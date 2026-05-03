@@ -1,3 +1,36 @@
 spring:
   application:
     name: galchat
+  ai:
+    deepseek:
+      base-url: https://api.deepseek.com
+      api-key: sk-c267b8feed9b4b72ba27c64f4db855af
+      chat:
+        options:
+          model: deepseek-reasoner
+          temperature: 1.0
+    model:
+      embedding: ollama
+    ollama:
+        embedding:
+          options:
+            model: quentinz/bge-large-zh-v1.5
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://localhost:5432/postgres
+    username: wyyd
+    password:
+logging:
+  level:
+    com.me.galchat:
+      mapper: debug
+      service: info
+      controller: info
+    org.springframework.ai.chat.client.advisor: debug
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      update-strategy: not_null
+      id-type: auto

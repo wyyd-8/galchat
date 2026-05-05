@@ -13,4 +13,5 @@ import com.baomidou.mybatisplus.extension.service.IService;
  */
 public interface IUserWorldPrefixService extends IService<UserWorldPrefix> {
 
+    UserWorldPrefix getByUserIdAndWorldId(Long userId, Long worldId);
 }

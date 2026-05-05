@@ -2,7 +2,6 @@ package com.me.galchat.domain.po;
 
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableId;
 import java.io.Serializable;
@@ -21,23 +20,23 @@ import lombok.experimental.Accessors;
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("user_info")
-public class UserInfo implements Serializable {
+@TableName("user_chat_history")
+public class UserChatHistory implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
-    private String username;
+    private Long userWorldId;
 
-    private String email;
+    private Long characterId;
 
-    private String password;
+    private String content;
 
-    private LocalDate birthday;
+    private String type;
 
-    private LocalDateTime createTime;
+    private LocalDateTime timestamp;
 
 
 }

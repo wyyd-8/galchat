@@ -1,6 +1,6 @@
 package com.me.galchat.service;
 
-import com.me.galchat.domain.po.UserInfo;
+import com.me.galchat.domain.po.UserChatHistory;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 /**
@@ -11,6 +11,6 @@ import com.baomidou.mybatisplus.extension.service.IService;
  * @author author
  * @since 2026-05-03
  */
-public interface IUserInfoService extends IService<UserInfo> {
-    UserInfo getInfoById(Integer id);
+public interface IUserChatHistoryService extends IService<UserChatHistory> {
+
 }

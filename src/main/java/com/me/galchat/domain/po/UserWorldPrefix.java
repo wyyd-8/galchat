@@ -41,5 +41,5 @@ public class UserWorldPrefix implements Serializable {
 
     private String favorSystemStatus;
 
-
+    private Boolean eotDetectionStatus;
 }

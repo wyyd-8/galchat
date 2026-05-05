@@ -17,4 +17,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> implements IUserInfoService {
 
+    @Override
+    public UserInfo getInfoById(Integer id) {
+        return lambdaQuery()
+                .select(UserInfo::getId, UserInfo::getUsername)
+                .eq(UserInfo::getId, id)
+                .one();
+
+    }
 }

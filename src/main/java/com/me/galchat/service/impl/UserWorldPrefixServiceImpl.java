@@ -17,4 +17,11 @@ import org.springframework.stereotype.Service;
 @Service
 public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMapper, UserWorldPrefix> implements IUserWorldPrefixService {
 
+    @Override
+    public UserWorldPrefix getByUserIdAndWorldId(Long userId, Long worldId) {
+        return lambdaQuery()
+                .eq(UserWorldPrefix::getUserId, userId)
+                .eq(UserWorldPrefix::getWorldId, worldId)
+                .one();
+    }
 }

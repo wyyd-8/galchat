@@ -20,6 +20,11 @@ spring:
     url: jdbc:postgresql://localhost:5432/postgres
     username: wyyd
     password:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
 logging:
   level:
     com.me.galchat:

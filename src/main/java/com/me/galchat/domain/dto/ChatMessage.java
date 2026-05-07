@@ -6,8 +6,11 @@ import lombok.Data;
 public class ChatMessage {
     private String type;
     private String worldId;
+    private Long userWorldId;
     private String characterId;
     private String message;
     private Boolean isTyping;
-    private int length = 0;
+    private long length = 0;
+    private long revision = 0;
+    private String triggerType;
 }

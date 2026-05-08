@@ -11,10 +11,10 @@ import org.springframework.web.bind.annotation.RestController;
  * </p>
  *
  * @author author
- * @since 2026-05-03
+ * @since 2026-05-08
  */
 @RestController
-@RequestMapping("/history")
-public class UserChatHistoryController {
+@RequestMapping("/user-character-info")
+public class UserCharacterInfoController {
 
 }

@@ -14,22 +14,28 @@ import lombok.experimental.Accessors;
  * </p>
  *
  * @author author
- * @since 2026-05-03
+ * @since 2026-05-08
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("user_character_favor")
-public class UserCharacterFavor implements Serializable {
+@TableName("world_template")
+public class WorldTemplate implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    @TableId(value = "user_world_id", type = IdType.AUTO)
-    private Long userWorldId;
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
-    private Long characterId;
+    private String name;
 
-    private Integer favorValue;
+    private String image;
+
+    private String author;
+
+    private String background;
+
+    private Long characterIds;
 
 
 }

@@ -1,7 +1,7 @@
 package com.me.galchat.websocket;
 
 import com.me.galchat.config.WebSocketHandshakeConfigurator;
-import com.me.galchat.domain.dto.ChatMessage;
+import com.me.galchat.domain.dto.ChatMessageDTO;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.redis.ChatLuaScripts;
@@ -56,8 +56,8 @@ public class WebSocketServer {
     // 按用户世界保存所有活跃会话，同一用户多端连接时需要全部推送
     private static final Map<Long, Map<String, Session>> sessionMap = new ConcurrentHashMap<>();
     private static final Map<String, UserWorldPrefix> userWorldMap = new ConcurrentHashMap<>();
-    private static RDelayedQueue<ChatMessage> delayedQueue;
-    private static RBlockingQueue<ChatMessage> blockingQueue;
+    private static RDelayedQueue<ChatMessageDTO> delayedQueue;
+    private static RBlockingQueue<ChatMessageDTO> blockingQueue;
 
     private static final String DELAY_QUEUE_NAME = "chat:delay:queue";
     private static final String TRIGGER_BERT = "bert";
@@ -121,7 +121,7 @@ public class WebSocketServer {
         while (begin) {
             try {
                 // 从阻塞队列中获取到期的任务，定期醒来检查关闭信号
-                ChatMessage message = blockingQueue.poll(1, TimeUnit.SECONDS);
+                ChatMessageDTO message = blockingQueue.poll(1, TimeUnit.SECONDS);
                 if (message == null) {
                     continue;
                 }
@@ -216,7 +216,7 @@ public class WebSocketServer {
         }
 
         // 反序列化并补齐消息上下文
-        ChatMessage data = JSONObject.fromJson(message, ChatMessage.class);
+        ChatMessageDTO data = JSONObject.fromJson(message, ChatMessageDTO.class);
         data.setUserWorldId(prefix.getId());
         if (data.getWorldId() == null) {
             data.setWorldId(String.valueOf(prefix.getWorldId()));
@@ -233,7 +233,7 @@ public class WebSocketServer {
     /**
      * 处理客户端输入片段并更新 Redis 中的输入内容。
      */
-    private void handleMessageFragment(ChatMessage ctx, String senderSid) {
+    private void handleMessageFragment(ChatMessageDTO ctx, String senderSid) {
         // 调用 Lua 脚本追加输入片段
         String snapshot = redisTemplate.execute(chatLuaScripts.updateFragmentScript(),
                 List.of(buildTypingKey(ctx), buildChatKey(ctx)),
@@ -254,7 +254,7 @@ public class WebSocketServer {
     /**
      * 处理打字状态 (核心暂停/恢复逻辑)
      */
-    private void handleTypingStatus(ChatMessage ctx) {
+    private void handleTypingStatus(ChatMessageDTO ctx) {
         // 更新当前会话的打字状态
         String state = redisTemplate.execute(chatLuaScripts.updateTypingScript(),
                 List.of(buildTypingKey(ctx)),
@@ -276,7 +276,7 @@ public class WebSocketServer {
     /**
      * 处理已到期的输入延时任务并尝试认领待回复内容。
      */
-    private void handleTypingDelayTask(ChatMessage data) {
+    private void handleTypingDelayTask(ChatMessageDTO data) {
         // 认领当前版本的待回复输入
         ClaimedConversation claimedConversation = claimConversation(data);
         if (claimedConversation == null) {
@@ -325,7 +325,7 @@ public class WebSocketServer {
     /**
      * 将某个设备发来的输入/打字状态同步给同一用户世界下的其他连接。
      */
-    private void broadcastMessageToOtherSessions(ChatMessage message, String senderSid) {
+    private void broadcastMessageToOtherSessions(ChatMessageDTO message, String senderSid) {
         Map<String, Session> sessions = sessionMap.get(message.getUserWorldId());
         if (sessions == null || sessions.isEmpty()) {
             return;
@@ -359,28 +359,28 @@ public class WebSocketServer {
     /**
      * 构建当前会话的打字状态 Redis key。
      */
-    private String buildTypingKey(ChatMessage ctx) {
+    private String buildTypingKey(ChatMessageDTO ctx) {
         return buildConversationKey(ctx) + ":typing";
     }
 
     /**
      * 构建当前会话的输入内容 Redis key。
      */
-    private String buildChatKey(ChatMessage ctx) {
+    private String buildChatKey(ChatMessageDTO ctx) {
         return buildConversationKey(ctx) + ":input";
     }
 
     /**
      * 构建当前会话的上一条助手回复 Redis key。
      */
-    private String buildLastAssistantKey(ChatMessage ctx) {
+    private String buildLastAssistantKey(ChatMessageDTO ctx) {
         return buildConversationKey(ctx) + ":last_assistant";
     }
 
     /**
      * 按用户世界和角色维度构建会话 Redis key 前缀。
      */
-    private String buildConversationKey(ChatMessage ctx) {
+    private String buildConversationKey(ChatMessageDTO ctx) {
         // 优先使用用户世界主键构建会话维度
         Long userWorldId = ctx.getUserWorldId();
         if (userWorldId != null) {
@@ -394,7 +394,7 @@ public class WebSocketServer {
     /**
      * 从 Redis 读取并解析当前打字状态。
      */
-    private TypingState getTypingState(ChatMessage ctx) {
+    private TypingState getTypingState(ChatMessageDTO ctx) {
         // 读取打字状态原始值
         String value = redisTemplate.opsForValue().get(buildTypingKey(ctx));
         if (value == null || value.isBlank()) {
@@ -464,9 +464,9 @@ public class WebSocketServer {
     /**
      * 创建聊天延时任务并写入 Redisson 可靠队列。
      */
-    private void addDelayTask(ChatMessage ctx, String triggerType, Duration delay) {
+    private void addDelayTask(ChatMessageDTO ctx, String triggerType, Duration delay) {
         // 拷贝触发任务需要的消息快照
-        ChatMessage task = new ChatMessage();
+        ChatMessageDTO task = new ChatMessageDTO();
         task.setType(ctx.getType());
         task.setWorldId(ctx.getWorldId());
         task.setUserWorldId(ctx.getUserWorldId());
@@ -482,9 +482,9 @@ public class WebSocketServer {
     /**
      * 异步判断输入是否完整，并在完整时注册 BERT 提前触发任务。
      */
-    private void scheduleBertEarlyTrigger(ChatMessage ctx, String accumulatedInput) {
+    private void scheduleBertEarlyTrigger(ChatMessageDTO ctx, String accumulatedInput) {
         // 拷贝当前输入状态快照
-        ChatMessage snapshot = new ChatMessage();
+        ChatMessageDTO snapshot = new ChatMessageDTO();
         snapshot.setType(ctx.getType());
         snapshot.setWorldId(ctx.getWorldId());
         snapshot.setUserWorldId(ctx.getUserWorldId());
@@ -518,7 +518,7 @@ public class WebSocketServer {
     /**
      * 通过 Lua 脚本认领指定版本和长度的待回复输入。
      */
-    private ClaimedConversation claimConversation(ChatMessage data) {
+    private ClaimedConversation claimConversation(ChatMessageDTO data) {
         // 原子认领当前待处理输入
         String claimed = redisTemplate.execute(chatLuaScripts.claimPendingScript(),
                 List.of(buildTypingKey(data), buildChatKey(data), buildLastAssistantKey(data)),

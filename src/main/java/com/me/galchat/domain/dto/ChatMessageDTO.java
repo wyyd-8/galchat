@@ -3,7 +3,7 @@ package com.me.galchat.domain.dto;
 import lombok.Data;
 
 @Data
-public class ChatMessage {
+public class ChatMessageDTO {
     private String type;
     private String worldId;
     private Long userWorldId;

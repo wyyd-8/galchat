@@ -2,6 +2,7 @@ package com.me.galchat.domain.po;
 
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
+import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.annotation.TableId;
 import java.io.Serializable;
 import lombok.Data;
@@ -14,34 +15,30 @@ import lombok.experimental.Accessors;
  * </p>
  *
  * @author author
- * @since 2026-05-03
+ * @since 2026-05-08
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("user_world_prefix")
-public class UserWorldPrefix implements Serializable {
+@TableName("user_character_info")
+public class UserCharacterInfo implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    @TableId(value = "id", type = IdType.AUTO)
-    private Long id;
+    @TableId(value = "user_world_id", type = IdType.INPUT)
+    private Long userWorldId;
 
-    private Long userId;
+    private Long characterId;
 
-    private Long worldId;
+    private String characterName;
 
-    private String name;
+    private String characterImage;
 
-    private String image;
+    private LocalDateTime lastChatTime;
 
-    private Boolean acitvePushStatus;
+    private String lastChatContent;
 
-    private Integer pushTime;
+    private Integer favorValue;
 
-    private Boolean connectOtherCharacterStatus;
 
-    private String favorSystemStatus;
-
-    private Boolean eotDetectionStatus;
 }

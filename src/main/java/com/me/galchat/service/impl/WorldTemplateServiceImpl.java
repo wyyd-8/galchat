@@ -1,9 +1,10 @@
 package com.me.galchat.service.impl;
 
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.domain.po.WorldTemplate;
+import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.WorldTemplateMapper;
 import com.me.galchat.service.IWorldTemplateService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -28,6 +29,10 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
 
     @Override
     public WorldTemplate getWorldTemplateById(Long id) {
-        return getById(id);
+        WorldTemplate template = getById(id);
+        if (template == null) {
+            throw new UserRequestException("世界模板不存在");
+        }
+        return template;
     }
 }

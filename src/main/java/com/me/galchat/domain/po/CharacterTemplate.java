@@ -2,8 +2,11 @@ package com.me.galchat.domain.po;
 
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import java.io.Serializable;
+import java.util.Map;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
@@ -19,7 +22,7 @@ import lombok.experimental.Accessors;
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("character_template")
+@TableName(value = "character_template", autoResultMap = true)
 public class CharacterTemplate implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -35,7 +38,8 @@ public class CharacterTemplate implements Serializable {
 
     private String personality;
 
-    private String favorability;
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private Map<String, String> favorability;
 
     private Integer initFavor;
 

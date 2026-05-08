@@ -60,6 +60,7 @@ public class WebSocketServer {
     private static RBlockingQueue<ChatMessageDTO> blockingQueue;
 
     private static final String DELAY_QUEUE_NAME = "chat:delay:queue";
+    private static final String WORLD_USER_AUTH_KEY = "world:user:auth";
     private static final String TRIGGER_BERT = "bert";
     private static final String TRIGGER_FALLBACK = "fallback";
     private static final Duration BERT_TRIGGER_DELAY = Duration.ofMillis(500);
@@ -164,7 +165,7 @@ public class WebSocketServer {
         Long id;
         try {
             Claims claims = JwtUtils.parseToken(authHeaders.getFirst());
-            id = (Long) claims.get("id");
+            id = Long.valueOf(String.valueOf(claims.get("id")));
             log.info("登录id:{}", id);
         } catch (Exception e) {
             log.info("不正确的token");
@@ -172,23 +173,30 @@ public class WebSocketServer {
             return;
         }
 
-        // 从请求参数(Query String)中读取 worldId
+        // 从请求参数(Query String)中读取 userWorldId
         Map<String, List<String>> requestParameterMap = session.getRequestParameterMap();
-        List<String> worldIdParams = requestParameterMap.get("worldId");
-        if (worldIdParams == null || worldIdParams.isEmpty()) {
+        List<String> userWorldIdParams = requestParameterMap.get("userWorldId");
+        if (userWorldIdParams == null || userWorldIdParams.isEmpty()) {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Missing param"));
             return;
         }
-        Long worldId;
+        Long userWorldId;
         try {
-            worldId = Long.valueOf(worldIdParams.getFirst());
+            userWorldId = Long.valueOf(userWorldIdParams.getFirst());
         } catch (NumberFormatException e) {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Invalid param"));
             return;
         }
 
+        // 使用 Redis 中的用户世界授权关系校验当前连接
+        Object authUserId = redisTemplate.opsForHash().get(WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
+        if (!String.valueOf(id).equals(authUserId)) {
+            session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Wrong param"));
+            return;
+        }
+
         // 绑定当前连接对应的用户世界
-        UserWorldPrefix prefix = userWorldService.getByUserIdAndWorldId(id, worldId);
+        UserWorldPrefix prefix = userWorldService.getById(userWorldId);
         if (prefix == null) {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Wrong param"));
             return;

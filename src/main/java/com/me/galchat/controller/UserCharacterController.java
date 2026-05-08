@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
  * @since 2026-05-08
  */
 @RestController
-@RequestMapping("/user-character-info")
-public class UserCharacterInfoController {
+@RequestMapping("/character")
+public class UserCharacterController {
 
 }

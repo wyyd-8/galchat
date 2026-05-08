@@ -3,6 +3,8 @@ package com.me.galchat.service;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.baomidou.mybatisplus.extension.service.IService;
 
+import java.util.List;
+
 /**
  * <p>
  *  服务类
@@ -14,4 +16,14 @@ import com.baomidou.mybatisplus.extension.service.IService;
 public interface IUserWorldPrefixService extends IService<UserWorldPrefix> {
 
     UserWorldPrefix getByUserIdAndWorldId(Long userId, Long worldId);
+
+    List<UserWorldPrefix> listBaseInfoByUserId(Long userId);
+
+    UserWorldPrefix createUserWorld(Long userId, UserWorldPrefix userWorldPrefix);
+
+    UserWorldPrefix getUserWorld(Long userId, Long id);
+
+    UserWorldPrefix updateUserWorld(Long userId, Long id, UserWorldPrefix userWorldPrefix);
+
+    void deleteUserWorld(Long userId, Long id);
 }

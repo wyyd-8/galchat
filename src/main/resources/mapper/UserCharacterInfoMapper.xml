@@ -2,4 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.me.galchat.mapper.UserCharacterInfoMapper">
 
+    <select id="updateFavorValue" resultType="java.lang.Integer">
+        UPDATE user_character_info
+        SET favor_value = LEAST(100, GREATEST(0, COALESCE(favor_value, 0) + #{favorChange}))
+        WHERE user_world_id = #{userWorldId}
+          AND character_id = #{characterId}
+        RETURNING favor_value
+    </select>
 </mapper>

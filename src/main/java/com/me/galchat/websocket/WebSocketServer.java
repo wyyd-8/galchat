@@ -1,7 +1,9 @@
 package com.me.galchat.websocket;
 
+import com.me.galchat.consumer.ChatQueueNames;
 import com.me.galchat.config.WebSocketHandshakeConfigurator;
 import com.me.galchat.domain.dto.ChatMessageDTO;
+import com.me.galchat.domain.dto.ChatReplyTaskDTO;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.redis.ChatLuaScripts;
@@ -58,8 +60,8 @@ public class WebSocketServer {
     private static final Map<String, UserWorldPrefix> userWorldMap = new ConcurrentHashMap<>();
     private static RDelayedQueue<ChatMessageDTO> delayedQueue;
     private static RBlockingQueue<ChatMessageDTO> blockingQueue;
+    private static RBlockingQueue<ChatReplyTaskDTO> replyQueue;
 
-    private static final String DELAY_QUEUE_NAME = "chat:delay:queue";
     private static final String TRIGGER_BERT = "bert";
     private static final String TRIGGER_FALLBACK = "fallback";
     private static final Duration BERT_TRIGGER_DELAY = Duration.ofMillis(500);
@@ -76,8 +78,9 @@ public class WebSocketServer {
 
         // 初始化 Redisson 的阻塞队列和延时队列
         // 创建队列时指定 JsonJacksonCodec，只影响这个队列
-        blockingQueue = redissonClient.getBlockingQueue(DELAY_QUEUE_NAME, new JsonJacksonCodec());
+        blockingQueue = redissonClient.getBlockingQueue(ChatQueueNames.DELAY_QUEUE_NAME, new JsonJacksonCodec());
         delayedQueue = redissonClient.getDelayedQueue(blockingQueue);//使用Json序列化，不添加是java默认的序列化
+        replyQueue = redissonClient.getBlockingQueue(ChatQueueNames.REPLY_QUEUE_NAME, new JsonJacksonCodec());
 
         // 启动异步线程消费延时任务
         for (int i = 0; i < 4; i++) {
@@ -284,10 +287,9 @@ public class WebSocketServer {
             return;
         }
 
-        // 记录触发信息，后续接入回复生成
         log.info("触发回复, triggerType={}, revision={}, length={}",
                 data.getTriggerType(), claimedConversation.revision(), claimedConversation.length());
-        // TODO 根据延迟任务触发后续回复逻辑
+        addReplyTask(data, claimedConversation);
     }
 
     /**
@@ -478,6 +480,35 @@ public class WebSocketServer {
 
         // 按指定延迟加入可靠队列
         delayedQueue.offer(task, delay.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * 将已认领的完整输入投递给聊天消费者。
+     */
+    private void addReplyTask(ChatMessageDTO ctx, ClaimedConversation claimedConversation) {
+        Long characterId = parseCharacterId(ctx.getCharacterId());
+        if (ctx.getUserWorldId() == null || characterId == null) {
+            log.warn("回复任务缺少必要上下文, userWorldId:{}, characterId:{}",
+                    ctx.getUserWorldId(), ctx.getCharacterId());
+            return;
+        }
+
+        ChatReplyTaskDTO task = new ChatReplyTaskDTO();
+        task.setUserWorldId(ctx.getUserWorldId());
+        task.setCharacterId(characterId);
+        task.setMessage(claimedConversation.input());
+        task.setLength(claimedConversation.length());
+        task.setRevision(claimedConversation.revision());
+        task.setTriggerType(ctx.getTriggerType());
+        replyQueue.offer(task);
+    }
+
+    private Long parseCharacterId(String characterId) {
+        try {
+            return Long.valueOf(characterId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**

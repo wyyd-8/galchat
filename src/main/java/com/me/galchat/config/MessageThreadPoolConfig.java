@@ -45,4 +45,19 @@ public class MessageThreadPoolConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean("chatTaskExecutor")
+    public ThreadPoolTaskExecutor chatTaskExecutor() {
+        log.info("初始化聊天消息消费线程池...");
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("chat-message-consumer-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.setAwaitTerminationSeconds(5);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
 }

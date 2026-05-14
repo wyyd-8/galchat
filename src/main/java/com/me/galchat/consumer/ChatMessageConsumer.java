@@ -8,6 +8,8 @@ import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.service.IUserCharacterInfoService;
+import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.websocket.WebSocketServer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -26,6 +28,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -43,6 +46,8 @@ public class ChatMessageConsumer {
     private final WebSocketServer webSocketServer;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final UserChatHistoryMapper userChatHistoryMapper;
+    private final IUserWorldPrefixService userWorldPrefixService;
+    private final IUserCharacterInfoService userCharacterInfoService;
     private final StringRedisTemplate redisTemplate;
 
     @Resource(name = "chatTaskExecutor")
@@ -123,7 +128,9 @@ public class ChatMessageConsumer {
         }
 
         ConversationInfo conversationInfo = new ConversationInfo(task.getUserWorldId(), task.getCharacterId(), null);
+        String systemPrompt = buildSystemPrompt(task);
         String content = chatClient.prompt()
+                .system(systemPrompt)
                 .user(task.getMessage())
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
                 .call()
@@ -146,6 +153,23 @@ public class ChatMessageConsumer {
                 .setTimestamp(LocalDateTime.now());
         userChatHistoryMapper.insert(fallbackAssistantMessage);
         return fallbackAssistantMessage;
+    }
+
+    private String buildSystemPrompt(ChatReplyTaskDTO task) {
+        StringBuilder prompt = new StringBuilder();
+        appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(task.getUserWorldId()));
+        appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId()));
+        return prompt.toString();
+    }
+
+    private void appendPrompt(StringBuilder prompt, String content) {
+        if (!StringUtils.hasText(content)) {
+            return;
+        }
+        if (!prompt.isEmpty()) {
+            prompt.append('\n');
+        }
+        prompt.append(content);
     }
 
     private void updateLastChatInfo(UserChatHistory assistantMessage) {

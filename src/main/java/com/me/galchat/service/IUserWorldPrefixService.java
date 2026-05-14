@@ -15,8 +15,6 @@ import java.util.List;
  */
 public interface IUserWorldPrefixService extends IService<UserWorldPrefix> {
 
-    UserWorldPrefix getByUserIdAndWorldId(Long userId, Long worldId);
-
     List<UserWorldPrefix> listBaseInfoByUserId(Long userId);
 
     UserWorldPrefix createUserWorld(Long userId, UserWorldPrefix userWorldPrefix);
@@ -30,4 +28,6 @@ public interface IUserWorldPrefixService extends IService<UserWorldPrefix> {
     void checkUserWorldAuth(Long userWorldId);
 
     UserWorldPrefix checkUserWorldAuth(Long userId, Long userWorldId);
+
+    String buildWorldPrompt(Long userWorldId);
 }

@@ -34,14 +34,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     private final StringRedisTemplate redisTemplate;
 
     @Override
-    public UserWorldPrefix getByUserIdAndWorldId(Long userId, Long worldId) {
-        return lambdaQuery()
-                .eq(UserWorldPrefix::getUserId, userId)
-                .eq(UserWorldPrefix::getWorldId, worldId)
-                .one();
-    }
-
-    @Override
     public List<UserWorldPrefix> listBaseInfoByUserId(Long userId) {
         return lambdaQuery()
                 .select(UserWorldPrefix::getId, UserWorldPrefix::getName, UserWorldPrefix::getImage)
@@ -144,5 +136,10 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
             throw new UserRequestException("用户世界不存在");
         }
         return userWorld;
+    }
+
+    @Override
+    public String buildWorldPrompt(Long userWorldId) {
+        return baseMapper.getBackground(userWorldId);
     }
 }

@@ -60,7 +60,6 @@ public class WebSocketServer {
     private static RBlockingQueue<ChatMessageDTO> blockingQueue;
 
     private static final String DELAY_QUEUE_NAME = "chat:delay:queue";
-    private static final String WORLD_USER_AUTH_KEY = "world:user:auth";
     private static final String TRIGGER_BERT = "bert";
     private static final String TRIGGER_FALLBACK = "fallback";
     private static final Duration BERT_TRIGGER_DELAY = Duration.ofMillis(500);
@@ -188,16 +187,10 @@ public class WebSocketServer {
             return;
         }
 
-        // 使用 Redis 中的用户世界授权关系校验当前连接
-        Object authUserId = redisTemplate.opsForHash().get(WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
-        if (!String.valueOf(id).equals(authUserId)) {
-            session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Wrong param"));
-            return;
-        }
-
-        // 绑定当前连接对应的用户世界
-        UserWorldPrefix prefix = userWorldService.getById(userWorldId);
-        if (prefix == null) {
+        UserWorldPrefix prefix;
+        try {
+            prefix = userWorldService.checkUserWorldAuth(id, userWorldId);
+        } catch (Exception e) {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Wrong param"));
             return;
         }

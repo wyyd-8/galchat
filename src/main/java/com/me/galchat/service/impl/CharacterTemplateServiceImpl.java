@@ -5,6 +5,7 @@ import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CharacterTemplateMapper;
 import com.me.galchat.service.ICharacterTemplateService;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -33,8 +34,18 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
     }
 
     @Override
+    @Cacheable(cacheNames = "characterTemplate", key = "#id", condition = "#id != null", unless = "#result == null")
     public CharacterTemplate getCharacterTemplateById(Long id) {
-        CharacterTemplate template = getById(id);
+        CharacterTemplate template = lambdaQuery()
+                .select(CharacterTemplate::getId,
+                        CharacterTemplate::getName,
+                        CharacterTemplate::getImage,
+                        CharacterTemplate::getBackground,
+                        CharacterTemplate::getPersonality,
+                        CharacterTemplate::getFavorability,
+                        CharacterTemplate::getInitFavor)
+                .eq(CharacterTemplate::getId, id)
+                .one();
         if (template == null) {
             throw new UserRequestException("角色模板不存在");
         }

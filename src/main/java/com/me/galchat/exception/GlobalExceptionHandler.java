@@ -29,6 +29,12 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler
+    public Result handleConversationIdException(ConversationIdException e) {
+        log.warn("会话id异常：{}", e.getMessage());
+        return Result.error(e.getMessage());
+    }
+
+    @ExceptionHandler
     public Result handleException(Exception e) {//异常会按照继承关系从小往大匹配
         log.error("出现异常！类型：{}", e.getClass().getName(), e);
         return Result.error("出现异常！" + e.getMessage());

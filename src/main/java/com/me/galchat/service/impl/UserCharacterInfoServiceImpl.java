@@ -3,12 +3,11 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.UserCharacterInfo;
-import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IUserCharacterInfoService;
-import com.me.galchat.utils.CurrentHolder;
+import com.me.galchat.service.IUserWorldPrefixService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -31,14 +30,15 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoMapper, UserCharacterInfo> implements IUserCharacterInfoService {
 
-    private static final String WORLD_USER_AUTH_KEY = "world:user:auth";
+    private static final String USER_CHARACTER_FAVOR_VALUE_KEY = "user:character:favor";
 
     private final ICharacterTemplateService characterTemplateService;
+    private final IUserWorldPrefixService userWorldPrefixService;
     private final StringRedisTemplate redisTemplate;
 
     @Override
     public UserCharacterInfo addCharacter(Long userWorldId, Long characterId) {
-        checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId);
         UserCharacterInfo oldCharacter = getByUserWorldIdAndCharacterId(userWorldId, characterId);
         if (oldCharacter != null) {
             throw new UserRequestException("角色已存在");
@@ -57,7 +57,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     @Override
     public void deleteCharacter(Long userWorldId, Long characterId) {
-        checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId);
         UserCharacterInfo userCharacterInfo = getByUserWorldIdAndCharacterId(userWorldId, characterId);
         if (userCharacterInfo == null) {
             throw new UserRequestException("角色不存在");
@@ -66,11 +66,12 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                 .eq(UserCharacterInfo::getCharacterId, characterId)
                 .remove();
+        redisTemplate.opsForHash().delete(USER_CHARACTER_FAVOR_VALUE_KEY, userWorldId + ":" + characterId);
     }
 
     @Override
     public List<UserCharacterInfo> listByUserWorldId(Long userWorldId) {
-        checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId);
         return lambdaQuery()
                 .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                 .list();
@@ -78,7 +79,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     @Override
     public Integer updateFavorValue(Long userWorldId, Long characterId, Integer favorChange) {
-        checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }
@@ -90,17 +91,18 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         if (favorValue == null) {
             throw new UserRequestException("角色不存在");
         }
+        redisTemplate.opsForHash().delete(USER_CHARACTER_FAVOR_VALUE_KEY, userWorldId + ":" + characterId);
         return favorValue;
     }
 
     @Override
     public String buildCharacterPrompt(Long userWorldId, Long characterId) {
-        checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }
 
-        UserCharacterInfo userCharacterInfo = getByUserWorldIdAndCharacterId(userWorldId, characterId);
+        UserCharacterInfo userCharacterInfo = getFavorValueByUserWorldIdAndCharacterId(userWorldId, characterId);
         if (userCharacterInfo == null) {
             throw new UserRequestException("角色不存在");
         }
@@ -124,20 +126,22 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 .one();
     }
 
-    private void checkUserWorldAuth(Long userWorldId) {
-        if (userWorldId == null) {
-            throw new UserRequestException("用户世界id不能为空");
+    private UserCharacterInfo getFavorValueByUserWorldIdAndCharacterId(Long userWorldId, Long characterId) {
+        String cacheKey = userWorldId + ":" + characterId;
+        Object cachedFavorValue = redisTemplate.opsForHash().get(USER_CHARACTER_FAVOR_VALUE_KEY, cacheKey);
+        if (cachedFavorValue != null) {
+            return new UserCharacterInfo().setFavorValue(Integer.valueOf(String.valueOf(cachedFavorValue)));
         }
 
-        Integer currentUserId = CurrentHolder.getCurrentId();
-        if (currentUserId == null) {
-            throw new UserAuthException("用户未登录");
+        UserCharacterInfo userCharacterInfo = lambdaQuery()
+                .select(UserCharacterInfo::getFavorValue)
+                .eq(UserCharacterInfo::getUserWorldId, userWorldId)
+                .eq(UserCharacterInfo::getCharacterId, characterId)
+                .one();
+        if (userCharacterInfo != null && userCharacterInfo.getFavorValue() != null) {
+            redisTemplate.opsForHash().put(USER_CHARACTER_FAVOR_VALUE_KEY, cacheKey, String.valueOf(userCharacterInfo.getFavorValue()));
         }
-
-        Object authUserId = redisTemplate.opsForHash().get(WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
-        if (!String.valueOf(currentUserId).equals(authUserId)) {
-            throw new UserAuthException("无权访问该用户世界");
-        }
+        return userCharacterInfo;
     }
 
     private String getFavorPrompt(Map<String, String> favorability, Integer favorValue) {

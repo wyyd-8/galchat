@@ -3,10 +3,12 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.WorldTemplate;
+import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserWorldPrefixMapper;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IWorldTemplateService;
+import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
@@ -92,6 +94,45 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
         UserWorldPrefix userWorld = getExistingUserWorld(userId, id);
         removeById(userWorld.getId());
         redisTemplate.opsForHash().delete(WORLD_USER_AUTH_KEY, String.valueOf(userWorld.getId()));
+    }
+
+    @Override
+    public void checkUserWorldAuth(Long userWorldId) {
+        Integer currentUserId = CurrentHolder.getCurrentId();
+        if (currentUserId == null) {
+            throw new UserAuthException("用户未登录");
+        }
+        checkUserWorldAuth(Long.valueOf(currentUserId), userWorldId);
+    }
+
+    @Override
+    public UserWorldPrefix checkUserWorldAuth(Long userId, Long userWorldId) {
+        if (userWorldId == null) {
+            throw new UserRequestException("用户世界id不能为空");
+        }
+        if (userId == null) {
+            throw new UserAuthException("用户未登录");
+        }
+
+        Object authUserId = redisTemplate.opsForHash().get(WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
+        if (String.valueOf(userId).equals(authUserId)) {
+            UserWorldPrefix userWorld = getById(userWorldId);
+            if (userWorld == null) {
+                throw new UserRequestException("用户世界不存在");
+            }
+            return userWorld;
+        }
+
+        UserWorldPrefix userWorld = lambdaQuery()
+                .eq(UserWorldPrefix::getId, userWorldId)
+                .eq(UserWorldPrefix::getUserId, userId)
+                .one();
+        if (userWorld == null) {
+            throw new UserAuthException("无权访问该用户世界");
+        }
+
+        redisTemplate.opsForHash().put(WORLD_USER_AUTH_KEY, String.valueOf(userWorldId), String.valueOf(userId));
+        return userWorld;
     }
 
     private UserWorldPrefix getExistingUserWorld(Long userId, Long id) {

@@ -23,21 +23,18 @@ import java.util.Locale;
 
 public class UserChatHistoryChatMemory implements ChatMemory {
 
-    private static final int DEFAULT_MAX_MESSAGES = 50;
     private static final String TOOL_CALL_TYPE = "tool_call";
+    private static final int MAX_CONTEXT_LENGTH = 430000;
 
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final boolean includeToolCalls;
     private final boolean readOnly;
-    private final int maxMessages;
 
     private UserChatHistoryChatMemory(Builder builder) {
         Assert.notNull(builder.userChatHistoryMapper, "userChatHistoryMapper cannot be null");
-        Assert.isTrue(builder.maxMessages > 0, "maxMessages must be greater than 0");
         this.userChatHistoryMapper = builder.userChatHistoryMapper;
         this.includeToolCalls = builder.includeToolCalls;
         this.readOnly = builder.readOnly;
-        this.maxMessages = builder.maxMessages;
     }
 
     @Override
@@ -63,6 +60,12 @@ public class UserChatHistoryChatMemory implements ChatMemory {
 
     public List<Message> get(ConversationInfo conversationInfo) {
         List<UserChatHistory> histories = listHistories(conversationInfo);
+        if (includeToolCalls && contextLength(histories) > MAX_CONTEXT_LENGTH) {
+            deleteToolCallsIn(conversationInfo);
+            histories = histories.stream()
+                    .filter(history -> !isToolCallType(history.getType()))
+                    .toList();
+        }
 
         List<Message> messages = new ArrayList<>();
         histories.stream()
@@ -80,8 +83,7 @@ public class UserChatHistoryChatMemory implements ChatMemory {
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
                         .notIn(UserChatHistory::getType, excludedTypes()))
-                .orderByDesc(UserChatHistory::getId)
-                .last("limit " + maxMessages);
+                .orderByDesc(UserChatHistory::getId);
         List<UserChatHistory> histories = userChatHistoryMapper.selectList(queryWrapper);
         Collections.reverse(histories);
         return histories;
@@ -103,6 +105,18 @@ public class UserChatHistoryChatMemory implements ChatMemory {
                 .eq(UserChatHistory::getUserWorldId, conversationInfo.getUserWorldId())
                 .eq(UserChatHistory::getCharacterId, conversationInfo.getCharacterId())
                 .lt(UserChatHistory::getId, conversationInfo.getStart())
+                .in(UserChatHistory::getType, MessageType.TOOL.getValue(), TOOL_CALL_TYPE));
+    }
+
+    private void deleteToolCallsIn(ConversationInfo conversationInfo) {
+        if (readOnly) {
+            return;
+        }
+
+        userChatHistoryMapper.delete(new LambdaUpdateWrapper<UserChatHistory>()
+                .eq(UserChatHistory::getUserWorldId, conversationInfo.getUserWorldId())
+                .eq(UserChatHistory::getCharacterId, conversationInfo.getCharacterId())
+                .ge(conversationInfo.getStart() != null, UserChatHistory::getId, conversationInfo.getStart())
                 .in(UserChatHistory::getType, MessageType.TOOL.getValue(), TOOL_CALL_TYPE));
     }
 
@@ -158,6 +172,22 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         return new UserMessage(content);
     }
 
+    private int contextLength(List<UserChatHistory> histories) {
+        int length = 0;
+        for (UserChatHistory history : histories) {
+            String content = history.getContent();
+            if (content != null) {
+                length += content.length();
+            }
+        }
+        return length;
+    }
+
+    private boolean isToolCallType(String type) {
+        String normalizedType = normalizeType(type);
+        return MessageType.TOOL.getValue().equals(normalizedType) || TOOL_CALL_TYPE.equals(normalizedType);
+    }
+
     private String normalizeType(String type) {
         if (!StringUtils.hasText(type)) {
             return MessageType.USER.getValue();
@@ -174,7 +204,6 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         private final UserChatHistoryMapper userChatHistoryMapper;
         private boolean includeToolCalls;
         private boolean readOnly;
-        private int maxMessages = DEFAULT_MAX_MESSAGES;
 
         private Builder(UserChatHistoryMapper userChatHistoryMapper) {
             this.userChatHistoryMapper = userChatHistoryMapper;
@@ -187,11 +216,6 @@ public class UserChatHistoryChatMemory implements ChatMemory {
 
         public Builder readOnly(boolean readOnly) {
             this.readOnly = readOnly;
-            return this;
-        }
-
-        public Builder maxMessages(int maxMessages) {
-            this.maxMessages = maxMessages;
             return this;
         }
 

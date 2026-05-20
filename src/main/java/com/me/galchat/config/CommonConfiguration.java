@@ -11,7 +11,6 @@ import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.data.redis.core.StringRedisTemplate;
 
 @Configuration
 public class CommonConfiguration {
@@ -60,7 +59,6 @@ public class CommonConfiguration {
         return UserChatHistoryChatMemory.builder(userChatHistoryMapper)
                 .includeToolCalls(true)
                 .readOnly(false)
-                .maxMessages(50)
                 .build();
     }
 
@@ -69,15 +67,7 @@ public class CommonConfiguration {
         return UserChatHistoryChatMemory.builder(userChatHistoryMapper)
                 .includeToolCalls(false)
                 .readOnly(true)
-                .maxMessages(50)
                 .build();
-    }
-
-    @Bean
-    public TopicBoundaryService topicBoundaryService(StringRedisTemplate redisTemplate,
-                                                     @Qualifier("topicClient") ChatClient topicClient,
-                                                     @Qualifier("topicChatMemory") UserChatHistoryChatMemory topicChatMemory) {
-        return new TopicBoundaryService(redisTemplate, topicClient, topicChatMemory);
     }
 
     @Bean

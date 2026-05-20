@@ -2,9 +2,11 @@ package com.me.galchat.memory;
 
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
+import lombok.RequiredArgsConstructor;
 import org.json.JSONObject;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -12,24 +14,20 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
+@RequiredArgsConstructor
+@Service
 public class TopicBoundaryService {
 
     private static final String KEY_PREFIX = "chat:topic:boundary:";
     private static final String PREVIOUS_START_ID = "previousStartId";
     private static final String CURRENT_START_ID = "currentStartId";
     private static final String LAST_CHECKED_MESSAGE_ID = "lastCheckedMessageId";
+    private static final int MAX_TOPIC_CONVERSATION_LENGTH = 10000;
     private static final DateTimeFormatter MESSAGE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final StringRedisTemplate redisTemplate;
     private final ChatClient topicClient;
     private final UserChatHistoryChatMemory topicChatMemory;
-
-    public TopicBoundaryService(StringRedisTemplate redisTemplate, ChatClient topicClient,
-                                UserChatHistoryChatMemory topicChatMemory) {
-        this.redisTemplate = redisTemplate;
-        this.topicClient = topicClient;
-        this.topicChatMemory = topicChatMemory;
-    }
 
     public TopicBoundary updateAfterUserMessage(ConversationInfo baseConversation, UserChatHistory userMessage) {
         TopicBoundary oldBoundary = getOrCreateBoundary(baseConversation, userMessage.getId());
@@ -78,13 +76,11 @@ public class TopicBoundaryService {
             return true;
         }
         history.removeLast();
+        if (conversationContentLength(history, userMessage) > MAX_TOPIC_CONVERSATION_LENGTH) {
+            return false;
+        }
 
         String prompt = """
-                你是一个专业的对话概要机器人，能够判断当前对话与上一段对话是否连续且为同一话题
-                每个对话均包含对话人，时间戳与对话内容
-                以下是历史对话与当前用户消息
-                现在，你需要判断两段对话是否为连续且为同一话题，是输出"true"，不是或无法判断输出"false"
-
                 历史对话：
                 %s
 
@@ -98,6 +94,22 @@ public class TopicBoundaryService {
                 .content();
 
         return content != null && content.trim().equalsIgnoreCase("true");
+    }
+
+    private int conversationContentLength(List<UserChatHistory> history, UserChatHistory userMessage) {
+        int length = contentLength(userMessage);
+        for (UserChatHistory message : history) {
+            length += contentLength(message);
+        }
+        return length;
+    }
+
+    private int contentLength(UserChatHistory message) {
+        String content = message.getContent();
+        if (content == null) {
+            return 0;
+        }
+        return content.length();
     }
 
     private String formatMessages(List<UserChatHistory> messages) {

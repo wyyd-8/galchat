@@ -32,6 +32,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Component
@@ -133,6 +134,7 @@ public class ChatMessageConsumer {
                 .system(systemPrompt)
                 .user(task.getMessage())
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
+                .toolContext(Map.of("userWorldId", task.getUserWorldId(), "characterId", task.getCharacterId()))
                 .call()
                 .content();
         if (content == null || content.isBlank()) {

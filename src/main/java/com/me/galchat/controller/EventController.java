@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
  * @since 2026-05-03
  */
 @RestController
-@RequestMapping("/user-event-log")
+@RequestMapping("/worldevent")
 public class EventController {
 
 }

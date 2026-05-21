@@ -2,9 +2,12 @@ package com.me.galchat.memory;
 
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
+import com.me.galchat.tool.VectorTools;
+import com.me.galchat.vector.ChatHistoryVectorService;
 import lombok.RequiredArgsConstructor;
 import org.json.JSONObject;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -13,6 +16,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @RequiredArgsConstructor
 @Service
@@ -22,12 +26,15 @@ public class TopicBoundaryService {
     private static final String PREVIOUS_START_ID = "previousStartId";
     private static final String CURRENT_START_ID = "currentStartId";
     private static final String LAST_CHECKED_MESSAGE_ID = "lastCheckedMessageId";
+    private static final String AUTO_SEARCH_INFO_PREFIX = "自动调用searchInfo结果：\n";
     private static final int MAX_TOPIC_CONVERSATION_LENGTH = 10000;
     private static final DateTimeFormatter MESSAGE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final StringRedisTemplate redisTemplate;
     private final ChatClient topicClient;
     private final UserChatHistoryChatMemory topicChatMemory;
+    private final VectorTools vectorTools;
+    private final ChatHistoryVectorService chatHistoryVectorService;
 
     public TopicBoundary updateAfterUserMessage(ConversationInfo baseConversation, UserChatHistory userMessage) {
         TopicBoundary oldBoundary = getOrCreateBoundary(baseConversation, userMessage.getId());
@@ -40,7 +47,29 @@ public class TopicBoundaryService {
                 : new TopicBoundary(oldBoundary.currentStartId(), userMessage.getId(), userMessage.getId());
 
         saveBoundary(baseConversation, newBoundary);
+        if (!sameTopic) {
+            searchInfoAfterFirstMessageInTopic(userMessage);
+            chatHistoryVectorService.addChatHistory(userMessage.getUserWorldId(), userMessage.getCharacterId(),
+                    oldBoundary.previousStartId(), oldBoundary.currentStartId());
+        }
         return newBoundary;
+    }
+
+    private void searchInfoAfterFirstMessageInTopic(UserChatHistory message) {
+        if (!StringUtils.hasText(message.getContent())) {
+            return;
+        }
+
+        String searchInfo = vectorTools.searchInfo(message.getContent(), new ToolContext(Map.of(
+                "userWorldId", message.getUserWorldId(),
+                "characterId", message.getCharacterId()
+        )));
+        if (!StringUtils.hasText(searchInfo)) {
+            return;
+        }
+
+        topicChatMemory.saveAutoSearchInfo(new ConversationInfo(message.getUserWorldId(), message.getCharacterId(), null),
+                AUTO_SEARCH_INFO_PREFIX + searchInfo);
     }
 
     public TopicBoundary getBoundary(ConversationInfo conversationInfo) {

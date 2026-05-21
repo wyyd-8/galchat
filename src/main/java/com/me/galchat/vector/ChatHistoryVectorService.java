@@ -18,6 +18,7 @@ import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,7 +28,7 @@ import java.util.UUID;
 public class ChatHistoryVectorService {
 
     private static final List<String> EXCLUDED_TYPES = List.of("system", "tool", "tool_call");
-    public static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final ChatClient rewriteClient;
@@ -64,11 +65,17 @@ public class ChatHistoryVectorService {
             return;
         }
 
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("userWorldId", userWorldId);
+        metadata.put("characterId", characterId);
+        if (histories.getFirst().getTimestamp() != null) {
+            metadata.put("timestamp", histories.getFirst().getTimestamp().format(FORMATTER));
+        }
+
         Document document = Document.builder()
                 .id(vectorDocumentId(userWorldId, characterId, start, end))
                 .text(rewrittenContent)
-                .metadata("userWorldId", userWorldId)
-                .metadata("characterId", characterId)
+                .metadata(metadata)
                 .build();
         chatHistoryVectorStore.add(List.of(document));
     }

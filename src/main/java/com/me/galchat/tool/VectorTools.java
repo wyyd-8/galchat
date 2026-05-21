@@ -24,8 +24,10 @@ import java.util.stream.Collectors;
 @Component
 @RequiredArgsConstructor
 public class VectorTools {
-    private static final int RERANK_TOP_N = 3;
+    private static final int RERANK_TOP_N = 5;
     private static final String SOURCE_METADATA_KEY = "source";
+    private static final String TIMESTAMP_METADATA_KEY = "timestamp";
+    private static final String UNKNOWN_TIMESTAMP = "未知";
     private static final String WORLD_DETAIL_SOURCE = "world_detail";
     private static final String CHAT_HISTORY_SOURCE = "chat_history";
     private static final String WORLD_EVENT_SOURCE = "world_event";
@@ -38,18 +40,22 @@ public class VectorTools {
     private final DocumentReranker documentReranker;
 
     @Tool(description = """
-            工具描述：根据重写后的问题，从多个数据库中匹配与提问近似的内容。
-            使用流程：1、判断当前信息是否已经足够完成对话。如果是，则不要调用此方法；如果否，则继续下面的步骤。
-            2、重写用户的提问，使其更适合进行向量匹配。重写后的问题应该保留原问题的核心意图，但可以进行适当的扩展或修改，例如替换其中的代词与指代不明确的部分。
-            3、调用此方法，传入重写后的文本。
-            注意事项：此方法的返回值是一个字符串，包含了从数据库中匹配到的与提问相关的内容。返回值的格式如下：
+            工具描述：
+            根据重写后的字符串，从多个数据库中匹配与其近似的内容。
+            使用流程：
+            1、判断当前信息是否出现缺失。如果是，则继续下面的步骤；如果否，则不要调用此方法。
+            2、重写你希望查找的内容，使其更适合进行向量匹配。重写后的字符串应该与当前对话相关，但可以进行适当的扩展或修改，如果涉及人名与时间，应当给出具体内容。
+            3、调用此方法，传入重写后的字符串，得到对应的返回值。
+            注意事项：
+            此方法的返回值是一个字符串，包含了从数据库中匹配到的与提问相关的内容。返回值的格式如下：
             来源: [来源名称]
+            时间戳: [匹配到的内容被创建的时间戳，部分来源可能为"未知"]
             内容: [匹配到的内容]
             不同来源的内容之间用以下分隔符分隔:---
-            查询到的内容可能与提问无关联，或为空字符串，此时请忽略返回内容，告知用户你不知道，引导用户给出更多信息或让用户解答此问题。
-            此方法对于同一提问只应调用一次，请不要尝试多次调用此方法来获取更多信息，这可能会导致信息错误和混乱。
+            查询到的内容可能无关联，或为空字符串，此时请忽略返回内容。
+            除自动调用外，此方法不应被连续调用，请不要尝试连续多次调用此方法来获取更多信息，这可能会导致信息错误和混乱。
             """)
-    public String searchInfo(@ToolParam(description = "重写后的提问") String query, ToolContext context) {
+    public String searchInfo(@ToolParam(description = "重写后的字符串") String query, ToolContext context) {
         if (!StringUtils.hasText(query) || context == null) {
             return "";
         }
@@ -111,7 +117,11 @@ public class VectorTools {
         if (source == null) {
             return text;
         }
-        return "来源: " + source + "\n" + "内容: " + text;
+
+        Object timestamp = document.getMetadata().get(TIMESTAMP_METADATA_KEY);
+        return "来源: " + source + "\n"
+                + "时间戳: " + (timestamp == null ? UNKNOWN_TIMESTAMP : timestamp) + "\n"
+                + "内容: " + text;
     }
 
     private Long asLong(Object value) {

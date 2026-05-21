@@ -4,6 +4,7 @@ import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.memory.TopicAwareMessageChatMemoryAdvisor;
 import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.memory.UserChatHistoryChatMemory;
+import com.me.galchat.tool.UserEventLogTools;
 import com.me.galchat.tool.VectorTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -17,13 +18,14 @@ public class CommonConfiguration {
     @Bean
     public ChatClient chatClient(DeepSeekChatModel model,
                                  TopicAwareMessageChatMemoryAdvisor topicAwareAdvisor,
-                                 VectorTools vectorTools) {
+                                 VectorTools vectorTools,
+                                 UserEventLogTools userEventLogTools) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("你是一个专业的ai聊天机器人。")
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(topicAwareAdvisor)
-                .defaultTools(vectorTools)
+                .defaultTools(vectorTools, userEventLogTools)
                 .build();
     }
 

@@ -39,7 +39,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                 .lt(id != null, UserChatHistory::getId, id)
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
-                        .notIn(UserChatHistory::getType, "system", "tool", "tool_call"))
+                        .notIn(UserChatHistory::getType, "system", "tool"))
                 .orderByDesc(UserChatHistory::getId)
                 .last("limit " + size)
                 .list();

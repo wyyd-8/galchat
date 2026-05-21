@@ -24,17 +24,20 @@ import java.util.Locale;
 public class UserChatHistoryChatMemory implements ChatMemory {
 
     private static final String TOOL_CALL_TYPE = "tool_call";
+    private static final String AUTO_SEARCH_TOOL_NAME = "searchInfo";
     private static final int MAX_CONTEXT_LENGTH = 430000;
 
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final boolean includeToolCalls;
     private final boolean readOnly;
+    private final String firstMessageSuffixPrompt;
 
     private UserChatHistoryChatMemory(Builder builder) {
         Assert.notNull(builder.userChatHistoryMapper, "userChatHistoryMapper cannot be null");
         this.userChatHistoryMapper = builder.userChatHistoryMapper;
         this.includeToolCalls = builder.includeToolCalls;
         this.readOnly = builder.readOnly;
+        this.firstMessageSuffixPrompt = builder.firstMessageSuffixPrompt;
     }
 
     @Override
@@ -66,6 +69,9 @@ public class UserChatHistoryChatMemory implements ChatMemory {
                     .filter(history -> !isToolCallType(history.getType()))
                     .toList();
         }
+        if (!histories.isEmpty()) {
+            histories.getFirst().setContent(histories.getFirst().getContent() + firstMessageSuffixPrompt);
+        }
 
         List<Message> messages = new ArrayList<>();
         histories.stream()
@@ -94,6 +100,20 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         UserChatHistory userChatHistory = toUserChatHistory(conversationInfo, message);
         userChatHistoryMapper.insert(userChatHistory);
         return userChatHistory;
+    }
+
+    public void saveAutoSearchInfo(ConversationInfo conversationInfo, String content) {
+        if (!StringUtils.hasText(content)) {
+            return;
+        }
+
+        UserChatHistory userChatHistory = new UserChatHistory()
+                .setUserWorldId(conversationInfo.getUserWorldId())
+                .setCharacterId(conversationInfo.getCharacterId())
+                .setContent(content)
+                .setType(MessageType.TOOL.getValue())
+                .setTimestamp(LocalDateTime.now());
+        userChatHistoryMapper.insert(userChatHistory);
     }
 
     public void deleteToolCallsBefore(ConversationInfo conversationInfo) {
@@ -166,7 +186,7 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         }
         if (MessageType.TOOL.getValue().equals(type)) {
             return ToolResponseMessage.builder()
-                    .responses(List.of(new ToolResponseMessage.ToolResponse("history", "history", content)))
+                    .responses(List.of(new ToolResponseMessage.ToolResponse(history.getId().toString(), AUTO_SEARCH_TOOL_NAME, content)))
                     .build();
         }
         return new UserMessage(content);
@@ -204,6 +224,7 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         private final UserChatHistoryMapper userChatHistoryMapper;
         private boolean includeToolCalls;
         private boolean readOnly;
+        private String firstMessageSuffixPrompt = "";
 
         private Builder(UserChatHistoryMapper userChatHistoryMapper) {
             this.userChatHistoryMapper = userChatHistoryMapper;
@@ -216,6 +237,11 @@ public class UserChatHistoryChatMemory implements ChatMemory {
 
         public Builder readOnly(boolean readOnly) {
             this.readOnly = readOnly;
+            return this;
+        }
+
+        public Builder firstMessageSuffixPrompt(String firstMessageSuffixPrompt) {
+            this.firstMessageSuffixPrompt = firstMessageSuffixPrompt == null ? "" : firstMessageSuffixPrompt;
             return this;
         }
 

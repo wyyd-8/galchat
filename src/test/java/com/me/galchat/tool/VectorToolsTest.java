@@ -21,10 +21,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class VectorToolsTest {
 
     @Test
-    void searchInfoReranksRetrievedDocumentsAndJoinsTopThreeText() {
+    void searchInfoReranksRetrievedDocumentsAndJoinsTopFiveText() {
         Document worldDetail = document("world-detail", "世界设定");
-        Document chatHistory = document("chat-history", "聊天历史");
-        Document worldEvent = document("world-event", "世界事件");
+        Document chatHistory = document("chat-history", "聊天历史", "2026-05-20T10:00");
+        Document worldEvent = document("world-event", "世界事件", "2026-05-21T12:30");
 
         FakeWorldDetailVectorService worldDetailVectorService = new FakeWorldDetailVectorService(List.of(worldDetail));
         FakeChatHistoryVectorService chatHistoryVectorService = new FakeChatHistoryVectorService(List.of(chatHistory));
@@ -42,24 +42,23 @@ class VectorToolsTest {
                 new ToolContext(Map.of("userWorldId", 10L, "characterId", 30L)));
 
         assertThat(result).isEqualTo("""
-                source: world_event
-                世界事件
-
+                来源: world_event
+                时间戳: 2026-05-21T12:30
+                内容: 世界事件
                 ---
-
-                source: chat_history
-                聊天历史
-
+                来源: chat_history
+                时间戳: 2026-05-20T10:00
+                内容: 聊天历史
                 ---
-
-                source: world_detail
-                世界设定""");
+                来源: world_detail
+                时间戳: 未知
+                内容: 世界设定""");
         assertThat(worldDetailVectorService.worldId).isEqualTo(20L);
         assertThat(chatHistoryVectorService.userWorldId).isEqualTo(10L);
         assertThat(worldEventVectorService.characterId).isEqualTo(30L);
         assertThat(documentReranker.documents).extracting(document -> document.getMetadata().get("source"))
                 .containsExactly("world_detail", "chat_history", "world_event");
-        assertThat(documentReranker.topN).isEqualTo(3);
+        assertThat(documentReranker.topN).isEqualTo(5);
     }
 
     @Test
@@ -104,6 +103,14 @@ class VectorToolsTest {
         return Document.builder()
                 .id(id)
                 .text(text)
+                .build();
+    }
+
+    private static Document document(String id, String text, String timestamp) {
+        return Document.builder()
+                .id(id)
+                .text(text)
+                .metadata("timestamp", timestamp)
                 .build();
     }
 

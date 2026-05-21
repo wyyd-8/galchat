@@ -16,6 +16,9 @@ import tools.jackson.databind.json.JsonMapper;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -26,6 +29,7 @@ public class WorldEventVectorService {
 
     private static final double DISTANCE_THRESHOLD = 0.27;
     private static final int TOP_K = 5;
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final VectorStore worldEventVectorStore;
     private final EmbeddingModel embeddingModel;
@@ -41,11 +45,17 @@ public class WorldEventVectorService {
             return;
         }
 
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("userWorldId", worldEventLog.getUserWorldId());
+        metadata.put("visibleCharacters", Arrays.asList(worldEventLog.getVisibleCharacters()));
+        if (worldEventLog.getTimestamp() != null) {
+            metadata.put("timestamp", worldEventLog.getTimestamp().format(FORMATTER));
+        }
+
         Document document = Document.builder()
                 .id(vectorDocumentId(worldEventLog.getId()))
                 .text(worldEventLog.getEventDescription())
-                .metadata("userWorldId", worldEventLog.getUserWorldId())
-                .metadata("visibleCharacters", List.of(worldEventLog.getVisibleCharacters()))
+                .metadata(metadata)
                 .build();
         worldEventVectorStore.add(List.of(document));
     }

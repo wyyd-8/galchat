@@ -64,7 +64,7 @@ public class WebSocketServer {
 
     private static final String TRIGGER_BERT = "bert";
     private static final String TRIGGER_FALLBACK = "fallback";
-    private static final Duration BERT_TRIGGER_DELAY = Duration.ofMillis(500);
+    private static final Duration BERT_TRIGGER_DELAY = Duration.ofMillis(700);
     private static final Duration FALLBACK_TRIGGER_DELAY = Duration.ofSeconds(3);
     private static final Duration INPUT_STATE_TTL = Duration.ofHours(1);
     private static volatile boolean begin = true;
@@ -192,7 +192,7 @@ public class WebSocketServer {
 
         UserWorldPrefix prefix;
         try {
-            prefix = userWorldService.checkUserWorldAuth(id, userWorldId);
+            prefix = userWorldService.checkUserWorldAuth(id, userWorldId, true);
         } catch (Exception e) {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Wrong param"));
             return;
@@ -229,7 +229,7 @@ public class WebSocketServer {
         // 按消息类型分发处理
         log.info("收到来自客户端：" + sid + "的信息:" + data);
         switch (data.getType()) {
-            case "fragment" -> handleMessageFragment(data, sid);
+            case "fragment" -> handleMessageFragment(data, sid, prefix.getEotDetectionStatus());
             case "typing" -> handleTypingStatus(data);
         }
     }
@@ -237,7 +237,7 @@ public class WebSocketServer {
     /**
      * 处理客户端输入片段并更新 Redis 中的输入内容。
      */
-    private void handleMessageFragment(ChatMessageDTO ctx, String senderSid) {
+    private void handleMessageFragment(ChatMessageDTO ctx, String senderSid, boolean enableEotDetection) {
         // 调用 Lua 脚本追加输入片段
         String snapshot = redisTemplate.execute(chatLuaScripts.updateFragmentScript(),
                 List.of(buildTypingKey(ctx), buildChatKey(ctx)),
@@ -252,7 +252,9 @@ public class WebSocketServer {
         ctx.setLength(inputSnapshot.length());
         ctx.setRevision(inputSnapshot.revision());
         broadcastMessageToOtherSessions(ctx, senderSid);
-        scheduleBertEarlyTrigger(ctx, inputSnapshot.input());
+        if (enableEotDetection) {
+            scheduleBertEarlyTrigger(ctx, inputSnapshot.input());
+        }
     }
 
     /**
@@ -486,14 +488,16 @@ public class WebSocketServer {
      * 将已认领的完整输入投递给聊天消费者。
      */
     private void addReplyTask(ChatMessageDTO ctx, ClaimedConversation claimedConversation) {
+        Long worldId = parseLong(ctx.getWorldId());
         Long characterId = parseCharacterId(ctx.getCharacterId());
-        if (ctx.getUserWorldId() == null || characterId == null) {
-            log.warn("回复任务缺少必要上下文, userWorldId:{}, characterId:{}",
-                    ctx.getUserWorldId(), ctx.getCharacterId());
+        if (ctx.getUserWorldId() == null || worldId == null || characterId == null) {
+            log.warn("回复任务缺少必要上下文, userWorldId:{}, worldId:{}, characterId:{}",
+                    ctx.getUserWorldId(), ctx.getWorldId(), ctx.getCharacterId());
             return;
         }
 
         ChatReplyTaskDTO task = new ChatReplyTaskDTO();
+        task.setWorldId(worldId);
         task.setUserWorldId(ctx.getUserWorldId());
         task.setCharacterId(characterId);
         task.setMessage(claimedConversation.input());
@@ -504,8 +508,15 @@ public class WebSocketServer {
     }
 
     private Long parseCharacterId(String characterId) {
+        return parseLong(characterId);
+    }
+
+    private Long parseLong(String value) {
+        if (value == null) {
+            return null;
+        }
         try {
-            return Long.valueOf(characterId);
+            return Long.valueOf(value);
         } catch (NumberFormatException e) {
             return null;
         }

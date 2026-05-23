@@ -28,7 +28,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     @Override
     public List<UserChatHistory> listHistory(Long userWorldId, Long characterId, Long id, Integer size) {
-        userWorldPrefixService.checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }

@@ -16,7 +16,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class CommonConfiguration {
     @Bean
-    public ChatClient chatClient(DeepSeekChatModel model,
+    public ChatClient deepThinkChatClient(@Qualifier("deepSeekThinkingChatModel") DeepSeekChatModel model,
                                  TopicAwareMessageChatMemoryAdvisor topicAwareAdvisor,
                                  VectorTools vectorTools,
                                  UserEventLogTools userEventLogTools) {
@@ -30,7 +30,21 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient topicClient(DeepSeekChatModel model) {
+    public ChatClient normalChatClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model,
+                                 TopicAwareMessageChatMemoryAdvisor topicAwareAdvisor,
+                                 VectorTools vectorTools,
+                                 UserEventLogTools userEventLogTools) {
+        return ChatClient
+                .builder(model)
+                .defaultSystem("你是一个专业的ai聊天机器人。")
+                .defaultAdvisors(new SimpleLoggerAdvisor())
+                .defaultAdvisors(topicAwareAdvisor)
+                .defaultTools(vectorTools, userEventLogTools)
+                .build();
+    }
+
+    @Bean
+    public ChatClient topicClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("""
@@ -44,7 +58,7 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient rewriteClient(DeepSeekChatModel model) {
+    public ChatClient rewriteClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("""

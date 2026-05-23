@@ -25,9 +25,9 @@ public interface IUserWorldPrefixService extends IService<UserWorldPrefix> {
 
     void deleteUserWorld(Long userId, Long id);
 
-    void checkUserWorldAuth(Long userWorldId);
+    UserWorldPrefix checkUserWorldAuth(Long userWorldId, boolean needUserWorldPrefix);
 
-    UserWorldPrefix checkUserWorldAuth(Long userId, Long userWorldId);
+    UserWorldPrefix checkUserWorldAuth(Long userId, Long userWorldId, boolean needUserWorldPrefix);
 
-    String buildWorldPrompt(Long userWorldId);
+    String buildWorldPrompt(Long worldId);
 }

@@ -61,7 +61,7 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         return get(conversationInfo);
     }
 
-    public List<Message> get(ConversationInfo conversationInfo) {
+    List<Message> get(ConversationInfo conversationInfo) {
         List<UserChatHistory> histories = listHistories(conversationInfo);
         if (includeToolCalls && contextLength(histories) > MAX_CONTEXT_LENGTH) {
             deleteToolCallsIn(conversationInfo);
@@ -81,7 +81,7 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         return messages;
     }
 
-    public List<UserChatHistory> listHistories(ConversationInfo conversationInfo) {
+    List<UserChatHistory> listHistories(ConversationInfo conversationInfo) {
         LambdaQueryWrapper<UserChatHistory> queryWrapper = new LambdaQueryWrapper<UserChatHistory>()
                 .eq(UserChatHistory::getUserWorldId, conversationInfo.getUserWorldId())
                 .eq(UserChatHistory::getCharacterId, conversationInfo.getCharacterId())
@@ -95,14 +95,14 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         return histories;
     }
 
-    public UserChatHistory save(ConversationInfo conversationInfo, Message message) {
+    UserChatHistory save(ConversationInfo conversationInfo, Message message) {
         Assert.isTrue(!readOnly, "read only chat memory cannot save messages");
         UserChatHistory userChatHistory = toUserChatHistory(conversationInfo, message);
         userChatHistoryMapper.insert(userChatHistory);
         return userChatHistory;
     }
 
-    public void saveAutoSearchInfo(ConversationInfo conversationInfo, String content) {
+    void saveAutoSearchInfo(ConversationInfo conversationInfo, String content) {
         if (!StringUtils.hasText(content)) {
             return;
         }
@@ -116,7 +116,7 @@ public class UserChatHistoryChatMemory implements ChatMemory {
         userChatHistoryMapper.insert(userChatHistory);
     }
 
-    public void deleteToolCallsBefore(ConversationInfo conversationInfo) {
+    void deleteToolCallsBefore(ConversationInfo conversationInfo) {
         if (readOnly || conversationInfo.getStart() == null) {
             return;
         }

@@ -38,7 +38,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     @Override
     public UserCharacterInfo addCharacter(Long userWorldId, Long characterId) {
-        userWorldPrefixService.checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         UserCharacterInfo oldCharacter = getByUserWorldIdAndCharacterId(userWorldId, characterId);
         if (oldCharacter != null) {
             throw new UserRequestException("角色已存在");
@@ -57,21 +57,20 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     @Override
     public void deleteCharacter(Long userWorldId, Long characterId) {
-        userWorldPrefixService.checkUserWorldAuth(userWorldId);
-        UserCharacterInfo userCharacterInfo = getByUserWorldIdAndCharacterId(userWorldId, characterId);
-        if (userCharacterInfo == null) {
-            throw new UserRequestException("角色不存在");
-        }
-        lambdaUpdate()
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
+        boolean removed = lambdaUpdate()
                 .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                 .eq(UserCharacterInfo::getCharacterId, characterId)
                 .remove();
+        if (!removed) {
+            throw new UserRequestException("角色不存在");
+        }
         redisTemplate.opsForHash().delete(USER_CHARACTER_FAVOR_VALUE_KEY, userWorldId + ":" + characterId);
     }
 
     @Override
     public List<UserCharacterInfo> listByUserWorldId(Long userWorldId) {
-        userWorldPrefixService.checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         return lambdaQuery()
                 .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                 .list();
@@ -79,7 +78,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     @Override
     public Integer updateFavorValue(Long userWorldId, Long characterId, Integer favorChange) {
-        userWorldPrefixService.checkUserWorldAuth(userWorldId);
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }
@@ -97,7 +96,6 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     @Override
     public String buildCharacterPrompt(Long userWorldId, Long characterId) {
-        userWorldPrefixService.checkUserWorldAuth(userWorldId);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }

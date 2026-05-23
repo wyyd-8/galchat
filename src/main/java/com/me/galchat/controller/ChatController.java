@@ -15,13 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class ChatController {
 
-    private final ChatClient chatClient;
+    private final ChatClient deepThinkChatClient;
 
     @GetMapping("/chat")
     public String chat(String message, String conversationId) {
         log.info("Received message: {}", message);
         new ConversationInfo(conversationId);
-        return chatClient.prompt()
+        return deepThinkChatClient.prompt()
                 .user(message)
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()

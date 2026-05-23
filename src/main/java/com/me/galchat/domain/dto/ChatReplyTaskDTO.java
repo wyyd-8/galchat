@@ -4,6 +4,7 @@ import lombok.Data;
 
 @Data
 public class ChatReplyTaskDTO {
+    private Long worldId;
     private Long userWorldId;
     private Long characterId;
     private String message;

@@ -10,6 +10,7 @@ import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Service;
@@ -78,7 +79,13 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
                 .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus());
         updateById(updateUserWorld);
-        return getExistingUserWorld(userId, id);
+        return oldUserWorld
+                .setName(updateUserWorld.getName())
+                .setAcitvePushStatus(updateUserWorld.getAcitvePushStatus())
+                .setPushTime(updateUserWorld.getPushTime())
+                .setConnectOtherCharacterStatus(updateUserWorld.getConnectOtherCharacterStatus())
+                .setFavorSystemStatus(updateUserWorld.getFavorSystemStatus())
+                .setEotDetectionStatus(updateUserWorld.getEotDetectionStatus());
     }
 
     @Override
@@ -89,16 +96,16 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     }
 
     @Override
-    public void checkUserWorldAuth(Long userWorldId) {
+    public UserWorldPrefix checkUserWorldAuth(Long userWorldId, boolean needUserWorldPrefix) {
         Integer currentUserId = CurrentHolder.getCurrentId();
         if (currentUserId == null) {
             throw new UserAuthException("用户未登录");
         }
-        checkUserWorldAuth(Long.valueOf(currentUserId), userWorldId);
+        return checkUserWorldAuth(Long.valueOf(currentUserId), userWorldId, needUserWorldPrefix);
     }
 
     @Override
-    public UserWorldPrefix checkUserWorldAuth(Long userId, Long userWorldId) {
+    public UserWorldPrefix checkUserWorldAuth(Long userId, Long userWorldId, boolean needUserWorldPrefix) {
         if (userWorldId == null) {
             throw new UserRequestException("用户世界id不能为空");
         }
@@ -108,11 +115,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
 
         Object authUserId = redisTemplate.opsForHash().get(WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
         if (String.valueOf(userId).equals(authUserId)) {
-            UserWorldPrefix userWorld = getById(userWorldId);
-            if (userWorld == null) {
-                throw new UserRequestException("用户世界不存在");
-            }
-            return userWorld;
+            return needUserWorldPrefix ? getExistingUserWorld(userId, userWorldId) : null;
         }
 
         UserWorldPrefix userWorld = lambdaQuery()
@@ -139,7 +142,8 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     }
 
     @Override
-    public String buildWorldPrompt(Long userWorldId) {
-        return baseMapper.getBackground(userWorldId);
+    @Cacheable(cacheNames = "worldPrompt", key = "#worldId", condition = "#worldId != null", unless = "#result == null")
+    public String buildWorldPrompt(Long worldId) {
+        return baseMapper.getBackground(worldId);
     }
 }

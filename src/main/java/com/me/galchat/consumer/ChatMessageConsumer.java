@@ -43,7 +43,7 @@ public class ChatMessageConsumer {
     private static final Duration LAST_ASSISTANT_TTL = Duration.ofHours(1);
 
     private final RedissonClient redissonClient;
-    private final ChatClient chatClient;
+    private final ChatClient normalChatClient;
     private final WebSocketServer webSocketServer;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final UserChatHistoryMapper userChatHistoryMapper;
@@ -123,14 +123,14 @@ public class ChatMessageConsumer {
     }
 
     private UserChatHistory generateReply(ChatReplyTaskDTO task) {
-        if (task.getUserWorldId() == null || task.getCharacterId() == null || task.getMessage() == null) {
+        if (task.getWorldId() == null || task.getUserWorldId() == null || task.getCharacterId() == null || task.getMessage() == null) {
             log.warn("聊天回复任务缺少必要字段: {}", task);
             return null;
         }
 
         ConversationInfo conversationInfo = new ConversationInfo(task.getUserWorldId(), task.getCharacterId(), null);
         String systemPrompt = buildSystemPrompt(task);
-        String content = chatClient.prompt()
+        String content = normalChatClient.prompt()
                 .system(systemPrompt)
                 .user(task.getMessage())
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
@@ -159,7 +159,7 @@ public class ChatMessageConsumer {
 
     private String buildSystemPrompt(ChatReplyTaskDTO task) {
         StringBuilder prompt = new StringBuilder();
-        appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(task.getUserWorldId()));
+        appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(task.getWorldId()));
         appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId()));
         return prompt.toString();
     }

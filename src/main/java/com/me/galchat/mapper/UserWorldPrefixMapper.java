@@ -14,6 +14,6 @@ import org.apache.ibatis.annotations.Select;
  */
 public interface UserWorldPrefixMapper extends BaseMapper<UserWorldPrefix> {
 
-    @Select("SELECT background FROM world_template WHERE id = (SELECT world_id FROM user_world_prefix WHERE id = #{userWorldId})")
-    String getBackground(Long userWorldId);
+    @Select("SELECT background FROM world_template WHERE id = #{worldId}")
+    String getBackground(Long worldId);
 }

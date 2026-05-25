@@ -32,7 +32,7 @@ public class TopicBoundaryService {
 
     private final StringRedisTemplate redisTemplate;
     private final ChatClient topicClient;
-    private final UserChatHistoryChatMemory topicChatMemory;
+    private final UserChatMemory topicChatMemory;
     private final VectorTools vectorTools;
     private final ChatHistoryVectorService chatHistoryVectorService;
 

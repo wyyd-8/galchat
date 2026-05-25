@@ -3,6 +3,7 @@ package com.me.galchat.vector;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.memory.UserChatMemory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
@@ -27,7 +28,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ChatHistoryVectorService {
 
-    private static final List<String> EXCLUDED_TYPES = List.of("system", "tool", "tool_call");
+    private static final List<String> EXCLUDED_TYPES = List.of("system", "tool",
+            UserChatMemory.AUTO_SEARCH_INFO_TYPE);
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final UserChatHistoryMapper userChatHistoryMapper;

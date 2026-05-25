@@ -1,9 +1,11 @@
 package com.me.galchat.config;
 
 import com.me.galchat.interceptor.DeepSeekThinkingInterceptor;
+import com.me.galchat.memory.UserChatMemory;
+import com.me.galchat.model.DeepSeekChatModel;
+import com.me.galchat.tool.RecordingToolCallingManager;
 import io.micrometer.observation.ObservationRegistry;
 import org.springframework.ai.chat.observation.ChatModelObservationConvention;
-import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.ai.deepseek.api.DeepSeekApi;
 import org.springframework.ai.model.SimpleApiKey;
 import org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatProperties;
@@ -34,6 +36,7 @@ public class DeepSeekModelConfiguration {
             ObjectProvider<RestClient.Builder> restClientBuilderProvider,
             ObjectProvider<WebClient.Builder> webClientBuilderProvider,
             ToolCallingManager toolCallingManager,
+            UserChatMemory userChatMemory,
             ObjectProvider<RetryTemplate> retryTemplate,
             ObjectProvider<ResponseErrorHandler> responseErrorHandler,
             ObjectProvider<ObservationRegistry> observationRegistry,
@@ -42,7 +45,8 @@ public class DeepSeekModelConfiguration {
         return buildChatModel(connectionProperties, chatProperties,
                 restClientBuilderProvider.getIfAvailable(RestClient::builder),
                 webClientBuilderProvider.getIfAvailable(WebClient::builder),
-                toolCallingManager, retryTemplate, responseErrorHandler, observationRegistry,
+                new RecordingToolCallingManager(toolCallingManager, userChatMemory),
+                retryTemplate, responseErrorHandler, observationRegistry,
                 observationConvention, toolExecutionEligibilityPredicate);
     }
 
@@ -53,6 +57,7 @@ public class DeepSeekModelConfiguration {
             ObjectProvider<RestClient.Builder> restClientBuilderProvider,
             ObjectProvider<WebClient.Builder> webClientBuilderProvider,
             ToolCallingManager toolCallingManager,
+            UserChatMemory userChatMemory,
             ObjectProvider<RetryTemplate> retryTemplate,
             ObjectProvider<ResponseErrorHandler> responseErrorHandler,
             ObjectProvider<ObservationRegistry> observationRegistry,
@@ -65,7 +70,8 @@ public class DeepSeekModelConfiguration {
 
         return buildChatModel(connectionProperties, chatProperties, restClientBuilder,
                 webClientBuilderProvider.getIfAvailable(WebClient::builder),
-                toolCallingManager, retryTemplate, responseErrorHandler, observationRegistry,
+                new RecordingToolCallingManager(toolCallingManager, userChatMemory),
+                retryTemplate, responseErrorHandler, observationRegistry,
                 observationConvention, toolExecutionEligibilityPredicate);
     }
 

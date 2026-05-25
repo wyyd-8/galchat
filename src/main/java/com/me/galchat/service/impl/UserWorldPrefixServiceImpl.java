@@ -68,7 +68,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     }
 
     @Override
-    public UserWorldPrefix updateUserWorld(Long userId, Long id, UserWorldPrefix userWorldPrefix) {
+    public void updateUserWorld(Long userId, Long id, UserWorldPrefix userWorldPrefix) {
         UserWorldPrefix oldUserWorld = getExistingUserWorld(userId, id);
         UserWorldPrefix updateUserWorld = new UserWorldPrefix()
                 .setId(oldUserWorld.getId())
@@ -77,15 +77,9 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setPushTime(userWorldPrefix.getPushTime())
                 .setConnectOtherCharacterStatus(userWorldPrefix.getConnectOtherCharacterStatus())
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
-                .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus());
+                .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
+                .setThinkStatus(oldUserWorld.getThinkStatus());
         updateById(updateUserWorld);
-        return oldUserWorld
-                .setName(updateUserWorld.getName())
-                .setAcitvePushStatus(updateUserWorld.getAcitvePushStatus())
-                .setPushTime(updateUserWorld.getPushTime())
-                .setConnectOtherCharacterStatus(updateUserWorld.getConnectOtherCharacterStatus())
-                .setFavorSystemStatus(updateUserWorld.getFavorSystemStatus())
-                .setEotDetectionStatus(updateUserWorld.getEotDetectionStatus());
     }
 
     @Override

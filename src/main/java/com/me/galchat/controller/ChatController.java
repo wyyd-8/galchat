@@ -1,13 +1,16 @@
 package com.me.galchat.controller;
 
-import com.me.galchat.domain.po.ConversationInfo;
+import com.me.galchat.domain.dto.ChatMessageDTO;
+import com.me.galchat.domain.vo.ChatFluxVO;
+import com.me.galchat.service.IChatService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
 
 @RestController
 @RequestMapping("/ai")
@@ -15,16 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class ChatController {
 
-    private final ChatClient deepThinkChatClient;
+    private final IChatService chatService;
 
-    @GetMapping("/chat")
-    public String chat(String message, String conversationId) {
-        log.info("Received message: {}", message);
-        new ConversationInfo(conversationId);
-        return deepThinkChatClient.prompt()
-                .user(message)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                .call()
-                .content();
+    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ChatFluxVO> chat(@RequestBody ChatMessageDTO chatMessageDTO) {
+        log.info("Received message: {}", chatMessageDTO == null ? null : chatMessageDTO.getMessage());
+        return chatService.chat(chatMessageDTO);
     }
 }

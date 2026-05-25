@@ -14,36 +14,24 @@ import lombok.experimental.Accessors;
  * </p>
  *
  * @author author
- * @since 2026-05-03
+ * @since 2026-05-24
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("user_world_prefix")
-public class UserWorldPrefix implements Serializable {
+@TableName("user_chat_thinking_history")
+public class UserChatThinkingHistory implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
-    private Long userId;
+    private Long userMessageId;
 
-    private Long worldId;
+    private Integer stepNo;
 
-    private String name;
+    private String reasoningContent;
 
-    private String image;
 
-    private Boolean acitvePushStatus;
-
-    private Integer pushTime;
-
-    private Boolean connectOtherCharacterStatus;
-
-    private String favorSystemStatus;
-
-    private Boolean eotDetectionStatus;
-
-    private Boolean thinkStatus;
 }

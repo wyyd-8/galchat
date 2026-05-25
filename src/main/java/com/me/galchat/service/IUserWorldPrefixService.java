@@ -21,7 +21,7 @@ public interface IUserWorldPrefixService extends IService<UserWorldPrefix> {
 
     UserWorldPrefix getUserWorld(Long userId, Long id);
 
-    UserWorldPrefix updateUserWorld(Long userId, Long id, UserWorldPrefix userWorldPrefix);
+    void updateUserWorld(Long userId, Long id, UserWorldPrefix userWorldPrefix);
 
     void deleteUserWorld(Long userId, Long id);
 

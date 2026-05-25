@@ -1,15 +1,8 @@
 package com.me.galchat.consumer;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.domain.dto.ChatReplyTaskDTO;
-import com.me.galchat.domain.po.ConversationInfo;
-import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
-import com.me.galchat.mapper.UserCharacterInfoMapper;
-import com.me.galchat.mapper.UserChatHistoryMapper;
-import com.me.galchat.service.IUserCharacterInfoService;
-import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.service.IChatService;
 import com.me.galchat.websocket.WebSocketServer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -20,19 +13,11 @@ import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.redisson.codec.JsonJacksonCodec;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 
-import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Component
@@ -40,16 +25,9 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class ChatMessageConsumer {
 
-    private static final Duration LAST_ASSISTANT_TTL = Duration.ofHours(1);
-
     private final RedissonClient redissonClient;
-    private final ChatClient normalChatClient;
     private final WebSocketServer webSocketServer;
-    private final UserCharacterInfoMapper userCharacterInfoMapper;
-    private final UserChatHistoryMapper userChatHistoryMapper;
-    private final IUserWorldPrefixService userWorldPrefixService;
-    private final IUserCharacterInfoService userCharacterInfoService;
-    private final StringRedisTemplate redisTemplate;
+    private final IChatService chatService;
 
     @Resource(name = "chatTaskExecutor")
     private ThreadPoolTaskExecutor chatTaskExecutor;
@@ -106,14 +84,11 @@ public class ChatMessageConsumer {
         RLock lock = redissonClient.getLock(buildReplyLockKey(task));
         lock.lock();
         try {
-            UserChatHistory assistantMessage = generateReply(task);
+            UserChatHistory assistantMessage = chatService.generateReply(task);
             if (assistantMessage == null) {
                 return;
             }
 
-            updateLastChatInfo(assistantMessage);
-            redisTemplate.opsForValue().set(buildLastAssistantKey(task),
-                    assistantMessage.getContent(), LAST_ASSISTANT_TTL);
             webSocketServer.sendMessageToSession(assistantMessage);
         } finally {
             if (lock.isHeldByCurrentThread()) {
@@ -122,81 +97,8 @@ public class ChatMessageConsumer {
         }
     }
 
-    private UserChatHistory generateReply(ChatReplyTaskDTO task) {
-        if (task.getWorldId() == null || task.getUserWorldId() == null || task.getCharacterId() == null || task.getMessage() == null) {
-            log.warn("聊天回复任务缺少必要字段: {}", task);
-            return null;
-        }
-
-        ConversationInfo conversationInfo = new ConversationInfo(task.getUserWorldId(), task.getCharacterId(), null);
-        String systemPrompt = buildSystemPrompt(task);
-        String content = normalChatClient.prompt()
-                .system(systemPrompt)
-                .user(task.getMessage())
-                .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
-                .toolContext(Map.of("userWorldId", task.getUserWorldId(), "characterId", task.getCharacterId()))
-                .call()
-                .content();
-        if (content == null || content.isBlank()) {
-            log.warn("ChatClient返回空回复, task:{}", task);
-            return null;
-        }
-
-        UserChatHistory savedAssistantMessage = latestAssistantMessage(task);
-        if (savedAssistantMessage != null) {
-            return savedAssistantMessage;
-        }
-
-        UserChatHistory fallbackAssistantMessage = new UserChatHistory()
-                .setUserWorldId(task.getUserWorldId())
-                .setCharacterId(task.getCharacterId())
-                .setContent(content)
-                .setType(MessageType.ASSISTANT.getValue())
-                .setTimestamp(LocalDateTime.now());
-        userChatHistoryMapper.insert(fallbackAssistantMessage);
-        return fallbackAssistantMessage;
-    }
-
-    private String buildSystemPrompt(ChatReplyTaskDTO task) {
-        StringBuilder prompt = new StringBuilder();
-        appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(task.getWorldId()));
-        appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId()));
-        return prompt.toString();
-    }
-
-    private void appendPrompt(StringBuilder prompt, String content) {
-        if (!StringUtils.hasText(content)) {
-            return;
-        }
-        if (!prompt.isEmpty()) {
-            prompt.append('\n');
-        }
-        prompt.append(content);
-    }
-
-    private void updateLastChatInfo(UserChatHistory assistantMessage) {
-        userCharacterInfoMapper.update(new LambdaUpdateWrapper<UserCharacterInfo>()
-                .eq(UserCharacterInfo::getUserWorldId, assistantMessage.getUserWorldId())
-                .eq(UserCharacterInfo::getCharacterId, assistantMessage.getCharacterId())
-                .set(UserCharacterInfo::getLastChatTime, assistantMessage.getTimestamp())
-                .set(UserCharacterInfo::getLastChatContent, assistantMessage.getContent()));
-    }
-
-    private UserChatHistory latestAssistantMessage(ChatReplyTaskDTO task) {
-        return userChatHistoryMapper.selectOne(new LambdaQueryWrapper<UserChatHistory>()
-                .eq(UserChatHistory::getUserWorldId, task.getUserWorldId())
-                .eq(UserChatHistory::getCharacterId, task.getCharacterId())
-                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
-                .orderByDesc(UserChatHistory::getId)
-                .last("limit 1"));
-    }
-
     private String buildReplyLockKey(ChatReplyTaskDTO task) {
         return buildConversationKey(task) + ":reply_lock";
-    }
-
-    private String buildLastAssistantKey(ChatReplyTaskDTO task) {
-        return buildConversationKey(task) + ":last_assistant";
     }
 
     private String buildConversationKey(ChatReplyTaskDTO task) {

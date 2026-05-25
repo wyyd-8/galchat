@@ -62,6 +62,8 @@ CREATE TABLE user_chat_history (
                                    character_id BIGINT NOT NULL,
                                    content TEXT,
                                    type VARCHAR(50),
+                                   user_message_id BIGINT,
+                                   step_no INT,
                                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

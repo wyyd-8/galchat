@@ -223,7 +223,7 @@ public class WebSocketServer {
         ChatMessageDTO data = JSONObject.fromJson(message, ChatMessageDTO.class);
         data.setUserWorldId(prefix.getId());
         if (data.getWorldId() == null) {
-            data.setWorldId(String.valueOf(prefix.getWorldId()));
+            data.setWorldId(prefix.getWorldId());
         }
 
         // 按消息类型分发处理
@@ -488,8 +488,8 @@ public class WebSocketServer {
      * 将已认领的完整输入投递给聊天消费者。
      */
     private void addReplyTask(ChatMessageDTO ctx, ClaimedConversation claimedConversation) {
-        Long worldId = parseLong(ctx.getWorldId());
-        Long characterId = parseCharacterId(ctx.getCharacterId());
+        Long worldId = ctx.getWorldId();
+        Long characterId = ctx.getCharacterId();
         if (ctx.getUserWorldId() == null || worldId == null || characterId == null) {
             log.warn("回复任务缺少必要上下文, userWorldId:{}, worldId:{}, characterId:{}",
                     ctx.getUserWorldId(), ctx.getWorldId(), ctx.getCharacterId());
@@ -505,21 +505,6 @@ public class WebSocketServer {
         task.setRevision(claimedConversation.revision());
         task.setTriggerType(ctx.getTriggerType());
         replyQueue.offer(task);
-    }
-
-    private Long parseCharacterId(String characterId) {
-        return parseLong(characterId);
-    }
-
-    private Long parseLong(String value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 
     /**

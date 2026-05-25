@@ -1,17 +1,20 @@
 package com.me.galchat.config;
 
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.mapper.UserChatThinkingHistoryMapper;
+import com.me.galchat.mapper.UserChatToolCallMapper;
 import com.me.galchat.memory.TopicAwareMessageChatMemoryAdvisor;
 import com.me.galchat.memory.TopicBoundaryService;
-import com.me.galchat.memory.UserChatHistoryChatMemory;
+import com.me.galchat.memory.UserChatMemory;
+import com.me.galchat.model.DeepSeekChatModel;
 import com.me.galchat.tool.UserEventLogTools;
 import com.me.galchat.tool.VectorTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
-import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 @Configuration
 public class CommonConfiguration {
@@ -73,24 +76,31 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public UserChatHistoryChatMemory chatMemory(UserChatHistoryMapper userChatHistoryMapper) {
-        return UserChatHistoryChatMemory.builder(userChatHistoryMapper)
+    public UserChatMemory chatMemory(UserChatHistoryMapper userChatHistoryMapper,
+                                     UserChatThinkingHistoryMapper userChatThinkingHistoryMapper,
+                                     UserChatToolCallMapper userChatToolCallMapper,
+                                     StringRedisTemplate redisTemplate) {
+        return UserChatMemory.builder(userChatHistoryMapper)
+                .thinkingHistoryMapper(userChatThinkingHistoryMapper)
+                .toolCallMapper(userChatToolCallMapper)
+                .redisTemplate(redisTemplate)
                 .includeToolCalls(true)
                 .readOnly(false)
                 .build();
     }
 
     @Bean
-    public UserChatHistoryChatMemory topicChatMemory(UserChatHistoryMapper userChatHistoryMapper) {
-        return UserChatHistoryChatMemory.builder(userChatHistoryMapper)
+    public UserChatMemory topicChatMemory(UserChatHistoryMapper userChatHistoryMapper) {
+        return UserChatMemory.builder(userChatHistoryMapper)
                 .includeToolCalls(false)
+                .includeAutoSearchInfo(false)
                 .readOnly(true)
                 .build();
     }
 
     @Bean
     public TopicAwareMessageChatMemoryAdvisor topicAwareMessageChatMemoryAdvisor(
-            @Qualifier("chatMemory") UserChatHistoryChatMemory chatMemory,
+            @Qualifier("chatMemory") UserChatMemory chatMemory,
             TopicBoundaryService topicBoundaryService) {
         return TopicAwareMessageChatMemoryAdvisor.builder(chatMemory, topicBoundaryService).build();
     }

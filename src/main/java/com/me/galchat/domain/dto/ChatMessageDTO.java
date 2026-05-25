@@ -5,9 +5,9 @@ import lombok.Data;
 @Data
 public class ChatMessageDTO {
     private String type;
-    private String worldId;
+    private Long worldId;
     private Long userWorldId;
-    private String characterId;
+    private Long characterId;
     private String message;
     private Boolean isTyping;
     private long length = 0;

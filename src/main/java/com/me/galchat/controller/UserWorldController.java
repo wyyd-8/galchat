@@ -70,7 +70,8 @@ public class UserWorldController {
         if (userWorldPrefix == null) {
             throw new UserRequestException("请求参数不能为空");
         }
-        return Result.success(userWorldPrefixService.updateUserWorld(currentUserId(), id, userWorldPrefix));
+        userWorldPrefixService.updateUserWorld(currentUserId(), id, userWorldPrefix);
+        return Result.success();
     }
 
     @DeleteMapping("/{id}")

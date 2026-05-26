@@ -117,13 +117,14 @@ public class UserChatMemory implements ChatMemory {
      */
     List<Message> get(ConversationInfo conversationInfo) {
         List<UserChatHistory> histories = listHistories(conversationInfo);
-        if (!histories.isEmpty()) {
-            histories.getFirst().setContent(histories.getFirst().getContent() + firstMessageSuffixPrompt);
-        }
+        return toPromptMessages(histories);
+    }
 
+    List<Message> toPromptMessages(List<UserChatHistory> histories) {
+        List<UserChatHistory> promptHistories = withFirstMessageSuffix(histories);
         boolean includeAuxiliaryMessages = includeToolCalls
-                && contextLength(histories) <= ChatConstant.MAX_CONTEXT_LENGTH;
-        return toMessages(histories, includeAuxiliaryMessages);
+                && contextLength(promptHistories) <= ChatConstant.MAX_CONTEXT_LENGTH;
+        return toMessages(promptHistories, includeAuxiliaryMessages);
     }
 
     /**
@@ -400,6 +401,30 @@ public class UserChatMemory implements ChatMemory {
             excludedTypes.add(ChatConstant.AUTO_SEARCH_INFO_TYPE);
         }
         return excludedTypes;
+    }
+
+    private List<UserChatHistory> withFirstMessageSuffix(List<UserChatHistory> histories) {
+        if (histories.isEmpty() || !StringUtils.hasText(firstMessageSuffixPrompt)) {
+            return histories;
+        }
+
+        List<UserChatHistory> copiedHistories = new ArrayList<>(histories);
+        UserChatHistory firstHistory = copiedHistories.getFirst();
+        copiedHistories.set(0, copyHistory(firstHistory)
+                .setContent(firstHistory.getContent() + firstMessageSuffixPrompt));
+        return copiedHistories;
+    }
+
+    private UserChatHistory copyHistory(UserChatHistory history) {
+        return new UserChatHistory()
+                .setId(history.getId())
+                .setUserWorldId(history.getUserWorldId())
+                .setCharacterId(history.getCharacterId())
+                .setContent(history.getContent())
+                .setType(history.getType())
+                .setUserMessageId(history.getUserMessageId())
+                .setStepNo(history.getStepNo())
+                .setTimestamp(history.getTimestamp());
     }
 
     /**

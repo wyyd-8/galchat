@@ -8,7 +8,6 @@ import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.memory.UserChatMemory;
 import com.me.galchat.model.DeepSeekChatModel;
 import com.me.galchat.tool.UserCharacterFavorTools;
-import com.me.galchat.tool.UserEventLogTools;
 import com.me.galchat.tool.VectorTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -22,31 +21,31 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 public class CommonConfiguration {
     @Bean
     public ChatClient deepThinkChatClient(@Qualifier("deepSeekThinkingChatModel") DeepSeekChatModel model,
-                                 TopicAwareMessageChatMemoryAdvisor topicAwareAdvisor,
-                                 VectorTools vectorTools,
-                                 UserEventLogTools userEventLogTools,
-                                 UserCharacterFavorTools userCharacterFavorTools) {
+                                          TopicBoundaryService topicBoundaryService,
+                                          @Qualifier("thinkChatMemory") UserChatMemory thinkChatMemory,
+                                          VectorTools vectorTools,
+                                          UserCharacterFavorTools userCharacterFavorTools) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("你是一个专业的ai聊天机器人。")
                 .defaultAdvisors(new SimpleLoggerAdvisor())
-                .defaultAdvisors(topicAwareAdvisor)
-                .defaultTools(vectorTools, userEventLogTools, userCharacterFavorTools)
+                .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(thinkChatMemory, topicBoundaryService).build())
+                .defaultTools(vectorTools, userCharacterFavorTools)
                 .build();
     }
 
     @Bean
     public ChatClient normalChatClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model,
-                                 TopicAwareMessageChatMemoryAdvisor topicAwareAdvisor,
-                                 VectorTools vectorTools,
-                                 UserEventLogTools userEventLogTools,
-                                 UserCharacterFavorTools userCharacterFavorTools) {
+                                       TopicBoundaryService topicBoundaryService,
+                                       @Qualifier("defaultChatMemory") UserChatMemory defaultChatMemory,
+                                       VectorTools vectorTools,
+                                       UserCharacterFavorTools userCharacterFavorTools) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("你是一个专业的ai聊天机器人。")
                 .defaultAdvisors(new SimpleLoggerAdvisor())
-                .defaultAdvisors(topicAwareAdvisor)
-                .defaultTools(vectorTools, userEventLogTools, userCharacterFavorTools)
+                .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(defaultChatMemory, topicBoundaryService).build())
+                .defaultTools(vectorTools, userCharacterFavorTools)
                 .build();
     }
 
@@ -80,11 +79,44 @@ public class CommonConfiguration {
     }
 
     @Bean
+    public ChatClient userEventLogClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+        return ChatClient
+                .builder(model)
+                .defaultSystem("""
+                        你是一个专业的用户事件判断机器人。
+                        你会收到当前窗口的对话历史，其中每条对话包含对话人、时间戳与对话内容；标记为“当前用户消息”的 user 对话是本次需要判断的消息。
+                        你需要判断当前用户消息中是否出现值得未来主动关心的新个人事件、计划、状态或情绪点。
+                        仅记录能够在未来主动关心的事件，例如考试、面试、生病、旅行、等待某个结果、期待某个作品、重要纪念日等。
+                        忽略普通寒暄、即时动作、泛泛情绪、天气闲聊，以及历史中已经存在且当前没有变化的事件。
+                        如果存在新事件，输出严格 JSON：{"time":"推断出的关心时间","eventDescription":"事件描述"}。
+                        time 必须是 ISO-8601 本地时间格式，例如 2026-05-20T14:30:00；如果用户没有给出明确时间，则根据当前消息时间和事件类型推断一个适合主动关心的时间。
+                        eventDescription 尽量保留用户原话细节。
+                        如果不存在新事件，输出空字符串。
+                        不要输出 JSON 以外的解释、Markdown 或其他内容。
+                        """)
+                .build();
+    }
+
+    @Bean
+    public ChatClient userEventCareClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+        return ChatClient
+                .builder(model)
+                .defaultSystem("""
+                        你是一个专业的主动关怀消息生成机器人。
+                        你会收到同一用户和同一角色之间的一组用户事件，每条事件包含时间和描述。
+                        请依据这些事件生成一条自然、简短、温柔的关怀消息，像角色主动发来的聊天内容。
+                        消息需要把多个事件自然融合，不要逐条罗列，不要提到“事件记录”“数据库”“任务”等系统概念。
+                        只输出最终要发送给用户的一条消息，不要输出解释、Markdown 或其他内容。
+                        """)
+                .build();
+    }
+
+    @Bean
     @Primary
-    public UserChatMemory chatMemory(UserChatHistoryMapper userChatHistoryMapper,
-                                     UserChatThinkingHistoryMapper userChatThinkingHistoryMapper,
-                                     UserChatToolCallMapper userChatToolCallMapper,
-                                     StringRedisTemplate redisTemplate) {
+    public UserChatMemory defaultChatMemory(UserChatHistoryMapper userChatHistoryMapper,
+                                            UserChatThinkingHistoryMapper userChatThinkingHistoryMapper,
+                                            UserChatToolCallMapper userChatToolCallMapper,
+                                            StringRedisTemplate redisTemplate) {
         return UserChatMemory.builder(userChatHistoryMapper)
                 .thinkingHistoryMapper(userChatThinkingHistoryMapper)
                 .toolCallMapper(userChatToolCallMapper)
@@ -95,18 +127,31 @@ public class CommonConfiguration {
     }
 
     @Bean
+    public UserChatMemory thinkChatMemory(UserChatHistoryMapper userChatHistoryMapper,
+                                            UserChatThinkingHistoryMapper userChatThinkingHistoryMapper,
+                                            UserChatToolCallMapper userChatToolCallMapper,
+                                            StringRedisTemplate redisTemplate) {
+        return UserChatMemory.builder(userChatHistoryMapper)
+                .thinkingHistoryMapper(userChatThinkingHistoryMapper)
+                .toolCallMapper(userChatToolCallMapper)
+                .redisTemplate(redisTemplate)
+                .includeToolCalls(true)
+                .readOnly(false)
+                .firstMessageSuffixPrompt("""
+                        【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
+                        1. 请以角色第一人称进行内心独白，用括号包裹内心活动，例如"（心想：……）"或"(内心OS：……)"
+                        2. 用第一人称描写角色的内心感受，例如"我心想""我觉得""我暗自"等
+                        3. 思考内容应沉浸在角色中，通过内心独白分析剧情和规划回复
+                        """)
+                .build();
+    }
+
+    @Bean
     public UserChatMemory topicChatMemory(UserChatHistoryMapper userChatHistoryMapper) {
         return UserChatMemory.builder(userChatHistoryMapper)
                 .includeToolCalls(false)
                 .includeAutoSearchInfo(false)
                 .readOnly(true)
                 .build();
-    }
-
-    @Bean
-    public TopicAwareMessageChatMemoryAdvisor topicAwareMessageChatMemoryAdvisor(
-            @Qualifier("chatMemory") UserChatMemory chatMemory,
-            TopicBoundaryService topicBoundaryService) {
-        return TopicAwareMessageChatMemoryAdvisor.builder(chatMemory, topicBoundaryService).build();
     }
 }

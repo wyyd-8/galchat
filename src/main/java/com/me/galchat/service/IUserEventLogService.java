@@ -20,4 +20,6 @@ public interface IUserEventLogService extends IService<UserEventLog> {
 
     List<UserEventLog> listUserEventLogs(Long userWorldId, LocalDateTime beginTime, LocalDateTime endTime);
 
+    List<UserEventLog> listUpcomingUserEventLogs(LocalDateTime beginTime, LocalDateTime endTime);
+
 }

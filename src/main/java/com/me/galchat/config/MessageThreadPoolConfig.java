@@ -60,4 +60,34 @@ public class MessageThreadPoolConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean("userEventLogTaskExecutor")
+    public ThreadPoolTaskExecutor userEventLogTaskExecutor() {
+        log.info("初始化用户事件判断线程池...");
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("user-event-log-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.setAwaitTerminationSeconds(5);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.DiscardPolicy());
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean("userEventCareTaskExecutor")
+    public ThreadPoolTaskExecutor userEventCareTaskExecutor() {
+        log.info("初始化用户事件关怀消费线程池...");
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("user-event-care-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.setAwaitTerminationSeconds(5);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        return executor;
+    }
 }

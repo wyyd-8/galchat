@@ -19,6 +19,7 @@ import com.me.galchat.service.ChatUserMessageListener;
 import com.me.galchat.service.IChatService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -28,6 +29,7 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -54,6 +56,10 @@ public class ChatServiceImpl implements IChatService {
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IUserCharacterInfoService userCharacterInfoService;
     private final StringRedisTemplate redisTemplate;
+    private final UserEventLogDetector userEventLogDetector;
+
+    @Resource(name = "userEventLogTaskExecutor")
+    private TaskExecutor userEventLogTaskExecutor;
 
     @Override
     public Flux<ChatFluxVO> chat(ChatMessageDTO chatMessageDTO) {
@@ -66,7 +72,8 @@ public class ChatServiceImpl implements IChatService {
         Map<String, Object> toolContext = buildToolContext(chatMessageDTO.getUserWorldId(),
                 chatMessageDTO.getCharacterId());
         toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
-                (ChatUserMessageListener) userMessageId::set);
+                buildUserMessageListener(userMessageId, chatMessageDTO.getUserWorldId(),
+                        chatMessageDTO.getCharacterId()));
         toolContext.put(ChatToolContextConstant.TOOL_EVENT_LISTENER_KEY,
                 (ChatToolEventListener) () -> toolFlux.tryEmitNext(new ChatFluxVO(ChatConstant.TOOL_TYPE, null)));
 
@@ -99,7 +106,7 @@ public class ChatServiceImpl implements IChatService {
         AtomicReference<Long> userMessageId = new AtomicReference<>();
         Map<String, Object> toolContext = buildToolContext(task.getUserWorldId(), task.getCharacterId());
         toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
-                (ChatUserMessageListener) userMessageId::set);
+                buildUserMessageListener(userMessageId, task.getUserWorldId(), task.getCharacterId()));
         String content = normalChatClient.prompt()
                 .system(buildSystemPrompt(task.getWorldId(), task.getUserWorldId(), task.getCharacterId()))
                 .user(task.getMessage())
@@ -195,6 +202,28 @@ public class ChatServiceImpl implements IChatService {
         toolContext.put(ChatToolContextConstant.USER_WORLD_ID_KEY, userWorldId);
         toolContext.put(ChatToolContextConstant.CHARACTER_ID_KEY, characterId);
         return toolContext;
+    }
+
+    private ChatUserMessageListener buildUserMessageListener(AtomicReference<Long> userMessageId,
+                                                             Long userWorldId,
+                                                             Long characterId) {
+        return (savedUserMessageId, conversationInfo, histories) -> {
+            userMessageId.set(savedUserMessageId);
+            detectUserEventLog(userWorldId, characterId, savedUserMessageId, histories);
+        };
+    }
+
+    private void detectUserEventLog(Long userWorldId, Long characterId, Long userMessageId,
+                                    List<UserChatHistory> histories) {
+        List<UserChatHistory> historySnapshot = histories == null ? List.of() : new ArrayList<>(histories);
+        userEventLogTaskExecutor.execute(() -> {
+            try {
+                userEventLogDetector.detectAndSave(userWorldId, characterId, userMessageId, historySnapshot);
+            } catch (Exception e) {
+                log.warn("用户事件判断失败, userWorldId:{}, characterId:{}, userMessageId:{}",
+                        userWorldId, characterId, userMessageId, e);
+            }
+        });
     }
 
     private void updateLatestChatInfo(Long userMessageId, Long userWorldId, Long characterId) {

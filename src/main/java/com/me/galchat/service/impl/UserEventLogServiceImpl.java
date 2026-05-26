@@ -46,4 +46,23 @@ public class UserEventLogServiceImpl extends ServiceImpl<UserEventLogMapper, Use
                 .list();
     }
 
+    @Override
+    public List<UserEventLog> listUpcomingUserEventLogs(LocalDateTime beginTime, LocalDateTime endTime) {
+        if (beginTime == null || endTime == null || !beginTime.isBefore(endTime)) {
+            return List.of();
+        }
+
+        return lambdaQuery()
+                .isNotNull(UserEventLog::getUserWorldId)
+                .isNotNull(UserEventLog::getCharacterId)
+                .isNotNull(UserEventLog::getTime)
+                .ge(UserEventLog::getTime, beginTime)
+                .lt(UserEventLog::getTime, endTime)
+                .orderByAsc(UserEventLog::getTime)
+                .orderByAsc(UserEventLog::getUserWorldId)
+                .orderByAsc(UserEventLog::getCharacterId)
+                .orderByAsc(UserEventLog::getId)
+                .list();
+    }
+
 }

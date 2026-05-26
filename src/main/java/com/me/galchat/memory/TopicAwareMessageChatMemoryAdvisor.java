@@ -56,7 +56,6 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
 
         Message userMessage = chatClientRequest.prompt().getLastUserOrToolResponseMessage();
         UserChatHistory savedUserMessage = chatMemory.save(baseConversation, userMessage);
-        notifyUserMessageSaved(chatClientRequest.prompt().getOptions(), savedUserMessage.getId());
 
         TopicBoundary boundary = MessageType.USER.equals(userMessage.getMessageType())
                 ? topicBoundaryService.updateAfterUserMessage(baseConversation, savedUserMessage)
@@ -64,7 +63,10 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         ConversationInfo windowConversation = new ConversationInfo(baseConversation.getUserWorldId(),
                 baseConversation.getCharacterId(), boundary.windowStartId());
 
-        List<Message> memoryMessages = chatMemory.get(windowConversation);
+        List<UserChatHistory> windowHistories = chatMemory.listHistories(windowConversation);
+        notifyUserMessageSaved(chatClientRequest.prompt().getOptions(), savedUserMessage.getId(),
+                windowConversation, windowHistories);
+        List<Message> memoryMessages = chatMemory.toPromptMessages(windowHistories);
         List<Message> processedMessages = new ArrayList<>(memoryMessages);
         processedMessages.addAll(removeLastUserOrToolResponseMessage(chatClientRequest.prompt().getInstructions()));
         ensureFirstSystemMessage(processedMessages);
@@ -141,7 +143,8 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         return newMessages;
     }
 
-    private Map<String, Object> putContext(Map<String, Object> context, ConversationInfo conversationInfo, Long userMessageId) {
+    private Map<String, Object> putContext(Map<String, Object> context, ConversationInfo conversationInfo,
+                                           Long userMessageId) {
         Map<String, Object> newContext = new HashMap<>(context);
         newContext.put(ChatConstant.TOPIC_CONVERSATION_INFO_CONTEXT_KEY, conversationInfo);
         newContext.put(ChatConstant.TOPIC_USER_MESSAGE_ID_CONTEXT_KEY, userMessageId);
@@ -161,7 +164,8 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         return copiedOptions;
     }
 
-    private void notifyUserMessageSaved(ChatOptions options, Long userMessageId) {
+    private void notifyUserMessageSaved(ChatOptions options, Long userMessageId, ConversationInfo conversationInfo,
+                                        List<UserChatHistory> histories) {
         if (!(options instanceof ToolCallingChatOptions toolCallingOptions)) {
             return;
         }
@@ -172,7 +176,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
 
         Object listener = toolContext.get(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY);
         if (listener instanceof ChatUserMessageListener userMessageListener) {
-            userMessageListener.onUserMessageSaved(userMessageId);
+            userMessageListener.onUserMessageSaved(userMessageId, conversationInfo, histories);
         }
     }
 

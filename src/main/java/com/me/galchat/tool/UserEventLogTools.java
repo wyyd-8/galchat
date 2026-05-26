@@ -25,30 +25,30 @@ public class UserEventLogTools {
             使用流程：
             1. 在对话中，当用户提及个人计划、状态时，应当调用本工具，例如考试，面试，发烧或期待的游戏等。
             2. 整理事件描述字符串，尽量保留用户原话中的细节，同时根据当前时间戳、用户提及的时间、事件类型推断应该在何时主动提及。
-            3. 调用本工具，传入上述信息。
+            3. 调用本工具，传入上述信息，该方法没有返回值。
             注意事项：
             仅记录能够在将来主动关心的事件，忽略“我去倒杯水”、“今天天气不错”这类即时或非个人事件。
             若用户后续修改了同一事件的细节（如时间变化、事件取消），请再次调用本工具并附上新描述。
             不应对同一无变化事件连续多次调用本工具。
             """)
-    public String addUserEventLog(@ToolParam(description = "事件描述") String eventDescription,
+    public void addUserEventLog(@ToolParam(description = "事件描述") String eventDescription,
                                   @ToolParam(description = "事件发生时间，ISO-8601格式，例如 2026-05-20T14:30:00")
                                   String time,
                                   ToolContext context) {
         if (!StringUtils.hasText(eventDescription) || context == null || context.getContext() == null) {
-            return "新增用户事件失败";
+            return;
         }
 
         Map<String, Object> map = context.getContext();
         Long userWorldId = asLong(map.get("userWorldId"));
         Long characterId = asLong(map.get("characterId"));
         if (userWorldId == null || characterId == null) {
-            return "新增用户事件失败";
+            return;
         }
 
         LocalDateTime eventTime = parseTime(time);
         if (eventTime == null) {
-            return "新增用户事件失败";
+            return;
         }
 
         UserEventLog userEventLog = new UserEventLog()
@@ -56,7 +56,7 @@ public class UserEventLogTools {
                 .setCharacterId(characterId)
                 .setTime(eventTime)
                 .setEventDescription(eventDescription);
-        return userEventLogService.addUserEventLog(userEventLog) ? "新增用户事件成功" : "新增用户事件失败";
+        userEventLogService.addUserEventLog(userEventLog);
     }
 
     private LocalDateTime parseTime(String time) {

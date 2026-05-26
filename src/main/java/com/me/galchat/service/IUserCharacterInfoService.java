@@ -21,7 +21,7 @@ public interface IUserCharacterInfoService extends IService<UserCharacterInfo> {
 
     List<UserCharacterInfo> listByUserWorldId(Long userWorldId);
 
-    Integer updateFavorValue(Long userWorldId, Long characterId, Integer favorChange);
+    Integer updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat);
 
     String buildCharacterPrompt(Long userWorldId, Long characterId);
 }

@@ -91,11 +91,12 @@ CREATE TABLE user_character_favor_log (
                                           character_id BIGINT NOT NULL,
                                           favor_update INT, -- 增加或减少的值，比如 +5 或 -2
                                           binding_chat BIGINT, -- 关联具体触发变更的聊天记录的ID
-                                          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                          UNIQUE (user_world_id, character_id)
+                                          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 为 user_character_favor_log 的前两个字段创建联合索引
+CREATE INDEX idx_user_character_favor_log_world_character
+    ON user_character_favor_log (user_world_id, character_id);
 
 -- 10. 创建 user_event_log 表
 CREATE TABLE world_event_log (

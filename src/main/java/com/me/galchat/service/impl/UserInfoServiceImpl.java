@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.domain.dto.UserAuthDTO;
+import com.me.galchat.constant.UserConstant;
 import com.me.galchat.domain.dto.UserPasswordDTO;
 import com.me.galchat.domain.dto.UserProfileDTO;
 import com.me.galchat.domain.po.UserInfo;
@@ -32,8 +33,6 @@ import java.util.Map;
  */
 @Service
 public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> implements IUserInfoService {
-
-    private static final String DEFAULT_USERNAME = "undefined";
 
     @Override
     public UserInfo getInfoById(Integer id) {
@@ -71,7 +70,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
         }
 
         UserInfo userInfo = new UserInfo()
-                .setUsername(DEFAULT_USERNAME)
+                .setUsername(UserConstant.DEFAULT_USERNAME)
                 .setEmail(userAuthDTO.getEmail())
                 .setPassword(encodePassword(userAuthDTO.getPassword()))
                 .setCreateTime(LocalDateTime.now());

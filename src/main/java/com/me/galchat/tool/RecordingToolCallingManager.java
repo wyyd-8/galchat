@@ -1,8 +1,8 @@
 package com.me.galchat.tool;
 
+import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.memory.UserChatMemory;
-import com.me.galchat.service.ChatToolContext;
 import com.me.galchat.service.ChatToolEventListener;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -53,9 +53,9 @@ public class RecordingToolCallingManager implements ToolCallingManager {
             return null;
         }
 
-        Long userWorldId = asLong(toolContext.get(ChatToolContext.USER_WORLD_ID_KEY));
-        Long characterId = asLong(toolContext.get(ChatToolContext.CHARACTER_ID_KEY));
-        Long userMessageId = asLong(toolContext.get(ChatToolContext.USER_MESSAGE_ID_KEY));
+        Long userWorldId = asLong(toolContext.get(ChatToolContextConstant.USER_WORLD_ID_KEY));
+        Long characterId = asLong(toolContext.get(ChatToolContextConstant.CHARACTER_ID_KEY));
+        Long userMessageId = asLong(toolContext.get(ChatToolContextConstant.USER_MESSAGE_ID_KEY));
         if (userWorldId == null || characterId == null || userMessageId == null) {
             return null;
         }
@@ -91,7 +91,7 @@ public class RecordingToolCallingManager implements ToolCallingManager {
             return;
         }
 
-        Object listener = toolContext.get(ChatToolContext.TOOL_EVENT_LISTENER_KEY);
+        Object listener = toolContext.get(ChatToolContextConstant.TOOL_EVENT_LISTENER_KEY);
         if (listener instanceof ChatToolEventListener toolEventListener) {
             toolEventListener.onToolCall();
         }

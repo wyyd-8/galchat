@@ -7,6 +7,7 @@ import com.me.galchat.memory.TopicAwareMessageChatMemoryAdvisor;
 import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.memory.UserChatMemory;
 import com.me.galchat.model.DeepSeekChatModel;
+import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.UserEventLogTools;
 import com.me.galchat.tool.VectorTools;
 import org.springframework.ai.chat.client.ChatClient;
@@ -14,6 +15,7 @@ import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 @Configuration
@@ -22,13 +24,14 @@ public class CommonConfiguration {
     public ChatClient deepThinkChatClient(@Qualifier("deepSeekThinkingChatModel") DeepSeekChatModel model,
                                  TopicAwareMessageChatMemoryAdvisor topicAwareAdvisor,
                                  VectorTools vectorTools,
-                                 UserEventLogTools userEventLogTools) {
+                                 UserEventLogTools userEventLogTools,
+                                 UserCharacterFavorTools userCharacterFavorTools) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("你是一个专业的ai聊天机器人。")
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(topicAwareAdvisor)
-                .defaultTools(vectorTools, userEventLogTools)
+                .defaultTools(vectorTools, userEventLogTools, userCharacterFavorTools)
                 .build();
     }
 
@@ -36,13 +39,14 @@ public class CommonConfiguration {
     public ChatClient normalChatClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model,
                                  TopicAwareMessageChatMemoryAdvisor topicAwareAdvisor,
                                  VectorTools vectorTools,
-                                 UserEventLogTools userEventLogTools) {
+                                 UserEventLogTools userEventLogTools,
+                                 UserCharacterFavorTools userCharacterFavorTools) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("你是一个专业的ai聊天机器人。")
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(topicAwareAdvisor)
-                .defaultTools(vectorTools, userEventLogTools)
+                .defaultTools(vectorTools, userEventLogTools, userCharacterFavorTools)
                 .build();
     }
 
@@ -76,6 +80,7 @@ public class CommonConfiguration {
     }
 
     @Bean
+    @Primary
     public UserChatMemory chatMemory(UserChatHistoryMapper userChatHistoryMapper,
                                      UserChatThinkingHistoryMapper userChatThinkingHistoryMapper,
                                      UserChatToolCallMapper userChatToolCallMapper,

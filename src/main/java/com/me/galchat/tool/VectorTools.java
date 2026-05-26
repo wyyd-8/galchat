@@ -1,5 +1,7 @@
 package com.me.galchat.tool;
 
+import com.me.galchat.constant.ChatToolContextConstant;
+import com.me.galchat.constant.VectorConstant;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.service.DocumentReranker;
 import com.me.galchat.service.IUserWorldPrefixService;
@@ -24,15 +26,6 @@ import java.util.stream.Collectors;
 @Component
 @RequiredArgsConstructor
 public class VectorTools {
-    private static final int RERANK_TOP_N = 5;
-    private static final String SOURCE_METADATA_KEY = "source";
-    private static final String TIMESTAMP_METADATA_KEY = "timestamp";
-    private static final String UNKNOWN_TIMESTAMP = "未知";
-    private static final String WORLD_DETAIL_SOURCE = "world_detail";
-    private static final String CHAT_HISTORY_SOURCE = "chat_history";
-    private static final String WORLD_EVENT_SOURCE = "world_event";
-    private static final String DOCUMENT_SEPARATOR = "\n---\n";
-
     private final ChatHistoryVectorService chatHistoryVectorService;
     private final WorldDetailVectorService worldDetailVectorService;
     private final WorldEventVectorService worldEventVectorService;
@@ -65,8 +58,8 @@ public class VectorTools {
             return "";
         }
 
-        Long userWorldId = asLong(map.get("userWorldId"));
-        Long characterId = asLong(map.get("characterId"));
+        Long userWorldId = asLong(map.get(ChatToolContextConstant.USER_WORLD_ID_KEY));
+        Long characterId = asLong(map.get(ChatToolContextConstant.CHARACTER_ID_KEY));
         if (userWorldId == null || characterId == null) {
             return "";
         }
@@ -78,31 +71,31 @@ public class VectorTools {
 
         CompletableFuture<List<Document>> worldDetailFuture = CompletableFuture.supplyAsync(() ->
                 queryWithSource(() -> worldDetailVectorService.queryWorldDetail(userWorld.getWorldId(), query),
-                        WORLD_DETAIL_SOURCE));
+                        VectorConstant.WORLD_DETAIL_SOURCE));
         CompletableFuture<List<Document>> chatHistoryFuture = CompletableFuture.supplyAsync(() ->
                 queryWithSource(() -> chatHistoryVectorService.queryChatHistory(userWorldId, characterId, query),
-                        CHAT_HISTORY_SOURCE));
+                        VectorConstant.CHAT_HISTORY_SOURCE));
         CompletableFuture<List<Document>> worldEventFuture = CompletableFuture.supplyAsync(() ->
                 queryWithSource(() -> worldEventVectorService.queryWorldEvent(userWorldId, characterId, query),
-                        WORLD_EVENT_SOURCE));
+                        VectorConstant.WORLD_EVENT_SOURCE));
 
         List<Document> documents = new ArrayList<>();
         documents.addAll(worldDetailFuture.join());
         documents.addAll(chatHistoryFuture.join());
         documents.addAll(worldEventFuture.join());
 
-        return documentReranker.rerank(query, documents, RERANK_TOP_N).stream()
+        return documentReranker.rerank(query, documents, VectorConstant.RERANK_TOP_N).stream()
                 .filter(Document::isText)
                 .map(this::formatDocument)
                 .filter(StringUtils::hasText)
-                .limit(RERANK_TOP_N)
-                .collect(Collectors.joining(DOCUMENT_SEPARATOR));
+                .limit(VectorConstant.RERANK_TOP_N)
+                .collect(Collectors.joining(VectorConstant.DOCUMENT_SEPARATOR));
     }
 
     private List<Document> queryWithSource(Supplier<List<Document>> querySupplier, String source) {
         return querySupplier.get().stream()
                 .map(document -> document.mutate()
-                        .metadata(SOURCE_METADATA_KEY, source)
+                        .metadata(VectorConstant.SOURCE_METADATA_KEY, source)
                         .build())
                 .toList();
     }
@@ -113,14 +106,14 @@ public class VectorTools {
             return "";
         }
 
-        Object source = document.getMetadata().get(SOURCE_METADATA_KEY);
+        Object source = document.getMetadata().get(VectorConstant.SOURCE_METADATA_KEY);
         if (source == null) {
             return text;
         }
 
-        Object timestamp = document.getMetadata().get(TIMESTAMP_METADATA_KEY);
+        Object timestamp = document.getMetadata().get(VectorConstant.TIMESTAMP_METADATA_KEY);
         return "来源: " + source + "\n"
-                + "时间戳: " + (timestamp == null ? UNKNOWN_TIMESTAMP : timestamp) + "\n"
+                + "时间戳: " + (timestamp == null ? VectorConstant.UNKNOWN_TIMESTAMP : timestamp) + "\n"
                 + "内容: " + text;
     }
 

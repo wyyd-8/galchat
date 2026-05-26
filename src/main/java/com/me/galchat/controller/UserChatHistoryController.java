@@ -1,6 +1,7 @@
 package com.me.galchat.controller;
 
 
+import com.me.galchat.constant.ChatConstant;
 import com.me.galchat.domain.Result;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.IUserChatHistoryService;
@@ -24,8 +25,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class UserChatHistoryController {
 
-    private static final int DEFAULT_PAGE_SIZE = 20;
-
     private final IUserChatHistoryService userChatHistoryService;
 
     @GetMapping
@@ -34,7 +33,7 @@ public class UserChatHistoryController {
                               @RequestParam(value = "id", required = false) Long id,
                               @RequestParam(value = "size", required = false) Integer size) {
         checkRequest(userWorldId, characterId);
-        size = size == null ? DEFAULT_PAGE_SIZE : size;
+        size = size == null ? ChatConstant.DEFAULT_HISTORY_PAGE_SIZE : size;
         if (size <= 0) {
             throw new UserRequestException("查询条数必须大于0");
         }

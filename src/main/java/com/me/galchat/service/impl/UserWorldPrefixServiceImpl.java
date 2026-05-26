@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.WorldTemplate;
 import com.me.galchat.exception.UserAuthException;
@@ -29,8 +30,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMapper, UserWorldPrefix> implements IUserWorldPrefixService {
 
-    private static final String WORLD_USER_AUTH_KEY = "world:user:auth";
-
     private final IWorldTemplateService worldTemplateService;
     private final StringRedisTemplate redisTemplate;
 
@@ -56,7 +55,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
                 .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus());
         save(newUserWorld);
-        redisTemplate.opsForHash().put(WORLD_USER_AUTH_KEY,
+        redisTemplate.opsForHash().put(RedisConstant.WORLD_USER_AUTH_KEY,
                 String.valueOf(newUserWorld.getId()),
                 String.valueOf(userId));
         return newUserWorld;
@@ -86,7 +85,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     public void deleteUserWorld(Long userId, Long id) {
         UserWorldPrefix userWorld = getExistingUserWorld(userId, id);
         removeById(userWorld.getId());
-        redisTemplate.opsForHash().delete(WORLD_USER_AUTH_KEY, String.valueOf(userWorld.getId()));
+        redisTemplate.opsForHash().delete(RedisConstant.WORLD_USER_AUTH_KEY, String.valueOf(userWorld.getId()));
     }
 
     @Override
@@ -107,7 +106,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
             throw new UserAuthException("用户未登录");
         }
 
-        Object authUserId = redisTemplate.opsForHash().get(WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
+        Object authUserId = redisTemplate.opsForHash().get(RedisConstant.WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
         if (String.valueOf(userId).equals(authUserId)) {
             return needUserWorldPrefix ? getExistingUserWorld(userId, userWorldId) : null;
         }
@@ -120,7 +119,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
             throw new UserAuthException("无权访问该用户世界");
         }
 
-        redisTemplate.opsForHash().put(WORLD_USER_AUTH_KEY, String.valueOf(userWorldId), String.valueOf(userId));
+        redisTemplate.opsForHash().put(RedisConstant.WORLD_USER_AUTH_KEY, String.valueOf(userWorldId), String.valueOf(userId));
         return userWorld;
     }
 

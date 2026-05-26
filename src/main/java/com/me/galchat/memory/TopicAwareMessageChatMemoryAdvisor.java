@@ -1,7 +1,10 @@
 package com.me.galchat.memory;
 
+import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
+import com.me.galchat.service.ChatUserMessageListener;
 import org.springframework.ai.chat.client.ChatClientMessageAggregator;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
@@ -28,9 +31,6 @@ import java.util.Map;
 
 public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor {
 
-    private static final String CONVERSATION_INFO_CONTEXT_KEY = "topic_conversation_info";
-    private static final String USER_MESSAGE_ID_CONTEXT_KEY = "topic_user_message_id";
-
     private final UserChatMemory chatMemory;
     private final TopicBoundaryService topicBoundaryService;
     private final String defaultConversationId;
@@ -56,6 +56,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
 
         Message userMessage = chatClientRequest.prompt().getLastUserOrToolResponseMessage();
         UserChatHistory savedUserMessage = chatMemory.save(baseConversation, userMessage);
+        notifyUserMessageSaved(chatClientRequest.prompt().getOptions(), savedUserMessage.getId());
 
         TopicBoundary boundary = MessageType.USER.equals(userMessage.getMessageType())
                 ? topicBoundaryService.updateAfterUserMessage(baseConversation, savedUserMessage)
@@ -81,11 +82,11 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
     @Override
     public ChatClientResponse after(ChatClientResponse chatClientResponse, AdvisorChain advisorChain) {
         ConversationInfo conversationInfo = (ConversationInfo) chatClientResponse.context()
-                .get(CONVERSATION_INFO_CONTEXT_KEY);
+                .get(ChatConstant.TOPIC_CONVERSATION_INFO_CONTEXT_KEY);
         if (conversationInfo == null || chatClientResponse.chatResponse() == null) {
             return chatClientResponse;
         }
-        Long userMessageId = (Long) chatClientResponse.context().get(USER_MESSAGE_ID_CONTEXT_KEY);
+        Long userMessageId = (Long) chatClientResponse.context().get(ChatConstant.TOPIC_USER_MESSAGE_ID_CONTEXT_KEY);
 
         List<Message> assistantMessages = chatClientResponse.chatResponse()
                 .getResults()
@@ -142,8 +143,8 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
 
     private Map<String, Object> putContext(Map<String, Object> context, ConversationInfo conversationInfo, Long userMessageId) {
         Map<String, Object> newContext = new HashMap<>(context);
-        newContext.put(CONVERSATION_INFO_CONTEXT_KEY, conversationInfo);
-        newContext.put(USER_MESSAGE_ID_CONTEXT_KEY, userMessageId);
+        newContext.put(ChatConstant.TOPIC_CONVERSATION_INFO_CONTEXT_KEY, conversationInfo);
+        newContext.put(ChatConstant.TOPIC_USER_MESSAGE_ID_CONTEXT_KEY, userMessageId);
         return newContext;
     }
 
@@ -154,10 +155,25 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
             if (copiedToolCallingOptions.getToolContext() != null) {
                 toolContext.putAll(copiedToolCallingOptions.getToolContext());
             }
-            toolContext.put("userMessageId", userMessageId);
+            toolContext.put(ChatToolContextConstant.USER_MESSAGE_ID_KEY, userMessageId);
             copiedToolCallingOptions.setToolContext(toolContext);
         }
         return copiedOptions;
+    }
+
+    private void notifyUserMessageSaved(ChatOptions options, Long userMessageId) {
+        if (!(options instanceof ToolCallingChatOptions toolCallingOptions)) {
+            return;
+        }
+        Map<String, Object> toolContext = toolCallingOptions.getToolContext();
+        if (toolContext == null) {
+            return;
+        }
+
+        Object listener = toolContext.get(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY);
+        if (listener instanceof ChatUserMessageListener userMessageListener) {
+            userMessageListener.onUserMessageSaved(userMessageId);
+        }
     }
 
     public static Builder builder(UserChatMemory chatMemory, TopicBoundaryService topicBoundaryService) {

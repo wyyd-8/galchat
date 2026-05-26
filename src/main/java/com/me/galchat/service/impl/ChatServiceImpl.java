@@ -2,6 +2,9 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.ChatToolContextConstant;
+import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.dto.ChatMessageDTO;
 import com.me.galchat.domain.dto.ChatReplyTaskDTO;
 import com.me.galchat.domain.po.ConversationInfo;
@@ -11,8 +14,8 @@ import com.me.galchat.domain.vo.ChatFluxVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
-import com.me.galchat.service.ChatToolContext;
 import com.me.galchat.service.ChatToolEventListener;
+import com.me.galchat.service.ChatUserMessageListener;
 import com.me.galchat.service.IChatService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
@@ -32,22 +35,17 @@ import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ChatServiceImpl implements IChatService {
-
-    private static final Duration LAST_ASSISTANT_TTL = Duration.ofHours(1);
-    private static final String THINK_TYPE = "think";
-    private static final String TOOL_TYPE = "tool";
-    private static final String RESPONSE_TYPE = "reponse";
 
     private final ChatClient deepThinkChatClient;
     private final ChatClient normalChatClient;
@@ -63,11 +61,14 @@ public class ChatServiceImpl implements IChatService {
 
         ConversationInfo conversationInfo = buildConversationInfo(chatMessageDTO.getUserWorldId(),
                 chatMessageDTO.getCharacterId());
+        AtomicReference<Long> userMessageId = new AtomicReference<>();
         Sinks.Many<ChatFluxVO> toolFlux = Sinks.many().unicast().onBackpressureBuffer();
         Map<String, Object> toolContext = buildToolContext(chatMessageDTO.getUserWorldId(),
                 chatMessageDTO.getCharacterId());
-        toolContext.put(ChatToolContext.TOOL_EVENT_LISTENER_KEY,
-                (ChatToolEventListener) () -> toolFlux.tryEmitNext(new ChatFluxVO(TOOL_TYPE, null)));
+        toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
+                (ChatUserMessageListener) userMessageId::set);
+        toolContext.put(ChatToolContextConstant.TOOL_EVENT_LISTENER_KEY,
+                (ChatToolEventListener) () -> toolFlux.tryEmitNext(new ChatFluxVO(ChatConstant.TOOL_TYPE, null)));
 
         Flux<ChatFluxVO> responseFlux = deepThinkChatClient.prompt()
                 .system(buildSystemPrompt(chatMessageDTO.getWorldId(), chatMessageDTO.getUserWorldId(),
@@ -78,7 +79,7 @@ public class ChatServiceImpl implements IChatService {
                 .stream()
                 .chatResponse()
                 .flatMap(this::toChatFlux)
-                .doOnComplete(() -> updateLatestChatInfo(chatMessageDTO.getUserWorldId(),
+                .doOnComplete(() -> updateLatestChatInfo(userMessageId.get(), chatMessageDTO.getUserWorldId(),
                         chatMessageDTO.getCharacterId()))
                 .doOnError(toolFlux::tryEmitError)
                 .doFinally(signalType -> toolFlux.tryEmitComplete());
@@ -95,11 +96,15 @@ public class ChatServiceImpl implements IChatService {
         }
 
         ConversationInfo conversationInfo = buildConversationInfo(task.getUserWorldId(), task.getCharacterId());
+        AtomicReference<Long> userMessageId = new AtomicReference<>();
+        Map<String, Object> toolContext = buildToolContext(task.getUserWorldId(), task.getCharacterId());
+        toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
+                (ChatUserMessageListener) userMessageId::set);
         String content = normalChatClient.prompt()
                 .system(buildSystemPrompt(task.getWorldId(), task.getUserWorldId(), task.getCharacterId()))
                 .user(task.getMessage())
                 .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
-                .toolContext(buildToolContext(task.getUserWorldId(), task.getCharacterId()))
+                .toolContext(toolContext)
                 .call()
                 .content();
         if (!StringUtils.hasText(content)) {
@@ -107,7 +112,8 @@ public class ChatServiceImpl implements IChatService {
             return null;
         }
 
-        UserChatHistory assistantMessage = latestAssistantMessage(task.getUserWorldId(), task.getCharacterId());
+        UserChatHistory assistantMessage = latestAssistantMessage(userMessageId.get(), task.getUserWorldId(),
+                task.getCharacterId());
         if (assistantMessage == null) {
             assistantMessage = new UserChatHistory()
                     .setUserWorldId(task.getUserWorldId())
@@ -132,12 +138,9 @@ public class ChatServiceImpl implements IChatService {
         for (Generation generation : chatResponse.getResults()) {
             AssistantMessage output = generation.getOutput();
             if (output instanceof DeepSeekAssistantMessage deepSeekAssistantMessage) {
-                addContent(messages, THINK_TYPE, deepSeekAssistantMessage.getReasoningContent());
+                addContent(messages, ChatConstant.THINKING_TYPE, deepSeekAssistantMessage.getReasoningContent());
             }
-            if (!CollectionUtils.isEmpty(output.getToolCalls())) {
-                messages.add(new ChatFluxVO(TOOL_TYPE, null));
-            }
-            addContent(messages, RESPONSE_TYPE, output.getText());
+            addContent(messages, ChatConstant.RESPONSE_TYPE, output.getText());
         }
         return Flux.fromIterable(messages);
     }
@@ -189,13 +192,13 @@ public class ChatServiceImpl implements IChatService {
 
     private Map<String, Object> buildToolContext(Long userWorldId, Long characterId) {
         Map<String, Object> toolContext = new HashMap<>();
-        toolContext.put(ChatToolContext.USER_WORLD_ID_KEY, userWorldId);
-        toolContext.put(ChatToolContext.CHARACTER_ID_KEY, characterId);
+        toolContext.put(ChatToolContextConstant.USER_WORLD_ID_KEY, userWorldId);
+        toolContext.put(ChatToolContextConstant.CHARACTER_ID_KEY, characterId);
         return toolContext;
     }
 
-    private void updateLatestChatInfo(Long userWorldId, Long characterId) {
-        UserChatHistory assistantMessage = latestAssistantMessage(userWorldId, characterId);
+    private void updateLatestChatInfo(Long userMessageId, Long userWorldId, Long characterId) {
+        UserChatHistory assistantMessage = latestAssistantMessage(userMessageId, userWorldId, characterId);
         if (assistantMessage == null) {
             return;
         }
@@ -211,24 +214,29 @@ public class ChatServiceImpl implements IChatService {
                 .set(UserCharacterInfo::getLastChatContent, assistantMessage.getContent()));
     }
 
-    private UserChatHistory latestAssistantMessage(Long userWorldId, Long characterId) {
+    private UserChatHistory latestAssistantMessage(Long userMessageId, Long userWorldId, Long characterId) {
+        if (userMessageId == null) {
+            return null;
+        }
         return userChatHistoryMapper.selectOne(new LambdaQueryWrapper<UserChatHistory>()
                 .eq(UserChatHistory::getUserWorldId, userWorldId)
                 .eq(UserChatHistory::getCharacterId, characterId)
                 .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                .eq(UserChatHistory::getUserMessageId, userMessageId)
                 .orderByDesc(UserChatHistory::getId)
                 .last("limit 1"));
     }
 
     private void cacheLastAssistant(Long userWorldId, Long characterId, String content) {
-        redisTemplate.opsForValue().set(buildLastAssistantKey(userWorldId, characterId), content, LAST_ASSISTANT_TTL);
+        redisTemplate.opsForValue().set(buildLastAssistantKey(userWorldId, characterId), content,
+                RedisConstant.LAST_ASSISTANT_TTL);
     }
 
     private String buildLastAssistantKey(Long userWorldId, Long characterId) {
-        return buildConversationKey(userWorldId, characterId) + ":last_assistant";
+        return buildConversationKey(userWorldId, characterId) + RedisConstant.LAST_ASSISTANT_SUFFIX;
     }
 
     private String buildConversationKey(Long userWorldId, Long characterId) {
-        return "chat:" + userWorldId + ":" + characterId;
+        return RedisConstant.CHAT_KEY_PREFIX + userWorldId + ":" + characterId;
     }
 }

@@ -2,6 +2,8 @@ package com.me.galchat.memory;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
@@ -25,7 +27,6 @@ import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,11 +39,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 public class UserChatMemory implements ChatMemory {
-
-    public static final String AUTO_SEARCH_INFO_TYPE = "auto_search_info";
-    private static final int MAX_CONTEXT_LENGTH = 430000;
-    private static final String STEP_NO_KEY_PREFIX = "chat:memory:step:";
-    private static final Duration STEP_NO_TTL = Duration.ofDays(1);
 
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final UserChatThinkingHistoryMapper userChatThinkingHistoryMapper;
@@ -125,7 +121,8 @@ public class UserChatMemory implements ChatMemory {
             histories.getFirst().setContent(histories.getFirst().getContent() + firstMessageSuffixPrompt);
         }
 
-        boolean includeAuxiliaryMessages = includeToolCalls && contextLength(histories) <= MAX_CONTEXT_LENGTH;
+        boolean includeAuxiliaryMessages = includeToolCalls
+                && contextLength(histories) <= ChatConstant.MAX_CONTEXT_LENGTH;
         return toMessages(histories, includeAuxiliaryMessages);
     }
 
@@ -229,7 +226,7 @@ public class UserChatMemory implements ChatMemory {
                 .setUserWorldId(conversationInfo.getUserWorldId())
                 .setCharacterId(conversationInfo.getCharacterId())
                 .setContent(content)
-                .setType(AUTO_SEARCH_INFO_TYPE)
+                .setType(ChatConstant.AUTO_SEARCH_INFO_TYPE)
                 .setTimestamp(LocalDateTime.now());
         userChatHistoryMapper.insert(userChatHistory);
     }
@@ -400,7 +397,7 @@ public class UserChatMemory implements ChatMemory {
     private List<String> excludedTypes() {
         List<String> excludedTypes = new ArrayList<>(List.of(MessageType.SYSTEM.getValue(), MessageType.TOOL.getValue()));
         if (!includeAutoSearchInfo) {
-            excludedTypes.add(AUTO_SEARCH_INFO_TYPE);
+            excludedTypes.add(ChatConstant.AUTO_SEARCH_INFO_TYPE);
         }
         return excludedTypes;
     }
@@ -612,7 +609,7 @@ public class UserChatMemory implements ChatMemory {
         if (MessageType.ASSISTANT.getValue().equals(type)) {
             return new AssistantMessage(content);
         }
-        if (AUTO_SEARCH_INFO_TYPE.equals(type)) {
+        if (ChatConstant.AUTO_SEARCH_INFO_TYPE.equals(type)) {
             return new UserMessage(content);
         }
         return new UserMessage(content);
@@ -746,7 +743,7 @@ public class UserChatMemory implements ChatMemory {
             if (stepNo == null) {
                 return null;
             }
-            redisTemplate.expire(key, STEP_NO_TTL);
+            redisTemplate.expire(key, RedisConstant.CHAT_MEMORY_STEP_TTL);
             return stepNo.intValue();
         } catch (RuntimeException ignored) {
             return null;
@@ -765,7 +762,8 @@ public class UserChatMemory implements ChatMemory {
         }
 
         try {
-            redisTemplate.opsForValue().set(buildStepNoKey(userMessageId), String.valueOf(stepNo), STEP_NO_TTL);
+            redisTemplate.opsForValue().set(buildStepNoKey(userMessageId), String.valueOf(stepNo),
+                    RedisConstant.CHAT_MEMORY_STEP_TTL);
         } catch (RuntimeException ignored) {
             // Redis 只是 stepNo 快路径；缓存失败不影响数据库持久化。
         }
@@ -899,7 +897,7 @@ public class UserChatMemory implements ChatMemory {
      * @return Redis key
      */
     private String buildStepNoKey(Long userMessageId) {
-        return STEP_NO_KEY_PREFIX + userMessageId;
+        return RedisConstant.CHAT_MEMORY_STEP_KEY_PREFIX + userMessageId;
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.me.galchat.vector;
 
+import com.me.galchat.constant.DateTimeConstant;
+import com.me.galchat.constant.VectorConstant;
 import com.me.galchat.domain.po.WorldEventLog;
 import com.pgvector.PGvector;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +18,6 @@ import tools.jackson.databind.json.JsonMapper;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -26,10 +27,6 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class WorldEventVectorService {
-
-    private static final double DISTANCE_THRESHOLD = 0.27;
-    private static final int TOP_K = 5;
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final VectorStore worldEventVectorStore;
     private final EmbeddingModel embeddingModel;
@@ -46,10 +43,11 @@ public class WorldEventVectorService {
         }
 
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("userWorldId", worldEventLog.getUserWorldId());
-        metadata.put("visibleCharacters", Arrays.asList(worldEventLog.getVisibleCharacters()));
+        metadata.put(VectorConstant.USER_WORLD_ID_METADATA_KEY, worldEventLog.getUserWorldId());
+        metadata.put(VectorConstant.VISIBLE_CHARACTERS_METADATA_KEY, Arrays.asList(worldEventLog.getVisibleCharacters()));
         if (worldEventLog.getTimestamp() != null) {
-            metadata.put("timestamp", worldEventLog.getTimestamp().format(FORMATTER));
+            metadata.put(VectorConstant.TIMESTAMP_METADATA_KEY,
+                    worldEventLog.getTimestamp().format(DateTimeConstant.DATE_TIME_FORMATTER));
         }
 
         Document document = Document.builder()
@@ -78,10 +76,10 @@ public class WorldEventVectorService {
         return jdbcTemplate.query(sql, this::mapDocument,
                 queryEmbedding,
                 queryEmbedding,
-                DISTANCE_THRESHOLD,
+                VectorConstant.WORLD_EVENT_DISTANCE_THRESHOLD,
                 "{\"userWorldId\":%d}".formatted(userWorldId),
                 "[%d]".formatted(characterId),
-                TOP_K);
+                VectorConstant.WORLD_EVENT_TOP_K);
     }
 
     private Document mapDocument(ResultSet resultSet, int rowNum) throws SQLException {
@@ -99,7 +97,7 @@ public class WorldEventVectorService {
     }
 
     private String vectorDocumentId(Long worldEventLogId) {
-        String idSource = "world-event:%d".formatted(worldEventLogId);
+        String idSource = "%s:%d".formatted(VectorConstant.WORLD_EVENT_ID_PREFIX, worldEventLogId);
         return UUID.nameUUIDFromBytes(idSource.getBytes(StandardCharsets.UTF_8)).toString();
     }
 }

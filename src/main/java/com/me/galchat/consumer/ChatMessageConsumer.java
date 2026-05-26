@@ -1,5 +1,6 @@
 package com.me.galchat.consumer;
 
+import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.dto.ChatReplyTaskDTO;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.service.IChatService;
@@ -38,7 +39,7 @@ public class ChatMessageConsumer {
     @PostConstruct
     public void init() {
         running = true;
-        replyQueue = redissonClient.getBlockingQueue(ChatQueueNames.REPLY_QUEUE_NAME, new JsonJacksonCodec());
+        replyQueue = redissonClient.getBlockingQueue(RedisConstant.REPLY_QUEUE_NAME, new JsonJacksonCodec());
         for (int i = 0; i < 2; i++) {
             chatTaskExecutor.execute(this::consumeReplyTasks);
         }
@@ -98,10 +99,10 @@ public class ChatMessageConsumer {
     }
 
     private String buildReplyLockKey(ChatReplyTaskDTO task) {
-        return buildConversationKey(task) + ":reply_lock";
+        return buildConversationKey(task) + RedisConstant.REPLY_LOCK_SUFFIX;
     }
 
     private String buildConversationKey(ChatReplyTaskDTO task) {
-        return "chat:" + task.getUserWorldId() + ":" + task.getCharacterId();
+        return RedisConstant.CHAT_KEY_PREFIX + task.getUserWorldId() + ":" + task.getCharacterId();
     }
 }

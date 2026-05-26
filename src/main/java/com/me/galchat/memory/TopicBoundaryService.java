@@ -1,5 +1,9 @@
 package com.me.galchat.memory;
 
+import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.ChatToolContextConstant;
+import com.me.galchat.constant.DateTimeConstant;
+import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.tool.VectorTools;
@@ -13,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,14 +24,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Service
 public class TopicBoundaryService {
-
-    private static final String KEY_PREFIX = "chat:topic:boundary:";
-    private static final String PREVIOUS_START_ID = "previousStartId";
-    private static final String CURRENT_START_ID = "currentStartId";
-    private static final String LAST_CHECKED_MESSAGE_ID = "lastCheckedMessageId";
-    private static final String AUTO_SEARCH_INFO_PREFIX = "自动调用searchInfo结果：\n";
-    private static final int MAX_TOPIC_CONVERSATION_LENGTH = 10000;
-    private static final DateTimeFormatter MESSAGE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final StringRedisTemplate redisTemplate;
     private final ChatClient topicClient;
@@ -61,15 +56,15 @@ public class TopicBoundaryService {
         }
 
         String searchInfo = vectorTools.searchInfo(message.getContent(), new ToolContext(Map.of(
-                "userWorldId", message.getUserWorldId(),
-                "characterId", message.getCharacterId()
+                ChatToolContextConstant.USER_WORLD_ID_KEY, message.getUserWorldId(),
+                ChatToolContextConstant.CHARACTER_ID_KEY, message.getCharacterId()
         )));
         if (!StringUtils.hasText(searchInfo)) {
             return;
         }
 
         topicChatMemory.saveAutoSearchInfo(new ConversationInfo(message.getUserWorldId(), message.getCharacterId(), null),
-                AUTO_SEARCH_INFO_PREFIX + searchInfo);
+                ChatConstant.AUTO_SEARCH_INFO_PREFIX + searchInfo);
     }
 
     public TopicBoundary getBoundary(ConversationInfo conversationInfo) {
@@ -80,9 +75,9 @@ public class TopicBoundaryService {
 
         JSONObject jsonObject = new JSONObject(value);
         return new TopicBoundary(
-                readLong(jsonObject, PREVIOUS_START_ID),
-                readLong(jsonObject, CURRENT_START_ID),
-                readLong(jsonObject, LAST_CHECKED_MESSAGE_ID)
+                readLong(jsonObject, ChatConstant.TOPIC_PREVIOUS_START_ID_KEY),
+                readLong(jsonObject, ChatConstant.TOPIC_CURRENT_START_ID_KEY),
+                readLong(jsonObject, ChatConstant.TOPIC_LAST_CHECKED_MESSAGE_ID_KEY)
         );
     }
 
@@ -105,7 +100,7 @@ public class TopicBoundaryService {
             return true;
         }
         history.removeLast();
-        if (conversationContentLength(history, userMessage) > MAX_TOPIC_CONVERSATION_LENGTH) {
+        if (conversationContentLength(history, userMessage) > ChatConstant.MAX_TOPIC_CONVERSATION_LENGTH) {
             return false;
         }
 
@@ -159,7 +154,7 @@ public class TopicBoundaryService {
         if (timestamp == null) {
             return "unknown";
         }
-        return MESSAGE_TIME_FORMATTER.format(timestamp);
+        return DateTimeConstant.DATE_TIME_FORMATTER.format(timestamp);
     }
 
     private String formatType(String type) {
@@ -171,9 +166,9 @@ public class TopicBoundaryService {
 
     private void saveBoundary(ConversationInfo conversationInfo, TopicBoundary boundary) {
         JSONObject jsonObject = new JSONObject();
-        jsonObject.put(PREVIOUS_START_ID, boundary.previousStartId());
-        jsonObject.put(CURRENT_START_ID, boundary.currentStartId());
-        jsonObject.put(LAST_CHECKED_MESSAGE_ID, boundary.lastCheckedMessageId());
+        jsonObject.put(ChatConstant.TOPIC_PREVIOUS_START_ID_KEY, boundary.previousStartId());
+        jsonObject.put(ChatConstant.TOPIC_CURRENT_START_ID_KEY, boundary.currentStartId());
+        jsonObject.put(ChatConstant.TOPIC_LAST_CHECKED_MESSAGE_ID_KEY, boundary.lastCheckedMessageId());
         redisTemplate.opsForValue().set(buildKey(conversationInfo), jsonObject.toString());
     }
 
@@ -185,6 +180,7 @@ public class TopicBoundaryService {
     }
 
     private String buildKey(ConversationInfo conversationInfo) {
-        return KEY_PREFIX + conversationInfo.getUserWorldId() + ":" + conversationInfo.getCharacterId();
+        return RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX
+                + conversationInfo.getUserWorldId() + ":" + conversationInfo.getCharacterId();
     }
 }

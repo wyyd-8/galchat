@@ -2,6 +2,7 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.me.galchat.constant.ChatConstant;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
@@ -38,8 +39,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMapper, UserChatHistory> implements IUserChatHistoryService {
-
-    private static final String THINKING_TYPE = "thinking";
 
     private final IUserWorldPrefixService userWorldPrefixService;
     private final UserChatThinkingHistoryMapper userChatThinkingHistoryMapper;
@@ -197,7 +196,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                 .filter(StringUtils::hasText)
                 .findFirst()
                 .map(content -> new UserChatHistory()
-                        .setType(THINKING_TYPE)
+                        .setType(ChatConstant.THINKING_TYPE)
                         .setContent(content)
                         .setUserMessageId(userMessageId)
                         .setStepNo(stepNo));
@@ -209,6 +208,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         toolCallsByUserMessageId.getOrDefault(userMessageId, List.of())
                 .stream()
                 .filter(toolCall -> Objects.equals(stepNo, toolCall.getStepNo()))
-                .forEach(toolCall -> messages.add(new UserChatHistory().setType("tool")));
+                .forEach(toolCall -> messages.add(new UserChatHistory().setType(ChatConstant.TOOL_TYPE)));
     }
 }

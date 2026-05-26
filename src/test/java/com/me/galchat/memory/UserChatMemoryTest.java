@@ -1,5 +1,6 @@
 package com.me.galchat.memory;
 
+import com.me.galchat.constant.ChatConstant;
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
@@ -186,12 +187,12 @@ class UserChatMemoryTest {
 
         assertThat(savedHistories).singleElement()
                 .satisfies(history -> {
-                    assertThat(history.getType()).isEqualTo(UserChatMemory.AUTO_SEARCH_INFO_TYPE);
+                assertThat(history.getType()).isEqualTo(ChatConstant.AUTO_SEARCH_INFO_TYPE);
                     assertThat(history.getContent()).isEqualTo("自动调用searchInfo结果：杭州天气资料");
                 });
 
         UserChatMemory readingMemory = UserChatMemory.builder(mapperWithHistories(List.of(
-                history(2L, UserChatMemory.AUTO_SEARCH_INFO_TYPE, "自动调用searchInfo结果：杭州天气资料"),
+                history(2L, ChatConstant.AUTO_SEARCH_INFO_TYPE, "自动调用searchInfo结果：杭州天气资料"),
                 history(1L, MessageType.USER, "杭州天气")
         ))).build();
 

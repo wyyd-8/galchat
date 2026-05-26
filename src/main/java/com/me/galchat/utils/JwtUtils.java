@@ -1,5 +1,6 @@
 package com.me.galchat.utils;
 
+import com.me.galchat.constant.JwtConstant;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -10,12 +11,8 @@ import java.util.Date;
 import java.util.Map;
 
 public class JwtUtils {
-    //密钥字符串
-    public static final String SECRET_STRING = "wyyd123123123456wyyd123123123456";
     // 密钥字符串转换得到的SecretKey
-    private static final SecretKey SECRET_KEY = Keys.hmacShaKeyFor(SECRET_STRING.getBytes(StandardCharsets.UTF_8));
-    // 过期时间（12小时）
-    private static final long EXPIRATION_TIME = 12 * 3600 * 1000;  // 毫秒单位
+    private static final SecretKey SECRET_KEY = Keys.hmacShaKeyFor(JwtConstant.SECRET_STRING.getBytes(StandardCharsets.UTF_8));
 
     /**
      * 生成JWT令牌
@@ -26,7 +23,7 @@ public class JwtUtils {
         return Jwts.builder()
                 .signWith(SECRET_KEY, Jwts.SIG.HS256) // 使用新API指定算法
                 .claims(claims)                         // 添加声明（新API）
-                .expiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
+                .expiration(new Date(System.currentTimeMillis() + JwtConstant.EXPIRATION_TIME))
                 .compact();
     }
 

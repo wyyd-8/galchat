@@ -1,7 +1,8 @@
 package com.me.galchat.websocket;
 
-import com.me.galchat.consumer.ChatQueueNames;
 import com.me.galchat.config.WebSocketHandshakeConfigurator;
+import com.me.galchat.constant.RedisConstant;
+import com.me.galchat.constant.WebSocketConstant;
 import com.me.galchat.domain.dto.ChatMessageDTO;
 import com.me.galchat.domain.dto.ChatReplyTaskDTO;
 import com.me.galchat.domain.po.UserChatHistory;
@@ -62,11 +63,6 @@ public class WebSocketServer {
     private static RBlockingQueue<ChatMessageDTO> blockingQueue;
     private static RBlockingQueue<ChatReplyTaskDTO> replyQueue;
 
-    private static final String TRIGGER_BERT = "bert";
-    private static final String TRIGGER_FALLBACK = "fallback";
-    private static final Duration BERT_TRIGGER_DELAY = Duration.ofMillis(700);
-    private static final Duration FALLBACK_TRIGGER_DELAY = Duration.ofSeconds(3);
-    private static final Duration INPUT_STATE_TTL = Duration.ofHours(1);
     private static volatile boolean begin = true;
 
     /**
@@ -78,9 +74,9 @@ public class WebSocketServer {
 
         // 初始化 Redisson 的阻塞队列和延时队列
         // 创建队列时指定 JsonJacksonCodec，只影响这个队列
-        blockingQueue = redissonClient.getBlockingQueue(ChatQueueNames.DELAY_QUEUE_NAME, new JsonJacksonCodec());
+        blockingQueue = redissonClient.getBlockingQueue(RedisConstant.DELAY_QUEUE_NAME, new JsonJacksonCodec());
         delayedQueue = redissonClient.getDelayedQueue(blockingQueue);//使用Json序列化，不添加是java默认的序列化
-        replyQueue = redissonClient.getBlockingQueue(ChatQueueNames.REPLY_QUEUE_NAME, new JsonJacksonCodec());
+        replyQueue = redissonClient.getBlockingQueue(RedisConstant.REPLY_QUEUE_NAME, new JsonJacksonCodec());
 
         // 启动异步线程消费延时任务
         for (int i = 0; i < 4; i++) {
@@ -242,7 +238,7 @@ public class WebSocketServer {
         String snapshot = redisTemplate.execute(chatLuaScripts.updateFragmentScript(),
                 List.of(buildTypingKey(ctx), buildChatKey(ctx)),
                 ctx.getMessage(),
-                String.valueOf(INPUT_STATE_TTL.toSeconds()));
+                String.valueOf(RedisConstant.INPUT_STATE_TTL.toSeconds()));
 
         // 空结果表示无需后续处理
         if (snapshot == null || snapshot.isBlank()) {
@@ -265,7 +261,7 @@ public class WebSocketServer {
         String state = redisTemplate.execute(chatLuaScripts.updateTypingScript(),
                 List.of(buildTypingKey(ctx)),
                 Boolean.TRUE.equals(ctx.getIsTyping()) ? "1" : "0",
-                String.valueOf(INPUT_STATE_TTL.toSeconds()));
+                String.valueOf(RedisConstant.INPUT_STATE_TTL.toSeconds()));
         if (state == null || state.isBlank()) {
             return;
         }
@@ -275,7 +271,7 @@ public class WebSocketServer {
 
         // 停止输入时注册保底触发和 BERT 提前触发
         if (!Boolean.TRUE.equals(ctx.getIsTyping()) && typingState.length() > 0) {
-            addDelayTask(ctx, TRIGGER_FALLBACK, FALLBACK_TRIGGER_DELAY);
+            addDelayTask(ctx, WebSocketConstant.TRIGGER_FALLBACK, WebSocketConstant.FALLBACK_TRIGGER_DELAY);
         }
     }
 
@@ -365,21 +361,21 @@ public class WebSocketServer {
      * 构建当前会话的打字状态 Redis key。
      */
     private String buildTypingKey(ChatMessageDTO ctx) {
-        return buildConversationKey(ctx) + ":typing";
+        return buildConversationKey(ctx) + RedisConstant.TYPING_SUFFIX;
     }
 
     /**
      * 构建当前会话的输入内容 Redis key。
      */
     private String buildChatKey(ChatMessageDTO ctx) {
-        return buildConversationKey(ctx) + ":input";
+        return buildConversationKey(ctx) + RedisConstant.INPUT_SUFFIX;
     }
 
     /**
      * 构建当前会话的上一条助手回复 Redis key。
      */
     private String buildLastAssistantKey(ChatMessageDTO ctx) {
-        return buildConversationKey(ctx) + ":last_assistant";
+        return buildConversationKey(ctx) + RedisConstant.LAST_ASSISTANT_SUFFIX;
     }
 
     /**
@@ -389,11 +385,11 @@ public class WebSocketServer {
         // 优先使用用户世界主键构建会话维度
         Long userWorldId = ctx.getUserWorldId();
         if (userWorldId != null) {
-            return "chat:" + userWorldId + ":" + ctx.getCharacterId();
+            return RedisConstant.CHAT_KEY_PREFIX + userWorldId + ":" + ctx.getCharacterId();
         }
 
         // 兼容未携带用户世界主键的消息
-        return "chat:" + ctx.getWorldId() + ":" + ctx.getCharacterId();
+        return RedisConstant.CHAT_KEY_PREFIX + ctx.getWorldId() + ":" + ctx.getCharacterId();
     }
 
     /**
@@ -535,7 +531,7 @@ public class WebSocketServer {
                 // 完整输入注册提前触发任务
                 String lastAssistant = redisTemplate.opsForValue().get(buildLastAssistantKey(snapshot));
                 if (inputCompletionClassifier.isComplete(accumulatedInput, lastAssistant)) {
-                    addDelayTask(snapshot, TRIGGER_BERT, BERT_TRIGGER_DELAY);
+                    addDelayTask(snapshot, WebSocketConstant.TRIGGER_BERT, WebSocketConstant.BERT_TRIGGER_DELAY);
                 }
             } catch (Exception e) {
                 log.warn("BERT提前触发任务异常，等待3秒保底任务", e);

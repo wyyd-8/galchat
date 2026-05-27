@@ -28,6 +28,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -227,7 +228,10 @@ public class WebSocketServer {
         }
 
         // 反序列化并补齐消息上下文
-        ChatMessageDTO data = JSONObject.fromJson(message, ChatMessageDTO.class);
+        ChatMessageDTO data = parseClientMessage(message, sid);
+        if (data == null || !hasRequiredContext(data, sid)) {
+            return;
+        }
         data.setUserWorldId(currentPrefix.getId());
         if (data.getWorldId() == null) {
             data.setWorldId(currentPrefix.getWorldId());
@@ -236,9 +240,33 @@ public class WebSocketServer {
         // 按消息类型分发处理
         log.info("收到来自客户端：" + sid + "的信息:" + data);
         switch (data.getType()) {
-            case "fragment" -> handleMessageFragment(data, sid, currentPrefix.getEotDetectionStatus());
-            case "typing" -> handleTypingStatus(data);
+            case WebSocketConstant.MESSAGE_FRAGMENT -> handleMessageFragment(data, sid,
+                    currentPrefix.getEotDetectionStatus());
+            case WebSocketConstant.MESSAGE_TYPING -> handleTypingStatus(data);
+            default -> log.warn("不支持的WebSocket消息类型, sid:{}, type:{}", sid, data.getType());
         }
+    }
+
+    private ChatMessageDTO parseClientMessage(String message, String sid) {
+        try {
+            return JSONObject.fromJson(message, ChatMessageDTO.class);
+        } catch (Exception e) {
+            log.warn("WebSocket消息不是合法JSON, sid:{}, message:{}", sid, message);
+            return null;
+        }
+    }
+
+    private boolean hasRequiredContext(ChatMessageDTO data, String sid) {
+        if (!StringUtils.hasText(data.getType()) || data.getCharacterId() == null) {
+            log.warn("WebSocket消息缺少必要上下文, sid:{}, type:{}, characterId:{}",
+                    sid, data.getType(), data.getCharacterId());
+            return false;
+        }
+        if (WebSocketConstant.MESSAGE_FRAGMENT.equals(data.getType()) && data.getMessage() == null) {
+            log.warn("WebSocket输入片段缺少消息内容, sid:{}, characterId:{}", sid, data.getCharacterId());
+            return false;
+        }
+        return true;
     }
 
     /**

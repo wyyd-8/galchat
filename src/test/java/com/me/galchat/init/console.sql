@@ -17,7 +17,9 @@ CREATE TABLE world_template (
                                 image VARCHAR(255),
                                 author VARCHAR(255),
                                 background TEXT,
-                                character_ids BIGINT[] DEFAULT '{}'
+                                character_ids BIGINT[] DEFAULT '{}',
+                                author_id BIGINT,
+                                visible BOOLEAN DEFAULT TRUE
 );
 
 -- 4. 创建 world_detail 表

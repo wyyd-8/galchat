@@ -40,5 +40,7 @@ public class WorldTemplate implements Serializable {
     @TableField(typeHandler = ArrayTypeHandler.class)
     private Long[] characterIds;
 
+    private Long authorId;
 
+    private Boolean visible;
 }

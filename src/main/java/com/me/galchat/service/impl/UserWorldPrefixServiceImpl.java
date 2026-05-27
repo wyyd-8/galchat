@@ -43,7 +43,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
 
     @Override
     public UserWorldPrefix createUserWorld(Long userId, UserWorldPrefix userWorldPrefix) {
-        WorldTemplate template = worldTemplateService.getWorldTemplateById(userWorldPrefix.getWorldId());
+        WorldTemplate template = worldTemplateService.getWorldTemplateById(userId, userWorldPrefix.getWorldId());
         UserWorldPrefix newUserWorld = new UserWorldPrefix()
                 .setUserId(userId)
                 .setWorldId(template.getId())

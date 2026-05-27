@@ -18,4 +18,6 @@ public interface ICharacterTemplateService extends IService<CharacterTemplate> {
     List<CharacterTemplate> listCharacterBaseInfoByIds(List<Long> ids);
 
     CharacterTemplate getCharacterTemplateById(Long id);
+
+    CharacterTemplate createCharacterTemplate(Long userId, Long worldId, CharacterTemplate characterTemplate);
 }

@@ -2,13 +2,17 @@ package com.me.galchat.controller;
 
 
 import com.me.galchat.domain.Result;
+import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IUserCharacterInfoService;
+import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -26,6 +30,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserCharacterController {
 
     private final IUserCharacterInfoService userCharacterInfoService;
+    private final ICharacterTemplateService characterTemplateService;
+
+    @PostMapping("/templates/{worldId}")
+    public Result createCharacterTemplate(@PathVariable Long worldId, @RequestBody CharacterTemplate characterTemplate) {
+        checkWorldId(worldId);
+        return Result.success(characterTemplateService.createCharacterTemplate(currentUserId(), worldId, characterTemplate));
+    }
 
     @PostMapping("/{userWorldId}/{characterId}")
     public Result addCharacter(@PathVariable Long userWorldId, @PathVariable Long characterId) {
@@ -54,9 +65,23 @@ public class UserCharacterController {
         }
     }
 
+    private void checkWorldId(Long worldId) {
+        if (worldId == null) {
+            throw new UserRequestException("世界模板id不能为空");
+        }
+    }
+
     private void checkCharacterId(Long characterId) {
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }
+    }
+
+    private Long currentUserId() {
+        Integer userId = CurrentHolder.getCurrentId();
+        if (userId == null) {
+            throw new UserRequestException("用户未登录");
+        }
+        return Long.valueOf(userId);
     }
 }

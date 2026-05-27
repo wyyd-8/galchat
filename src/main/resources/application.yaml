@@ -7,7 +7,7 @@ spring:
       api-key: sk-c267b8feed9b4b72ba27c64f4db855af
       chat:
         options:
-          model: deepseek-reasoner
+          model: deepseek-v4-pro
           temperature: 1.0
     model:
       embedding: ollama
@@ -39,3 +39,8 @@ mybatis-plus:
     db-config:
       update-strategy: not_null
       id-type: auto
+galchat:
+  alioss:
+    endpoint: https://oss-cn-beijing.aliyuncs.com
+    bucket-name: galchat
+    region: cn-beijing

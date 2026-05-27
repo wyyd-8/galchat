@@ -15,7 +15,9 @@ import java.util.List;
  */
 public interface IWorldTemplateService extends IService<WorldTemplate> {
 
-    List<WorldTemplate> listWorldBaseInfo();
+    List<WorldTemplate> listWorldBaseInfo(Long userId);
 
-    WorldTemplate getWorldTemplateById(Long id);
+    WorldTemplate getWorldTemplateById(Long userId, Long id);
+
+    WorldTemplate createWorldTemplate(Long userId, WorldTemplate worldTemplate);
 }

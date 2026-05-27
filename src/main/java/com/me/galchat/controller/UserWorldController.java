@@ -3,8 +3,11 @@ package com.me.galchat.controller;
 
 import com.me.galchat.domain.Result;
 import com.me.galchat.domain.po.UserWorldPrefix;
+import com.me.galchat.domain.po.WorldDetail;
+import com.me.galchat.domain.po.WorldTemplate;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.service.IWorldDetailService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
@@ -32,10 +35,11 @@ public class UserWorldController {
 
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IWorldTemplateService worldTemplateService;
+    private final IWorldDetailService worldDetailService;
 
     @GetMapping("/templates")
     public Result listWorldTemplates() {
-        return Result.success(worldTemplateService.listWorldBaseInfo());
+        return Result.success(worldTemplateService.listWorldBaseInfo(currentUserId()));
     }
 
     @GetMapping("/templates/{id}")
@@ -43,7 +47,28 @@ public class UserWorldController {
         if (id == null) {
             throw new UserRequestException("世界模板id不能为空");
         }
-        return Result.success(worldTemplateService.getWorldTemplateById(id));
+        return Result.success(worldTemplateService.getWorldTemplateById(currentUserId(), id));
+    }
+
+    @PostMapping("/templates")
+    public Result createWorldTemplate(@RequestBody WorldTemplate worldTemplate) {
+        return Result.success(worldTemplateService.createWorldTemplate(currentUserId(), worldTemplate));
+    }
+
+    @GetMapping("/templates/{worldId}/details")
+    public Result listWorldDetails(@PathVariable Long worldId) {
+        if (worldId == null) {
+            throw new UserRequestException("世界模板id不能为空");
+        }
+        return Result.success(worldDetailService.listWorldDetails(currentUserId(), worldId));
+    }
+
+    @PostMapping("/templates/{worldId}/details")
+    public Result createWorldDetail(@PathVariable Long worldId, @RequestBody WorldDetail worldDetail) {
+        if (worldId == null) {
+            throw new UserRequestException("世界模板id不能为空");
+        }
+        return Result.success(worldDetailService.createWorldDetail(currentUserId(), worldId, worldDetail));
     }
 
     @PostMapping

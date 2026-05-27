@@ -49,10 +49,20 @@ public class TopicBoundaryService {
         saveBoundary(baseConversation, newBoundary);
         if (!sameTopic) {
             searchInfoAfterFirstMessageInTopic(userMessage);
-            chatHistoryVectorService.addChatHistory(userMessage.getUserWorldId(), userMessage.getCharacterId(),
-                    oldBoundary.previousStartId(), oldBoundary.currentStartId());
+            vectorizeClosedTopic(userMessage, oldBoundary);
         }
         return newBoundary;
+    }
+
+    private void vectorizeClosedTopic(UserChatHistory userMessage, TopicBoundary oldBoundary) {
+        Long startId = oldBoundary.previousStartId();
+        Long endId = oldBoundary.currentStartId();
+        if (startId == null || endId == null || startId >= endId) {
+            return;
+        }
+
+        chatHistoryVectorService.addChatHistory(userMessage.getUserWorldId(), userMessage.getCharacterId(),
+                startId, endId);
     }
 
     public void startStoryTopic(Long userWorldId, Long characterId, Long storyEventId, Long startMessageId) {

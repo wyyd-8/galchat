@@ -8,6 +8,7 @@ import com.me.galchat.service.IWorldTemplateService;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * <p>
@@ -21,18 +22,43 @@ import java.util.List;
 public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, WorldTemplate> implements IWorldTemplateService {
 
     @Override
-    public List<WorldTemplate> listWorldBaseInfo() {
+    public List<WorldTemplate> listWorldBaseInfo(Long userId) {
         return lambdaQuery()
                 .select(WorldTemplate::getId, WorldTemplate::getName, WorldTemplate::getImage)
+                .and(wrapper -> wrapper.ne(WorldTemplate::getVisible, false)
+                        .or()
+                        .isNull(WorldTemplate::getVisible)
+                        .or()
+                        .eq(WorldTemplate::getAuthorId, userId))
                 .list();
     }
 
     @Override
-    public WorldTemplate getWorldTemplateById(Long id) {
+    public WorldTemplate getWorldTemplateById(Long userId, Long id) {
         WorldTemplate template = getById(id);
         if (template == null) {
             throw new UserRequestException("世界模板不存在");
         }
+        if (Boolean.FALSE.equals(template.getVisible()) && !Objects.equals(template.getAuthorId(), userId)) {
+            throw new UserRequestException("世界模板不存在");
+        }
         return template;
+    }
+
+    @Override
+    public WorldTemplate createWorldTemplate(Long userId, WorldTemplate worldTemplate) {
+        if (worldTemplate == null) {
+            throw new UserRequestException("请求参数不能为空");
+        }
+        WorldTemplate newWorldTemplate = new WorldTemplate()
+                .setName(worldTemplate.getName())
+                .setImage(worldTemplate.getImage())
+                .setAuthor(worldTemplate.getAuthor())
+                .setAuthorId(userId)
+                .setBackground(worldTemplate.getBackground())
+                .setCharacterIds(worldTemplate.getCharacterIds())
+                .setVisible(!Boolean.FALSE.equals(worldTemplate.getVisible()));
+        save(newWorldTemplate);
+        return newWorldTemplate;
     }
 }

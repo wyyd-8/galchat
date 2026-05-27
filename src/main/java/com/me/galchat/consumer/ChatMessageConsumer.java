@@ -11,7 +11,6 @@ import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBlockingQueue;
-import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.redisson.codec.JsonJacksonCodec;
 import org.springframework.context.event.ContextClosedEvent;
@@ -82,27 +81,11 @@ public class ChatMessageConsumer {
     }
 
     private void handleReplyTask(ChatReplyTaskDTO task) {
-        RLock lock = redissonClient.getLock(buildReplyLockKey(task));
-        lock.lock();
-        try {
-            UserChatHistory assistantMessage = chatService.generateReply(task);
-            if (assistantMessage == null) {
-                return;
-            }
-
-            webSocketServer.sendMessageToSession(assistantMessage);
-        } finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+        UserChatHistory assistantMessage = chatService.generateReply(task);
+        if (assistantMessage == null) {
+            return;
         }
-    }
 
-    private String buildReplyLockKey(ChatReplyTaskDTO task) {
-        return buildConversationKey(task) + RedisConstant.REPLY_LOCK_SUFFIX;
-    }
-
-    private String buildConversationKey(ChatReplyTaskDTO task) {
-        return RedisConstant.CHAT_KEY_PREFIX + task.getUserWorldId() + ":" + task.getCharacterId();
+        webSocketServer.sendMessageToSession(assistantMessage);
     }
 }

@@ -1,6 +1,5 @@
 package com.me.galchat.domain.po;
 
-import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
 import java.time.LocalDateTime;
@@ -9,7 +8,6 @@ import java.io.Serializable;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
-import org.apache.ibatis.type.ArrayTypeHandler;
 
 /**
  * <p>
@@ -17,13 +15,13 @@ import org.apache.ibatis.type.ArrayTypeHandler;
  * </p>
  *
  * @author author
- * @since 2026-05-03
+ * @since 2026-05-27
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName(value = "world_event_log", autoResultMap = true)
-public class WorldEventLog implements Serializable {
+@TableName("world_story_event")
+public class WorldStoryEvent implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -32,14 +30,25 @@ public class WorldEventLog implements Serializable {
 
     private Long userWorldId;
 
-    private String eventDescription;
-
-    @TableField(typeHandler = ArrayTypeHandler.class)
-    private Long[] visibleCharacters;
-
-    private LocalDateTime timestamp;
-
     private String title;
 
-    private Long storyEventId;
+    private String theme;
+
+    private String currentScene;
+
+    private String opening;
+
+    private String summary;
+
+    private String status;
+
+    private LocalDateTime startedAt;
+
+    private LocalDateTime endedAt;
+
+    private LocalDateTime createdAt;
+
+    private LocalDateTime updatedAt;
+
+
 }

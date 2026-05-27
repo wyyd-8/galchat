@@ -27,7 +27,6 @@ public class CommonConfiguration {
                                           UserCharacterFavorTools userCharacterFavorTools) {
         return ChatClient
                 .builder(model)
-                .defaultSystem("你是一个专业的ai聊天机器人。")
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(thinkChatMemory, topicBoundaryService).build())
                 .defaultTools(vectorTools, userCharacterFavorTools)
@@ -42,7 +41,6 @@ public class CommonConfiguration {
                                        UserCharacterFavorTools userCharacterFavorTools) {
         return ChatClient
                 .builder(model)
-                .defaultSystem("你是一个专业的ai聊天机器人。")
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(defaultChatMemory, topicBoundaryService).build())
                 .defaultTools(vectorTools, userCharacterFavorTools)
@@ -107,6 +105,52 @@ public class CommonConfiguration {
                         请依据这些事件生成一条自然、简短、温柔的关怀消息，像角色主动发来的聊天内容。
                         消息需要把多个事件自然融合，不要逐条罗列，不要提到“事件记录”“数据库”“任务”等系统概念。
                         只输出最终要发送给用户的一条消息，不要输出解释、Markdown 或其他内容。
+                        """)
+                .build();
+    }
+
+    @Bean
+    public ChatClient worldStoryOpeningClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+        return ChatClient
+                .builder(model)
+                .defaultSystem("""
+                        你是一个专业的互动故事开场生成机器人。
+                        你会收到用户世界、故事主题，以及用户可能已经指定的标题、场景或开场。
+                        请补全缺失部分，生成适合作为多人角色故事开端的信息。
+                        输出严格 JSON：{"title":"故事标题","currentScene":"当前场景","opening":"故事开场"}。
+                        opening 应是故事已经发生的起始情况，不要写系统说明，不要给角色添加额外身份、秘密目标或私有动机。
+                        不要输出 JSON 以外的解释、Markdown 或其他内容。
+                        """)
+                .build();
+    }
+
+    @Bean
+    public ChatClient worldStoryAdvanceClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+        return ChatClient
+                .builder(model)
+                .defaultSystem("""
+                        你是一个专业的互动故事推进整理机器人。
+                        你会收到当前故事信息和用户给出的切换语句。
+                        请把切换语句整理为一条可插入故事上下文的客观推进消息。
+                        如果切换语句表示地点或场景确实改变，currentScene 输出新的当前场景；如果只是时间、天气、状态、物品或其他元素变化，currentScene 保持原场景。
+                        输出严格 JSON：{"currentScene":"当前场景","progress":"故事推进消息"}。
+                        progress 不要写系统说明，不要给角色添加额外身份、秘密目标或私有动机。
+                        不要输出 JSON 以外的解释、Markdown 或其他内容。
+                        """)
+                .build();
+    }
+
+    @Bean
+    public ChatClient worldStoryEndClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+        return ChatClient
+                .builder(model)
+                .defaultSystem("""
+                        你是一个专业的互动故事总结机器人。
+                        你会收到故事信息、可选的用户离开说明，以及各参与角色在故事窗口中的消息。
+                        请生成一段完整、客观、适合长期检索的世界事件概括。
+                        输出严格 JSON：{"summary":"完整事件概括"}。
+                        summary 应包含故事起因、重要推进、最终状态和参与角色可共同记住的事实；不要写系统说明，不要添加未出现的新角色动机或秘密。
+                        不要输出 JSON 以外的解释、Markdown 或其他内容。
                         """)
                 .build();
     }

@@ -12,11 +12,12 @@ public final class RedisConstant {
     public static final String USER_CHARACTER_FAVOR_VALUE_KEY = "user:character:favor";
     public static final String CHAT_MEMORY_STEP_KEY_PREFIX = "chat:memory:step:";
     public static final String TOPIC_BOUNDARY_KEY_PREFIX = "chat:topic:boundary:";
+    public static final String STORY_ACTIVE_KEY_PREFIX = "chat:story:active:";
+    public static final String USER_CHARACTER_LOCK_PREFIX = "chat:user:character:lock:";
 
     public static final String TYPING_SUFFIX = ":typing";
     public static final String INPUT_SUFFIX = ":input";
     public static final String LAST_ASSISTANT_SUFFIX = ":last_assistant";
-    public static final String REPLY_LOCK_SUFFIX = ":reply_lock";
 
     public static final Duration CHAT_MEMORY_STEP_TTL = Duration.ofDays(1);
     public static final Duration LAST_ASSISTANT_TTL = Duration.ofHours(1);

@@ -45,6 +45,9 @@ public class WorldEventVectorService {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put(VectorConstant.USER_WORLD_ID_METADATA_KEY, worldEventLog.getUserWorldId());
         metadata.put(VectorConstant.VISIBLE_CHARACTERS_METADATA_KEY, Arrays.asList(worldEventLog.getVisibleCharacters()));
+        if (StringUtils.hasText(worldEventLog.getTitle())) {
+            metadata.put("title", worldEventLog.getTitle());
+        }
         if (worldEventLog.getTimestamp() != null) {
             metadata.put(VectorConstant.TIMESTAMP_METADATA_KEY,
                     worldEventLog.getTimestamp().format(DateTimeConstant.DATE_TIME_FORMATTER));
@@ -52,7 +55,7 @@ public class WorldEventVectorService {
 
         Document document = Document.builder()
                 .id(vectorDocumentId(worldEventLog.getId()))
-                .text(worldEventLog.getEventDescription())
+                .text(formatDocumentText(worldEventLog))
                 .metadata(metadata)
                 .build();
         worldEventVectorStore.add(List.of(document));
@@ -99,5 +102,12 @@ public class WorldEventVectorService {
     private String vectorDocumentId(Long worldEventLogId) {
         String idSource = "%s:%d".formatted(VectorConstant.WORLD_EVENT_ID_PREFIX, worldEventLogId);
         return UUID.nameUUIDFromBytes(idSource.getBytes(StandardCharsets.UTF_8)).toString();
+    }
+
+    private String formatDocumentText(WorldEventLog worldEventLog) {
+        if (!StringUtils.hasText(worldEventLog.getTitle())) {
+            return worldEventLog.getEventDescription();
+        }
+        return "标题: " + worldEventLog.getTitle() + "\n内容: " + worldEventLog.getEventDescription();
     }
 }

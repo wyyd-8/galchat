@@ -48,7 +48,7 @@ public class ChatHistoryVectorService {
                 .lt(UserChatHistory::getId, end)
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
-                        .notIn(UserChatHistory::getType, List.of("system", ChatConstant.TOOL_TYPE,
+                        .notIn(UserChatHistory::getType, List.of(ChatConstant.SYSTEM_TYPE, ChatConstant.TOOL_TYPE,
                                 ChatConstant.AUTO_SEARCH_INFO_TYPE)))
                 .orderByAsc(UserChatHistory::getId));
 
@@ -66,8 +66,8 @@ public class ChatHistoryVectorService {
         }
 
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("userWorldId", userWorldId);
-        metadata.put("characterId", characterId);
+        metadata.put(VectorConstant.USER_WORLD_ID_METADATA_KEY, userWorldId);
+        metadata.put(VectorConstant.CHARACTER_ID_METADATA_KEY, characterId);
         if (histories.getFirst().getTimestamp() != null) {
             metadata.put(VectorConstant.TIMESTAMP_METADATA_KEY,
                     histories.getFirst().getTimestamp().format(DateTimeConstant.DATE_TIME_FORMATTER));

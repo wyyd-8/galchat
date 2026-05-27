@@ -1,6 +1,7 @@
 package com.me.galchat.task;
 
 import com.me.galchat.constant.RedisConstant;
+import com.me.galchat.constant.UserEventLogConstant;
 import com.me.galchat.domain.dto.UserEventLogDelayTaskDTO;
 import com.me.galchat.domain.po.UserEventLog;
 import com.me.galchat.service.IUserEventLogService;
@@ -14,7 +15,6 @@ import org.redisson.codec.JsonJacksonCodec;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
@@ -26,12 +26,6 @@ import java.util.stream.Collectors;
 @Slf4j
 @RequiredArgsConstructor
 public class UserEventLogScheduleTask {
-
-    private static final List<LocalTime> SEARCH_TIMES = List.of(
-            LocalTime.of(8, 0),
-            LocalTime.of(13, 0),
-            LocalTime.of(19, 0)
-    );
 
     private final IUserEventLogService userEventLogService;
     private final RedissonClient redissonClient;
@@ -45,7 +39,7 @@ public class UserEventLogScheduleTask {
         delayedQueue = redissonClient.getDelayedQueue(blockingQueue);
     }
 
-    @Scheduled(cron = "0 0 8,13,19 * * *", zone = "Asia/Shanghai")
+    @Scheduled(cron = UserEventLogConstant.SCHEDULE_CRON, zone = UserEventLogConstant.SCHEDULE_ZONE)
     public void scheduleUpcomingUserEventLogs() {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime nextSearchTime = nextSearchTime(now);
@@ -58,12 +52,12 @@ public class UserEventLogScheduleTask {
         Map<EventTaskKey, List<Long>> eventIdsByTask = eventLogs.stream()
                 .collect(Collectors.groupingBy(this::eventTaskKey,
                         Collectors.mapping(UserEventLog::getId, Collectors.toList())));
-        eventIdsByTask.forEach((key, eventIds) -> offerDelayTask(key, eventIds, now));
+        eventIdsByTask.forEach(this::offerDelayTask);
         log.info("用户事件定时扫描完成, begin:{}, end:{}, eventCount:{}, taskCount:{}",
                 now, nextSearchTime, eventLogs.size(), eventIdsByTask.size());
     }
 
-    private void offerDelayTask(EventTaskKey key, List<Long> eventIds, LocalDateTime now) {
+    private void offerDelayTask(EventTaskKey key, List<Long> eventIds) {
         if (eventIds.isEmpty()) {
             return;
         }
@@ -81,12 +75,12 @@ public class UserEventLogScheduleTask {
 
     private LocalDateTime nextSearchTime(LocalDateTime now) {
         LocalTime currentTime = now.toLocalTime();
-        for (LocalTime searchTime : SEARCH_TIMES) {
+        for (LocalTime searchTime : UserEventLogConstant.SEARCH_TIMES) {
             if (currentTime.isBefore(searchTime)) {
                 return LocalDateTime.of(now.toLocalDate(), searchTime);
             }
         }
-        return LocalDateTime.of(now.toLocalDate().plusDays(1), SEARCH_TIMES.getFirst());
+        return LocalDateTime.of(now.toLocalDate().plusDays(1), UserEventLogConstant.SEARCH_TIMES.getFirst());
     }
 
     private record EventTaskKey(Long userWorldId, Long characterId) {

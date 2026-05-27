@@ -1,13 +1,14 @@
 package com.me.galchat.tool;
 
 import com.me.galchat.constant.ChatToolContextConstant;
+import com.me.galchat.constant.FavorConstant;
 import com.me.galchat.service.IUserCharacterInfoService;
+import com.me.galchat.utils.TypeConvertUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 
 import java.util.Map;
 
@@ -34,30 +35,33 @@ public class UserCharacterFavorTools {
         }
 
         Map<String, Object> map = context.getContext();
-        Long userWorldId = asLong(map.get(ChatToolContextConstant.USER_WORLD_ID_KEY));
-        Long characterId = asLong(map.get(ChatToolContextConstant.CHARACTER_ID_KEY));
-        Long userMessageId = asLong(map.get(ChatToolContextConstant.USER_MESSAGE_ID_KEY));
+        Long userWorldId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.USER_WORLD_ID_KEY));
+        Long characterId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.CHARACTER_ID_KEY));
+        Long userMessageId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.USER_MESSAGE_ID_KEY));
+        String favorSystemStatus = TypeConvertUtils.asString(map.get(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY));
         if (userWorldId == null || characterId == null || userMessageId == null) {
             return;
         }
 
-        userCharacterInfoService.updateFavorValue(userWorldId, characterId, favorChange, userMessageId);
+        userCharacterInfoService.updateFavorValue(userWorldId, characterId,
+                applyFavorSystemCoefficient(favorChange, favorSystemStatus), userMessageId);
     }
 
-    private Long asLong(Object value) {
-        if (value instanceof Long longValue) {
-            return longValue;
+    private Integer applyFavorSystemCoefficient(Integer favorChange, String favorSystemStatus) {
+        if (favorChange == null || favorChange <= 0) {
+            return favorChange;
         }
-        if (value instanceof Number number) {
-            return number.longValue();
+
+        return Math.toIntExact(Math.round(favorChange * favorCoefficient(favorSystemStatus)));
+    }
+
+    private double favorCoefficient(String favorSystemStatus) {
+        if (FavorConstant.EASY_STATUS.equalsIgnoreCase(favorSystemStatus)) {
+            return FavorConstant.EASY_COEFFICIENT;
         }
-        if (value instanceof String stringValue && StringUtils.hasText(stringValue)) {
-            try {
-                return Long.valueOf(stringValue);
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
+        if (FavorConstant.HARD_STATUS.equalsIgnoreCase(favorSystemStatus)) {
+            return FavorConstant.HARD_COEFFICIENT;
         }
-        return null;
+        return FavorConstant.DEFAULT_COEFFICIENT;
     }
 }

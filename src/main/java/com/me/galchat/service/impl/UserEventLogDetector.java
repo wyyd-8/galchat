@@ -2,6 +2,7 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.DateTimeConstant;
+import com.me.galchat.constant.UserEventLogConstant;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserEventLog;
 import com.me.galchat.mapper.UserChatHistoryMapper;
@@ -12,7 +13,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.MessageType;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -26,8 +26,6 @@ import java.util.Objects;
 @Slf4j
 @RequiredArgsConstructor
 public class UserEventLogDetector {
-
-    private static final int HISTORY_LIMIT = 20;
 
     private final ChatClient userEventLogClient;
     private final UserChatHistoryMapper userChatHistoryMapper;
@@ -80,7 +78,7 @@ public class UserEventLogDetector {
                         .in(UserChatHistory::getType, List.of(MessageType.USER.getValue(),
                                 MessageType.ASSISTANT.getValue())))
                 .orderByDesc(UserChatHistory::getId)
-                .last("limit " + HISTORY_LIMIT));
+                .last("limit " + UserEventLogConstant.HISTORY_LIMIT));
         Collections.reverse(histories);
         return histories;
     }
@@ -118,8 +116,8 @@ public class UserEventLogDetector {
 
         try {
             JSONObject jsonObject = new JSONObject(normalizeJson(content));
-            String eventDescription = jsonObject.optString("eventDescription", "");
-            LocalDateTime eventTime = parseTime(jsonObject.optString("time", ""));
+            String eventDescription = jsonObject.optString(UserEventLogConstant.EVENT_DESCRIPTION_JSON_KEY, "");
+            LocalDateTime eventTime = parseTime(jsonObject.optString(UserEventLogConstant.TIME_JSON_KEY, ""));
             if (!StringUtils.hasText(eventDescription) || eventTime == null) {
                 return null;
             }

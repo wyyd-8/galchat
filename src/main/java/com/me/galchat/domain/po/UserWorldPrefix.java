@@ -37,10 +37,6 @@ public class UserWorldPrefix implements Serializable {
 
     private Boolean acitvePushStatus;
 
-    private Integer pushTime;
-
-    private Boolean connectOtherCharacterStatus;
-
     private String favorSystemStatus;
 
     private Boolean eotDetectionStatus;

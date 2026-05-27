@@ -1,5 +1,6 @@
 package com.me.galchat.vector;
 
+import com.me.galchat.constant.VectorConstant;
 import com.me.galchat.domain.po.WorldDetail;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.document.Document;
@@ -37,7 +38,7 @@ public class WorldDetailVectorService {
         Document document = Document.builder()
                 .id(vectorDocumentId(worldDetail.getId()))
                 .text(worldDetail.getDetails())
-                .metadata("worldId", worldDetail.getWorldId())
+                .metadata(VectorConstant.WORLD_ID_METADATA_KEY, worldDetail.getWorldId())
                 .build();
         worldDetailVectorStore.add(List.of(document));
     }
@@ -55,11 +56,11 @@ public class WorldDetailVectorService {
 
     private Filter.Expression filterByWorld(Long worldId) {
         FilterExpressionBuilder builder = new FilterExpressionBuilder();
-        return builder.eq("worldId", worldId).build();
+        return builder.eq(VectorConstant.WORLD_ID_METADATA_KEY, worldId).build();
     }
 
     private String vectorDocumentId(Long worldDetailId) {
-        String idSource = "world-detail:%d".formatted(worldDetailId);
+        String idSource = "%s:%d".formatted(VectorConstant.WORLD_DETAIL_ID_PREFIX, worldDetailId);
         return UUID.nameUUIDFromBytes(idSource.getBytes(StandardCharsets.UTF_8)).toString();
     }
 }

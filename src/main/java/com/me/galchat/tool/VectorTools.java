@@ -5,6 +5,7 @@ import com.me.galchat.constant.VectorConstant;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.service.DocumentReranker;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.utils.TypeConvertUtils;
 import com.me.galchat.vector.ChatHistoryVectorService;
 import com.me.galchat.vector.WorldDetailVectorService;
 import com.me.galchat.vector.WorldEventVectorService;
@@ -58,8 +59,8 @@ public class VectorTools {
             return "";
         }
 
-        Long userWorldId = asLong(map.get(ChatToolContextConstant.USER_WORLD_ID_KEY));
-        Long characterId = asLong(map.get(ChatToolContextConstant.CHARACTER_ID_KEY));
+        Long userWorldId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.USER_WORLD_ID_KEY));
+        Long characterId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.CHARACTER_ID_KEY));
         if (userWorldId == null || characterId == null) {
             return "";
         }
@@ -117,20 +118,4 @@ public class VectorTools {
                 + "内容: " + text;
     }
 
-    private Long asLong(Object value) {
-        if (value instanceof Long longValue) {
-            return longValue;
-        }
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        if (value instanceof String stringValue && StringUtils.hasText(stringValue)) {
-            try {
-                return Long.valueOf(stringValue);
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-        return null;
-    }
 }

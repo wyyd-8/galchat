@@ -3,13 +3,16 @@ package com.me.galchat.consumer;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.RedisConstant;
+import com.me.galchat.constant.UserEventLogConstant;
 import com.me.galchat.domain.dto.UserEventLogDelayTaskDTO;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserEventLog;
+import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.service.IUserEventLogService;
+import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.websocket.WebSocketServer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -28,7 +31,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
@@ -39,13 +41,10 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class UserEventLogConsumer {
 
-    private static final Duration MIN_CHAT_IDLE_TIME = Duration.ofMinutes(5);
-    private static final Duration USER_EVENT_RETRY_DELAY = Duration.ofMinutes(10);
-    private static final int MAX_USER_EVENT_RETRY_COUNT = 3;
-
     private final RedissonClient redissonClient;
     private final WebSocketServer webSocketServer;
     private final IUserEventLogService userEventLogService;
+    private final IUserWorldPrefixService userWorldPrefixService;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final UserChatHistoryMapper userChatHistoryMapper;
 
@@ -109,6 +108,12 @@ public class UserEventLogConsumer {
                 || task.getUserEventLogIds() == null || task.getUserEventLogIds().isEmpty()) {
             return;
         }
+        UserWorldPrefix userWorld = userWorldPrefixService.getById(task.getUserWorldId());
+        if (userWorld == null || !Boolean.TRUE.equals(userWorld.getAcitvePushStatus())) {
+            log.info("用户世界未开启主动推送，跳过用户事件关怀任务, userWorldId:{}, characterId:{}",
+                    task.getUserWorldId(), task.getCharacterId());
+            return;
+        }
 
         UserCharacterInfo userCharacterInfo = userCharacterInfoMapper.selectOne(
                 new LambdaQueryWrapper<UserCharacterInfo>()
@@ -162,19 +167,19 @@ public class UserEventLogConsumer {
     }
 
     private boolean isRecentlyChatted(LocalDateTime lastChatTime, LocalDateTime now) {
-        return lastChatTime != null && lastChatTime.isAfter(now.minus(MIN_CHAT_IDLE_TIME));
+        return lastChatTime != null && lastChatTime.isAfter(now.minus(UserEventLogConstant.MIN_CHAT_IDLE_TIME));
     }
 
     private void retryUserEventLogTask(UserEventLogDelayTaskDTO task) {
         int retryCount = task.getRetryCount() == null ? 0 : task.getRetryCount();
-        if (retryCount >= MAX_USER_EVENT_RETRY_COUNT) {
+        if (retryCount >= UserEventLogConstant.MAX_RETRY_COUNT) {
             log.info("用户事件关怀任务超过最大重试次数, userWorldId:{}, characterId:{}, eventIds:{}",
                     task.getUserWorldId(), task.getCharacterId(), task.getUserEventLogIds());
             return;
         }
 
         task.setRetryCount(retryCount + 1);
-        userEventLogDelayedQueue.offer(task, USER_EVENT_RETRY_DELAY.toMillis(), TimeUnit.MILLISECONDS);
+        userEventLogDelayedQueue.offer(task, UserEventLogConstant.RETRY_DELAY.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     private String formatUserEventCarePrompt(List<UserEventLog> eventLogs) {

@@ -214,18 +214,29 @@ public class WebSocketServer {
             log.warn("未找到会话绑定的用户世界信息, sid:{}", sid);
             return;
         }
+        UserWorldPrefix currentPrefix = userWorldService.getById(prefix.getId());
+        if (currentPrefix == null) {
+            log.warn("用户世界不存在, sid:{}, userWorldId:{}", sid, prefix.getId());
+            return;
+        }
+        userWorldMap.put(sid, currentPrefix);
+        if (Boolean.TRUE.equals(currentPrefix.getThinkStatus())) {
+            log.info("用户世界已开启思考模式，跳过WebSocket消息处理, sid:{}, userWorldId:{}",
+                    sid, currentPrefix.getId());
+            return;
+        }
 
         // 反序列化并补齐消息上下文
         ChatMessageDTO data = JSONObject.fromJson(message, ChatMessageDTO.class);
-        data.setUserWorldId(prefix.getId());
+        data.setUserWorldId(currentPrefix.getId());
         if (data.getWorldId() == null) {
-            data.setWorldId(prefix.getWorldId());
+            data.setWorldId(currentPrefix.getWorldId());
         }
 
         // 按消息类型分发处理
         log.info("收到来自客户端：" + sid + "的信息:" + data);
         switch (data.getType()) {
-            case "fragment" -> handleMessageFragment(data, sid, prefix.getEotDetectionStatus());
+            case "fragment" -> handleMessageFragment(data, sid, currentPrefix.getEotDetectionStatus());
             case "typing" -> handleTypingStatus(data);
         }
     }
@@ -557,7 +568,6 @@ public class WebSocketServer {
         JSONObject jsonObject = new JSONObject(claimed);
         return new ClaimedConversation(
                 jsonObject.optString("input", ""),
-                jsonObject.optString("lastAssistant", ""),
                 jsonObject.optLong("length", 0),
                 jsonObject.optLong("revision", 0)
         );
@@ -569,7 +579,7 @@ public class WebSocketServer {
     private record InputSnapshot(String input, long length, long revision) {
     }
 
-    private record ClaimedConversation(String input, String lastAssistant, long length, long revision) {
+    private record ClaimedConversation(String input, long length, long revision) {
     }
 
     /**

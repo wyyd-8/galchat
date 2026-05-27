@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.StoryConstant;
 import com.me.galchat.domain.dto.WorldStoryEventAdvanceDTO;
 import com.me.galchat.domain.dto.WorldStoryEventEndDTO;
 import com.me.galchat.domain.dto.WorldStoryEventStartDTO;
@@ -50,8 +51,6 @@ import java.util.Set;
 public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMapper, WorldStoryEvent>
         implements IWorldStoryEventService {
 
-    private static final String ACTIVE_STATUS = "ACTIVE";
-
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IUserCharacterInfoService userCharacterInfoService;
     private final WorldStoryEventCharacterMapper worldStoryEventCharacterMapper;
@@ -93,7 +92,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 .setTheme(startDTO.getTheme())
                 .setCurrentScene(opening.currentScene())
                 .setOpening(opening.opening())
-                .setStatus(ACTIVE_STATUS)
+                .setStatus(StoryConstant.ACTIVE_STATUS)
                 .setStartedAt(now)
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
@@ -114,7 +113,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
 
         WorldStoryEvent storyEvent = lambdaQuery()
                 .eq(WorldStoryEvent::getUserWorldId, userWorldId)
-                .eq(WorldStoryEvent::getStatus, ACTIVE_STATUS)
+                .eq(WorldStoryEvent::getStatus, StoryConstant.ACTIVE_STATUS)
                 .orderByDesc(WorldStoryEvent::getId)
                 .last("limit 1")
                 .one();
@@ -187,7 +186,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         String summary = buildStorySummary(storyEvent, endDTO, storyHistories);
         LocalDateTime now = LocalDateTime.now();
         storyEvent.setSummary(summary)
-                .setStatus("CLOSED")
+                .setStatus(StoryConstant.CLOSED_STATUS)
                 .setEndedAt(now)
                 .setUpdatedAt(now);
         updateById(storyEvent);
@@ -252,7 +251,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     private void checkNoActiveStory(Long userWorldId) {
         Long count = lambdaQuery()
                 .eq(WorldStoryEvent::getUserWorldId, userWorldId)
-                .eq(WorldStoryEvent::getStatus, ACTIVE_STATUS)
+                .eq(WorldStoryEvent::getStatus, StoryConstant.ACTIVE_STATUS)
                 .count();
         if (count != null && count > 0) {
             throw new UserRequestException("当前世界已有进行中的故事");
@@ -264,7 +263,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         if (storyEvent == null) {
             throw new UserRequestException("故事事件不存在");
         }
-        if (!ACTIVE_STATUS.equals(storyEvent.getStatus())) {
+        if (!StoryConstant.ACTIVE_STATUS.equals(storyEvent.getStatus())) {
             throw new UserRequestException("故事事件未处于进行中");
         }
         return storyEvent;

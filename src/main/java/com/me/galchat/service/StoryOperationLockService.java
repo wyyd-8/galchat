@@ -1,6 +1,7 @@
 package com.me.galchat.service;
 
 import com.me.galchat.constant.RedisConstant;
+import com.me.galchat.constant.StoryConstant;
 import com.me.galchat.exception.UserRequestException;
 import lombok.RequiredArgsConstructor;
 import org.redisson.api.RLock;
@@ -17,16 +18,13 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class StoryOperationLockService {
 
-    private static final Duration STORY_LOCK_WAIT = Duration.ofSeconds(5);
-    private static final Duration CHAT_LOCK_WAIT = Duration.ZERO;
-
     private final RedissonClient redissonClient;
 
     public List<RLock> lockStoryCharacters(Long userWorldId, List<Long> characterIds) {
         List<RLock> locks = new ArrayList<>();
         try {
             for (Long characterId : distinctSortedCharacterIds(characterIds)) {
-                locks.add(lock(userCharacterLock(userWorldId, characterId), STORY_LOCK_WAIT));
+                locks.add(lock(userCharacterLock(userWorldId, characterId), StoryConstant.STORY_LOCK_WAIT));
             }
             return locks;
         } catch (RuntimeException e) {
@@ -36,7 +34,7 @@ public class StoryOperationLockService {
     }
 
     public RLock tryLockUserCharacter(Long userWorldId, Long characterId) {
-        return tryLock(userCharacterLock(userWorldId, characterId), CHAT_LOCK_WAIT);
+        return tryLock(userCharacterLock(userWorldId, characterId), StoryConstant.CHAT_LOCK_WAIT);
     }
 
     public void unlockAll(List<RLock> locks) {

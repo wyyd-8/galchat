@@ -46,7 +46,7 @@ public class WorldEventVectorService {
         metadata.put(VectorConstant.USER_WORLD_ID_METADATA_KEY, worldEventLog.getUserWorldId());
         metadata.put(VectorConstant.VISIBLE_CHARACTERS_METADATA_KEY, Arrays.asList(worldEventLog.getVisibleCharacters()));
         if (StringUtils.hasText(worldEventLog.getTitle())) {
-            metadata.put("title", worldEventLog.getTitle());
+            metadata.put(VectorConstant.TITLE_METADATA_KEY, worldEventLog.getTitle());
         }
         if (worldEventLog.getTimestamp() != null) {
             metadata.put(VectorConstant.TIMESTAMP_METADATA_KEY,

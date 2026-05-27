@@ -50,8 +50,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setName(StringUtils.hasText(userWorldPrefix.getName()) ? userWorldPrefix.getName() : template.getName())
                 .setImage(template.getImage())
                 .setAcitvePushStatus(userWorldPrefix.getAcitvePushStatus())
-                .setPushTime(userWorldPrefix.getPushTime())
-                .setConnectOtherCharacterStatus(userWorldPrefix.getConnectOtherCharacterStatus())
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
                 .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus());
         save(newUserWorld);
@@ -73,8 +71,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setId(oldUserWorld.getId())
                 .setName(userWorldPrefix.getName())
                 .setAcitvePushStatus(userWorldPrefix.getAcitvePushStatus())
-                .setPushTime(userWorldPrefix.getPushTime())
-                .setConnectOtherCharacterStatus(userWorldPrefix.getConnectOtherCharacterStatus())
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
                 .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
                 .setThinkStatus(oldUserWorld.getThinkStatus());

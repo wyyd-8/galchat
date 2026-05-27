@@ -47,7 +47,8 @@ public class UserInfoController {
 
     @PutMapping("/info")
     public Result updateUserInfo(@RequestBody UserProfileDTO userProfileDTO) {
-        return Result.success(userInfoService.updateUserInfo(CurrentHolder.getCurrentId(), userProfileDTO));
+        userInfoService.updateUserInfo(CurrentHolder.getCurrentId(), userProfileDTO);
+        return Result.success();
     }
 
     @PutMapping("/password")

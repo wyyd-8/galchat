@@ -15,7 +15,7 @@ import java.util.List;
  */
 public interface IWorldDetailService extends IService<WorldDetail> {
 
-    WorldDetail createWorldDetail(Long userId, Long worldId, WorldDetail worldDetail);
+    void createWorldDetail(Long userId, Long worldId, WorldDetail worldDetail);
 
     List<WorldDetail> listWorldDetails(Long userId, Long worldId);
 }

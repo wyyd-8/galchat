@@ -79,7 +79,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
     }
 
     @Override
-    public UserInfo updateUserInfo(Integer userId, UserProfileDTO userProfileDTO) {
+    public void updateUserInfo(Integer userId, UserProfileDTO userProfileDTO) {
         if (userProfileDTO == null) {
             throw new UserRequestException("请求参数不能为空");
         }
@@ -98,8 +98,6 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
                 .setEmail(StringUtils.hasText(userProfileDTO.getEmail()) ? userProfileDTO.getEmail() : null)
                 .setBirthday(userProfileDTO.getBirthday());
         updateById(updateUserInfo);
-
-        return getInfoById(userId);
     }
 
     @Override

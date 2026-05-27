@@ -3,8 +3,6 @@ package com.me.galchat.service;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.baomidou.mybatisplus.extension.service.IService;
 
-import java.util.List;
-
 /**
  * <p>
  *  服务类
@@ -15,9 +13,7 @@ import java.util.List;
  */
 public interface ICharacterTemplateService extends IService<CharacterTemplate> {
 
-    List<CharacterTemplate> listCharacterBaseInfoByIds(List<Long> ids);
-
     CharacterTemplate getCharacterTemplateById(Long id);
 
-    CharacterTemplate createCharacterTemplate(Long userId, Long worldId, CharacterTemplate characterTemplate);
+    void createCharacterTemplate(Long userId, Long worldId, CharacterTemplate characterTemplate);
 }

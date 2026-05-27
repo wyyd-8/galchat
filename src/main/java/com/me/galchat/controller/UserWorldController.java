@@ -52,7 +52,8 @@ public class UserWorldController {
 
     @PostMapping("/templates")
     public Result createWorldTemplate(@RequestBody WorldTemplate worldTemplate) {
-        return Result.success(worldTemplateService.createWorldTemplate(currentUserId(), worldTemplate));
+        worldTemplateService.createWorldTemplate(currentUserId(), worldTemplate);
+        return Result.success();
     }
 
     @GetMapping("/templates/{worldId}/details")
@@ -68,7 +69,8 @@ public class UserWorldController {
         if (worldId == null) {
             throw new UserRequestException("世界模板id不能为空");
         }
-        return Result.success(worldDetailService.createWorldDetail(currentUserId(), worldId, worldDetail));
+        worldDetailService.createWorldDetail(currentUserId(), worldId, worldDetail);
+        return Result.success();
     }
 
     @PostMapping
@@ -76,7 +78,8 @@ public class UserWorldController {
         if (userWorldPrefix == null || userWorldPrefix.getWorldId() == null) {
             throw new UserRequestException("世界模板id不能为空");
         }
-        return Result.success(userWorldPrefixService.createUserWorld(currentUserId(), userWorldPrefix));
+        userWorldPrefixService.createUserWorld(currentUserId(), userWorldPrefix);
+        return Result.success();
     }
 
     @GetMapping("/{id}")

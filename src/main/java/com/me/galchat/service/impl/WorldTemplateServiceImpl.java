@@ -46,7 +46,7 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
     }
 
     @Override
-    public WorldTemplate createWorldTemplate(Long userId, WorldTemplate worldTemplate) {
+    public void createWorldTemplate(Long userId, WorldTemplate worldTemplate) {
         if (worldTemplate == null) {
             throw new UserRequestException("请求参数不能为空");
         }
@@ -59,6 +59,5 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
                 .setCharacterIds(worldTemplate.getCharacterIds())
                 .setVisible(!Boolean.FALSE.equals(worldTemplate.getVisible()));
         save(newWorldTemplate);
-        return newWorldTemplate;
     }
 }

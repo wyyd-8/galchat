@@ -17,7 +17,7 @@ public interface IUserWorldPrefixService extends IService<UserWorldPrefix> {
 
     List<UserWorldPrefix> listBaseInfoByUserId(Long userId);
 
-    UserWorldPrefix createUserWorld(Long userId, UserWorldPrefix userWorldPrefix);
+    void createUserWorld(Long userId, UserWorldPrefix userWorldPrefix);
 
     UserWorldPrefix getUserWorld(Long userId, Long id);
 

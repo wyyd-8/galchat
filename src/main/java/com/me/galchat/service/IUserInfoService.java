@@ -22,7 +22,7 @@ public interface IUserInfoService extends IService<UserInfo> {
 
     UserTokenVO register(UserAuthDTO userAuthDTO);
 
-    UserInfo updateUserInfo(Integer userId, UserProfileDTO userProfileDTO);
+    void updateUserInfo(Integer userId, UserProfileDTO userProfileDTO);
 
     void updatePassword(Integer userId, UserPasswordDTO userPasswordDTO);
 }

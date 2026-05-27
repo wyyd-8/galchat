@@ -39,7 +39,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     private final UserCharacterFavorLogMapper userCharacterFavorLogMapper;
 
     @Override
-    public UserCharacterInfo addCharacter(Long userWorldId, Long characterId) {
+    public void addCharacter(Long userWorldId, Long characterId) {
         userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         UserCharacterInfo oldCharacter = getByUserWorldIdAndCharacterId(userWorldId, characterId);
         if (oldCharacter != null) {
@@ -54,7 +54,6 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 .setCharacterImage(template.getImage())
                 .setFavorValue(template.getInitFavor());
         save(userCharacterInfo);
-        return userCharacterInfo;
     }
 
     @Override
@@ -79,7 +78,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     }
 
     @Override
-    public Integer updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat) {
+    public void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat) {
         if (favorChange == null) {
             favorChange = 0;
         }
@@ -92,7 +91,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
                 buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
         insertFavorLog(userWorldId, characterId, favorValue - oldFavorValue, bindingChat);
-        return favorValue;
+        return;
     }
 
     @Override

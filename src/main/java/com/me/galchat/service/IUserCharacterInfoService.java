@@ -15,13 +15,13 @@ import java.util.List;
  */
 public interface IUserCharacterInfoService extends IService<UserCharacterInfo> {
 
-    UserCharacterInfo addCharacter(Long userWorldId, Long characterId);
+    void addCharacter(Long userWorldId, Long characterId);
 
     void deleteCharacter(Long userWorldId, Long characterId);
 
     List<UserCharacterInfo> listByUserWorldId(Long userWorldId);
 
-    Integer updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat);
+    void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat);
 
     String buildCharacterPrompt(Long userWorldId, Long characterId);
 }

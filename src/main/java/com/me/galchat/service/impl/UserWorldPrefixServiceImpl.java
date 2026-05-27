@@ -42,7 +42,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     }
 
     @Override
-    public UserWorldPrefix createUserWorld(Long userId, UserWorldPrefix userWorldPrefix) {
+    public void createUserWorld(Long userId, UserWorldPrefix userWorldPrefix) {
         WorldTemplate template = worldTemplateService.getWorldTemplateById(userId, userWorldPrefix.getWorldId());
         UserWorldPrefix newUserWorld = new UserWorldPrefix()
                 .setUserId(userId)
@@ -56,7 +56,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
         redisTemplate.opsForHash().put(RedisConstant.WORLD_USER_AUTH_KEY,
                 String.valueOf(newUserWorld.getId()),
                 String.valueOf(userId));
-        return newUserWorld;
     }
 
     @Override

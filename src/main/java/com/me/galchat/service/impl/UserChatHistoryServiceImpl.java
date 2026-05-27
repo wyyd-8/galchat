@@ -51,47 +51,49 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
             throw new UserRequestException("角色id不能为空");
         }
 
-        List<UserChatHistory> userMessages = listUserMessages(userWorldId, characterId, id, size);
-        if (userMessages.isEmpty()) {
+        List<UserChatHistory> primaryMessages = listPrimaryMessages(userWorldId, characterId, id, size);
+        if (primaryMessages.isEmpty()) {
             return List.of();
         }
 
         if (!Boolean.TRUE.equals(thinkStatus)) {
-            return listVisibleMessages(userWorldId, characterId, userMessages);
+            return listVisibleMessages(userWorldId, characterId, primaryMessages);
         }
 
-        return listThinkingMessages(userWorldId, characterId, userMessages);
+        return listThinkingMessages(userWorldId, characterId, primaryMessages);
     }
 
-    private List<UserChatHistory> listUserMessages(Long userWorldId, Long characterId, Long id, Integer size) {
-        List<UserChatHistory> userMessages = lambdaQuery()
+    private List<UserChatHistory> listPrimaryMessages(Long userWorldId, Long characterId, Long id, Integer size) {
+        List<UserChatHistory> primaryMessages = lambdaQuery()
                 .eq(UserChatHistory::getUserWorldId, userWorldId)
                 .eq(UserChatHistory::getCharacterId, characterId)
                 .lt(id != null, UserChatHistory::getId, id)
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
-                        .eq(UserChatHistory::getType, MessageType.USER.getValue()))
+                        .eq(UserChatHistory::getType, MessageType.USER.getValue())
+                        .or()
+                        .in(UserChatHistory::getType, storyMessageTypes()))
                 .orderByDesc(UserChatHistory::getId)
                 .last("limit " + size)
                 .list();
-        Collections.reverse(userMessages);
-        return userMessages;
+        Collections.reverse(primaryMessages);
+        return primaryMessages;
     }
 
     private List<UserChatHistory> listVisibleMessages(Long userWorldId, Long characterId,
-                                                      List<UserChatHistory> userMessages) {
-        Set<Long> userMessageIds = userMessageIds(userMessages);
+                                                      List<UserChatHistory> primaryMessages) {
+        Set<Long> userMessageIds = userMessageIds(primaryMessages);
         List<UserChatHistory> assistantMessages = listLinkedAssistantMessages(userWorldId, characterId, userMessageIds);
-        List<UserChatHistory> messages = new ArrayList<>(userMessages.size() + assistantMessages.size());
-        messages.addAll(userMessages);
+        List<UserChatHistory> messages = new ArrayList<>(primaryMessages.size() + assistantMessages.size());
+        messages.addAll(primaryMessages);
         messages.addAll(assistantMessages);
         messages.sort(Comparator.comparing(UserChatHistory::getId));
         return messages;
     }
 
     private List<UserChatHistory> listThinkingMessages(Long userWorldId, Long characterId,
-                                                       List<UserChatHistory> userMessages) {
-        Set<Long> userMessageIds = userMessageIds(userMessages);
+                                                       List<UserChatHistory> primaryMessages) {
+        Set<Long> userMessageIds = userMessageIds(primaryMessages);
         Map<Long, List<UserChatHistory>> assistantsByUserMessageId =
                 listLinkedAssistantMessages(userWorldId, characterId, userMessageIds).stream()
                         .collect(Collectors.groupingBy(UserChatHistory::getUserMessageId));
@@ -99,9 +101,12 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         Map<Long, List<UserChatToolCall>> toolCallsByUserMessageId = listToolCalls(userMessageIds);
 
         List<UserChatHistory> messages = new ArrayList<>();
-        for (UserChatHistory userMessage : userMessages) {
-            messages.add(userMessage);
-            Long userMessageId = userMessage.getId();
+        for (UserChatHistory primaryMessage : primaryMessages) {
+            messages.add(primaryMessage);
+            if (!isUserMessage(primaryMessage)) {
+                continue;
+            }
+            Long userMessageId = primaryMessage.getId();
             for (Integer stepNo : stepNos(userMessageId, assistantsByUserMessageId,
                     thinkingByUserMessageId, toolCallsByUserMessageId)) {
                 reasoningMessage(userMessageId, stepNo, thinkingByUserMessageId)
@@ -159,9 +164,18 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     private Set<Long> userMessageIds(List<UserChatHistory> userMessages) {
         return userMessages.stream()
+                .filter(this::isUserMessage)
                 .map(UserChatHistory::getId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
+    }
+
+    private boolean isUserMessage(UserChatHistory history) {
+        return history.getType() == null || Objects.equals(MessageType.USER.getValue(), history.getType());
+    }
+
+    private List<String> storyMessageTypes() {
+        return List.of(ChatConstant.STORY_START_TYPE, ChatConstant.STORY_PROGRESS_TYPE, ChatConstant.STORY_END_TYPE);
     }
 
     private List<Integer> stepNos(Long userMessageId,

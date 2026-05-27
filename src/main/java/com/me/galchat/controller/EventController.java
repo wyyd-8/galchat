@@ -30,9 +30,20 @@ public class EventController {
 
     private final IWorldStoryEventService worldStoryEventService;
 
+    @GetMapping("/story/list/{userWorldId}")
+    public Result listStories(@PathVariable Long userWorldId) {
+        return Result.success(worldStoryEventService.listStories(userWorldId));
+    }
+
+    @GetMapping("/story/{storyEventId}")
+    public Result getStoryDetail(@PathVariable Long storyEventId) {
+        return Result.success(worldStoryEventService.getStoryDetail(storyEventId));
+    }
+
     @PostMapping("/story/start")
     public Result startStory(@RequestBody WorldStoryEventStartDTO startDTO) {
-        return Result.success(worldStoryEventService.startStory(startDTO));
+        worldStoryEventService.startStory(startDTO);
+        return Result.success();
     }
 
     @GetMapping("/story/active/{userWorldId}")
@@ -43,12 +54,14 @@ public class EventController {
     @PostMapping("/story/{storyEventId}/advance")
     public Result advanceStory(@PathVariable Long storyEventId,
                                @RequestBody WorldStoryEventAdvanceDTO advanceDTO) {
-        return Result.success(worldStoryEventService.advanceStory(storyEventId, advanceDTO));
+        worldStoryEventService.advanceStory(storyEventId, advanceDTO);
+        return Result.success();
     }
 
     @PostMapping("/story/{storyEventId}/end")
     public Result endStory(@PathVariable Long storyEventId,
                            @RequestBody(required = false) WorldStoryEventEndDTO endDTO) {
-        return Result.success(worldStoryEventService.endStory(storyEventId, endDTO));
+        worldStoryEventService.endStory(storyEventId, endDTO);
+        return Result.success();
     }
 }

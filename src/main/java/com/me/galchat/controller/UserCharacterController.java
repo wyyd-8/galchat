@@ -35,14 +35,16 @@ public class UserCharacterController {
     @PostMapping("/templates/{worldId}")
     public Result createCharacterTemplate(@PathVariable Long worldId, @RequestBody CharacterTemplate characterTemplate) {
         checkWorldId(worldId);
-        return Result.success(characterTemplateService.createCharacterTemplate(currentUserId(), worldId, characterTemplate));
+        characterTemplateService.createCharacterTemplate(currentUserId(), worldId, characterTemplate);
+        return Result.success();
     }
 
     @PostMapping("/{userWorldId}/{characterId}")
     public Result addCharacter(@PathVariable Long userWorldId, @PathVariable Long characterId) {
         checkUserWorldId(userWorldId);
         checkCharacterId(characterId);
-        return Result.success(userCharacterInfoService.addCharacter(userWorldId, characterId));
+        userCharacterInfoService.addCharacter(userWorldId, characterId);
+        return Result.success();
     }
 
     @DeleteMapping("/{userWorldId}/{characterId}")

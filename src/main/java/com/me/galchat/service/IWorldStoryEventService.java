@@ -5,17 +5,23 @@ import com.me.galchat.domain.dto.WorldStoryEventAdvanceDTO;
 import com.me.galchat.domain.dto.WorldStoryEventEndDTO;
 import com.me.galchat.domain.dto.WorldStoryEventStartDTO;
 import com.me.galchat.domain.po.WorldStoryEvent;
-import com.me.galchat.domain.vo.WorldStoryEventAdvanceVO;
-import com.me.galchat.domain.vo.WorldStoryEventEndVO;
+import com.me.galchat.domain.vo.WorldStoryEventDetailVO;
+import com.me.galchat.domain.vo.WorldStoryEventListVO;
 import com.me.galchat.domain.vo.WorldStoryEventStartVO;
+
+import java.util.List;
 
 public interface IWorldStoryEventService extends IService<WorldStoryEvent> {
 
-    WorldStoryEventStartVO startStory(WorldStoryEventStartDTO startDTO);
+    List<WorldStoryEventListVO> listStories(Long userWorldId);
+
+    WorldStoryEventDetailVO getStoryDetail(Long storyEventId);
+
+    void startStory(WorldStoryEventStartDTO startDTO);
 
     WorldStoryEventStartVO getActiveStory(Long userWorldId);
 
-    WorldStoryEventAdvanceVO advanceStory(Long storyEventId, WorldStoryEventAdvanceDTO advanceDTO);
+    void advanceStory(Long storyEventId, WorldStoryEventAdvanceDTO advanceDTO);
 
-    WorldStoryEventEndVO endStory(Long storyEventId, WorldStoryEventEndDTO endDTO);
+    void endStory(Long storyEventId, WorldStoryEventEndDTO endDTO);
 }

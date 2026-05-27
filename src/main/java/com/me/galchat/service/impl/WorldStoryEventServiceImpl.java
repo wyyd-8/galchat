@@ -14,8 +14,8 @@ import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.domain.po.WorldStoryEvent;
 import com.me.galchat.domain.po.WorldStoryEventCharacter;
-import com.me.galchat.domain.vo.WorldStoryEventAdvanceVO;
-import com.me.galchat.domain.vo.WorldStoryEventEndVO;
+import com.me.galchat.domain.vo.WorldStoryEventDetailVO;
+import com.me.galchat.domain.vo.WorldStoryEventListVO;
 import com.me.galchat.domain.vo.WorldStoryEventStartVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserChatHistoryMapper;
@@ -40,10 +40,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 @Service
 @Slf4j
@@ -68,18 +65,66 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     private ChatClient worldStoryEndClient;
 
     @Override
-    public WorldStoryEventStartVO startStory(WorldStoryEventStartDTO startDTO) {
+    public List<WorldStoryEventListVO> listStories(Long userWorldId) {
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
+        return lambdaQuery()
+                .select(WorldStoryEvent::getId, WorldStoryEvent::getTitle)
+                .eq(WorldStoryEvent::getUserWorldId, userWorldId)
+                .orderByDesc(WorldStoryEvent::getId)
+                .list()
+                .stream()
+                .map(storyEvent -> new WorldStoryEventListVO(storyEvent.getId(), storyEvent.getTitle()))
+                .toList();
+    }
+
+    @Override
+    public WorldStoryEventDetailVO getStoryDetail(Long storyEventId) {
+        if (storyEventId == null) {
+            throw new UserRequestException("故事事件id不能为空");
+        }
+        WorldStoryEvent storyEvent = lambdaQuery()
+                .select(WorldStoryEvent::getId,
+                        WorldStoryEvent::getUserWorldId,
+                        WorldStoryEvent::getTitle,
+                        WorldStoryEvent::getTheme,
+                        WorldStoryEvent::getSummary,
+                        WorldStoryEvent::getStatus,
+                        WorldStoryEvent::getStartedAt,
+                        WorldStoryEvent::getEndedAt)
+                .eq(WorldStoryEvent::getId, storyEventId)
+                .one();
+        if (storyEvent == null) {
+            throw new UserRequestException("故事事件不存在");
+        }
+        userWorldPrefixService.checkUserWorldAuth(storyEvent.getUserWorldId(), false);
+
+        List<WorldStoryEventCharacter> characters = listStoryCharacters(storyEventId);
+        return new WorldStoryEventDetailVO(
+                storyEvent.getId(),
+                storyEvent.getUserWorldId(),
+                storyEvent.getTitle(),
+                storyEvent.getTheme(),
+                storyEvent.getSummary(),
+                storyEvent.getStatus(),
+                storyEvent.getStartedAt(),
+                storyEvent.getEndedAt(),
+                characterNames(storyEvent.getUserWorldId(), characters)
+        );
+    }
+
+    @Override
+    public void startStory(WorldStoryEventStartDTO startDTO) {
         checkStartRequest(startDTO);
         List<Long> characterIds = distinctCharacterIds(startDTO.getCharacterIds());
         List<RLock> locks = storyOperationLockService.lockStoryCharacters(startDTO.getUserWorldId(), characterIds);
         try {
-            return doStartStory(startDTO, characterIds);
+            doStartStory(startDTO, characterIds);
         } finally {
             storyOperationLockService.unlockAll(locks);
         }
     }
 
-    private WorldStoryEventStartVO doStartStory(WorldStoryEventStartDTO startDTO, List<Long> characterIds) {
+    private void doStartStory(WorldStoryEventStartDTO startDTO, List<Long> characterIds) {
         UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(startDTO.getUserWorldId(), true);
         checkCharacters(startDTO.getUserWorldId(), characterIds);
         checkNoActiveStory(startDTO.getUserWorldId());
@@ -98,10 +143,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 .setUpdatedAt(now);
         save(storyEvent);
 
-        List<WorldStoryEventCharacter> characters = characterIds.stream()
-                .map(characterId -> createStoryCharacter(storyEvent, characterId))
-                .toList();
-        return new WorldStoryEventStartVO(storyEvent, characters);
+        characterIds.forEach(characterId -> createStoryCharacter(storyEvent, characterId));
     }
 
     @Override
@@ -127,7 +169,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     }
 
     @Override
-    public WorldStoryEventAdvanceVO advanceStory(Long storyEventId, WorldStoryEventAdvanceDTO advanceDTO) {
+    public void advanceStory(Long storyEventId, WorldStoryEventAdvanceDTO advanceDTO) {
         checkAdvanceRequest(storyEventId, advanceDTO);
         WorldStoryEvent storyEvent = getActiveStoryById(storyEventId);
         List<WorldStoryEventCharacter> characters = listStoryCharacters(storyEventId);
@@ -137,28 +179,24 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         List<RLock> locks = storyOperationLockService.lockStoryCharacters(storyEvent.getUserWorldId(),
                 characterIds(characters));
         try {
-            return doAdvanceStory(storyEventId, advanceDTO, characters);
+            doAdvanceStory(storyEvent, advanceDTO, characters);
         } finally {
             storyOperationLockService.unlockAll(locks);
         }
     }
 
-    private WorldStoryEventAdvanceVO doAdvanceStory(Long storyEventId, WorldStoryEventAdvanceDTO advanceDTO,
-                                                   List<WorldStoryEventCharacter> characters) {
-        WorldStoryEvent storyEvent = getActiveStoryById(storyEventId);
+    private void doAdvanceStory(WorldStoryEvent storyEvent, WorldStoryEventAdvanceDTO advanceDTO,
+                                List<WorldStoryEventCharacter> characters) {
         userWorldPrefixService.checkUserWorldAuth(storyEvent.getUserWorldId(), false);
 
         StoryProgress storyProgress = buildStoryProgress(storyEvent, advanceDTO.getTransition());
         updateStoryScene(storyEvent, storyProgress.currentScene());
-        List<UserChatHistory> messages = characters.stream()
-                .map(character -> createStoryProgressMessage(storyEvent, character, storyProgress.progress()))
-                .toList();
+        characters.forEach(character -> createStoryProgressMessage(storyEvent, character, storyProgress.progress()));
         restoreStoryTopics(storyEvent, characters);
-        return new WorldStoryEventAdvanceVO(storyEvent, messages);
     }
 
     @Override
-    public WorldStoryEventEndVO endStory(Long storyEventId, WorldStoryEventEndDTO endDTO) {
+    public void endStory(Long storyEventId, WorldStoryEventEndDTO endDTO) {
         if (storyEventId == null) {
             throw new UserRequestException("故事事件id不能为空");
         }
@@ -171,15 +209,14 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         List<RLock> locks = storyOperationLockService.lockStoryCharacters(storyEvent.getUserWorldId(),
                 characterIds(characters));
         try {
-            return doEndStory(storyEventId, endDTO, characters);
+            doEndStory(storyEvent, endDTO, characters);
         } finally {
             storyOperationLockService.unlockAll(locks);
         }
     }
 
-    private WorldStoryEventEndVO doEndStory(Long storyEventId, WorldStoryEventEndDTO endDTO,
-                                            List<WorldStoryEventCharacter> characters) {
-        WorldStoryEvent storyEvent = getActiveStoryById(storyEventId);
+    private void doEndStory(WorldStoryEvent storyEvent, WorldStoryEventEndDTO endDTO,
+                            List<WorldStoryEventCharacter> characters) {
         userWorldPrefixService.checkUserWorldAuth(storyEvent.getUserWorldId(), false);
 
         List<UserChatHistory> storyHistories = listStoryHistories(storyEvent, characters);
@@ -195,10 +232,9 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 .map(character -> createStoryEndMessage(storyEvent, character, summary))
                 .toList();
         updateStoryCharacterEndMessages(characters, endMessages);
-        WorldEventLog worldEventLog = createWorldEventLog(storyEvent, characters, summary, now);
+        createWorldEventLog(storyEvent, characters, summary, now);
         characters.forEach(character -> topicBoundaryService.endStoryTopic(storyEvent.getUserWorldId(),
                 character.getCharacterId()));
-        return new WorldStoryEventEndVO(storyEvent, worldEventLog, endMessages);
     }
 
     private void checkStartRequest(WorldStoryEventStartDTO startDTO) {
@@ -227,7 +263,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
 
     private List<Long> distinctCharacterIds(List<Long> characterIds) {
         return characterIds.stream()
-                .filter(characterId -> characterId != null)
+                .filter(Objects::nonNull)
                 .distinct()
                 .toList();
     }
@@ -406,7 +442,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return trimmedContent.substring(beginIndex, endIndex + 1);
     }
 
-    private WorldStoryEventCharacter createStoryCharacter(WorldStoryEvent storyEvent, Long characterId) {
+    private void createStoryCharacter(WorldStoryEvent storyEvent, Long characterId) {
         UserChatHistory startMessage = new UserChatHistory()
                 .setUserWorldId(storyEvent.getUserWorldId())
                 .setCharacterId(characterId)
@@ -422,7 +458,6 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         worldStoryEventCharacterMapper.insert(storyCharacter);
         topicBoundaryService.startStoryTopic(storyEvent.getUserWorldId(), characterId,
                 storyEvent.getId(), startMessage.getId());
-        return storyCharacter;
     }
 
     private UserChatHistory createStoryEndMessage(WorldStoryEvent storyEvent,
@@ -438,9 +473,9 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return endMessage;
     }
 
-    private UserChatHistory createStoryProgressMessage(WorldStoryEvent storyEvent,
-                                                       WorldStoryEventCharacter character,
-                                                       String progress) {
+    private void createStoryProgressMessage(WorldStoryEvent storyEvent,
+                                            WorldStoryEventCharacter character,
+                                            String progress) {
         UserChatHistory progressMessage = new UserChatHistory()
                 .setUserWorldId(storyEvent.getUserWorldId())
                 .setCharacterId(character.getCharacterId())
@@ -448,7 +483,6 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 .setContent(formatStoryProgressContent(storyEvent, progress))
                 .setTimestamp(LocalDateTime.now());
         userChatHistoryMapper.insert(progressMessage);
-        return progressMessage;
     }
 
     private void updateStoryScene(WorldStoryEvent storyEvent, String currentScene) {
@@ -467,6 +501,26 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     private List<Long> characterIds(List<WorldStoryEventCharacter> characters) {
         return characters.stream()
                 .map(WorldStoryEventCharacter::getCharacterId)
+                .toList();
+    }
+
+    private List<String> characterNames(Long userWorldId, List<WorldStoryEventCharacter> characters) {
+        if (characters.isEmpty()) {
+            return List.of();
+        }
+
+        Set<Long> characterIds = new HashSet<>(characters.stream()
+                .map(WorldStoryEventCharacter::getCharacterId)
+                .toList());
+        Map<Long, String> nameByCharacterId = new HashMap<>();
+        for (UserCharacterInfo character : userCharacterInfoService.listByUserWorldId(userWorldId)) {
+            if (characterIds.contains(character.getCharacterId())) {
+                nameByCharacterId.putIfAbsent(character.getCharacterId(), character.getCharacterName());
+            }
+        }
+        return characters.stream()
+                .map(character -> nameByCharacterId.get(character.getCharacterId()))
+                .filter(StringUtils::hasText)
                 .toList();
     }
 
@@ -506,10 +560,10 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         }
     }
 
-    private WorldEventLog createWorldEventLog(WorldStoryEvent storyEvent,
-                                              List<WorldStoryEventCharacter> characters,
-                                              String summary,
-                                              LocalDateTime timestamp) {
+    private void createWorldEventLog(WorldStoryEvent storyEvent,
+                                     List<WorldStoryEventCharacter> characters,
+                                     String summary,
+                                     LocalDateTime timestamp) {
         Long[] visibleCharacters = characters.stream()
                 .map(WorldStoryEventCharacter::getCharacterId)
                 .toArray(Long[]::new);
@@ -522,7 +576,6 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 .setTimestamp(timestamp);
         worldEventLogService.save(worldEventLog);
         worldEventVectorService.addWorldEventLog(worldEventLog);
-        return worldEventLog;
     }
 
     private void restoreStoryTopics(WorldStoryEvent storyEvent, List<WorldStoryEventCharacter> characters) {

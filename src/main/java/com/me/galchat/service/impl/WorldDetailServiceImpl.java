@@ -33,7 +33,7 @@ public class WorldDetailServiceImpl extends ServiceImpl<WorldDetailMapper, World
 
     @Override
     @Transactional
-    public WorldDetail createWorldDetail(Long userId, Long worldId, WorldDetail worldDetail) {
+    public void createWorldDetail(Long userId, Long worldId, WorldDetail worldDetail) {
         if (worldDetail == null) {
             throw new UserRequestException("请求参数不能为空");
         }
@@ -45,7 +45,6 @@ public class WorldDetailServiceImpl extends ServiceImpl<WorldDetailMapper, World
                 .setDetails(worldDetail.getDetails());
         save(newWorldDetail);
         worldDetailVectorService.addWorldDetail(newWorldDetail);
-        return newWorldDetail;
     }
 
     @Override

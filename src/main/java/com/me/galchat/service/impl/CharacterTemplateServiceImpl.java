@@ -14,8 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -31,17 +29,6 @@ import java.util.Objects;
 public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateMapper, CharacterTemplate> implements ICharacterTemplateService {
 
     private final IWorldTemplateService worldTemplateService;
-
-    @Override
-    public List<CharacterTemplate> listCharacterBaseInfoByIds(List<Long> ids) {
-        if (ids == null || ids.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return lambdaQuery()
-                .select(CharacterTemplate::getId, CharacterTemplate::getName, CharacterTemplate::getImage)
-                .in(CharacterTemplate::getId, ids)
-                .list();
-    }
 
     @Override
     @Cacheable(cacheNames = "characterTemplate", key = "#id", condition = "#id != null", unless = "#result == null")
@@ -64,7 +51,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
 
     @Override
     @Transactional
-    public CharacterTemplate createCharacterTemplate(Long userId, Long worldId, CharacterTemplate characterTemplate) {
+    public void createCharacterTemplate(Long userId, Long worldId, CharacterTemplate characterTemplate) {
         if (characterTemplate == null) {
             throw new UserRequestException("请求参数不能为空");
         }
@@ -88,7 +75,6 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
         worldTemplateService.updateById(new WorldTemplate()
                 .setId(worldId)
                 .setCharacterIds(appendCharacterId(worldTemplate.getCharacterIds(), newCharacterTemplate.getId())));
-        return newCharacterTemplate;
     }
 
     private Long[] appendCharacterId(Long[] characterIds, Long characterId) {

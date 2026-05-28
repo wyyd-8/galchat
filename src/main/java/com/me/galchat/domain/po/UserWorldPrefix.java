@@ -1,5 +1,6 @@
 package com.me.galchat.domain.po;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -42,4 +43,6 @@ public class UserWorldPrefix implements Serializable {
     private Boolean eotDetectionStatus;
 
     private Boolean thinkStatus;
+
+    private Boolean myWorld;
 }

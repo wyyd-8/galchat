@@ -18,4 +18,6 @@ public interface IWorldDetailService extends IService<WorldDetail> {
     void createWorldDetail(Long userId, Long worldId, WorldDetail worldDetail);
 
     List<WorldDetail> listWorldDetails(Long userId, Long worldId);
+
+    void deleteWorldDetail(Long userId, Long worldId, Long detailId);
 }

@@ -51,7 +51,9 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setImage(template.getImage())
                 .setAcitvePushStatus(userWorldPrefix.getAcitvePushStatus())
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
-                .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus());
+                .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
+                .setThinkStatus(userWorldPrefix.getThinkStatus())
+                .setMyWorld(template.getAuthorId().equals(userId));
         save(newUserWorld);
         redisTemplate.opsForHash().put(RedisConstant.WORLD_USER_AUTH_KEY,
                 String.valueOf(newUserWorld.getId()),
@@ -72,7 +74,8 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setAcitvePushStatus(userWorldPrefix.getAcitvePushStatus())
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
                 .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
-                .setThinkStatus(oldUserWorld.getThinkStatus());
+                .setThinkStatus(oldUserWorld.getThinkStatus())
+                .setMyWorld(oldUserWorld.getMyWorld());
         updateById(updateUserWorld);
     }
 

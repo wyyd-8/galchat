@@ -1,47 +1,2099 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
-import TheWelcome from './components/TheWelcome.vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChatDotRound,
+  Compass,
+  House,
+  Plus,
+  Refresh,
+  Setting,
+  User,
+} from '@element-plus/icons-vue'
+import {
+  api,
+  clearSession,
+  currentSession,
+  saveSession,
+  streamChat,
+  uploadImage,
+} from './api/client'
+import type {
+  ActiveStory,
+  ChatHistory,
+  StoryListItem,
+  UserCharacter,
+  UserWorld,
+  WorldTemplate,
+} from './api/types'
+
+type SidebarMode = 'worlds' | 'characters'
+
+interface UiMessage {
+  id: string
+  role: 'user' | 'assistant' | 'thinking' | 'tool' | 'story'
+  content: string
+  time?: string
+}
+
+const sessionSnapshot = currentSession()
+const session = reactive({
+  token: sessionSnapshot.token,
+  id: sessionSnapshot.id as number | null,
+  username: sessionSnapshot.username,
+})
+
+const sidebarMode = ref<SidebarMode>('worlds')
+const authDialogVisible = ref(!session.token)
+const authMode = ref<'login' | 'register'>('login')
+const authForm = reactive({ email: '', password: '' })
+const authLoading = ref(false)
+
+const loading = reactive({
+  app: false,
+  worlds: false,
+  characters: false,
+  events: false,
+  history: false,
+  sending: false,
+})
+
+const worldTemplates = ref<WorldTemplate[]>([])
+const userWorlds = ref<UserWorld[]>([])
+const selectedWorld = ref<UserWorld | null>(null)
+const selectedWorldDetail = ref<UserWorld | null>(null)
+const characters = ref<UserCharacter[]>([])
+const selectedCharacter = ref<UserCharacter | null>(null)
+const stories = ref<StoryListItem[]>([])
+const activeStory = ref<ActiveStory | null>(null)
+const characterPanelCollapsed = ref(false)
+
+const createWorldDialogVisible = ref(false)
+const createWorldStep = ref(0)
+const createWorldForm = reactive({
+  worldId: undefined as number | undefined,
+  name: '',
+  acitvePushStatus: true,
+  favorSystemStatus: 'NORMAL',
+  eotDetectionStatus: true,
+  thinkStatus: true,
+})
+const createTemplateDialogVisible = ref(false)
+const templateImageUploading = ref(false)
+const createTemplateForm = reactive({
+  name: '',
+  image: '',
+  author: '',
+  background: '',
+  visible: true,
+})
+
+const startStoryDialogVisible = ref(false)
+const storyForm = reactive({
+  title: '',
+  theme: '',
+  currentScene: '',
+  opening: '',
+  characterIds: [] as number[],
+})
+
+const messageInput = ref('')
+const messageList = ref<UiMessage[]>([])
+const messageScroller = ref<HTMLElement | null>(null)
+
+const isLoggedIn = computed(() => Boolean(session.token))
+const hasSelectedWorld = computed(() => Boolean(selectedWorld.value))
+const hasSelectedCharacter = computed(() => Boolean(selectedCharacter.value))
+const selectedWorldId = computed(() => selectedWorld.value?.id)
+const selectedTemplateWorldId = computed(() => selectedWorldDetail.value?.worldId)
+
+const selectedWorldName = computed(() => selectedWorld.value?.name || '未选择世界')
+const selectedCharacterName = computed(() => selectedCharacter.value?.characterName || '未选择角色')
+const createWorldStepIsLast = computed(() => createWorldStep.value === 4)
+const selectedCreateTemplate = computed(() =>
+  worldTemplates.value.find((template) => template.id === createWorldForm.worldId),
+)
+
+const averageFavor = computed(() => {
+  const values = characters.value
+    .map((character) => character.favorValue)
+    .filter((value): value is number => typeof value === 'number')
+  if (values.length === 0) {
+    return 0
+  }
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+})
+
+const activeStoryTitle = computed(() => activeStory.value?.storyEvent?.title || '暂无进行中事件')
+const selectedStoryCharacterIds = computed(() =>
+  new Set(activeStory.value?.characters.map((character) => character.characterId) || []),
+)
+
+watch(
+  () => createWorldForm.thinkStatus,
+  (thinkStatus) => {
+    if (thinkStatus) {
+      createWorldForm.eotDetectionStatus = false
+    }
+  },
+)
+
+function imageStyle(image?: string) {
+  return image ? { backgroundImage: `url(${image})` } : {}
+}
+
+function firstText(text?: string) {
+  return text?.trim().charAt(0) || 'G'
+}
+
+function isWorldActive(world: UserWorld) {
+  return selectedWorld.value?.id === world.id
+}
+
+function isCharacterActive(character: UserCharacter) {
+  return selectedCharacter.value?.characterId === character.characterId
+}
+
+function favorTone(value?: number) {
+  const favor = value ?? 0
+  if (favor >= 80) return 'success'
+  if (favor >= 50) return 'primary'
+  if (favor >= 20) return 'warning'
+  return 'danger'
+}
+
+function formatTime(value?: string) {
+  if (!value) {
+    return ''
+  }
+  return value.replace('T', ' ').slice(0, 16)
+}
+
+function messageRole(history: ChatHistory): UiMessage['role'] {
+  if (history.type === 'thinking') return 'thinking'
+  if (history.type === 'tool') return 'tool'
+  if (history.type?.startsWith('story_')) return 'story'
+  if (history.type === 'ASSISTANT' || history.type === 'assistant') return 'assistant'
+  return 'user'
+}
+
+function toUiMessage(history: ChatHistory): UiMessage {
+  const role = messageRole(history)
+  return {
+    id: `history-${history.id || `${role}-${Math.random()}`}`,
+    role,
+    content: history.content || (role === 'tool' ? '调用了角色记忆与状态工具' : ''),
+    time: formatTime(history.timestamp),
+  }
+}
+
+async function withMessage<T>(task: () => Promise<T>, fallback: string) {
+  try {
+    return await task()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : fallback)
+    throw error
+  }
+}
+
+async function submitAuth() {
+  if (!authForm.email.trim() || !authForm.password.trim()) {
+    ElMessage.warning('请输入邮箱和密码')
+    return
+  }
+
+  authLoading.value = true
+  try {
+    const result =
+      authMode.value === 'login'
+        ? await api.login(authForm.email.trim(), authForm.password)
+        : await api.register(authForm.email.trim(), authForm.password)
+
+    saveSession(result)
+    session.token = result.token
+    session.id = result.id
+    session.username = result.username
+    authDialogVisible.value = false
+    authForm.password = ''
+    ElMessage.success(authMode.value === 'login' ? '登录成功' : '注册成功')
+    await loadAppData()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '登录失败')
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function ensureUser() {
+  if (!session.token) {
+    return false
+  }
+  if (session.id) {
+    return true
+  }
+
+  const user = await api.getUserInfo()
+  session.id = user.id
+  session.username = user.username
+  localStorage.setItem('galchat.userId', String(user.id))
+  localStorage.setItem('galchat.username', user.username)
+  return true
+}
+
+async function loadAppData() {
+  if (!(await ensureUser())) {
+    return
+  }
+
+  loading.app = true
+  try {
+    await Promise.all([loadWorlds(), loadWorldTemplates()])
+  } finally {
+    loading.app = false
+  }
+}
+
+async function loadWorlds() {
+  if (!session.id) return
+  loading.worlds = true
+  try {
+    userWorlds.value = await api.listUserWorlds(session.id)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载已有世界失败')
+  } finally {
+    loading.worlds = false
+  }
+}
+
+async function loadWorldTemplates() {
+  loading.worlds = true
+  try {
+    worldTemplates.value = await api.listWorldTemplates()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载世界模板失败')
+  } finally {
+    loading.worlds = false
+  }
+}
+
+async function refreshCurrentWorld() {
+  if (!selectedWorld.value) {
+    await loadAppData()
+    return
+  }
+  await selectWorld(selectedWorld.value)
+}
+
+async function selectWorld(world: UserWorld) {
+  selectedWorld.value = world
+  selectedCharacter.value = null
+  messageList.value = []
+  sidebarMode.value = 'characters'
+  characterPanelCollapsed.value = false
+
+  await withMessage(async () => {
+    const [detail] = await Promise.all([
+      api.getUserWorld(world.id),
+      loadCharacters(world.id),
+      loadWorldEvents(world.id),
+    ])
+    selectedWorldDetail.value = detail
+  }, '加载世界失败')
+}
+
+async function loadCharacters(userWorldId: number) {
+  loading.characters = true
+  try {
+    characters.value = await api.listCharacters(userWorldId)
+  } finally {
+    loading.characters = false
+  }
+}
+
+async function loadWorldEvents(userWorldId: number) {
+  loading.events = true
+  try {
+    const [storyList, active] = await Promise.all([
+      api.listStories(userWorldId),
+      api.getActiveStory(userWorldId),
+    ])
+    stories.value = storyList
+    activeStory.value = active
+  } finally {
+    loading.events = false
+  }
+}
+
+async function selectCharacter(character: UserCharacter) {
+  selectedCharacter.value = character
+  characterPanelCollapsed.value = false
+  await loadHistory()
+}
+
+async function loadHistory() {
+  if (!selectedWorldId.value || !selectedCharacter.value) {
+    return
+  }
+
+  loading.history = true
+  try {
+    const history = await api.listHistory(selectedWorldId.value, selectedCharacter.value.characterId)
+    messageList.value = history.map(toUiMessage)
+    await scrollToBottom()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载聊天历史失败')
+  } finally {
+    loading.history = false
+  }
+}
+
+function openCreateWorld(template?: WorldTemplate) {
+  createWorldForm.worldId = template?.id
+  createWorldForm.name = template?.name || ''
+  createWorldForm.acitvePushStatus = true
+  createWorldForm.favorSystemStatus = 'NORMAL'
+  createWorldForm.thinkStatus = true
+  createWorldForm.eotDetectionStatus = false
+  createWorldStep.value = 0
+  createWorldDialogVisible.value = true
+}
+
+function openCreateTemplate() {
+  createTemplateForm.name = ''
+  createTemplateForm.image = ''
+  createTemplateForm.author = session.username || ''
+  createTemplateForm.background = ''
+  createTemplateForm.visible = true
+  createTemplateDialogVisible.value = true
+}
+
+async function handleTemplateImageChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) {
+    return
+  }
+
+  templateImageUploading.value = true
+  try {
+    createTemplateForm.image = await uploadImage(file)
+    ElMessage.success('图片已上传')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '图片上传失败')
+  } finally {
+    templateImageUploading.value = false
+  }
+}
+
+async function submitCreateTemplate() {
+  if (!createTemplateForm.name.trim() || !createTemplateForm.background.trim()) {
+    ElMessage.warning('请填写模板名称和世界背景')
+    return
+  }
+
+  await withMessage(async () => {
+    await api.createWorldTemplate({
+      name: createTemplateForm.name.trim(),
+      image: createTemplateForm.image.trim(),
+      author: createTemplateForm.author.trim(),
+      background: createTemplateForm.background.trim(),
+      visible: createTemplateForm.visible,
+    })
+    await loadWorldTemplates()
+    const createdTemplate = worldTemplates.value.find(
+      (template) =>
+        template.name === createTemplateForm.name.trim() &&
+        (!createTemplateForm.image || template.image === createTemplateForm.image.trim()),
+    )
+    createWorldForm.worldId = createdTemplate?.id
+    createWorldForm.name = createTemplateForm.name.trim()
+    createTemplateDialogVisible.value = false
+    ElMessage.success(createdTemplate ? '模板已创建并选中' : '模板已创建，请在列表中选择')
+  }, '创建模板失败')
+}
+
+function canProceedCreateWorldStep() {
+  if (createWorldStep.value === 0) {
+    if (!createWorldForm.worldId) {
+      ElMessage.warning('请先选择世界模板')
+      return false
+    }
+    return true
+  }
+  return true
+}
+
+function nextCreateWorldStep() {
+  if (!canProceedCreateWorldStep()) {
+    return
+  }
+  createWorldStep.value = Math.min(4, createWorldStep.value + 1)
+}
+
+function previousCreateWorldStep() {
+  createWorldStep.value = Math.max(0, createWorldStep.value - 1)
+}
+
+async function submitCreateWorld() {
+  if (!createWorldForm.worldId) {
+    ElMessage.warning('请选择一个世界模板')
+    return
+  }
+
+  await withMessage(async () => {
+    const thinkStatus = createWorldForm.thinkStatus
+    await api.createUserWorld({
+      worldId: createWorldForm.worldId as number,
+      name: createWorldForm.name.trim(),
+      acitvePushStatus: createWorldForm.acitvePushStatus,
+      favorSystemStatus: createWorldForm.favorSystemStatus,
+      eotDetectionStatus: thinkStatus ? false : createWorldForm.eotDetectionStatus,
+      thinkStatus,
+    })
+    createWorldDialogVisible.value = false
+    ElMessage.success('世界已创建')
+    await loadWorlds()
+  }, '创建世界失败')
+}
+
+function openStartStory() {
+  storyForm.title = ''
+  storyForm.theme = ''
+  storyForm.currentScene = ''
+  storyForm.opening = ''
+  storyForm.characterIds = selectedCharacter.value
+    ? [selectedCharacter.value.characterId]
+    : characters.value.slice(0, 2).map((character) => character.characterId)
+  startStoryDialogVisible.value = true
+}
+
+async function submitStartStory() {
+  if (!selectedWorldId.value) return
+  if (!storyForm.title.trim() || !storyForm.currentScene.trim()) {
+    ElMessage.warning('请填写事件标题和当前场景')
+    return
+  }
+  if (storyForm.characterIds.length === 0) {
+    ElMessage.warning('至少选择一个参与角色')
+    return
+  }
+
+  await withMessage(async () => {
+    await api.startStory({
+      userWorldId: selectedWorldId.value as number,
+      title: storyForm.title.trim(),
+      theme: storyForm.theme.trim(),
+      currentScene: storyForm.currentScene.trim(),
+      opening: storyForm.opening.trim(),
+      characterIds: storyForm.characterIds,
+    })
+    startStoryDialogVisible.value = false
+    ElMessage.success('新事件已开启')
+    await loadWorldEvents(selectedWorldId.value as number)
+  }, '开启事件失败')
+}
+
+async function sendMessage() {
+  const content = messageInput.value.trim()
+  const worldId = selectedTemplateWorldId.value
+  const userWorldId = selectedWorldId.value
+  const characterId = selectedCharacter.value?.characterId
+
+  if (!content || !worldId || !userWorldId || !characterId) {
+    return
+  }
+
+  const assistantMessage: UiMessage = {
+    id: `assistant-${Date.now()}`,
+    role: 'assistant',
+    content: '',
+  }
+
+  messageList.value.push({
+    id: `user-${Date.now()}`,
+    role: 'user',
+    content,
+    time: '刚刚',
+  })
+  messageList.value.push(assistantMessage)
+  messageInput.value = ''
+  loading.sending = true
+  await scrollToBottom()
+
+  try {
+    await streamChat(
+      {
+        type: 'chat',
+        worldId,
+        userWorldId,
+        characterId,
+        message: content,
+      },
+      (chunk) => {
+        if (chunk.type === 'thinking') {
+          messageList.value.push({
+            id: `thinking-${Date.now()}-${Math.random()}`,
+            role: 'thinking',
+            content: chunk.content || '正在整理记忆',
+          })
+          void scrollToBottom()
+          return
+        }
+
+        if (chunk.type === 'tool') {
+          messageList.value.push({
+            id: `tool-${Date.now()}-${Math.random()}`,
+            role: 'tool',
+            content: '调用了记忆检索或好感度工具',
+          })
+          void scrollToBottom()
+          return
+        }
+
+        assistantMessage.content += chunk.content || ''
+        void scrollToBottom()
+      },
+    )
+
+    if (!assistantMessage.content.trim()) {
+      assistantMessage.content = '暂时没有收到角色回复。'
+    }
+    await Promise.all([loadCharacters(userWorldId), loadWorldEvents(userWorldId)])
+  } catch (error) {
+    assistantMessage.content = '发送失败，请稍后再试。'
+    ElMessage.error(error instanceof Error ? error.message : '发送失败')
+  } finally {
+    loading.sending = false
+    await scrollToBottom()
+  }
+}
+
+async function scrollToBottom() {
+  await nextTick()
+  if (messageScroller.value) {
+    messageScroller.value.scrollTop = messageScroller.value.scrollHeight
+  }
+}
+
+function resetSelection() {
+  selectedWorld.value = null
+  selectedWorldDetail.value = null
+  selectedCharacter.value = null
+  characters.value = []
+  stories.value = []
+  activeStory.value = null
+  messageList.value = []
+  sidebarMode.value = 'worlds'
+}
+
+function logout() {
+  clearSession()
+  session.token = ''
+  session.id = null
+  session.username = ''
+  resetSelection()
+  authMode.value = 'login'
+  authDialogVisible.value = true
+}
+
+onMounted(() => {
+  if (isLoggedIn.value) {
+    void loadAppData()
+  }
+})
 </script>
 
 <template>
-  <header>
-    <img alt="Vue logo" class="logo" src="./assets/logo.svg" width="125" height="125" />
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">G</div>
+        <div>
+          <h1>GalChat</h1>
+          <p>角色世界会话台</p>
+        </div>
+      </div>
 
-    <div class="wrapper">
-      <HelloWorld msg="You did it!" />
-    </div>
-  </header>
+      <el-radio-group v-model="sidebarMode" class="mode-switch" size="large">
+        <el-radio-button value="worlds">
+          <el-icon><Compass /></el-icon>
+          世界
+        </el-radio-button>
+        <el-radio-button value="characters" :disabled="!hasSelectedWorld">
+          <el-icon><User /></el-icon>
+          角色
+        </el-radio-button>
+      </el-radio-group>
 
-  <main>
-    <TheWelcome />
-  </main>
+      <div class="sidebar-scroll">
+        <template v-if="sidebarMode === 'worlds'">
+          <div class="sidebar-title">
+            <span>已有世界</span>
+            <el-button :icon="Refresh" text circle @click="loadWorlds" />
+          </div>
+
+          <button
+            v-for="world in userWorlds"
+            :key="world.id"
+            class="nav-item"
+            :class="{ active: isWorldActive(world) }"
+            @click="selectWorld(world)"
+          >
+            <span class="avatar" :style="imageStyle(world.image)">
+              <span v-if="!world.image">{{ firstText(world.name) }}</span>
+            </span>
+            <span class="nav-copy">
+              <strong>{{ world.name }}</strong>
+              <small>进入角色选择</small>
+            </span>
+          </button>
+
+          <el-empty
+            v-if="!loading.worlds && userWorlds.length === 0"
+            description="还没有创建世界"
+            :image-size="72"
+          />
+        </template>
+
+        <template v-else>
+          <button class="back-row" @click="sidebarMode = 'worlds'">
+            <el-icon><ArrowLeft /></el-icon>
+            {{ selectedWorldName }}
+          </button>
+
+          <div class="sidebar-title">
+            <span>选择角色</span>
+            <el-button :icon="Refresh" text circle @click="refreshCurrentWorld" />
+          </div>
+
+          <button
+            v-for="character in characters"
+            :key="character.characterId"
+            class="nav-item character-nav"
+            :class="{ active: isCharacterActive(character) }"
+            @click="selectCharacter(character)"
+          >
+            <span class="avatar" :style="imageStyle(character.characterImage)">
+              <span v-if="!character.characterImage">{{ firstText(character.characterName) }}</span>
+            </span>
+            <span class="nav-copy">
+              <strong>{{ character.characterName }}</strong>
+              <small>{{ character.lastChatContent || '尚未开始对话' }}</small>
+            </span>
+            <el-tag :type="favorTone(character.favorValue)" size="small" round>
+              {{ character.favorValue ?? 0 }}
+            </el-tag>
+          </button>
+
+          <el-empty
+            v-if="!loading.characters && characters.length === 0"
+            description="该世界还没有角色"
+            :image-size="72"
+          />
+        </template>
+      </div>
+
+      <div class="user-dock">
+        <button v-if="isLoggedIn" class="user-card">
+          <span class="avatar user-avatar">{{ firstText(session.username) }}</span>
+          <span>
+            <strong>{{ session.username || '已登录用户' }}</strong>
+            <small>账号设置</small>
+          </span>
+        </button>
+        <el-button v-else type="primary" class="login-button" @click="authDialogVisible = true">
+          登录 / 注册
+        </el-button>
+        <el-dropdown v-if="isLoggedIn" trigger="click">
+          <el-button :icon="Setting" circle />
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item @click="authDialogVisible = true">切换账号</el-dropdown-item>
+              <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
+    </aside>
+
+    <main class="workspace" v-loading="loading.app">
+      <header class="workspace-header">
+        <div>
+          <p class="eyebrow">
+            <span v-if="!hasSelectedWorld">世界入口</span>
+            <span v-else-if="!hasSelectedCharacter">世界概览</span>
+            <span v-else>实时聊天</span>
+          </p>
+          <h2>
+            <span v-if="!hasSelectedWorld">选择或创建一个世界</span>
+            <span v-else-if="!hasSelectedCharacter">{{ selectedWorldName }}</span>
+            <span v-else>{{ selectedCharacterName }}</span>
+          </h2>
+        </div>
+
+        <div class="header-actions">
+          <el-tag v-if="hasSelectedWorld" effect="plain" round>
+            <el-icon><House /></el-icon>
+            {{ selectedWorldName }}
+          </el-tag>
+          <el-button v-if="hasSelectedWorld" :icon="Plus" @click="openStartStory">
+            开启新事件
+          </el-button>
+          <el-button :icon="Refresh" circle @click="refreshCurrentWorld" />
+        </div>
+      </header>
+
+      <section v-if="!hasSelectedWorld" class="world-stage">
+        <div class="section-panel">
+          <div class="section-heading">
+            <div>
+              <h3>已有世界</h3>
+              <p>继续你的世界、角色关系和剧情进度。</p>
+            </div>
+            <el-button :icon="Plus" type="primary" @click="openCreateWorld()">创建世界</el-button>
+          </div>
+
+          <div class="world-grid">
+            <button
+              v-for="world in userWorlds"
+              :key="world.id"
+              class="world-card"
+              @click="selectWorld(world)"
+            >
+              <span class="world-cover" :style="imageStyle(world.image)">
+                <span v-if="!world.image">{{ firstText(world.name) }}</span>
+              </span>
+              <span>
+                <strong>{{ world.name }}</strong>
+                <small>选择后进入角色列表</small>
+              </span>
+              <el-icon><ArrowRight /></el-icon>
+            </button>
+          </div>
+
+          <el-empty
+            v-if="!loading.worlds && userWorlds.length === 0"
+            description="你还没有自己的世界"
+          />
+        </div>
+
+        <div class="section-panel">
+          <div class="section-heading">
+            <div>
+              <h3>可创建世界</h3>
+              <p>从后端世界模板创建用户世界。</p>
+            </div>
+          </div>
+
+          <div class="template-list">
+            <article v-for="template in worldTemplates" :key="template.id" class="template-row">
+              <span class="avatar large" :style="imageStyle(template.image)">
+                <span v-if="!template.image">{{ firstText(template.name) }}</span>
+              </span>
+              <div>
+                <h4>{{ template.name }}</h4>
+                <p>{{ template.background || '暂无背景简介，创建后可在后端补充世界详情。' }}</p>
+              </div>
+              <el-button type="primary" plain @click="openCreateWorld(template)">
+                创建
+              </el-button>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section v-else-if="!hasSelectedCharacter" class="overview-stage">
+        <div class="metric-strip">
+          <article>
+            <span>角色数</span>
+            <strong>{{ characters.length }}</strong>
+          </article>
+          <article>
+            <span>平均好感</span>
+            <strong>{{ averageFavor }}</strong>
+          </article>
+          <article>
+            <span>故事事件</span>
+            <strong>{{ stories.length }}</strong>
+          </article>
+          <article>
+            <span>进行中</span>
+            <strong>{{ activeStory ? 1 : 0 }}</strong>
+          </article>
+        </div>
+
+        <div class="overview-grid">
+          <div class="section-panel">
+            <div class="section-heading">
+              <div>
+                <h3>角色好感度概况</h3>
+                <p>选择右侧角色后进入聊天主窗口。</p>
+              </div>
+            </div>
+
+            <div class="favor-list">
+              <button
+                v-for="character in characters"
+                :key="character.characterId"
+                class="favor-row"
+                @click="selectCharacter(character)"
+              >
+                <span class="avatar" :style="imageStyle(character.characterImage)">
+                  <span v-if="!character.characterImage">{{ firstText(character.characterName) }}</span>
+                </span>
+                <span class="favor-copy">
+                  <strong>{{ character.characterName }}</strong>
+                  <el-progress
+                    :percentage="Math.max(0, Math.min(100, character.favorValue ?? 0))"
+                    :stroke-width="8"
+                    :show-text="false"
+                  />
+                </span>
+                <span class="favor-number">{{ character.favorValue ?? 0 }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="section-panel">
+            <div class="section-heading">
+              <div>
+                <h3>事件总览</h3>
+                <p>{{ activeStoryTitle }}</p>
+              </div>
+              <el-button :icon="Plus" type="primary" @click="openStartStory">开启新事件</el-button>
+            </div>
+
+            <article v-if="activeStory" class="active-story">
+              <el-tag type="success" effect="dark" round>进行中</el-tag>
+              <h4>{{ activeStory.storyEvent.title }}</h4>
+              <p>{{ activeStory.storyEvent.currentScene || activeStory.storyEvent.opening }}</p>
+              <div class="story-characters">
+                <el-tag
+                  v-for="character in characters.filter((item) => selectedStoryCharacterIds.has(item.characterId))"
+                  :key="character.characterId"
+                  round
+                >
+                  {{ character.characterName }}
+                </el-tag>
+              </div>
+            </article>
+
+            <div class="story-list">
+              <button v-for="story in stories" :key="story.id" class="story-row">
+                <span>{{ story.title }}</span>
+                <el-icon><ArrowRight /></el-icon>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-else class="chat-stage">
+        <div class="chat-window">
+          <div ref="messageScroller" class="messages" v-loading="loading.history">
+            <div v-if="messageList.length === 0" class="empty-chat">
+              <el-icon><ChatDotRound /></el-icon>
+              <h3>和 {{ selectedCharacterName }} 开始对话</h3>
+              <p>角色会结合世界背景、历史记忆、剧情事件和好感度回应。</p>
+            </div>
+
+            <article
+              v-for="message in messageList"
+              :key="message.id"
+              class="message"
+              :class="message.role"
+            >
+              <div class="message-bubble">
+                <p>{{ message.content }}</p>
+                <small v-if="message.time">{{ message.time }}</small>
+              </div>
+            </article>
+          </div>
+
+          <div class="composer">
+            <el-input
+              v-model="messageInput"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 4 }"
+              resize="none"
+              placeholder="输入给角色的消息"
+              @keydown.enter.exact.prevent="sendMessage"
+            />
+            <el-button type="primary" :loading="loading.sending" @click="sendMessage">
+              发送
+            </el-button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside
+      v-if="hasSelectedCharacter"
+      class="character-panel"
+      :class="{ collapsed: characterPanelCollapsed }"
+    >
+      <button class="collapse-button" @click="characterPanelCollapsed = !characterPanelCollapsed">
+        <el-icon>
+          <ArrowRight v-if="!characterPanelCollapsed" />
+          <ArrowLeft v-else />
+        </el-icon>
+      </button>
+
+      <template v-if="!characterPanelCollapsed && selectedCharacter">
+        <span class="avatar portrait" :style="imageStyle(selectedCharacter.characterImage)">
+          <span v-if="!selectedCharacter.characterImage">
+            {{ firstText(selectedCharacter.characterName) }}
+          </span>
+        </span>
+        <h3>{{ selectedCharacter.characterName }}</h3>
+        <p class="panel-muted">{{ selectedWorldName }}</p>
+
+        <div class="panel-stat">
+          <span>好感度</span>
+          <strong>{{ selectedCharacter.favorValue ?? 0 }}</strong>
+        </div>
+        <el-progress
+          :percentage="Math.max(0, Math.min(100, selectedCharacter.favorValue ?? 0))"
+          :stroke-width="10"
+        />
+
+        <div class="info-block">
+          <h4>最近对话</h4>
+          <p>{{ selectedCharacter.lastChatContent || '暂无最近对话' }}</p>
+          <small>{{ formatTime(selectedCharacter.lastChatTime) }}</small>
+        </div>
+
+        <div class="info-block">
+          <h4>当前事件</h4>
+          <p>{{ activeStory?.storyEvent.title || '暂无进行中的事件' }}</p>
+          <small>{{ activeStory?.storyEvent.currentScene }}</small>
+        </div>
+      </template>
+    </aside>
+
+    <el-dialog v-model="authDialogVisible" width="420px" :close-on-click-modal="false">
+      <template #header>
+        <div class="dialog-title">
+          <h3>{{ authMode === 'login' ? '登录 GalChat' : '注册 GalChat' }}</h3>
+          <p>登录后即可读取你的世界、角色和聊天历史。</p>
+        </div>
+      </template>
+
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="邮箱">
+          <el-input
+            v-model="authForm.email"
+            autocomplete="email"
+            inputmode="email"
+            placeholder="请输入邮箱"
+          />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input
+            v-model="authForm.password"
+            type="password"
+            autocomplete="current-password"
+            show-password
+            @keydown.enter="submitAuth"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="authMode = authMode === 'login' ? 'register' : 'login'">
+          {{ authMode === 'login' ? '去注册' : '去登录' }}
+        </el-button>
+        <el-button type="primary" :loading="authLoading" @click="submitAuth">
+          {{ authMode === 'login' ? '登录' : '注册' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="createWorldDialogVisible" title="创建世界" width="620px">
+      <el-steps :active="createWorldStep" finish-status="success" simple class="create-steps">
+        <el-step title="模板" />
+        <el-step title="好感" />
+        <el-step title="主动" />
+        <el-step title="思考" />
+        <el-step title="输入" />
+      </el-steps>
+
+      <el-form label-position="top" class="create-world-form">
+        <section v-if="createWorldStep === 0" class="create-step-panel">
+          <el-form-item label="世界模板">
+            <el-select v-model="createWorldForm.worldId" filterable placeholder="选择模板">
+              <el-option
+                v-for="template in worldTemplates"
+                :key="template.id"
+                :label="template.name"
+                :value="template.id"
+              />
+            </el-select>
+            <p class="field-help">
+              世界模板提供世界背景、封面和默认角色来源；创建世界时会记录所选模板 ID，并用于后续聊天上下文构建。
+            </p>
+          </el-form-item>
+
+          <el-button class="create-template-button" plain :icon="Plus" @click="openCreateTemplate">
+            创建新的模板
+          </el-button>
+
+          <el-form-item label="世界名称">
+            <el-input v-model="createWorldForm.name" placeholder="留空则使用模板名称" />
+            <p class="field-help">
+              名称只用于你的世界列表展示，不会改变原始模板内容。
+            </p>
+          </el-form-item>
+
+          <div v-if="selectedCreateTemplate" class="selected-template">
+            <span class="avatar large" :style="imageStyle(selectedCreateTemplate.image)">
+              <span v-if="!selectedCreateTemplate.image">
+                {{ firstText(selectedCreateTemplate.name) }}
+              </span>
+            </span>
+            <div>
+              <strong>{{ selectedCreateTemplate.name }}</strong>
+              <p>{{ selectedCreateTemplate.background || '暂无背景简介' }}</p>
+            </div>
+          </div>
+        </section>
+
+        <section v-else-if="createWorldStep === 1" class="create-step-panel">
+          <el-form-item label="好感度提升难度">
+            <el-radio-group v-model="createWorldForm.favorSystemStatus" class="option-stack">
+              <el-radio value="EASY" border>
+                简单
+                <span>面对陌生人，人们总是倾向于信任，而非怀疑。角色更容易被善意、陪伴和选择打动。</span>
+              </el-radio>
+              <el-radio value="NORMAL" border>
+                标准
+                <span>关系会随着稳定互动自然推进。好感变化克制但可感知，适合大多数日常和剧情向世界。</span>
+              </el-radio>
+              <el-radio value="HARD" border>
+                困难
+                <span>信任需要更长时间建立。角色会更看重持续行动、关键承诺和明确选择。</span>
+              </el-radio>
+            </el-radio-group>
+            <p class="field-help">
+              难度只影响角色关系系统中的好感变化速度，不会改变聊天原文。
+            </p>
+          </el-form-item>
+        </section>
+
+        <section v-else-if="createWorldStep === 2" class="create-step-panel">
+          <el-form-item label="主动聊天功能">
+            <el-switch v-model="createWorldForm.acitvePushStatus" active-text="开启" inactive-text="关闭" />
+            <p class="field-help">
+              开启后，系统可根据聊天中提及的事件触发后续主动关怀；主动聊天会记录聊天提及事件，仅用于主动聊天功能。
+            </p>
+          </el-form-item>
+        </section>
+
+        <section v-else-if="createWorldStep === 3" class="create-step-panel">
+          <el-form-item label="思考模式">
+            <el-switch v-model="createWorldForm.thinkStatus" active-text="开启" inactive-text="关闭" />
+            <p class="field-help">
+              开启后会以流式方式展示思考与回复过程；此模式不支持多条对话合并，优化输入会自动关闭。
+            </p>
+          </el-form-item>
+        </section>
+
+        <section v-else class="create-step-panel">
+          <el-form-item label="优化输入">
+            <el-switch
+              v-model="createWorldForm.eotDetectionStatus"
+              :disabled="createWorldForm.thinkStatus"
+              active-text="开启"
+              inactive-text="关闭"
+            />
+            <p class="field-help">
+              开启后会判断用户输入是否完成，能更快得到响应，但可能出现“抢答”的情况；如果开启思考模式，该字段会固定为 false。
+            </p>
+          </el-form-item>
+        </section>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="createWorldDialogVisible = false">取消</el-button>
+        <el-button :disabled="createWorldStep === 0" @click="previousCreateWorldStep">上一步</el-button>
+        <el-button v-if="!createWorldStepIsLast" type="primary" @click="nextCreateWorldStep">
+          下一步
+        </el-button>
+        <el-button v-else type="primary" @click="submitCreateWorld">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="createTemplateDialogVisible" title="创建新的世界模板" width="760px">
+      <el-form label-position="top" class="template-form">
+        <div class="template-form-grid">
+          <el-form-item label="模板名称">
+            <el-input v-model="createTemplateForm.name" placeholder="例如：雾港学院" />
+            <p class="field-help">
+              模板名称会出现在可创建世界列表中，并作为模板基础信息保存。
+            </p>
+          </el-form-item>
+
+          <el-form-item label="作者">
+            <el-input v-model="createTemplateForm.author" placeholder="留空也可以创建" />
+            <p class="field-help">
+              作者用于标记模板来源，该信息会随模板一同保存。
+            </p>
+          </el-form-item>
+        </div>
+
+        <el-form-item label="封面图片">
+          <div class="upload-row">
+            <el-input v-model="createTemplateForm.image" placeholder="上传后自动回填图片 URL" />
+            <label class="upload-button">
+              <input type="file" accept="image/*" @change="handleTemplateImageChange" />
+              <span>{{ templateImageUploading ? '上传中' : '上传图片' }}</span>
+            </label>
+          </div>
+          <p class="field-help">
+            图片会通过后端上传接口保存，并将返回 URL 写入模板；图片 URL 会用于世界与模板展示。
+          </p>
+        </el-form-item>
+
+        <el-form-item label="世界背景">
+          <el-input
+            v-model="createTemplateForm.background"
+            type="textarea"
+            :autosize="{ minRows: 5, maxRows: 8 }"
+            placeholder="描述世界观、时代背景、核心冲突和关键规则"
+          />
+          <p class="field-help">
+            世界背景会进入角色聊天上下文，请不要写入不希望角色长期参考的隐私信息。
+          </p>
+        </el-form-item>
+
+        <el-form-item label="可见性">
+          <el-switch v-model="createTemplateForm.visible" active-text="公开" inactive-text="私有" />
+          <p class="field-help">
+            公开模板可在模板列表中被看见，私有模板仅用于当前用户可访问范围。角色模板会在世界创建完成后添加，并由系统自动绑定到对应世界模板。
+          </p>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="createTemplateDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="templateImageUploading" @click="submitCreateTemplate">
+          创建模板
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="startStoryDialogVisible" title="开启新事件" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="事件标题">
+          <el-input v-model="storyForm.title" placeholder="例如：雨夜旧约" />
+        </el-form-item>
+        <el-form-item label="主题">
+          <el-input v-model="storyForm.theme" placeholder="事件的情绪或目标" />
+        </el-form-item>
+        <el-form-item label="当前场景">
+          <el-input
+            v-model="storyForm.currentScene"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            placeholder="角色正在面对的地点、状态和冲突"
+          />
+        </el-form-item>
+        <el-form-item label="开场描述">
+          <el-input
+            v-model="storyForm.opening"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            placeholder="可选，留空时后端会生成开场"
+          />
+        </el-form-item>
+        <el-form-item label="参与角色">
+          <el-select
+            v-model="storyForm.characterIds"
+            multiple
+            placeholder="选择参与事件的角色"
+          >
+            <el-option
+              v-for="character in characters"
+              :key="character.characterId"
+              :label="character.characterName"
+              :value="character.characterId"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="startStoryDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitStartStory">开启事件</el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <style scoped>
-header {
-  line-height: 1.5;
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 284px minmax(0, 1fr) auto;
+  background:
+    linear-gradient(135deg, rgba(24, 91, 116, 0.08), transparent 34%),
+    linear-gradient(315deg, rgba(189, 74, 94, 0.08), transparent 36%),
+    #f5f7fb;
+  color: #202734;
 }
 
-.logo {
+.sidebar {
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 16px;
+  border-right: 1px solid rgba(42, 52, 71, 0.1);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(18px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 800;
+  background: linear-gradient(135deg, #285c74, #c6576a);
+}
+
+.brand h1,
+.brand p,
+.workspace-header h2,
+.workspace-header p,
+.section-heading h3,
+.section-heading p {
+  margin: 0;
+}
+
+.brand h1 {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.brand p,
+.sidebar-title,
+.nav-copy small,
+.panel-muted,
+.section-heading p,
+.world-card small,
+.template-row p,
+.dialog-title p {
+  color: #697386;
+}
+
+.mode-switch {
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.mode-switch :deep(.el-radio-button) {
+  flex: 1;
+}
+
+.mode-switch :deep(.el-radio-button__inner) {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.sidebar-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.sidebar-title,
+.section-heading,
+.header-actions,
+.user-dock,
+.back-row,
+.story-row,
+.favor-row,
+.world-card,
+.template-row {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-title {
+  justify-content: space-between;
+  font-size: 13px;
+  margin: 8px 4px 10px;
+}
+
+.nav-item,
+.back-row {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.nav-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  text-align: left;
+  margin-bottom: 6px;
+}
+
+.nav-item:hover,
+.nav-item.active,
+.back-row:hover {
+  background: #edf4f6;
+}
+
+.nav-item.active {
+  outline: 1px solid rgba(40, 92, 116, 0.28);
+}
+
+.character-nav .nav-copy small {
   display: block;
-  margin: 0 auto 2rem;
+  max-width: 126px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@media (min-width: 1024px) {
-  header {
-    display: flex;
-    place-items: center;
-    padding-right: calc(var(--section-gap) / 2);
+.nav-copy {
+  min-width: 0;
+}
+
+.nav-copy strong {
+  display: block;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(135deg, rgba(40, 92, 116, 0.22), rgba(198, 87, 106, 0.2)),
+    #e7edf2;
+  background-size: cover;
+  background-position: center;
+  color: #285c74;
+  font-weight: 800;
+}
+
+.avatar.large {
+  width: 52px;
+  height: 52px;
+}
+
+.avatar.portrait {
+  width: 88px;
+  height: 88px;
+  margin: 6px auto 14px;
+  font-size: 28px;
+}
+
+.user-avatar {
+  width: 34px;
+  height: 34px;
+}
+
+.back-row {
+  gap: 8px;
+  padding: 10px;
+  text-align: left;
+  font-weight: 700;
+}
+
+.user-dock {
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(42, 52, 71, 0.08);
+}
+
+.user-card {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: #f3f6f8;
+  text-align: left;
+}
+
+.user-card strong,
+.user-card small {
+  display: block;
+}
+
+.user-card strong {
+  font-weight: 700;
+}
+
+.user-card small {
+  color: #7a8494;
+}
+
+.login-button {
+  flex: 1;
+}
+
+.workspace {
+  min-width: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  overflow: hidden;
+}
+
+.workspace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.eyebrow {
+  color: #c6576a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workspace-header h2 {
+  margin-top: 2px;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.header-actions {
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.world-stage,
+.overview-stage,
+.chat-stage {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.world-stage,
+.overview-stage {
+  display: grid;
+  gap: 18px;
+}
+
+.section-panel {
+  border: 1px solid rgba(42, 52, 71, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.84);
+  padding: 18px;
+  box-shadow: 0 18px 45px rgba(33, 43, 54, 0.06);
+}
+
+.section-heading {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.section-heading h3 {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.world-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.world-card,
+.template-row,
+.favor-row,
+.story-row {
+  width: 100%;
+  border: 1px solid rgba(42, 52, 71, 0.1);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.world-card {
+  min-height: 94px;
+  gap: 12px;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.world-card:hover,
+.template-row:hover,
+.favor-row:hover,
+.story-row:hover {
+  border-color: rgba(40, 92, 116, 0.34);
+  box-shadow: 0 12px 28px rgba(33, 43, 54, 0.08);
+}
+
+.world-cover {
+  width: 70px;
+  height: 70px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(40, 92, 116, 0.18), rgba(198, 87, 106, 0.22)),
+    #e7edf2;
+  background-size: cover;
+  background-position: center;
+  font-size: 22px;
+  font-weight: 800;
+  color: #285c74;
+}
+
+.world-card strong,
+.world-card small {
+  display: block;
+}
+
+.world-card strong,
+.template-row h4 {
+  font-weight: 800;
+}
+
+.world-card .el-icon {
+  margin-left: auto;
+}
+
+.template-list {
+  display: grid;
+  gap: 10px;
+}
+
+.template-row {
+  gap: 14px;
+  padding: 14px;
+}
+
+.template-row div {
+  min-width: 0;
+  flex: 1;
+}
+
+.template-row h4,
+.template-row p {
+  margin: 0;
+}
+
+.template-row p {
+  margin-top: 4px;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-strip article {
+  border: 1px solid rgba(42, 52, 71, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  padding: 16px;
+}
+
+.metric-strip span,
+.panel-stat span {
+  display: block;
+  color: #697386;
+  font-size: 13px;
+}
+
+.metric-strip strong,
+.panel-stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: 18px;
+}
+
+.favor-list {
+  display: grid;
+  gap: 10px;
+}
+
+.favor-row {
+  gap: 12px;
+  padding: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.favor-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.favor-copy strong {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 800;
+}
+
+.favor-number {
+  font-weight: 800;
+  color: #285c74;
+}
+
+.active-story {
+  padding: 16px;
+  border-radius: 8px;
+  background: #f0f7f3;
+}
+
+.active-story h4,
+.active-story p {
+  margin: 10px 0 0;
+}
+
+.active-story h4 {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.active-story p {
+  color: #4d5968;
+}
+
+.story-characters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.story-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.story-row {
+  justify-content: space-between;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.chat-stage {
+  display: flex;
+}
+
+.chat-window {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  border: 1px solid rgba(42, 52, 71, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  overflow: hidden;
+}
+
+.messages {
+  min-height: 0;
+  overflow: auto;
+  padding: 22px;
+}
+
+.empty-chat {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  color: #697386;
+  text-align: center;
+}
+
+.empty-chat .el-icon {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #edf4f6;
+  color: #285c74;
+  font-size: 28px;
+}
+
+.empty-chat h3,
+.empty-chat p {
+  margin: 0;
+}
+
+.empty-chat h3 {
+  color: #202734;
+  font-weight: 800;
+}
+
+.empty-chat p {
+  margin-top: 6px;
+}
+
+.message {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.message.user {
+  justify-content: flex-end;
+}
+
+.message-bubble {
+  max-width: min(680px, 76%);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid rgba(42, 52, 71, 0.1);
+}
+
+.message.user .message-bubble {
+  color: #fff;
+  background: #285c74;
+  border-color: #285c74;
+}
+
+.message.thinking .message-bubble,
+.message.tool .message-bubble,
+.message.story .message-bubble {
+  max-width: 560px;
+  color: #586273;
+  background: #f5f7f9;
+  font-size: 13px;
+}
+
+.message-bubble p,
+.message-bubble small {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.message-bubble small {
+  display: block;
+  margin-top: 6px;
+  opacity: 0.7;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 14px;
+  border-top: 1px solid rgba(42, 52, 71, 0.1);
+  background: #fff;
+}
+
+.character-panel {
+  width: 292px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  padding: 22px 18px;
+  border-left: 1px solid rgba(42, 52, 71, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+  transition: width 0.2s ease;
+}
+
+.character-panel.collapsed {
+  width: 54px;
+  padding: 18px 8px;
+}
+
+.collapse-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(42, 52, 71, 0.12);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  background: #fff;
+  cursor: pointer;
+}
+
+.character-panel h3,
+.panel-muted {
+  margin: 0;
+  text-align: center;
+}
+
+.character-panel h3 {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.panel-stat {
+  margin: 22px 0 8px;
+}
+
+.info-block {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(42, 52, 71, 0.1);
+}
+
+.info-block h4,
+.info-block p,
+.info-block small {
+  margin: 0;
+}
+
+.info-block h4 {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.info-block p {
+  margin-top: 8px;
+  color: #3f4958;
+}
+
+.info-block small {
+  display: block;
+  margin-top: 6px;
+  color: #7a8494;
+}
+
+.dialog-title h3,
+.dialog-title p {
+  margin: 0;
+}
+
+.dialog-title h3 {
+  font-weight: 800;
+}
+
+.dialog-title p {
+  margin-top: 4px;
+}
+
+.create-steps {
+  margin-bottom: 18px;
+}
+
+.create-world-form,
+.template-form {
+  max-height: 58vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.create-step-panel {
+  min-height: 260px;
+}
+
+.field-help {
+  width: 100%;
+  margin: 8px 0 0;
+  color: #697386;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.create-template-button {
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.selected-template {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(42, 52, 71, 0.1);
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.selected-template strong,
+.selected-template p {
+  margin: 0;
+}
+
+.selected-template strong {
+  font-weight: 800;
+}
+
+.selected-template p {
+  margin-top: 4px;
+  color: #697386;
+}
+
+.option-stack {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+
+.option-stack :deep(.el-radio) {
+  width: 100%;
+  height: auto;
+  align-items: flex-start;
+  padding: 12px;
+  margin-right: 0;
+  white-space: normal;
+}
+
+.option-stack :deep(.el-radio__label) {
+  display: grid;
+  gap: 4px;
+  color: #202734;
+  font-weight: 800;
+}
+
+.option-stack :deep(.el-radio__label span) {
+  color: #697386;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.template-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.upload-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.upload-button {
+  position: relative;
+  min-width: 92px;
+  height: 32px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #285c74;
+  background: #fff;
+  cursor: pointer;
+}
+
+.upload-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 244px minmax(0, 1fr);
   }
 
-  .logo {
-    margin: 0 2rem 0 0;
+  .character-panel {
+    position: fixed;
+    right: 0;
+    z-index: 10;
+    box-shadow: -18px 0 40px rgba(33, 43, 54, 0.12);
   }
 
-  header .wrapper {
-    display: flex;
-    place-items: flex-start;
-    flex-wrap: wrap;
+  .overview-grid,
+  .metric-strip,
+  .template-form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    display: block;
+  }
+
+  .sidebar,
+  .workspace {
+    height: auto;
+    position: static;
+  }
+
+  .sidebar {
+    min-height: 420px;
+  }
+
+  .workspace {
+    padding: 16px;
+  }
+
+  .workspace-header,
+  .section-heading {
+    display: block;
+  }
+
+  .header-actions,
+  .section-heading .el-button {
+    margin-top: 12px;
+  }
+
+  .overview-grid,
+  .metric-strip,
+  .template-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .composer {
+    grid-template-columns: 1fr;
   }
 }
 </style>

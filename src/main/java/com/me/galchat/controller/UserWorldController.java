@@ -73,6 +73,15 @@ public class UserWorldController {
         return Result.success();
     }
 
+    @DeleteMapping("/templates/{worldId}/{detailId}")
+    public Result deleteWorldDetail(@PathVariable Long worldId, @PathVariable Long detailId) {
+        if (worldId == null) {
+            throw new UserRequestException("世界模板id不能为空");
+        }
+        worldDetailService.deleteWorldDetail(currentUserId(), worldId, detailId);
+        return Result.success();
+    }
+
     @PostMapping
     public Result createUserWorld(@RequestBody UserWorldPrefix userWorldPrefix) {
         if (userWorldPrefix == null || userWorldPrefix.getWorldId() == null) {

@@ -55,6 +55,14 @@ public class WorldDetailServiceImpl extends ServiceImpl<WorldDetailMapper, World
                 .list();
     }
 
+    @Override
+    public void deleteWorldDetail(Long userId, Long worldId, Long detailId) {
+        checkWorldAuthor(userId, worldId);
+        lambdaUpdate().eq(WorldDetail::getId, detailId)
+                .eq(WorldDetail::getWorldId, worldId)
+                .remove();
+    }
+
     private void checkWorldAuthor(Long userId, Long worldId) {
         if (worldId == null) {
             throw new UserRequestException("世界模板id不能为空");

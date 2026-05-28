@@ -37,6 +37,9 @@ public class WorldDetailServiceImpl extends ServiceImpl<WorldDetailMapper, World
         if (worldDetail == null) {
             throw new UserRequestException("请求参数不能为空");
         }
+        if (worldDetail.getDetails().length() > 2000) {
+            throw new UserRequestException("世界详情内容过长，不能超过2000字");
+        }
         checkWorldAuthor(userId, worldId);
 
         WorldDetail newWorldDetail = new WorldDetail()

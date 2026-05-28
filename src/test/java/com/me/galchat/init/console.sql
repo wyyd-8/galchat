@@ -53,7 +53,8 @@ CREATE TABLE user_world_prefix (
     acitve_push_status BOOLEAN DEFAULT FALSE,
     favor_system_status VARCHAR(50) DEFAULT 'EASY',
     eot_detection_status BOOLEAN DEFAULT FALSE,
-    think_status BOOLEAN DEFAULT FALSE
+    think_status BOOLEAN DEFAULT FALSE,
+    add_special_prompt BOOLEAN DEFAULT FALSE
 );
 
 CREATE INDEX idx_user_world_prefix_user_id
@@ -126,7 +127,7 @@ CREATE TABLE world_story_event (
     id BIGSERIAL PRIMARY KEY,
     user_world_id BIGINT NOT NULL,
     title VARCHAR(255),
-    theme VARCHAR(255),
+    theme TEXT,
     current_scene TEXT,
     opening TEXT,
     summary TEXT,

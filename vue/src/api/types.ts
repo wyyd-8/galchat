@@ -39,6 +39,8 @@ export interface UserWorld {
   favorSystemStatus?: string
   eotDetectionStatus?: boolean
   thinkStatus?: boolean
+  addSpecialPrompt?: boolean
+  myWorld?: boolean
 }
 
 export interface UserCharacter {
@@ -49,6 +51,23 @@ export interface UserCharacter {
   lastChatTime?: string
   lastChatContent?: string
   favorValue?: number
+}
+
+export interface CharacterTemplate {
+  id?: number
+  name: string
+  image?: string
+  background?: string
+  personality?: string
+  favorability?: Record<string, string>
+  initFavor?: number
+}
+
+export interface WorldDetail {
+  id?: number
+  worldId?: number
+  about?: string
+  details?: string
 }
 
 export interface ChatHistory {

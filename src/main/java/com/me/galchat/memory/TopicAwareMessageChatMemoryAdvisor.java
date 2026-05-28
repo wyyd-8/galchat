@@ -5,7 +5,6 @@ import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.service.ChatUserMessageListener;
-import org.springframework.ai.chat.client.ChatClientMessageAggregator;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
@@ -16,18 +15,20 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor {
 
@@ -70,7 +71,10 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         List<Message> processedMessages = new ArrayList<>(memoryMessages);
         processedMessages.addAll(removeLastUserOrToolResponseMessage(chatClientRequest.prompt().getInstructions()));
         ensureFirstSystemMessage(processedMessages);
+        appendSuffixToFirstNonSystemMessage(processedMessages,
+                firstMessageSuffixPrompt(chatClientRequest.prompt().getOptions()));
 
+        System.out.println(processedMessages);
         return chatClientRequest.mutate()
                 .prompt(chatClientRequest.prompt()
                         .mutate()
@@ -107,7 +111,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
                 .publishOn(getScheduler())
                 .map(request -> before(request, streamAdvisorChain))
                 .flatMapMany(streamAdvisorChain::nextStream)
-                .transform(flux -> new ChatClientMessageAggregator()
+                .transform(flux -> new DeepSeekChatClientMessageAggregator()
                         .aggregateChatClientResponse(flux, response -> after(response, streamAdvisorChain)));
     }
 
@@ -141,6 +145,69 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
             }
         }
         return newMessages;
+    }
+
+    static void appendSuffixToFirstNonSystemMessage(List<Message> messages, String suffixPrompt) {
+        if (messages == null || messages.isEmpty() || !StringUtils.hasText(suffixPrompt)) {
+            return;
+        }
+
+        for (int i = 0; i < messages.size(); i++) {
+            Message message = messages.get(i);
+            if (MessageType.SYSTEM.equals(message.getMessageType())) {
+                continue;
+            }
+
+            String text = message.getText() == null ? "" : message.getText();
+            Message copiedMessage = copyWithText(message, text + suffixPrompt);
+            if (copiedMessage == null) {
+                continue;
+            }
+            messages.set(i, copiedMessage);
+            return;
+        }
+    }
+
+    private static Message copyWithText(Message message, String text) {
+        if (message instanceof DeepSeekAssistantMessage deepSeekAssistantMessage) {
+            return new DeepSeekAssistantMessage.Builder()
+                    .content(text)
+                    .reasoningContent(deepSeekAssistantMessage.getReasoningContent())
+                    .prefix(deepSeekAssistantMessage.getPrefix())
+                    .properties(deepSeekAssistantMessage.getMetadata())
+                    .toolCalls(deepSeekAssistantMessage.getToolCalls())
+                    .media(deepSeekAssistantMessage.getMedia())
+                    .build();
+        }
+        if (message instanceof AssistantMessage assistantMessage) {
+            return AssistantMessage.builder()
+                    .content(text)
+                    .properties(assistantMessage.getMetadata())
+                    .toolCalls(assistantMessage.getToolCalls())
+                    .media(assistantMessage.getMedia())
+                    .build();
+        }
+        if (message instanceof UserMessage userMessage) {
+            return UserMessage.builder()
+                    .text(text)
+                    .metadata(userMessage.getMetadata())
+                    .media(userMessage.getMedia())
+                    .build();
+        }
+        if (message instanceof ToolResponseMessage) {
+            return null;
+        }
+        return null;
+    }
+
+    private String firstMessageSuffixPrompt(ChatOptions options) {
+        if (!(options instanceof ToolCallingChatOptions toolCallingOptions)
+                || toolCallingOptions.getToolContext() == null) {
+            return "";
+        }
+        Object suffixPrompt = toolCallingOptions.getToolContext()
+                .get(ChatToolContextConstant.FIRST_MESSAGE_SUFFIX_PROMPT_KEY);
+        return suffixPrompt instanceof String text ? text : "";
     }
 
     private Map<String, Object> putContext(Map<String, Object> context, ConversationInfo conversationInfo,

@@ -26,7 +26,7 @@ import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IWorldEventLogService;
 import com.me.galchat.service.IWorldStoryEventService;
-import com.me.galchat.service.StoryOperationLockService;
+import com.me.galchat.vector.WorldDetailVectorService;
 import com.me.galchat.vector.WorldEventVectorService;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
@@ -35,12 +35,14 @@ import org.redisson.api.RLock;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -54,6 +56,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final TopicBoundaryService topicBoundaryService;
     private final IWorldEventLogService worldEventLogService;
+    private final WorldDetailVectorService worldDetailVectorService;
     private final WorldEventVectorService worldEventVectorService;
     private final StoryOperationLockService storyOperationLockService;
 
@@ -129,7 +132,10 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         checkCharacters(startDTO.getUserWorldId(), characterIds);
         checkNoActiveStory(startDTO.getUserWorldId());
 
-        StoryOpening opening = buildStoryOpening(startDTO, userWorld);
+        List<Document> sceneWorldDetails = shouldGenerateStoryOpening(startDTO)
+                ? querySceneWorldDetails(startDTO, userWorld)
+                : List.of();
+        StoryOpening opening = buildStoryOpening(startDTO, userWorld, sceneWorldDetails);
         LocalDateTime now = LocalDateTime.now();
         WorldStoryEvent storyEvent = new WorldStoryEvent()
                 .setUserWorldId(startDTO.getUserWorldId())
@@ -305,7 +311,14 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return storyEvent;
     }
 
-    private StoryOpening buildStoryOpening(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld) {
+    private boolean shouldGenerateStoryOpening(WorldStoryEventStartDTO startDTO) {
+        return !StringUtils.hasText(startDTO.getTitle())
+                || !StringUtils.hasText(startDTO.getCurrentScene())
+                || !StringUtils.hasText(startDTO.getOpening());
+    }
+
+    private StoryOpening buildStoryOpening(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld,
+                                           List<Document> sceneWorldDetails) {
         if (StringUtils.hasText(startDTO.getTitle())
                 && StringUtils.hasText(startDTO.getCurrentScene())
                 && StringUtils.hasText(startDTO.getOpening())) {
@@ -313,7 +326,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                     startDTO.getOpening().trim());
         }
 
-        StoryOpening generatedOpening = generateStoryOpening(startDTO, userWorld);
+        StoryOpening generatedOpening = generateStoryOpening(startDTO, userWorld, sceneWorldDetails);
         String title = StringUtils.hasText(startDTO.getTitle()) ? startDTO.getTitle().trim() : generatedOpening.title();
         String currentScene = StringUtils.hasText(startDTO.getCurrentScene())
                 ? startDTO.getCurrentScene().trim()
@@ -327,9 +340,17 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return new StoryOpening(title, currentScene, opening);
     }
 
-    private StoryOpening generateStoryOpening(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld) {
+    private List<Document> querySceneWorldDetails(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld) {
+        if (!StringUtils.hasText(startDTO.getCurrentScene()) || userWorld.getWorldId() == null) {
+            return List.of();
+        }
+        return worldDetailVectorService.queryWorldDetail(userWorld.getWorldId(), startDTO.getCurrentScene().trim());
+    }
+
+    private StoryOpening generateStoryOpening(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld,
+                                              List<Document> sceneWorldDetails) {
         String content = worldStoryOpeningClient.prompt()
-                .user(formatOpeningPrompt(startDTO, userWorld))
+                .user(formatOpeningPrompt(startDTO, userWorld, sceneWorldDetails))
                 .call()
                 .content();
         try {
@@ -412,15 +433,30 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return builder.toString();
     }
 
-    private String formatOpeningPrompt(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld) {
+    private String formatOpeningPrompt(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld,
+                                       List<Document> sceneWorldDetails) {
         StringBuilder builder = new StringBuilder();
         builder.append("用户世界：").append(userWorld.getName()).append('\n');
         appendPromptLine(builder, "世界背景", userWorldPrefixService.buildWorldPrompt(userWorld.getWorldId()));
+        appendPromptLine(builder, "当前场景相关设定，如果与当前场景无关请忽略", formatSceneWorldDetails(sceneWorldDetails));
         appendPromptLine(builder, "故事主题", startDTO.getTheme());
         appendPromptLine(builder, "用户指定标题", startDTO.getTitle());
         appendPromptLine(builder, "用户指定场景", startDTO.getCurrentScene());
         appendPromptLine(builder, "用户指定开场", startDTO.getOpening());
         return builder.toString();
+    }
+
+    private String formatSceneWorldDetails(List<Document> sceneWorldDetails) {
+        if (CollectionUtils.isEmpty(sceneWorldDetails)) {
+            return "";
+        }
+        return sceneWorldDetails.stream()
+                .filter(Document::isText)
+                .map(Document::getText)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.joining("\n---\n"));
     }
 
     private void appendPromptLine(StringBuilder builder, String key, String value) {

@@ -20,7 +20,6 @@ import com.me.galchat.service.ChatUserMessageListener;
 import com.me.galchat.service.IChatService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
-import com.me.galchat.service.StoryOperationLockService;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -67,46 +66,48 @@ public class ChatServiceImpl implements IChatService {
 
     @Override
     public Flux<ChatFluxVO> chat(ChatMessageDTO chatMessageDTO) {
-        checkChatRequest(chatMessageDTO);
-        RLock conversationLock = storyOperationLockService.tryLockUserCharacter(chatMessageDTO.getUserWorldId(),
-                chatMessageDTO.getCharacterId());
-        if (conversationLock == null) {
-            throw new UserRequestException("故事切换或结束中，请稍后再对话");
-        }
+        return Flux.defer(() -> {
+            checkChatRequest(chatMessageDTO);
+            StoryOperationLockService.OwnedLock conversationLock = storyOperationLockService
+                    .tryLockUserCharacterWithOwner(chatMessageDTO.getUserWorldId(), chatMessageDTO.getCharacterId());
+            if (conversationLock == null) {
+                return Flux.error(new UserRequestException("故事切换或结束中，请稍后再对话"));
+            }
 
-        try {
-            ConversationInfo conversationInfo = buildConversationInfo(chatMessageDTO.getUserWorldId(),
-                    chatMessageDTO.getCharacterId());
-            AtomicReference<Long> userMessageId = new AtomicReference<>();
-            Sinks.Many<ChatFluxVO> toolFlux = Sinks.many().unicast().onBackpressureBuffer();
-            Map<String, Object> toolContext = buildToolContext(chatMessageDTO.getUserWorldId(),
-                    chatMessageDTO.getCharacterId());
-            toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
-                    buildUserMessageListener(userMessageId, chatMessageDTO.getUserWorldId(),
-                            chatMessageDTO.getCharacterId()));
-            toolContext.put(ChatToolContextConstant.TOOL_EVENT_LISTENER_KEY,
-                    (ChatToolEventListener) () -> toolFlux.tryEmitNext(new ChatFluxVO(ChatConstant.TOOL_TYPE, null)));
+            try {
+                ConversationInfo conversationInfo = buildConversationInfo(chatMessageDTO.getUserWorldId(),
+                        chatMessageDTO.getCharacterId());
+                AtomicReference<Long> userMessageId = new AtomicReference<>();
+                Sinks.Many<ChatFluxVO> toolFlux = Sinks.many().unicast().onBackpressureBuffer();
+                Map<String, Object> toolContext = buildToolContext(chatMessageDTO.getUserWorldId(),
+                        chatMessageDTO.getCharacterId(), true);
+                toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
+                        buildUserMessageListener(userMessageId, chatMessageDTO.getUserWorldId(),
+                                chatMessageDTO.getCharacterId()));
+                toolContext.put(ChatToolContextConstant.TOOL_EVENT_LISTENER_KEY,
+                        (ChatToolEventListener) () -> toolFlux.tryEmitNext(new ChatFluxVO(ChatConstant.TOOL_TYPE, null)));
 
-            Flux<ChatFluxVO> responseFlux = deepThinkChatClient.prompt()
-                    .system(buildSystemPrompt(chatMessageDTO.getWorldId(), chatMessageDTO.getUserWorldId(),
-                            chatMessageDTO.getCharacterId()))
-                    .user(chatMessageDTO.getMessage())
-                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
-                    .toolContext(toolContext)
-                    .stream()
-                    .chatResponse()
-                    .flatMap(this::toChatFlux)
-                    .doOnComplete(() -> updateLatestChatInfo(userMessageId.get(), chatMessageDTO.getUserWorldId(),
-                            chatMessageDTO.getCharacterId()))
-                    .doOnError(toolFlux::tryEmitError)
-                    .doFinally(signalType -> toolFlux.tryEmitComplete());
+                Flux<ChatFluxVO> responseFlux = deepThinkChatClient.prompt()
+                        .system(buildSystemPrompt(chatMessageDTO.getWorldId(), chatMessageDTO.getUserWorldId(),
+                                chatMessageDTO.getCharacterId()))
+                        .user(chatMessageDTO.getMessage())
+                        .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
+                        .toolContext(toolContext)
+                        .stream()
+                        .chatResponse()
+                        .flatMap(this::toChatFlux)
+                        .doOnComplete(() -> updateLatestChatInfo(userMessageId.get(), chatMessageDTO.getUserWorldId(),
+                                chatMessageDTO.getCharacterId()))
+                        .doOnError(toolFlux::tryEmitError)
+                        .doFinally(signalType -> toolFlux.tryEmitComplete());
 
-            return Flux.merge(toolFlux.asFlux(), responseFlux)
-                    .doFinally(signalType -> storyOperationLockService.unlock(conversationLock));
-        } catch (RuntimeException e) {
-            storyOperationLockService.unlock(conversationLock);
-            throw e;
-        }
+                return Flux.merge(toolFlux.asFlux(), responseFlux)
+                        .doFinally(signalType -> storyOperationLockService.unlock(conversationLock));
+            } catch (RuntimeException e) {
+                storyOperationLockService.unlock(conversationLock);
+                return Flux.error(e);
+            }
+        });
     }
 
     @Override
@@ -127,7 +128,7 @@ public class ChatServiceImpl implements IChatService {
         try {
             ConversationInfo conversationInfo = buildConversationInfo(task.getUserWorldId(), task.getCharacterId());
             AtomicReference<Long> userMessageId = new AtomicReference<>();
-            Map<String, Object> toolContext = buildToolContext(task.getUserWorldId(), task.getCharacterId());
+            Map<String, Object> toolContext = buildToolContext(task.getUserWorldId(), task.getCharacterId(), false);
             toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
                     buildUserMessageListener(userMessageId, task.getUserWorldId(), task.getCharacterId()));
             String content = normalChatClient.prompt()
@@ -204,9 +205,9 @@ public class ChatServiceImpl implements IChatService {
 
     private String buildSystemPrompt(Long worldId, Long userWorldId, Long characterId) {
         StringBuilder prompt = new StringBuilder();
+        appendPrompt(prompt, ChatConstant.CHAT_SYSTEM_INSTRUCTIONS);
         appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(worldId));
         appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(userWorldId, characterId));
-        appendPrompt(prompt, ChatConstant.CHAT_SYSTEM_INSTRUCTIONS);
         return prompt.toString();
     }
 
@@ -224,13 +225,18 @@ public class ChatServiceImpl implements IChatService {
         return new ConversationInfo(userWorldId, characterId, null);
     }
 
-    private Map<String, Object> buildToolContext(Long userWorldId, Long characterId) {
+    private Map<String, Object> buildToolContext(Long userWorldId, Long characterId, boolean thinkingRequest) {
         Map<String, Object> toolContext = new HashMap<>();
         toolContext.put(ChatToolContextConstant.USER_WORLD_ID_KEY, userWorldId);
         toolContext.put(ChatToolContextConstant.CHARACTER_ID_KEY, characterId);
         UserWorldPrefix userWorld = userWorldPrefixService.getById(userWorldId);
         if (userWorld != null) {
             toolContext.put(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY, userWorld.getFavorSystemStatus());
+            if (thinkingRequest && Boolean.TRUE.equals(userWorld.getThinkStatus())
+                    && Boolean.TRUE.equals(userWorld.getAddSpecialPrompt())) {
+                toolContext.put(ChatToolContextConstant.FIRST_MESSAGE_SUFFIX_PROMPT_KEY,
+                        ChatConstant.SPECIAL_FIRST_MESSAGE_SUFFIX_PROMPT);
+            }
         }
         return toolContext;
     }

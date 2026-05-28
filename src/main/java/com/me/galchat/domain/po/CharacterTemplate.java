@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+import com.me.galchat.typehandler.JsonbTypeHandler;
 import java.io.Serializable;
 import java.util.Map;
 import lombok.Data;
@@ -38,7 +38,7 @@ public class CharacterTemplate implements Serializable {
 
     private String personality;
 
-    @TableField(typeHandler = JacksonTypeHandler.class)
+    @TableField(typeHandler = JsonbTypeHandler.class)
     private Map<String, String> favorability;
 
     private Integer initFavor;

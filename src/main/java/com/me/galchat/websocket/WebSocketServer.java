@@ -150,10 +150,14 @@ public class WebSocketServer {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Missing request"));
             return;
         }
+        Map<String, List<String>> requestParameterMap = session.getRequestParameterMap();
 
-        // 从请求头中获取 JWT
-        List<String> authHeaders = request.getHeaders().get("token");
-        if (authHeaders == null || authHeaders.isEmpty()) {
+        // 从请求头或浏览器 WebSocket query 参数中获取 JWT
+        String token = firstValue(request.getHeaders().get("token"));
+        if (!StringUtils.hasText(token)) {
+            token = firstValue(requestParameterMap.get("token"));
+        }
+        if (!StringUtils.hasText(token)) {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Missing token"));
             return;
         }
@@ -163,7 +167,7 @@ public class WebSocketServer {
         log.info("客户端：" + sid + "建立连接");
         Long id;
         try {
-            Claims claims = JwtUtils.parseToken(authHeaders.getFirst());
+            Claims claims = JwtUtils.parseToken(token);
             id = Long.valueOf(String.valueOf(claims.get("id")));
             log.info("登录id:{}", id);
         } catch (Exception e) {
@@ -173,7 +177,6 @@ public class WebSocketServer {
         }
 
         // 从请求参数(Query String)中读取 userWorldId
-        Map<String, List<String>> requestParameterMap = session.getRequestParameterMap();
         List<String> userWorldIdParams = requestParameterMap.get("userWorldId");
         if (userWorldIdParams == null || userWorldIdParams.isEmpty()) {
             session.close(new CloseReason(CloseReason.CloseCodes.VIOLATED_POLICY, "Missing param"));
@@ -199,6 +202,10 @@ public class WebSocketServer {
         sessionMap.computeIfAbsent(prefix.getId(), key -> new ConcurrentHashMap<>())
                 .put(sid, session);
         userWorldMap.put(sid, prefix);
+    }
+
+    private String firstValue(List<String> values) {
+        return values == null || values.isEmpty() ? null : values.getFirst();
     }
 
     /**

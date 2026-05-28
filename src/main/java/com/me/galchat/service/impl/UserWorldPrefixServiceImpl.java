@@ -53,6 +53,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
                 .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
                 .setThinkStatus(userWorldPrefix.getThinkStatus())
+                .setAddSpecialPrompt(userWorldPrefix.getAddSpecialPrompt())
                 .setMyWorld(template.getAuthorId().equals(userId));
         save(newUserWorld);
         redisTemplate.opsForHash().put(RedisConstant.WORLD_USER_AUTH_KEY,
@@ -75,6 +76,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
                 .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
                 .setThinkStatus(oldUserWorld.getThinkStatus())
+                .setAddSpecialPrompt(userWorldPrefix.getAddSpecialPrompt())
                 .setMyWorld(oldUserWorld.getMyWorld());
         updateById(updateUserWorld);
     }

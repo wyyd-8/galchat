@@ -44,5 +44,7 @@ public class UserWorldPrefix implements Serializable {
 
     private Boolean thinkStatus;
 
+    private Boolean addSpecialPrompt;
+
     private Boolean myWorld;
 }

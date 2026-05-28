@@ -16,6 +16,9 @@
 
 package com.me.galchat.model;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -87,6 +90,8 @@ public class DeepSeekChatModel implements ChatModel {
 	private static final ChatModelObservationConvention DEFAULT_OBSERVATION_CONVENTION = new DefaultChatModelObservationConvention();
 
 	private static final ToolCallingManager DEFAULT_TOOL_CALLING_MANAGER = ToolCallingManager.builder().build();
+
+	private static final String RAW_TOOL_CALLS_METADATA_KEY = "deepSeekRawToolCalls";
 
 	/**
 	 * The default options used for the chat completion requests.
@@ -290,38 +295,7 @@ public class DeepSeekChatModel implements ChatModel {
 				}));
 
 			// @formatter:off
-			Flux<ChatResponse> flux = chatResponse.flatMap(response -> {
-				ChatOptions options = prompt.getOptions();
-				Assert.state(options != null, "options must not be null");
-				if (this.toolExecutionEligibilityPredicate.isToolExecutionRequired(options, response)) {
-					// FIXME: bounded elastic needs to be used since tool calling
-					//  is currently only synchronous
-					return Flux.deferContextual(ctx -> {
-						ToolExecutionResult toolExecutionResult;
-						try {
-							ToolCallReactiveContextHolder.setContext(ctx);
-							toolExecutionResult = this.toolCallingManager.executeToolCalls(prompt, response);
-						}
-						finally {
-							ToolCallReactiveContextHolder.clearContext();
-						}
-						if (toolExecutionResult.returnDirect()) {
-							// Return tool execution result directly to the client.
-							return Flux.just(ChatResponse.builder().from(response)
-									.generations(ToolExecutionResult.buildGenerations(toolExecutionResult))
-									.build());
-						}
-						else {
-							// Send the tool execution result back to the model.
-							return this.internalStream(new Prompt(toolExecutionResult.conversationHistory(), prompt.getOptions()),
-									response);
-						}
-					}).subscribeOn(Schedulers.boundedElastic());
-				}
-				else {
-					return Flux.just(response);
-				}
-			})
+			Flux<ChatResponse> flux = executeToolCallsAfterStream(prompt, chatResponse)
 			.doOnError(observation::error)
 			.doFinally(s -> observation.stop())
 			.contextWrite(ctx -> ctx.put(ObservationThreadLocalAccessor.KEY, observation));
@@ -332,14 +306,46 @@ public class DeepSeekChatModel implements ChatModel {
 		});
 	}
 
+	private Flux<ChatResponse> executeToolCallsAfterStream(Prompt prompt, Flux<ChatResponse> chatResponse) {
+		StreamAggregationState aggregationState = new StreamAggregationState();
+		Flux<ChatResponse> visibleResponses = chatResponse
+				.doOnSubscribe(subscription -> aggregationState.reset())
+				.doOnNext(aggregationState::append)
+				.filter(response -> !response.hasToolCalls());
+
+		return visibleResponses.concatWith(Flux.deferContextual(ctx -> {
+			ChatResponse aggregatedResponse = aggregationState.toChatResponse();
+			ChatOptions options = prompt.getOptions();
+			Assert.state(options != null, "options must not be null");
+			if (!this.toolExecutionEligibilityPredicate.isToolExecutionRequired(options, aggregatedResponse)) {
+				return Flux.empty();
+			}
+
+			return Flux.deferContextual(toolContext -> {
+				ToolExecutionResult toolExecutionResult;
+				try {
+					ToolCallReactiveContextHolder.setContext(toolContext);
+					toolExecutionResult = this.toolCallingManager.executeToolCalls(prompt, aggregatedResponse);
+				}
+				finally {
+					ToolCallReactiveContextHolder.clearContext();
+				}
+				if (toolExecutionResult.returnDirect()) {
+					return Flux.just(ChatResponse.builder()
+							.from(aggregatedResponse)
+							.generations(ToolExecutionResult.buildGenerations(toolExecutionResult))
+							.build());
+				}
+				return this.internalStream(new Prompt(toolExecutionResult.conversationHistory(), prompt.getOptions()),
+						aggregatedResponse);
+			}).subscribeOn(Schedulers.boundedElastic());
+		}));
+	}
+
 	private Generation buildGeneration(Choice choice, Map<String, Object> metadata) {
-		List<AssistantMessage.ToolCall> toolCalls = choice.message().toolCalls() == null ? List.of()
-				: choice.message()
-					.toolCalls()
-					.stream()
-					.map(toolCall -> new AssistantMessage.ToolCall(toolCall.id(), "function",
-							toolCall.function().name(), toolCall.function().arguments()))
-					.toList();
+		List<ToolCall> rawToolCalls = choice.message().toolCalls();
+		List<AssistantMessage.ToolCall> toolCalls = rawToolCalls == null ? List.of()
+				: rawToolCalls.stream().map(this::toAssistantToolCall).toList();
 
 		String finishReason = (choice.finishReason() != null ? choice.finishReason().name() : "");
 		var generationMetadataBuilder = ChatGenerationMetadata.builder().finishReason(finishReason);
@@ -347,14 +353,201 @@ public class DeepSeekChatModel implements ChatModel {
 		String textContent = choice.message().content();
 		String reasoningContent = choice.message().reasoningContent();
 
+		Map<String, Object> properties = new HashMap<>(metadata);
+		if (!CollectionUtils.isEmpty(rawToolCalls)) {
+			properties.put(RAW_TOOL_CALLS_METADATA_KEY, rawToolCalls);
+		}
+
 		DeepSeekAssistantMessage.Builder builder = new DeepSeekAssistantMessage.Builder();
 		DeepSeekAssistantMessage assistantMessage = builder.content(textContent)
 			.reasoningContent(reasoningContent)
-			.properties(metadata)
+			.properties(properties)
 			.toolCalls(toolCalls)
 			.build();
 
 		return new Generation(assistantMessage, generationMetadataBuilder.build());
+	}
+
+	private AssistantMessage.ToolCall toAssistantToolCall(ToolCall toolCall) {
+		ChatCompletionFunction function = toolCall.function();
+		return new AssistantMessage.ToolCall(toolCall.id(), toolCall.type() == null ? "function" : toolCall.type(),
+				function == null ? null : function.name(), function == null ? null : function.arguments());
+	}
+
+	private static class StreamAggregationState {
+
+		private final StringBuilder content = new StringBuilder();
+		private final StringBuilder reasoningContent = new StringBuilder();
+		private final Map<String, Object> properties = new HashMap<>();
+		private final Map<Integer, ToolCallAccumulator> toolCallsByIndex = new LinkedHashMap<>();
+		private final List<ToolCallAccumulator> unindexedToolCalls = new ArrayList<>();
+		private ChatResponseMetadata responseMetadata;
+		private ChatGenerationMetadata generationMetadata = ChatGenerationMetadata.NULL;
+		private boolean hasAssistantOutput;
+
+		void reset() {
+			content.setLength(0);
+			reasoningContent.setLength(0);
+			properties.clear();
+			toolCallsByIndex.clear();
+			unindexedToolCalls.clear();
+			responseMetadata = null;
+			generationMetadata = ChatGenerationMetadata.NULL;
+			hasAssistantOutput = false;
+		}
+
+		void append(ChatResponse response) {
+			if (response == null) {
+				return;
+			}
+			if (response.getMetadata() != null) {
+				responseMetadata = response.getMetadata();
+			}
+			for (Generation generation : response.getResults()) {
+				append(generation);
+			}
+		}
+
+		private void append(Generation generation) {
+			if (generation == null || generation.getOutput() == null) {
+				return;
+			}
+			if (generation.getMetadata() != null && generation.getMetadata() != ChatGenerationMetadata.NULL) {
+				generationMetadata = generation.getMetadata();
+			}
+
+			AssistantMessage output = generation.getOutput();
+			appendText(content, output.getText());
+			if (output instanceof DeepSeekAssistantMessage deepSeekAssistantMessage) {
+				appendText(reasoningContent, deepSeekAssistantMessage.getReasoningContent());
+			}
+			if (output.getMetadata() != null) {
+				properties.putAll(output.getMetadata());
+				appendRawToolCalls(output.getMetadata().get(RAW_TOOL_CALLS_METADATA_KEY));
+			}
+			if (CollectionUtils.isEmpty(toolCalls()) && !CollectionUtils.isEmpty(output.getToolCalls())) {
+				appendAssistantToolCalls(output.getToolCalls());
+			}
+			hasAssistantOutput = true;
+		}
+
+		private void appendRawToolCalls(Object rawToolCalls) {
+			if (!(rawToolCalls instanceof List<?> list)) {
+				return;
+			}
+			for (Object item : list) {
+				if (item instanceof ToolCall toolCall) {
+					ToolCallAccumulator accumulator = accumulator(toolCall);
+					accumulator.append(toolCall);
+				}
+			}
+		}
+
+		private ToolCallAccumulator accumulator(ToolCall toolCall) {
+			Integer index = toolCall.index();
+			if (index != null) {
+				return toolCallsByIndex.computeIfAbsent(index, ignored -> new ToolCallAccumulator());
+			}
+
+			if (toolCall.id() != null) {
+				for (ToolCallAccumulator accumulator : unindexedToolCalls) {
+					if (toolCall.id().equals(accumulator.id)) {
+						return accumulator;
+					}
+				}
+			}
+
+			ToolCallAccumulator accumulator = new ToolCallAccumulator();
+			unindexedToolCalls.add(accumulator);
+			return accumulator;
+		}
+
+		private void appendAssistantToolCalls(List<AssistantMessage.ToolCall> toolCalls) {
+			for (AssistantMessage.ToolCall toolCall : toolCalls) {
+				ToolCallAccumulator accumulator = new ToolCallAccumulator();
+				accumulator.id = toolCall.id();
+				accumulator.type = toolCall.type();
+				accumulator.name = toolCall.name();
+				appendText(accumulator.arguments, toolCall.arguments());
+				unindexedToolCalls.add(accumulator);
+			}
+		}
+
+		ChatResponse toChatResponse() {
+			if (!hasAssistantOutput) {
+				return null;
+			}
+
+			AssistantMessage assistantMessage = assistantMessage();
+			return new ChatResponse(List.of(new Generation(assistantMessage, generationMetadata)),
+					responseMetadata == null ? ChatResponseMetadata.builder().build() : responseMetadata);
+		}
+
+		private AssistantMessage assistantMessage() {
+			List<AssistantMessage.ToolCall> toolCalls = toolCalls();
+			properties.remove(RAW_TOOL_CALLS_METADATA_KEY);
+			if (!reasoningContent.isEmpty()) {
+				return new DeepSeekAssistantMessage.Builder()
+						.content(content.toString())
+						.reasoningContent(reasoningContent.toString())
+						.properties(properties)
+						.toolCalls(toolCalls)
+						.build();
+			}
+			return AssistantMessage.builder()
+					.content(content.toString())
+					.properties(properties)
+					.toolCalls(toolCalls)
+					.build();
+		}
+
+		private List<AssistantMessage.ToolCall> toolCalls() {
+			List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
+			toolCallsByIndex.values().stream()
+					.map(ToolCallAccumulator::toToolCall)
+					.forEach(toolCalls::add);
+			unindexedToolCalls.stream()
+					.map(ToolCallAccumulator::toToolCall)
+					.forEach(toolCalls::add);
+			return toolCalls;
+		}
+
+		private void appendText(StringBuilder builder, String text) {
+			if (text != null) {
+				builder.append(text);
+			}
+		}
+	}
+
+	private static class ToolCallAccumulator {
+
+		private String id;
+		private String type = "function";
+		private String name;
+		private final StringBuilder arguments = new StringBuilder();
+
+		void append(ToolCall toolCall) {
+			if (toolCall.id() != null) {
+				id = toolCall.id();
+			}
+			if (toolCall.type() != null) {
+				type = toolCall.type();
+			}
+			ChatCompletionFunction function = toolCall.function();
+			if (function == null) {
+				return;
+			}
+			if (function.name() != null) {
+				name = function.name();
+			}
+			if (function.arguments() != null) {
+				arguments.append(function.arguments());
+			}
+		}
+
+		AssistantMessage.ToolCall toToolCall() {
+			return new AssistantMessage.ToolCall(id, type, name, arguments.toString());
+		}
 	}
 
 	private ChatResponseMetadata from(ChatCompletion result, Usage usage) {

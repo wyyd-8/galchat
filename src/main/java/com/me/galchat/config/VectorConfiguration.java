@@ -32,7 +32,7 @@ public class VectorConfiguration {
     public DocumentRetriever worldDetailRetriever(VectorStore worldDetailVectorStore) {
         return VectorStoreDocumentRetriever.builder()
                 .vectorStore(worldDetailVectorStore)
-                .similarityThreshold(0.73)
+                .similarityThreshold(0.5)
                 .topK(5)
                 .build();
     }
@@ -54,7 +54,7 @@ public class VectorConfiguration {
     public DocumentRetriever chatHistoryRetriever(VectorStore chatHistoryVectorStore) {
         return VectorStoreDocumentRetriever.builder()
                 .vectorStore(chatHistoryVectorStore)
-                .similarityThreshold(0.73)
+                .similarityThreshold(0.5)
                 .topK(5)
                 .build();
     }

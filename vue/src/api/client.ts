@@ -1,6 +1,7 @@
 import type {
   ActiveStory,
   ApiResult,
+  CharacterTemplate,
   ChatFlux,
   ChatHistory,
   ChatMessagePayload,
@@ -10,11 +11,13 @@ import type {
   UserInfo,
   UserToken,
   UserWorld,
+  WorldDetail,
   WorldTemplate,
 } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const TOKEN_KEY = 'galchat.token'
+export const UNAUTHORIZED_EVENT = 'galchat:unauthorized'
 
 function token() {
   return localStorage.getItem(TOKEN_KEY)
@@ -22,6 +25,16 @@ function token() {
 
 function endpoint(path: string) {
   return `${API_BASE}${path}`
+}
+
+function wsEndpoint(path: string) {
+  const url =
+    API_BASE.startsWith('http://') || API_BASE.startsWith('https://')
+      ? new URL(path, API_BASE)
+      : new URL(path, window.location.href)
+
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
 }
 
 async function readError(response: Response) {
@@ -35,6 +48,15 @@ async function readError(response: Response) {
   } catch {
     return text
   }
+}
+
+function handleUnauthorized(response: Response) {
+  if (response.status !== 401) {
+    return false
+  }
+  clearSession()
+  window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
+  return true
 }
 
 async function request<T>(path: string, init: RequestInit = {}) {
@@ -54,6 +76,9 @@ async function request<T>(path: string, init: RequestInit = {}) {
   })
 
   if (!response.ok) {
+    if (handleUnauthorized(response)) {
+      throw new Error('登录状态已失效，请重新登录')
+    }
     throw new Error(await readError(response))
   }
 
@@ -72,9 +97,9 @@ export function saveSession(session: UserToken) {
 }
 
 export function clearSession() {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem('galchat.userId')
-  localStorage.removeItem('galchat.username')
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith('galchat.'))
+    .forEach((key) => localStorage.removeItem(key))
 }
 
 export function currentSession() {
@@ -105,6 +130,18 @@ export const api = {
   getUserInfo() {
     return request<UserInfo>('/user/info')
   },
+  updateUserInfo(payload: Partial<Pick<UserInfo, 'username' | 'email' | 'birthday'>>) {
+    return request<void>('/user/info', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
+  updatePassword(payload: { email: string; oldPassword: string; newPassword: string }) {
+    return request<void>('/user/password', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
   listWorldTemplates() {
     return request<WorldTemplate[]>('/world/templates')
   },
@@ -115,6 +152,20 @@ export const api = {
     return request<void>('/world/templates', {
       method: 'POST',
       body: JSON.stringify(payload),
+    })
+  },
+  listWorldDetails(worldId: number) {
+    return request<WorldDetail[]>(`/world/templates/${worldId}/details`)
+  },
+  createWorldDetail(worldId: number, payload: WorldDetail) {
+    return request<void>(`/world/templates/${worldId}/details`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  deleteWorldDetail(worldId: number, detailId: number) {
+    return request<void>(`/world/templates/${worldId}/${detailId}`, {
+      method: 'DELETE',
     })
   },
   createUserWorld(payload: Partial<UserWorld> & { worldId: number }) {
@@ -131,6 +182,17 @@ export const api = {
   },
   listCharacters(userWorldId: number) {
     return request<UserCharacter[]>(`/character/${userWorldId}`)
+  },
+  createCharacterTemplate(worldId: number, payload: CharacterTemplate) {
+    return request<void>(`/character/templates/${worldId}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  addCharacter(userWorldId: number, characterId: number) {
+    return request<void>(`/character/${userWorldId}/${characterId}`, {
+      method: 'POST',
+    })
   },
   listHistory(userWorldId: number, characterId: number, size = 30) {
     const params = new URLSearchParams({
@@ -171,6 +233,9 @@ export async function uploadImage(file: File) {
   })
 
   if (!response.ok) {
+    if (handleUnauthorized(response)) {
+      throw new Error('登录状态已失效，请重新登录')
+    }
     throw new Error(await readError(response))
   }
 
@@ -200,6 +265,9 @@ export async function streamChat(
   })
 
   if (!response.ok) {
+    if (handleUnauthorized(response)) {
+      throw new Error('登录状态已失效，请重新登录')
+    }
     throw new Error(await readError(response))
   }
   if (!response.body) {
@@ -209,6 +277,24 @@ export async function streamChat(
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+
+  const handleLine = (rawLine: string) => {
+    const line = rawLine.trim()
+    if (!line || line.startsWith(':')) {
+      return
+    }
+
+    const data = line.startsWith('data:') ? line.slice(5).trim() : line
+    if (!data || data === '[DONE]') {
+      return
+    }
+
+    try {
+      onMessage(JSON.parse(data) as ChatFlux)
+    } catch {
+      onMessage({ type: 'reponse', content: data })
+    }
+  }
 
   while (true) {
     const { done, value } = await reader.read()
@@ -221,21 +307,28 @@ export async function streamChat(
     buffer = lines.pop() || ''
 
     for (const rawLine of lines) {
-      const line = rawLine.trim()
-      if (!line || line.startsWith(':')) {
-        continue
-      }
-
-      const data = line.startsWith('data:') ? line.slice(5).trim() : line
-      if (!data || data === '[DONE]') {
-        continue
-      }
-
-      try {
-        onMessage(JSON.parse(data) as ChatFlux)
-      } catch {
-        onMessage({ type: 'reponse', content: data })
-      }
+      handleLine(rawLine)
     }
   }
+
+  buffer += decoder.decode()
+  if (buffer.trim()) {
+    handleLine(buffer)
+  }
+}
+
+export function createChatSocket(userWorldId: number) {
+  const sid =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `web-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const url = new URL(wsEndpoint(`/ws/${encodeURIComponent(sid)}`))
+  url.searchParams.set('userWorldId', String(userWorldId))
+
+  const currentToken = token()
+  if (currentToken) {
+    url.searchParams.set('token', currentToken)
+  }
+
+  return new WebSocket(url.toString())
 }

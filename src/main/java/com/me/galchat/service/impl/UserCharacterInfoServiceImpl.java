@@ -14,6 +14,7 @@ import com.me.galchat.service.IUserWorldPrefixService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Comparator;
@@ -78,6 +79,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat) {
         if (favorChange == null) {
             favorChange = 0;
@@ -165,7 +167,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 .filter(entry -> parseFavorThreshold(entry.getKey()) != null)
                 .filter(entry -> parseFavorThreshold(entry.getKey()) <= currentFavorValue)
                 .max(Comparator.comparingInt(entry -> parseFavorThreshold(entry.getKey())));
-        return match.map(Map.Entry::getValue).orElse(null);
+        return match.map(Map.Entry::getValue).orElse("");
     }
 
     private Integer parseFavorThreshold(String threshold) {

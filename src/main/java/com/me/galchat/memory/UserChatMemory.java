@@ -47,7 +47,6 @@ public class UserChatMemory implements ChatMemory {
     private final boolean includeToolCalls;
     private final boolean includeAutoSearchInfo;
     private final boolean readOnly;
-    private final String firstMessageSuffixPrompt;
 
     /**
      * 根据 Builder 创建会话记忆实例。
@@ -63,7 +62,6 @@ public class UserChatMemory implements ChatMemory {
         this.includeToolCalls = builder.includeToolCalls;
         this.includeAutoSearchInfo = builder.includeAutoSearchInfo;
         this.readOnly = builder.readOnly;
-        this.firstMessageSuffixPrompt = builder.firstMessageSuffixPrompt;
     }
 
     /**
@@ -121,10 +119,9 @@ public class UserChatMemory implements ChatMemory {
     }
 
     List<Message> toPromptMessages(List<UserChatHistory> histories) {
-        List<UserChatHistory> promptHistories = withFirstMessageSuffix(histories);
         boolean includeAuxiliaryMessages = includeToolCalls
-                && contextLength(promptHistories) <= ChatConstant.MAX_CONTEXT_LENGTH;
-        return toMessages(promptHistories, includeAuxiliaryMessages);
+                && contextLength(histories) <= ChatConstant.MAX_CONTEXT_LENGTH;
+        return toMessages(histories, includeAuxiliaryMessages);
     }
 
     /**
@@ -403,30 +400,6 @@ public class UserChatMemory implements ChatMemory {
         return excludedTypes;
     }
 
-    private List<UserChatHistory> withFirstMessageSuffix(List<UserChatHistory> histories) {
-        if (histories.isEmpty() || !StringUtils.hasText(firstMessageSuffixPrompt)) {
-            return histories;
-        }
-
-        List<UserChatHistory> copiedHistories = new ArrayList<>(histories);
-        UserChatHistory firstHistory = copiedHistories.getFirst();
-        copiedHistories.set(0, copyHistory(firstHistory)
-                .setContent(firstHistory.getContent() + firstMessageSuffixPrompt));
-        return copiedHistories;
-    }
-
-    private UserChatHistory copyHistory(UserChatHistory history) {
-        return new UserChatHistory()
-                .setId(history.getId())
-                .setUserWorldId(history.getUserWorldId())
-                .setCharacterId(history.getCharacterId())
-                .setContent(history.getContent())
-                .setType(history.getType())
-                .setUserMessageId(history.getUserMessageId())
-                .setStepNo(history.getStepNo())
-                .setTimestamp(history.getTimestamp());
-    }
-
     /**
      * 将 UserChatHistory 列表转换为模型消息，并按需插入辅助表中的 reasoning/tool calls/tool responses。
      *
@@ -609,7 +582,7 @@ public class UserChatMemory implements ChatMemory {
         List<ToolResponseMessage.ToolResponse> responses = toolCallsByUserMessageId.getOrDefault(userMessageId, List.of())
                 .stream()
                 .filter(toolCall -> Objects.equals(stepNo, toolCall.getStepNo()))
-                .filter(toolCall -> StringUtils.hasText(toolCall.getToolResult()))
+                .filter(toolCall -> toolCall.getToolResult() != null)
                 .map(toolCall -> new ToolResponseMessage.ToolResponse(toolCall.getToolCallId(),
                         toolCall.getToolName(), toolCall.getToolResult()))
                 .toList();
@@ -969,7 +942,6 @@ public class UserChatMemory implements ChatMemory {
         private boolean includeToolCalls;
         private boolean includeAutoSearchInfo = true;
         private boolean readOnly;
-        private String firstMessageSuffixPrompt = "";
 
         /**
          * 创建 Builder。
@@ -1043,17 +1015,6 @@ public class UserChatMemory implements ChatMemory {
          */
         public Builder readOnly(boolean readOnly) {
             this.readOnly = readOnly;
-            return this;
-        }
-
-        /**
-         * 配置追加到窗口第一条消息后的提示词。
-         *
-         * @param firstMessageSuffixPrompt 后缀提示词；null 会按空字符串处理
-         * @return 当前 Builder
-         */
-        public Builder firstMessageSuffixPrompt(String firstMessageSuffixPrompt) {
-            this.firstMessageSuffixPrompt = firstMessageSuffixPrompt == null ? "" : firstMessageSuffixPrompt;
             return this;
         }
 

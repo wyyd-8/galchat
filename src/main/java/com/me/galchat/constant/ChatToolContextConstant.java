@@ -8,6 +8,7 @@ public final class ChatToolContextConstant {
     public static final String USER_MESSAGE_LISTENER_KEY = "userMessageListener";
     public static final String TOOL_EVENT_LISTENER_KEY = "toolEventListener";
     public static final String FAVOR_SYSTEM_STATUS_KEY = "favorSystemStatus";
+    public static final String FIRST_MESSAGE_SUFFIX_PROMPT_KEY = "firstMessageSuffixPrompt";
 
     private ChatToolContextConstant() {
     }

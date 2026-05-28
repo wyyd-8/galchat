@@ -90,6 +90,8 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                         WorldStoryEvent::getUserWorldId,
                         WorldStoryEvent::getTitle,
                         WorldStoryEvent::getTheme,
+                        WorldStoryEvent::getCurrentScene,
+                        WorldStoryEvent::getOpening,
                         WorldStoryEvent::getSummary,
                         WorldStoryEvent::getStatus,
                         WorldStoryEvent::getStartedAt,
@@ -107,6 +109,8 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 storyEvent.getUserWorldId(),
                 storyEvent.getTitle(),
                 storyEvent.getTheme(),
+                storyEvent.getCurrentScene(),
+                storyEvent.getOpening(),
                 storyEvent.getSummary(),
                 storyEvent.getStatus(),
                 storyEvent.getStartedAt(),
@@ -132,10 +136,8 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         checkCharacters(startDTO.getUserWorldId(), characterIds);
         checkNoActiveStory(startDTO.getUserWorldId());
 
-        List<Document> sceneWorldDetails = shouldGenerateStoryOpening(startDTO)
-                ? querySceneWorldDetails(startDTO, userWorld)
-                : List.of();
-        StoryOpening opening = buildStoryOpening(startDTO, userWorld, sceneWorldDetails);
+        String rawSceneWorldDetails = formatSceneWorldDetails(querySceneWorldDetails(startDTO, userWorld));
+        StoryOpening opening = buildStoryOpening(startDTO, userWorld, rawSceneWorldDetails);
         LocalDateTime now = LocalDateTime.now();
         WorldStoryEvent storyEvent = new WorldStoryEvent()
                 .setUserWorldId(startDTO.getUserWorldId())
@@ -149,7 +151,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 .setUpdatedAt(now);
         save(storyEvent);
 
-        characterIds.forEach(characterId -> createStoryCharacter(storyEvent, characterId));
+        characterIds.forEach(characterId -> createStoryCharacter(storyEvent, characterId, opening.sceneWorldDetails()));
     }
 
     @Override
@@ -240,7 +242,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         updateStoryCharacterEndMessages(characters, endMessages);
         createWorldEventLog(storyEvent, characters, summary, now);
         characters.forEach(character -> topicBoundaryService.endStoryTopic(storyEvent.getUserWorldId(),
-                character.getCharacterId()));
+                character.getCharacterId(), character.getEndMessageId()));
     }
 
     private void checkStartRequest(WorldStoryEventStartDTO startDTO) {
@@ -311,22 +313,17 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return storyEvent;
     }
 
-    private boolean shouldGenerateStoryOpening(WorldStoryEventStartDTO startDTO) {
-        return !StringUtils.hasText(startDTO.getTitle())
-                || !StringUtils.hasText(startDTO.getCurrentScene())
-                || !StringUtils.hasText(startDTO.getOpening());
-    }
-
     private StoryOpening buildStoryOpening(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld,
-                                           List<Document> sceneWorldDetails) {
+                                           String rawSceneWorldDetails) {
         if (StringUtils.hasText(startDTO.getTitle())
                 && StringUtils.hasText(startDTO.getCurrentScene())
-                && StringUtils.hasText(startDTO.getOpening())) {
+                && StringUtils.hasText(startDTO.getOpening())
+                && !StringUtils.hasText(rawSceneWorldDetails)) {
             return new StoryOpening(startDTO.getTitle().trim(), startDTO.getCurrentScene().trim(),
-                    startDTO.getOpening().trim());
+                    startDTO.getOpening().trim(), "");
         }
 
-        StoryOpening generatedOpening = generateStoryOpening(startDTO, userWorld, sceneWorldDetails);
+        StoryOpening generatedOpening = generateStoryOpening(startDTO, userWorld, rawSceneWorldDetails);
         String title = StringUtils.hasText(startDTO.getTitle()) ? startDTO.getTitle().trim() : generatedOpening.title();
         String currentScene = StringUtils.hasText(startDTO.getCurrentScene())
                 ? startDTO.getCurrentScene().trim()
@@ -337,7 +334,10 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         if (!StringUtils.hasText(title) || !StringUtils.hasText(currentScene) || !StringUtils.hasText(opening)) {
             throw new UserRequestException("故事开场生成失败");
         }
-        return new StoryOpening(title, currentScene, opening);
+        String sceneWorldDetails = StringUtils.hasText(generatedOpening.sceneWorldDetails())
+                ? generatedOpening.sceneWorldDetails().trim()
+                : "";
+        return new StoryOpening(title, currentScene, opening, sceneWorldDetails);
     }
 
     private List<Document> querySceneWorldDetails(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld) {
@@ -348,9 +348,9 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     }
 
     private StoryOpening generateStoryOpening(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld,
-                                              List<Document> sceneWorldDetails) {
+                                              String rawSceneWorldDetails) {
         String content = worldStoryOpeningClient.prompt()
-                .user(formatOpeningPrompt(startDTO, userWorld, sceneWorldDetails))
+                .user(formatOpeningPrompt(startDTO, userWorld, rawSceneWorldDetails))
                 .call()
                 .content();
         try {
@@ -358,7 +358,8 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
             return new StoryOpening(
                     jsonObject.optString("title", ""),
                     jsonObject.optString("currentScene", ""),
-                    jsonObject.optString("opening", "")
+                    jsonObject.optString("opening", ""),
+                    jsonObject.optString("sceneWorldDetails", "")
             );
         } catch (JSONException e) {
             log.warn("故事开场生成结果不是有效JSON: {}", content);
@@ -434,11 +435,11 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     }
 
     private String formatOpeningPrompt(WorldStoryEventStartDTO startDTO, UserWorldPrefix userWorld,
-                                       List<Document> sceneWorldDetails) {
+                                       String rawSceneWorldDetails) {
         StringBuilder builder = new StringBuilder();
         builder.append("用户世界：").append(userWorld.getName()).append('\n');
         appendPromptLine(builder, "世界背景", userWorldPrefixService.buildWorldPrompt(userWorld.getWorldId()));
-        appendPromptLine(builder, "当前场景相关设定，如果与当前场景无关请忽略", formatSceneWorldDetails(sceneWorldDetails));
+        appendPromptLine(builder, "当前场景相关设定候选", rawSceneWorldDetails);
         appendPromptLine(builder, "故事主题", startDTO.getTheme());
         appendPromptLine(builder, "用户指定标题", startDTO.getTitle());
         appendPromptLine(builder, "用户指定场景", startDTO.getCurrentScene());
@@ -478,12 +479,12 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return trimmedContent.substring(beginIndex, endIndex + 1);
     }
 
-    private void createStoryCharacter(WorldStoryEvent storyEvent, Long characterId) {
+    private void createStoryCharacter(WorldStoryEvent storyEvent, Long characterId, String sceneWorldDetails) {
         UserChatHistory startMessage = new UserChatHistory()
                 .setUserWorldId(storyEvent.getUserWorldId())
                 .setCharacterId(characterId)
                 .setType(ChatConstant.STORY_START_TYPE)
-                .setContent(formatStoryStartContent(storyEvent))
+                .setContent(formatStoryStartContent(storyEvent, sceneWorldDetails))
                 .setTimestamp(LocalDateTime.now());
         userChatHistoryMapper.insert(startMessage);
 
@@ -621,12 +622,13 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         }
     }
 
-    private String formatStoryStartContent(WorldStoryEvent storyEvent) {
+    private String formatStoryStartContent(WorldStoryEvent storyEvent, String sceneWorldDetails) {
         StringBuilder builder = new StringBuilder();
         builder.append("【故事开始】\n");
         appendPromptLine(builder, "标题", storyEvent.getTitle());
         appendPromptLine(builder, "主题", storyEvent.getTheme());
         appendPromptLine(builder, "当前场景", storyEvent.getCurrentScene());
+        appendPromptLine(builder, "当前场景相关设定", sceneWorldDetails);
         appendPromptLine(builder, "开场", storyEvent.getOpening());
         return builder.toString().trim();
     }
@@ -666,7 +668,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return builder.toString().trim();
     }
 
-    private record StoryOpening(String title, String currentScene, String opening) {
+    private record StoryOpening(String title, String currentScene, String opening, String sceneWorldDetails) {
     }
 
     private record StoryProgress(String currentScene, String progress) {

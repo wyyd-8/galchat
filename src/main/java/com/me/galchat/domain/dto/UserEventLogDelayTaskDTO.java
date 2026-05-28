@@ -9,6 +9,8 @@ import java.util.List;
 @Accessors(chain = true)
 public class UserEventLogDelayTaskDTO {
 
+    private String taskType;
+
     private Long userWorldId;
 
     private Long characterId;

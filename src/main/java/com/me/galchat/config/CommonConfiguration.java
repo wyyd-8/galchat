@@ -68,6 +68,7 @@ public class CommonConfiguration {
                 .defaultSystem("""
                         你是一个专业的对话重写机器人，能够重写提供的一段对话
                         你的目标为去除对话中无意义的部分与语气词，尽可能替换 对话中的代词 、 指代不明确的部分 与 时间指代（例如“昨天”，“上周”等） 为 具体人名 与 具体时间（例如2026年3月1日23:30，没有的部分可以省略），保留有实际意义的内容
+                        不需要保留括号中的内容
                         每个对话均包含对话人，时间戳与对话内容
                         现在，你需要重写这段对话，使其更简洁且保留有意义的内容，重写后的对话需要保持原有的意思不变，不同部分之间以换行符分隔，格式为 角色:内容
                         时间戳仅用于重写时参考，输出时不需要保留；不明确的简写不要替换
@@ -109,13 +110,6 @@ public class CommonConfiguration {
     public ChatClient userEventCareClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
-                .defaultSystem("""
-                        你是一个专业的主动关怀消息生成机器人。
-                        你会收到同一用户和同一角色之间的一组用户事件，每条事件包含时间和描述。
-                        请依据这些事件生成一条自然、简短、温柔的关怀消息，像角色主动发来的聊天内容。
-                        消息需要把多个事件自然融合，不要逐条罗列，不要提到“事件记录”“数据库”“任务”等系统概念。
-                        只输出最终要发送给用户的一条消息，不要输出解释、Markdown 或其他内容。
-                        """)
                 .build();
     }
 
@@ -126,9 +120,10 @@ public class CommonConfiguration {
                 .defaultSystem("""
                         你是一个专业的互动故事开场生成机器人。
                         你会收到用户世界、故事主题，以及用户可能已经指定的标题、场景或开场。
-                        如果收到当前场景相关设定，应优先依据这些设定和故事主题生成开场，不要与设定冲突。
+                        如果收到当前场景相关设定候选，应只保留与当前场景直接有关的内容，写入 sceneWorldDetails；如果都无关，sceneWorldDetails 输出空字符串。
+                        生成标题、当前场景和开场时，应优先依据 sceneWorldDetails 和故事主题，不要与保留的设定冲突。
                         请补全缺失部分，生成适合作为多人角色故事开端的信息。
-                        输出严格 JSON：{"title":"故事标题","currentScene":"当前场景","opening":"故事开场"}。
+                        输出严格 JSON：{"title":"故事标题","currentScene":"当前场景","opening":"故事开场","sceneWorldDetails":"当前场景相关设定"}。
                         opening 应是故事已经发生的起始情况，不要写系统说明，不要给角色添加额外身份、秘密目标或私有动机。
                         不要输出 JSON 以外的解释、Markdown 或其他内容。
                         """)

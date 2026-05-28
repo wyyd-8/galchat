@@ -5,12 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.constant.UserEventLogConstant;
 import com.me.galchat.domain.dto.UserEventLogDelayTaskDTO;
-import com.me.galchat.domain.po.UserCharacterInfo;
-import com.me.galchat.domain.po.UserChatHistory;
-import com.me.galchat.domain.po.UserEventLog;
-import com.me.galchat.domain.po.UserWorldPrefix;
-import com.me.galchat.mapper.UserCharacterInfoMapper;
+import com.me.galchat.domain.po.*;
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserEventLogService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.websocket.WebSocketServer;
@@ -45,8 +42,8 @@ public class UserEventLogConsumer {
     private final WebSocketServer webSocketServer;
     private final IUserEventLogService userEventLogService;
     private final IUserWorldPrefixService userWorldPrefixService;
-    private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final UserChatHistoryMapper userChatHistoryMapper;
+    private final IUserCharacterInfoService userCharacterInfoService;
 
     @Resource(name = "userEventCareClient")
     private ChatClient userEventCareClient;
@@ -115,11 +112,10 @@ public class UserEventLogConsumer {
             return;
         }
 
-        UserCharacterInfo userCharacterInfo = userCharacterInfoMapper.selectOne(
+        UserCharacterInfo userCharacterInfo = userCharacterInfoService.getOne(
                 new LambdaQueryWrapper<UserCharacterInfo>()
                         .eq(UserCharacterInfo::getUserWorldId, task.getUserWorldId())
-                        .eq(UserCharacterInfo::getCharacterId, task.getCharacterId())
-                        .last("limit 1"));
+                        .eq(UserCharacterInfo::getCharacterId, task.getCharacterId()));
         if (userCharacterInfo == null) {
             return;
         }
@@ -141,10 +137,39 @@ public class UserEventLogConsumer {
             return;
         }
 
-        String content = userEventCareClient.prompt()
-                .user(formatUserEventCarePrompt(eventLogs))
-                .call()
-                .content();
+        String prompt = userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId());
+
+        String content;
+        if (task.getTaskType().equals(UserEventLogConstant.TASK_TYPE_UPCOMING)) {
+            content = userEventCareClient.prompt()
+                    .system("""
+                        你是一个专业的主动关怀消息生成机器人，需要扮演下文中给定的角色，为用户生成一条关怀消息。
+                        你会收到同一用户和同一角色之间的一组用户事件，每条事件包含时间和描述。
+                        请依据这些事件生成一条自然、简短的关怀消息，像角色主动发来的聊天内容。
+                        主要围绕提醒即将发生的事件。
+                        生成的消息需要符合角色性格，当你觉得不合适发出消息时，请返回空字符串。
+                        消息需要把多个事件自然融合，不要逐条罗列，不要提到“事件记录”“数据库”“任务”等系统概念。
+                        只输出最终要发送给用户的一条消息，不要输出解释、Markdown 或其他内容。""" + prompt)
+                    .user(formatUserEventCarePrompt(eventLogs))
+                    .call()
+                    .content();
+        } else if (task.getTaskType().equals(UserEventLogConstant.TASK_TYPE_DAILY_CARE)) {
+            content = userEventCareClient.prompt()
+                    .system("""
+                        你是一个专业的主动关怀消息生成机器人，需要扮演下文中给定的角色，为用户生成一条关怀消息。
+                        你会收到同一用户和同一角色之间的一组用户事件，每条事件包含时间和描述。
+                        现在已经是夜间了，给定的事件都是今天用户所发生的事件。
+                        请依据这些事件生成一条自然、简短的关怀消息，像角色主动发来的聊天内容。
+                        主要围绕回顾这一天的事件。
+                        生成的消息需要符合角色性格，当你觉得不合适发出消息时，请返回空字符串。
+                        消息需要把多个事件自然融合，不要逐条罗列，不要提到“事件记录”“数据库”“任务”等系统概念。
+                        只输出最终要发送给用户的一条消息，不要输出解释、Markdown 或其他内容。""" + prompt)
+                    .user(formatUserEventCarePrompt(eventLogs))
+                    .call()
+                    .content();
+        } else {
+            content = null;
+        }
         if (!StringUtils.hasText(content)) {
             return;
         }
@@ -195,7 +220,7 @@ public class UserEventLogConsumer {
     }
 
     private void updateLastChatInfo(UserChatHistory message) {
-        userCharacterInfoMapper.update(new UserCharacterInfo(), new LambdaUpdateWrapper<UserCharacterInfo>()
+        userCharacterInfoService.update(new UserCharacterInfo(), new LambdaUpdateWrapper<UserCharacterInfo>()
                 .eq(UserCharacterInfo::getUserWorldId, message.getUserWorldId())
                 .eq(UserCharacterInfo::getCharacterId, message.getCharacterId())
                 .set(UserCharacterInfo::getLastChatTime, message.getTimestamp())

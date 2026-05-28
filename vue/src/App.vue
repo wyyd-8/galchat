@@ -29,6 +29,7 @@ import type {
   CharacterTemplate,
   ChatHistory,
   ChatMessagePayload,
+  StoryDetail,
   StoryListItem,
   UserCharacter,
   UserWorld,
@@ -96,6 +97,9 @@ const characters = ref<UserCharacter[]>([])
 const selectedCharacter = ref<UserCharacter | null>(null)
 const stories = ref<StoryListItem[]>([])
 const activeStory = ref<ActiveStory | null>(null)
+const storyDetailDialogVisible = ref(false)
+const storyDetailLoading = ref(false)
+const selectedStoryDetail = ref<StoryDetail | null>(null)
 const characterPanelCollapsed = ref(false)
 
 const createWorldDialogVisible = ref(false)
@@ -146,12 +150,21 @@ const worldDetailForm = reactive({
 })
 
 const startStoryDialogVisible = ref(false)
+const advanceStoryDialogVisible = ref(false)
+const endStoryDialogVisible = ref(false)
+const storyActionLoading = ref(false)
 const storyForm = reactive({
   title: '',
   theme: '',
   currentScene: '',
   opening: '',
   characterIds: [] as number[],
+})
+const storyAdvanceForm = reactive({
+  transition: '',
+})
+const storyEndForm = reactive({
+  ending: '',
 })
 
 const messageInput = ref('')
@@ -262,6 +275,18 @@ function formatTime(value?: string) {
     return ''
   }
   return value.replace('T', ' ').slice(0, 16)
+}
+
+function storyStatusLabel(status?: string) {
+  if (status === 'ACTIVE') return '进行中'
+  if (status === 'CLOSED') return '已结束'
+  return status || '未知'
+}
+
+function storyStatusType(status?: string): 'success' | 'info' | 'warning' {
+  if (status === 'ACTIVE') return 'success'
+  if (status === 'CLOSED') return 'info'
+  return 'warning'
 }
 
 function messageRole(history: ChatHistory): UiMessage['role'] {
@@ -564,6 +589,17 @@ async function selectWorld(world: UserWorld) {
   }, '加载世界失败')
 }
 
+async function openWorldOverview() {
+  if (selectedCharacter.value) {
+    await sendSocketTyping(false)
+  }
+  closeChatSocket()
+  selectedCharacter.value = null
+  messageList.value = []
+  sidebarMode.value = 'characters'
+  characterPanelCollapsed.value = false
+}
+
 async function loadCharacters(userWorldId: number) {
   loading.characters = true
   try {
@@ -584,6 +620,19 @@ async function loadWorldEvents(userWorldId: number) {
     activeStory.value = active
   } finally {
     loading.events = false
+  }
+}
+
+async function openStoryDetail(storyEventId: number) {
+  storyDetailDialogVisible.value = true
+  storyDetailLoading.value = true
+  selectedStoryDetail.value = null
+  try {
+    selectedStoryDetail.value = await api.getStoryDetail(storyEventId)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '加载事件详情失败')
+  } finally {
+    storyDetailLoading.value = false
   }
 }
 
@@ -974,6 +1023,74 @@ async function submitStartStory() {
   }, '开启事件失败')
 }
 
+function openAdvanceStory() {
+  if (!activeStory.value) {
+    ElMessage.warning('当前没有进行中的事件')
+    return
+  }
+  storyAdvanceForm.transition = ''
+  advanceStoryDialogVisible.value = true
+}
+
+async function submitAdvanceStory() {
+  const storyEventId = activeStory.value?.storyEvent.id
+  const userWorldId = selectedWorldId.value
+  if (!storyEventId || !userWorldId) return
+  if (!storyAdvanceForm.transition.trim()) {
+    ElMessage.warning('请填写事件推进说明')
+    return
+  }
+
+  storyActionLoading.value = true
+  try {
+    await api.advanceStory(storyEventId, {
+      transition: storyAdvanceForm.transition.trim(),
+    })
+    advanceStoryDialogVisible.value = false
+    ElMessage.success('事件已推进')
+    await loadWorldEvents(userWorldId)
+    if (selectedCharacter.value) {
+      await loadHistory()
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '推进事件失败')
+  } finally {
+    storyActionLoading.value = false
+  }
+}
+
+function openEndStory() {
+  if (!activeStory.value) {
+    ElMessage.warning('当前没有进行中的事件')
+    return
+  }
+  storyEndForm.ending = ''
+  endStoryDialogVisible.value = true
+}
+
+async function submitEndStory() {
+  const storyEventId = activeStory.value?.storyEvent.id
+  const userWorldId = selectedWorldId.value
+  if (!storyEventId || !userWorldId) return
+
+  storyActionLoading.value = true
+  try {
+    await api.endStory(storyEventId, {
+      ending: storyEndForm.ending.trim(),
+    })
+    endStoryDialogVisible.value = false
+    ElMessage.success('事件已结束')
+    await loadWorldEvents(userWorldId)
+    if (selectedCharacter.value) {
+      await loadHistory()
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '结束事件失败')
+  } finally {
+    storyActionLoading.value = false
+  }
+}
+
 function closeChatSocket() {
   chatSocketConnecting = null
   chatSocketUserWorldId = null
@@ -1335,7 +1452,7 @@ onBeforeUnmount(() => {
           <el-icon><Compass /></el-icon>
           世界
         </el-radio-button>
-        <el-radio-button value="characters" :disabled="!hasSelectedWorld">
+        <el-radio-button value="characters" :disabled="!hasSelectedWorld" @click="openWorldOverview">
           <el-icon><User /></el-icon>
           角色
         </el-radio-button>
@@ -1596,11 +1713,26 @@ onBeforeUnmount(() => {
                 <h3>事件总览</h3>
                 <p>{{ activeStoryTitle }}</p>
               </div>
-              <el-button :icon="Plus" type="primary" @click="openStartStory">开启新事件</el-button>
+              <div class="story-actions">
+                <el-button :icon="Plus" type="primary" @click="openStartStory">开启新事件</el-button>
+                <el-button :icon="ArrowRight" :disabled="!activeStory" @click="openAdvanceStory">
+                  推进事件
+                </el-button>
+              </div>
             </div>
 
-            <article v-if="activeStory" class="active-story">
-              <el-tag type="success" effect="dark" round>进行中</el-tag>
+            <article
+              v-if="activeStory"
+              class="active-story"
+              role="button"
+              tabindex="0"
+              @click="openStoryDetail(activeStory.storyEvent.id)"
+              @keydown.enter.prevent="openStoryDetail(activeStory.storyEvent.id)"
+            >
+              <div class="active-story-header">
+                <el-tag type="success" effect="dark" round>进行中</el-tag>
+                <el-button type="danger" plain size="small" @click.stop="openEndStory">结束事件</el-button>
+              </div>
               <h4>{{ activeStory.storyEvent.title }}</h4>
               <p>{{ activeStory.storyEvent.currentScene || activeStory.storyEvent.opening }}</p>
               <div class="story-characters">
@@ -1615,7 +1747,12 @@ onBeforeUnmount(() => {
             </article>
 
             <div class="story-list">
-              <button v-for="story in stories" :key="story.id" class="story-row">
+              <button
+                v-for="story in stories"
+                :key="story.id"
+                class="story-row"
+                @click="openStoryDetail(story.id)"
+              >
                 <span>{{ story.title }}</span>
                 <el-icon><ArrowRight /></el-icon>
               </button>
@@ -2161,6 +2298,62 @@ onBeforeUnmount(() => {
       </template>
     </el-dialog>
 
+    <el-dialog v-model="storyDetailDialogVisible" title="事件详情" width="620px">
+      <div v-loading="storyDetailLoading" class="story-detail-dialog">
+        <template v-if="selectedStoryDetail">
+          <div class="story-detail-title">
+            <div>
+              <h3>{{ selectedStoryDetail.title }}</h3>
+              <p>{{ selectedStoryDetail.theme || '暂无主题' }}</p>
+            </div>
+            <el-tag :type="storyStatusType(selectedStoryDetail.status)" round>
+              {{ storyStatusLabel(selectedStoryDetail.status) }}
+            </el-tag>
+          </div>
+
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="开始时间">
+              {{ formatTime(selectedStoryDetail.startedAt) || '未记录' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="结束时间">
+              {{ formatTime(selectedStoryDetail.endedAt) || '未结束' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="参与角色" :span="2">
+              <div class="story-characters">
+                <el-tag
+                  v-for="name in selectedStoryDetail.characterNames"
+                  :key="name"
+                  round
+                >
+                  {{ name }}
+                </el-tag>
+                <span v-if="selectedStoryDetail.characterNames.length === 0" class="muted-text">
+                  暂无角色
+                </span>
+              </div>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div class="detail-text-block">
+            <h4>当前场景</h4>
+            <p>{{ selectedStoryDetail.currentScene || '暂无当前场景' }}</p>
+          </div>
+          <div class="detail-text-block">
+            <h4>开场描述</h4>
+            <p>{{ selectedStoryDetail.opening || '暂无开场描述' }}</p>
+          </div>
+          <div class="detail-text-block">
+            <h4>事件总结</h4>
+            <p>{{ selectedStoryDetail.summary || '事件尚未结束，暂无总结' }}</p>
+          </div>
+        </template>
+      </div>
+
+      <template #footer>
+        <el-button @click="storyDetailDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="startStoryDialogVisible" title="开启新事件" width="560px">
       <el-form label-position="top">
         <el-form-item label="事件标题">
@@ -2203,6 +2396,44 @@ onBeforeUnmount(() => {
       <template #footer>
         <el-button @click="startStoryDialogVisible = false">取消</el-button>
         <el-button type="primary" @click="submitStartStory">开启事件</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="advanceStoryDialogVisible" title="推进事件" width="520px">
+      <el-form label-position="top">
+        <el-form-item label="推进说明">
+          <el-input
+            v-model="storyAdvanceForm.transition"
+            type="textarea"
+            :rows="4"
+            placeholder="描述接下来发生的转折、线索或场景变化"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="advanceStoryDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="storyActionLoading" @click="submitAdvanceStory">
+          推进事件
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="endStoryDialogVisible" title="结束事件" width="520px">
+      <el-form label-position="top">
+        <el-form-item label="结束说明">
+          <el-input
+            v-model="storyEndForm.ending"
+            type="textarea"
+            :rows="4"
+            placeholder="可选：描述事件如何收束，留空则由系统根据历史总结"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="endStoryDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="storyActionLoading" @click="submitEndStory">
+          结束事件
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -2671,6 +2902,27 @@ onBeforeUnmount(() => {
   padding: 16px;
   border-radius: 8px;
   background: #f0f7f3;
+  cursor: pointer;
+}
+
+.active-story:hover {
+  box-shadow: 0 12px 28px rgba(33, 43, 54, 0.08);
+}
+
+.story-actions,
+.active-story-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.story-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.active-story-header {
+  justify-content: space-between;
 }
 
 .active-story h4,
@@ -2704,6 +2956,49 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   padding: 12px;
   cursor: pointer;
+}
+
+.story-detail-dialog {
+  min-height: 220px;
+}
+
+.story-detail-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.story-detail-title h3,
+.story-detail-title p,
+.detail-text-block h4,
+.detail-text-block p {
+  margin: 0;
+}
+
+.story-detail-title h3,
+.detail-text-block h4 {
+  font-weight: 800;
+}
+
+.story-detail-title p,
+.muted-text {
+  color: #697386;
+}
+
+.detail-text-block {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(42, 52, 71, 0.1);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.detail-text-block p {
+  margin-top: 8px;
+  color: #3f4958;
+  white-space: pre-wrap;
 }
 
 .chat-stage {

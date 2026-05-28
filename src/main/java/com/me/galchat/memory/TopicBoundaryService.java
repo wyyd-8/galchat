@@ -76,14 +76,33 @@ public class TopicBoundaryService {
         redisTemplate.opsForValue().set(buildActiveStoryKey(conversationInfo), storyEventId + ":" + startMessageId);
     }
 
-    public void endStoryTopic(Long userWorldId, Long characterId) {
+    public void endStoryTopic(Long userWorldId, Long characterId, Long endMessageId) {
         if (userWorldId == null || characterId == null) {
             return;
         }
 
         ConversationInfo conversationInfo = new ConversationInfo(userWorldId, characterId, null);
+        vectorizeClosedStoryTopic(conversationInfo, endMessageId);
         redisTemplate.delete(buildActiveStoryKey(conversationInfo));
         redisTemplate.delete(buildKey(conversationInfo));
+    }
+
+    private void vectorizeClosedStoryTopic(ConversationInfo conversationInfo, Long endMessageId) {
+        if (endMessageId == null) {
+            return;
+        }
+
+        Long startId = activeStoryStartId(conversationInfo);
+        if (startId == null) {
+            startId = getBoundary(conversationInfo).currentStartId();
+        }
+        Long endExclusiveId = endMessageId + 1;
+        if (startId == null || startId >= endExclusiveId) {
+            return;
+        }
+
+        chatHistoryVectorService.addChatHistory(conversationInfo.getUserWorldId(), conversationInfo.getCharacterId(),
+                startId, endExclusiveId);
     }
 
     private TopicBoundary updateActiveStoryBoundary(ConversationInfo conversationInfo, Long userMessageId) {

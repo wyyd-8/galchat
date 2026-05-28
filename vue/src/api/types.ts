@@ -131,6 +131,20 @@ export interface ActiveStory {
   characters: StoryCharacter[]
 }
 
+export interface StoryDetail {
+  id: number
+  userWorldId: number
+  title: string
+  theme?: string
+  currentScene?: string
+  opening?: string
+  summary?: string
+  status?: string
+  startedAt?: string
+  endedAt?: string
+  characterNames: string[]
+}
+
 export interface StoryStartPayload {
   userWorldId: number
   title: string
@@ -138,4 +152,12 @@ export interface StoryStartPayload {
   currentScene: string
   opening?: string
   characterIds: number[]
+}
+
+export interface StoryAdvancePayload {
+  transition: string
+}
+
+export interface StoryEndPayload {
+  ending?: string
 }

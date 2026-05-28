@@ -6,6 +6,9 @@ import java.util.List;
 
 public final class UserEventLogConstant {
 
+    public static final String TASK_TYPE_UPCOMING = "upcoming";
+    public static final String TASK_TYPE_DAILY_CARE = "daily_care";
+
     public static final int HISTORY_LIMIT = 20;
 
     public static final Duration MIN_CHAT_IDLE_TIME = Duration.ofMinutes(5);
@@ -18,6 +21,8 @@ public final class UserEventLogConstant {
             LocalTime.of(19, 0)
     );
     public static final String SCHEDULE_CRON = "0 0 8,13,19 * * *";
+    public static final LocalTime DAILY_CARE_TIME = LocalTime.of(21, 0);
+    public static final String DAILY_CARE_SCHEDULE_CRON = "0 0 21 * * *";
     public static final String SCHEDULE_ZONE = "Asia/Shanghai";
 
     public static final String EVENT_DESCRIPTION_JSON_KEY = "eventDescription";

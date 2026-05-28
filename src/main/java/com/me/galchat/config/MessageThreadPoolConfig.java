@@ -18,7 +18,7 @@ public class MessageThreadPoolConfig {
         // 核心线程数：消费延时任务不需要太多线程
         executor.setCorePoolSize(4);
         // 最大线程数
-        executor.setMaxPoolSize(4);
+        executor.setMaxPoolSize(8);
         // 队列大小
         executor.setQueueCapacity(10);
         // 线程名前缀
@@ -35,8 +35,8 @@ public class MessageThreadPoolConfig {
     public ThreadPoolTaskExecutor bertTaskExecutor() {
         log.info("初始化BERT完整性判断线程池...");
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(4);
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(8);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("bert-completion-");
         executor.setWaitForTasksToCompleteOnShutdown(false);
@@ -50,8 +50,8 @@ public class MessageThreadPoolConfig {
     public ThreadPoolTaskExecutor chatTaskExecutor() {
         log.info("初始化聊天消息消费线程池...");
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(2);
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(8);
         executor.setQueueCapacity(20);
         executor.setThreadNamePrefix("chat-message-consumer-");
         executor.setWaitForTasksToCompleteOnShutdown(false);

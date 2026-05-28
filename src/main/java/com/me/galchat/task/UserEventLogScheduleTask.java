@@ -57,12 +57,36 @@ public class UserEventLogScheduleTask {
                 now, nextSearchTime, eventLogs.size(), eventIdsByTask.size());
     }
 
+    @Scheduled(cron = UserEventLogConstant.DAILY_CARE_SCHEDULE_CRON, zone = UserEventLogConstant.SCHEDULE_ZONE)
+    public void scheduleDailyUserEventCare() {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime dayBegin = LocalDateTime.of(now.toLocalDate(), LocalTime.MIN);
+        LocalDateTime nextDayBegin = LocalDateTime.now();
+        List<UserEventLog> eventLogs = userEventLogService.listUpcomingUserEventLogs(dayBegin, nextDayBegin);
+        if (eventLogs.isEmpty()) {
+            log.info("用户事件每日关怀扫描完成, begin:{}, end:{}, count:0", dayBegin, nextDayBegin);
+            return;
+        }
+
+        Map<EventTaskKey, List<Long>> eventIdsByTask = eventLogs.stream()
+                .collect(Collectors.groupingBy(this::eventTaskKey,
+                        Collectors.mapping(UserEventLog::getId, Collectors.toList())));
+        eventIdsByTask.forEach((key, eventIds) -> offerDelayTask(key, eventIds, UserEventLogConstant.TASK_TYPE_DAILY_CARE));
+        log.info("用户事件每日关怀扫描完成, begin:{}, end:{}, eventCount:{}, taskCount:{}",
+                dayBegin, nextDayBegin, eventLogs.size(), eventIdsByTask.size());
+    }
+
     private void offerDelayTask(EventTaskKey key, List<Long> eventIds) {
+        offerDelayTask(key, eventIds, UserEventLogConstant.TASK_TYPE_UPCOMING);
+    }
+
+    private void offerDelayTask(EventTaskKey key, List<Long> eventIds, String taskType) {
         if (eventIds.isEmpty()) {
             return;
         }
 
         UserEventLogDelayTaskDTO task = new UserEventLogDelayTaskDTO()
+                .setTaskType(taskType)
                 .setUserWorldId(key.userWorldId())
                 .setCharacterId(key.characterId())
                 .setUserEventLogIds(eventIds);

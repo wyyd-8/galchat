@@ -5,6 +5,9 @@ import type {
   ChatFlux,
   ChatHistory,
   ChatMessagePayload,
+  StoryAdvancePayload,
+  StoryDetail,
+  StoryEndPayload,
   StoryListItem,
   StoryStartPayload,
   UserCharacter,
@@ -208,8 +211,23 @@ export const api = {
   getActiveStory(userWorldId: number) {
     return request<ActiveStory | null>(`/worldevent/story/active/${userWorldId}`)
   },
+  getStoryDetail(storyEventId: number) {
+    return request<StoryDetail>(`/worldevent/story/${storyEventId}`)
+  },
   startStory(payload: StoryStartPayload) {
     return request<void>('/worldevent/story/start', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  advanceStory(storyEventId: number, payload: StoryAdvancePayload) {
+    return request<void>(`/worldevent/story/${storyEventId}/advance`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  endStory(storyEventId: number, payload: StoryEndPayload = {}) {
+    return request<void>(`/worldevent/story/${storyEventId}/end`, {
       method: 'POST',
       body: JSON.stringify(payload),
     })

@@ -13,6 +13,8 @@ public class WorldStoryEventDetailVO {
     private Long userWorldId;
     private String title;
     private String theme;
+    private String currentScene;
+    private String opening;
     private String summary;
     private String status;
     private LocalDateTime startedAt;

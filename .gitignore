@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### 模型 ###
+/python/bert_model/

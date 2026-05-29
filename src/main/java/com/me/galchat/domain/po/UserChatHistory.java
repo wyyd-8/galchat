@@ -36,6 +36,10 @@ public class UserChatHistory implements Serializable {
 
     private String type;
 
+    private Long userMessageId;
+
+    private Integer stepNo;
+
     private LocalDateTime timestamp;
 
 

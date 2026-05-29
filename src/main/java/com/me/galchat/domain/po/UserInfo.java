@@ -35,8 +35,6 @@ public class UserInfo implements Serializable {
 
     private String password;
 
-    private Boolean eotDetectionStatus;
-
     private LocalDate birthday;
 
     private LocalDateTime createTime;

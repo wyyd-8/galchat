@@ -7,14 +7,20 @@ spring:
       api-key: sk-c267b8feed9b4b72ba27c64f4db855af
       chat:
         options:
-          model: deepseek-reasoner
+          model: deepseek-v4-flash
           temperature: 1.0
     model:
       embedding: ollama
     ollama:
         embedding:
           options:
-            model: quentinz/bge-large-zh-v1.5
+            model: qwen3-embedding:latest
+            dimensions: 1024
+  cache:
+    type: redis
+    # 不配置 cache-names 或留空，则任何 @Cacheable 新名称都会自动创建
+    redis:
+      time-to-live: 60m
   datasource:
     driver-class-name: org.postgresql.Driver
     url: jdbc:postgresql://localhost:5432/postgres
@@ -39,3 +45,8 @@ mybatis-plus:
     db-config:
       update-strategy: not_null
       id-type: auto
+galchat:
+  alioss:
+    endpoint: https://oss-cn-beijing.aliyuncs.com
+    bucket-name: galchat
+    region: cn-beijing

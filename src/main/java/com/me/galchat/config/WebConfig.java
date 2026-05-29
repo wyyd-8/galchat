@@ -1,11 +1,8 @@
 package com.me.galchat.config;
 
-import com.me.galchat.interceptor.DeepSeekThinkingInterceptor;
 import com.me.galchat.interceptor.TokenInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.client.RestClient;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -21,14 +18,9 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(tokenInterceptor)
                 .addPathPatterns("/**")//拦截所有请求
-                .excludePathPatterns("/login");//不拦截/login的请求(excludePathPatterns优先级更高)
+                .excludePathPatterns("/user/login", "/user/register");//不拦截/login的请求(excludePathPatterns优先级更高)
     }
 
-    @Bean
-    public RestClient.Builder deepSeekRestClientBuilder() {
-        return RestClient.builder()
-                .requestInterceptor(new DeepSeekThinkingInterceptor());
-    }
 }
 /*
 addPathPatterns中:/*拦截一级路径，如/emps，/depts，不包括/emps/1

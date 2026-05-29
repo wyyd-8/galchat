@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 
 @Data
 @Component
-@ConfigurationProperties(prefix = "aliyun.oss")
+@ConfigurationProperties(prefix = "galchat.alioss")
 public class OSSProperties {
     private String endpoint;
     private String bucketName;

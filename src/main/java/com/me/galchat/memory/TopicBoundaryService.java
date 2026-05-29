@@ -1,0 +1,295 @@
+package com.me.galchat.memory;
+
+import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.ChatToolContextConstant;
+import com.me.galchat.constant.DateTimeConstant;
+import com.me.galchat.constant.RedisConstant;
+import com.me.galchat.domain.po.ConversationInfo;
+import com.me.galchat.domain.po.UserChatHistory;
+import com.me.galchat.tool.VectorTools;
+import com.me.galchat.vector.ChatHistoryVectorService;
+import lombok.RequiredArgsConstructor;
+import org.json.JSONObject;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+@RequiredArgsConstructor
+@Service
+public class TopicBoundaryService {
+
+    private final StringRedisTemplate redisTemplate;
+    private final ChatClient topicClient;
+    private final UserChatMemory topicChatMemory;
+    private final VectorTools vectorTools;
+    private final ChatHistoryVectorService chatHistoryVectorService;
+
+    public TopicBoundary updateAfterUserMessage(ConversationInfo baseConversation, UserChatHistory userMessage) {
+        TopicBoundary storyBoundary = updateActiveStoryBoundary(baseConversation, userMessage.getId());
+        if (storyBoundary != null) {
+            return storyBoundary;
+        }
+
+        TopicBoundary oldBoundary = getOrCreateBoundary(baseConversation, userMessage.getId());
+        ConversationInfo topicConversation = new ConversationInfo(baseConversation.getUserWorldId(),
+                baseConversation.getCharacterId(), oldBoundary.windowStartId());
+
+        boolean sameTopic = isSameTopic(topicConversation, userMessage);
+        TopicBoundary newBoundary = sameTopic
+                ? new TopicBoundary(oldBoundary.previousStartId(), oldBoundary.currentStartId(), userMessage.getId())
+                : new TopicBoundary(oldBoundary.currentStartId(), userMessage.getId(), userMessage.getId());
+
+        saveBoundary(baseConversation, newBoundary);
+        if (!sameTopic) {
+            searchInfoAfterFirstMessageInTopic(userMessage);
+            vectorizeClosedTopic(userMessage, oldBoundary);
+        }
+        return newBoundary;
+    }
+
+    private void vectorizeClosedTopic(UserChatHistory userMessage, TopicBoundary oldBoundary) {
+        vectorizeChatHistory(userMessage.getUserWorldId(), userMessage.getCharacterId(),
+                oldBoundary.previousStartId(), oldBoundary.currentStartId());
+    }
+
+    public void startAssistantMessageTopic(UserChatHistory assistantMessage) {
+        if (assistantMessage == null || assistantMessage.getUserWorldId() == null
+                || assistantMessage.getCharacterId() == null || assistantMessage.getId() == null) {
+            return;
+        }
+
+        ConversationInfo conversationInfo = new ConversationInfo(assistantMessage.getUserWorldId(),
+                assistantMessage.getCharacterId(), null);
+        TopicBoundary oldBoundary = getOrCreateBoundary(conversationInfo, assistantMessage.getId());
+        TopicBoundary newBoundary = new TopicBoundary(oldBoundary.currentStartId(), assistantMessage.getId(),
+                assistantMessage.getId());
+        saveBoundary(conversationInfo, newBoundary);
+        vectorizeClosedTopic(assistantMessage, oldBoundary);
+    }
+
+    public void startStoryTopic(Long userWorldId, Long characterId, Long storyEventId, Long startMessageId) {
+        if (userWorldId == null || characterId == null || storyEventId == null || startMessageId == null) {
+            return;
+        }
+
+        ConversationInfo conversationInfo = new ConversationInfo(userWorldId, characterId, null);
+        TopicBoundary oldBoundary = getOrCreateBoundary(conversationInfo, startMessageId);
+        vectorizeChatHistory(userWorldId, characterId, oldBoundary.previousStartId(), oldBoundary.currentStartId());
+        vectorizeChatHistory(userWorldId, characterId, oldBoundary.currentStartId(), startMessageId);
+
+        TopicBoundary boundary = new TopicBoundary(null, startMessageId, startMessageId);
+        saveBoundary(conversationInfo, boundary);
+        redisTemplate.opsForValue().set(buildActiveStoryKey(conversationInfo), storyEventId + ":" + startMessageId);
+    }
+
+    public void endStoryTopic(Long userWorldId, Long characterId, Long endMessageId) {
+        if (userWorldId == null || characterId == null) {
+            return;
+        }
+
+        ConversationInfo conversationInfo = new ConversationInfo(userWorldId, characterId, null);
+        vectorizeClosedStoryTopic(conversationInfo, endMessageId);
+        redisTemplate.delete(buildActiveStoryKey(conversationInfo));
+        redisTemplate.delete(buildKey(conversationInfo));
+    }
+
+    private void vectorizeClosedStoryTopic(ConversationInfo conversationInfo, Long endMessageId) {
+        if (endMessageId == null) {
+            return;
+        }
+
+        Long startId = activeStoryStartId(conversationInfo);
+        if (startId == null) {
+            startId = getBoundary(conversationInfo).currentStartId();
+        }
+        Long endExclusiveId = endMessageId + 1;
+        if (startId == null || startId >= endExclusiveId) {
+            return;
+        }
+
+        chatHistoryVectorService.addChatHistory(conversationInfo.getUserWorldId(), conversationInfo.getCharacterId(),
+                startId, endExclusiveId);
+    }
+
+    private void vectorizeChatHistory(Long userWorldId, Long characterId, Long startId, Long endId) {
+        if (startId == null || endId == null || startId >= endId) {
+            return;
+        }
+
+        chatHistoryVectorService.addChatHistory(userWorldId, characterId, startId, endId);
+    }
+
+    private TopicBoundary updateActiveStoryBoundary(ConversationInfo conversationInfo, Long userMessageId) {
+        Long storyStartId = activeStoryStartId(conversationInfo);
+        if (storyStartId == null) {
+            return null;
+        }
+
+        TopicBoundary boundary = new TopicBoundary(null, storyStartId, userMessageId);
+        saveBoundary(conversationInfo, boundary);
+        return boundary;
+    }
+
+    private Long activeStoryStartId(ConversationInfo conversationInfo) {
+        String value = redisTemplate.opsForValue().get(buildActiveStoryKey(conversationInfo));
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+
+        String[] parts = value.split(":", -1);
+        if (parts.length != 2 || !StringUtils.hasText(parts[1])) {
+            return null;
+        }
+        try {
+            return Long.valueOf(parts[1]);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private void searchInfoAfterFirstMessageInTopic(UserChatHistory message) {
+        if (!StringUtils.hasText(message.getContent())) {
+            return;
+        }
+
+        String searchInfo = vectorTools.searchInfo(message.getContent(), new ToolContext(Map.of(
+                ChatToolContextConstant.USER_WORLD_ID_KEY, message.getUserWorldId(),
+                ChatToolContextConstant.CHARACTER_ID_KEY, message.getCharacterId()
+        )));
+        if (!StringUtils.hasText(searchInfo)) {
+            return;
+        }
+
+        topicChatMemory.saveAutoSearchInfo(new ConversationInfo(message.getUserWorldId(), message.getCharacterId(), null),
+                ChatConstant.AUTO_SEARCH_INFO_PREFIX + searchInfo);
+    }
+
+    public TopicBoundary getBoundary(ConversationInfo conversationInfo) {
+        String value = redisTemplate.opsForValue().get(buildKey(conversationInfo));
+        if (!StringUtils.hasText(value)) {
+            return new TopicBoundary(conversationInfo.getStart(), conversationInfo.getStart(), null);
+        }
+
+        JSONObject jsonObject = new JSONObject(value);
+        return new TopicBoundary(
+                readLong(jsonObject, ChatConstant.TOPIC_PREVIOUS_START_ID_KEY),
+                readLong(jsonObject, ChatConstant.TOPIC_CURRENT_START_ID_KEY),
+                readLong(jsonObject, ChatConstant.TOPIC_LAST_CHECKED_MESSAGE_ID_KEY)
+        );
+    }
+
+    private TopicBoundary getOrCreateBoundary(ConversationInfo conversationInfo, Long fallbackStartId) {
+        TopicBoundary boundary = getBoundary(conversationInfo);
+        Long currentStartId = boundary.currentStartId();
+        if (currentStartId != null) {
+            return boundary;
+        }
+
+        Long startId = conversationInfo.getStart() != null ? conversationInfo.getStart() : fallbackStartId;
+        TopicBoundary initialBoundary = new TopicBoundary(startId, startId, boundary.lastCheckedMessageId());
+        saveBoundary(conversationInfo, initialBoundary);
+        return initialBoundary;
+    }
+
+    private boolean isSameTopic(ConversationInfo topicConversation, UserChatHistory userMessage) {
+        List<UserChatHistory> history = new ArrayList<>(topicChatMemory.listHistories(topicConversation));
+        if (history.size() <= 1) {
+            return true;
+        }
+        history.removeLast();
+        if (conversationContentLength(history, userMessage) > ChatConstant.MAX_TOPIC_CONVERSATION_LENGTH) {
+            return false;
+        }
+
+        String prompt = """
+                历史对话：
+                %s
+
+                当前用户消息：
+                %s
+                """.formatted(formatMessages(history), formatMessage(userMessage));
+
+        String content = topicClient.prompt()
+                .user(prompt)
+                .call()
+                .content();
+
+        return content != null && content.trim().equalsIgnoreCase("true");
+    }
+
+    private int conversationContentLength(List<UserChatHistory> history, UserChatHistory userMessage) {
+        int length = contentLength(userMessage);
+        for (UserChatHistory message : history) {
+            length += contentLength(message);
+        }
+        return length;
+    }
+
+    private int contentLength(UserChatHistory message) {
+        String content = message.getContent();
+        if (content == null) {
+            return 0;
+        }
+        return content.length();
+    }
+
+    private String formatMessages(List<UserChatHistory> messages) {
+        StringBuilder builder = new StringBuilder();
+        for (UserChatHistory message : messages) {
+            builder.append(formatMessage(message)).append('\n');
+        }
+        return builder.toString();
+    }
+
+    private String formatMessage(UserChatHistory message) {
+        return "[" + formatTimestamp(message.getTimestamp()) + "] "
+                + formatType(message.getType()) + ": "
+                + message.getContent();
+    }
+
+    private String formatTimestamp(LocalDateTime timestamp) {
+        if (timestamp == null) {
+            return "unknown";
+        }
+        return DateTimeConstant.DATE_TIME_FORMATTER.format(timestamp);
+    }
+
+    private String formatType(String type) {
+        if (!StringUtils.hasText(type)) {
+            return "user";
+        }
+        return type;
+    }
+
+    private void saveBoundary(ConversationInfo conversationInfo, TopicBoundary boundary) {
+        JSONObject jsonObject = new JSONObject();
+        jsonObject.put(ChatConstant.TOPIC_PREVIOUS_START_ID_KEY, boundary.previousStartId());
+        jsonObject.put(ChatConstant.TOPIC_CURRENT_START_ID_KEY, boundary.currentStartId());
+        jsonObject.put(ChatConstant.TOPIC_LAST_CHECKED_MESSAGE_ID_KEY, boundary.lastCheckedMessageId());
+        redisTemplate.opsForValue().set(buildKey(conversationInfo), jsonObject.toString());
+    }
+
+    private Long readLong(JSONObject jsonObject, String key) {
+        if (!jsonObject.has(key) || jsonObject.isNull(key)) {
+            return null;
+        }
+        return jsonObject.getLong(key);
+    }
+
+    private String buildKey(ConversationInfo conversationInfo) {
+        return RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX
+                + conversationInfo.getUserWorldId() + ":" + conversationInfo.getCharacterId();
+    }
+
+    private String buildActiveStoryKey(ConversationInfo conversationInfo) {
+        return RedisConstant.STORY_ACTIVE_KEY_PREFIX
+                + conversationInfo.getUserWorldId() + ":" + conversationInfo.getCharacterId();
+    }
+}

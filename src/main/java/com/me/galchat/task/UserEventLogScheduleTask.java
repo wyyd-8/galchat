@@ -1,9 +1,12 @@
 package com.me.galchat.task;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.constant.UserEventLogConstant;
 import com.me.galchat.domain.dto.UserEventLogDelayTaskDTO;
+import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserEventLog;
+import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.service.IUserEventLogService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +15,7 @@ import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RDelayedQueue;
 import org.redisson.api.RedissonClient;
 import org.redisson.codec.JsonJacksonCodec;
+import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +32,7 @@ import java.util.stream.Collectors;
 public class UserEventLogScheduleTask {
 
     private final IUserEventLogService userEventLogService;
+    private final UserChatHistoryMapper userChatHistoryMapper;
     private final RedissonClient redissonClient;
 
     private RDelayedQueue<UserEventLogDelayTaskDTO> delayedQueue;
@@ -63,17 +68,22 @@ public class UserEventLogScheduleTask {
         LocalDateTime dayBegin = LocalDateTime.of(now.toLocalDate(), LocalTime.MIN);
         LocalDateTime nextDayBegin = LocalDateTime.now();
         List<UserEventLog> eventLogs = userEventLogService.listUpcomingUserEventLogs(dayBegin, nextDayBegin);
-        if (eventLogs.isEmpty()) {
-            log.info("用户事件每日关怀扫描完成, begin:{}, end:{}, count:0", dayBegin, nextDayBegin);
-            return;
-        }
-
         Map<EventTaskKey, List<Long>> eventIdsByTask = eventLogs.stream()
                 .collect(Collectors.groupingBy(this::eventTaskKey,
                         Collectors.mapping(UserEventLog::getId, Collectors.toList())));
         eventIdsByTask.forEach((key, eventIds) -> offerDelayTask(key, eventIds, UserEventLogConstant.TASK_TYPE_DAILY_CARE));
-        log.info("用户事件每日关怀扫描完成, begin:{}, end:{}, eventCount:{}, taskCount:{}",
-                dayBegin, nextDayBegin, eventLogs.size(), eventIdsByTask.size());
+
+        List<EventTaskKey> chattedTaskKeys = listChattedTaskKeys(dayBegin, nextDayBegin);
+        long discussionTaskCount = 0;
+        for (EventTaskKey key : chattedTaskKeys) {
+            if (eventIdsByTask.containsKey(key)) {
+                continue;
+            }
+            offerDelayTask(key, List.of(), UserEventLogConstant.TASK_TYPE_DAILY_CARE);
+            discussionTaskCount++;
+        }
+        log.info("用户事件每日关怀扫描完成, begin:{}, end:{}, eventCount:{}, eventTaskCount:{}, discussionTaskCount:{}",
+                dayBegin, nextDayBegin, eventLogs.size(), eventIdsByTask.size(), discussionTaskCount);
     }
 
     private void offerDelayTask(EventTaskKey key, List<Long> eventIds) {
@@ -81,7 +91,7 @@ public class UserEventLogScheduleTask {
     }
 
     private void offerDelayTask(EventTaskKey key, List<Long> eventIds, String taskType) {
-        if (eventIds.isEmpty()) {
+        if (eventIds.isEmpty() && !UserEventLogConstant.TASK_TYPE_DAILY_CARE.equals(taskType)) {
             return;
         }
 
@@ -91,6 +101,26 @@ public class UserEventLogScheduleTask {
                 .setCharacterId(key.characterId())
                 .setUserEventLogIds(eventIds);
         delayedQueue.offer(task, 0L, TimeUnit.MILLISECONDS);
+    }
+
+    private List<EventTaskKey> listChattedTaskKeys(LocalDateTime beginTime, LocalDateTime endTime) {
+        if (beginTime == null || endTime == null || !beginTime.isBefore(endTime)) {
+            return List.of();
+        }
+
+        return userChatHistoryMapper.selectList(new LambdaQueryWrapper<UserChatHistory>()
+                        .select(UserChatHistory::getUserWorldId, UserChatHistory::getCharacterId)
+                        .isNotNull(UserChatHistory::getUserWorldId)
+                        .isNotNull(UserChatHistory::getCharacterId)
+                        .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
+                                .or()
+                                .eq(UserChatHistory::getType, MessageType.USER.getValue()))
+                        .ge(UserChatHistory::getTimestamp, beginTime)
+                        .lt(UserChatHistory::getTimestamp, endTime)
+                        .groupBy(UserChatHistory::getUserWorldId, UserChatHistory::getCharacterId))
+                .stream()
+                .map(history -> new EventTaskKey(history.getUserWorldId(), history.getCharacterId()))
+                .toList();
     }
 
     private EventTaskKey eventTaskKey(UserEventLog eventLog) {

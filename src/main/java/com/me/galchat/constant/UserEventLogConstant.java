@@ -10,6 +10,7 @@ public final class UserEventLogConstant {
     public static final String TASK_TYPE_DAILY_CARE = "daily_care";
 
     public static final int HISTORY_LIMIT = 20;
+    public static final int DISCUSSION_TOPIC_HISTORY_LIMIT = 50;
 
     public static final Duration MIN_CHAT_IDLE_TIME = Duration.ofMinutes(5);
     public static final Duration RETRY_DELAY = Duration.ofMinutes(10);
@@ -27,6 +28,8 @@ public final class UserEventLogConstant {
 
     public static final String EVENT_DESCRIPTION_JSON_KEY = "eventDescription";
     public static final String TIME_JSON_KEY = "time";
+    public static final String DISCUSSION_TOPIC_JSON_KEY = "topic";
+    public static final String DISCUSSION_MESSAGE_JSON_KEY = "message";
 
     private UserEventLogConstant() {
     }

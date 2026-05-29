@@ -3,6 +3,7 @@ package com.me.galchat.service.impl;
 import com.me.galchat.service.DocumentReranker;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -16,11 +17,8 @@ public class LocalDocumentReranker implements DocumentReranker {
 
     private final RestClient restClient;
 
-    public LocalDocumentReranker() {
-        this("http://localhost:8082");
-    }
-
-    LocalDocumentReranker(String baseUrl) {
+    public LocalDocumentReranker(
+            @Value("${galchat.service.reranker-url:http://localhost:8082}") String baseUrl) {
         this(restClientBuilder(baseUrl));
     }
 

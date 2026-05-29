@@ -7,6 +7,7 @@ import com.me.galchat.constant.UserEventLogConstant;
 import com.me.galchat.domain.dto.UserEventLogDelayTaskDTO;
 import com.me.galchat.domain.po.*;
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserEventLogService;
 import com.me.galchat.service.IUserWorldPrefixService;
@@ -20,6 +21,8 @@ import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RDelayedQueue;
 import org.redisson.api.RedissonClient;
 import org.redisson.codec.JsonJacksonCodec;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.context.event.ContextClosedEvent;
@@ -44,6 +47,7 @@ public class UserEventLogConsumer {
     private final IUserWorldPrefixService userWorldPrefixService;
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final IUserCharacterInfoService userCharacterInfoService;
+    private final TopicBoundaryService topicBoundaryService;
 
     @Resource(name = "userEventCareClient")
     private ChatClient userEventCareClient;
@@ -101,10 +105,14 @@ public class UserEventLogConsumer {
     }
 
     private void handleUserEventLogTask(UserEventLogDelayTaskDTO task) {
-        if (task == null || task.getUserWorldId() == null || task.getCharacterId() == null
-                || task.getUserEventLogIds() == null || task.getUserEventLogIds().isEmpty()) {
+        if (task == null || task.getUserWorldId() == null || task.getCharacterId() == null) {
             return;
         }
+        List<Long> userEventLogIds = task.getUserEventLogIds() == null ? List.of() : task.getUserEventLogIds();
+        if (userEventLogIds.isEmpty() && !UserEventLogConstant.TASK_TYPE_DAILY_CARE.equals(task.getTaskType())) {
+            return;
+        }
+
         UserWorldPrefix userWorld = userWorldPrefixService.getById(task.getUserWorldId());
         if (userWorld == null || !Boolean.TRUE.equals(userWorld.getAcitvePushStatus())) {
             log.info("用户世界未开启主动推送，跳过用户事件关怀任务, userWorldId:{}, characterId:{}",
@@ -126,21 +134,15 @@ public class UserEventLogConsumer {
             return;
         }
 
-        List<UserEventLog> eventLogs = userEventLogService.listByIds(task.getUserEventLogIds())
-                .stream()
-                .filter(eventLog -> task.getUserWorldId().equals(eventLog.getUserWorldId()))
-                .filter(eventLog -> task.getCharacterId().equals(eventLog.getCharacterId()))
-                .sorted(Comparator.comparing(UserEventLog::getTime, Comparator.nullsLast(Comparator.naturalOrder()))
-                        .thenComparing(UserEventLog::getId, Comparator.nullsLast(Comparator.naturalOrder())))
-                .toList();
-        if (eventLogs.isEmpty()) {
-            return;
-        }
-
-        String prompt = userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId());
-
         String content;
-        if (task.getTaskType().equals(UserEventLogConstant.TASK_TYPE_UPCOMING)) {
+        if (userEventLogIds.isEmpty()) {
+            content = generateDailyDiscussionQuestion(task, userWorld);
+        } else if (UserEventLogConstant.TASK_TYPE_UPCOMING.equals(task.getTaskType())) {
+            List<UserEventLog> eventLogs = listTaskEventLogs(task, userEventLogIds);
+            if (eventLogs.isEmpty()) {
+                return;
+            }
+            String prompt = userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId());
             content = userEventCareClient.prompt()
                     .system("""
                         你是一个专业的主动关怀消息生成机器人，需要扮演下文中给定的角色，为用户生成一条关怀消息。
@@ -153,7 +155,12 @@ public class UserEventLogConsumer {
                     .user(formatUserEventCarePrompt(eventLogs))
                     .call()
                     .content();
-        } else if (task.getTaskType().equals(UserEventLogConstant.TASK_TYPE_DAILY_CARE)) {
+        } else if (UserEventLogConstant.TASK_TYPE_DAILY_CARE.equals(task.getTaskType())) {
+            List<UserEventLog> eventLogs = listTaskEventLogs(task, userEventLogIds);
+            if (eventLogs.isEmpty()) {
+                return;
+            }
+            String prompt = userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId());
             content = userEventCareClient.prompt()
                     .system("""
                         你是一个专业的主动关怀消息生成机器人，需要扮演下文中给定的角色，为用户生成一条关怀消息。
@@ -181,6 +188,7 @@ public class UserEventLogConsumer {
                 .setContent(content.trim())
                 .setTimestamp(LocalDateTime.now());
         userChatHistoryMapper.insert(message);
+        topicBoundaryService.startAssistantMessageTopic(message);
         updateLastChatInfo(message);
 
         try {
@@ -195,6 +203,81 @@ public class UserEventLogConsumer {
         return lastChatTime != null && lastChatTime.isAfter(now.minus(UserEventLogConstant.MIN_CHAT_IDLE_TIME));
     }
 
+    private List<UserEventLog> listTaskEventLogs(UserEventLogDelayTaskDTO task, List<Long> userEventLogIds) {
+        return userEventLogService.listByIds(userEventLogIds)
+                .stream()
+                .filter(eventLog -> task.getUserWorldId().equals(eventLog.getUserWorldId()))
+                .filter(eventLog -> task.getCharacterId().equals(eventLog.getCharacterId()))
+                .sorted(Comparator.comparing(UserEventLog::getTime, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(UserEventLog::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    private String generateDailyDiscussionQuestion(UserEventLogDelayTaskDTO task, UserWorldPrefix userWorld) {
+        List<String> recentTopics = listRecentDiscussionTopics(task.getUserWorldId(), task.getCharacterId());
+        String contextPrompt = buildWorldCharacterPrompt(userWorld, task.getUserWorldId(), task.getCharacterId());
+        String content = userEventCareClient.prompt()
+                .system("""
+                        你是一个专业的主动聊天问题生成机器人，需要扮演下文中给定的角色。
+                        当前没有可回顾或提醒的用户事件，但用户今天曾与该角色聊天。
+                        请基于当前世界观与角色设定，生成一个自然、简短、主动发给用户的深度或思辨问题。
+                        问题应围绕“世界、角色、用户”三者之一展开：可以追问世界观中的价值冲突、角色自身的处境或信念，或邀请用户思考自身选择与感受。
+                        必须符合角色性格与关系边界，像角色本人发来的消息，不要像访谈提纲。
+                        尽量避开已使用主题；不要重复最近主题的核心角度。
+                        输出严格 JSON：{"topic":"本次问题主题，20字以内","message":"最终发送给用户的一条消息"}。
+                        message 只包含一条消息，不要解释，不要 Markdown，不要提到“事件记录”“数据库”“任务”“主题”等系统概念。
+                        如果不适合主动发问，输出空字符串。""" + contextPrompt)
+                .user(formatDiscussionTopicPrompt(recentTopics))
+                .call()
+                .content();
+        DailyDiscussionQuestion question = parseDailyDiscussionQuestion(content);
+        if (question == null) {
+            return null;
+        }
+
+        userEventLogService.addUserEventLog(new UserEventLog()
+                .setUserWorldId(task.getUserWorldId())
+                .setCharacterId(task.getCharacterId())
+                .setTime(null)
+                .setEventDescription(question.topic()));
+        return question.message();
+    }
+
+    private List<String> listRecentDiscussionTopics(Long userWorldId, Long characterId) {
+        return userEventLogService.lambdaQuery()
+                .select(UserEventLog::getEventDescription)
+                .eq(UserEventLog::getUserWorldId, userWorldId)
+                .eq(UserEventLog::getCharacterId, characterId)
+                .isNull(UserEventLog::getTime)
+                .orderByDesc(UserEventLog::getTimestamp)
+                .orderByDesc(UserEventLog::getId)
+                .last("limit " + UserEventLogConstant.DISCUSSION_TOPIC_HISTORY_LIMIT)
+                .list()
+                .stream()
+                .map(UserEventLog::getEventDescription)
+                .filter(StringUtils::hasText)
+                .toList();
+    }
+
+    private String buildWorldCharacterPrompt(UserWorldPrefix userWorld, Long userWorldId, Long characterId) {
+        StringBuilder prompt = new StringBuilder();
+        if (userWorld != null && userWorld.getWorldId() != null) {
+            appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(userWorld.getWorldId()));
+        }
+        appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(userWorldId, characterId));
+        return prompt.toString();
+    }
+
+    private void appendPrompt(StringBuilder prompt, String content) {
+        if (!StringUtils.hasText(content)) {
+            return;
+        }
+        if (!prompt.isEmpty()) {
+            prompt.append('\n');
+        }
+        prompt.append(content);
+    }
+
     private void retryUserEventLogTask(UserEventLogDelayTaskDTO task) {
         int retryCount = task.getRetryCount() == null ? 0 : task.getRetryCount();
         if (retryCount >= UserEventLogConstant.MAX_RETRY_COUNT) {
@@ -205,6 +288,19 @@ public class UserEventLogConsumer {
 
         task.setRetryCount(retryCount + 1);
         userEventLogDelayedQueue.offer(task, UserEventLogConstant.RETRY_DELAY.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
+    private String formatDiscussionTopicPrompt(List<String> recentTopics) {
+        if (recentTopics == null || recentTopics.isEmpty()) {
+            return "已使用主题：无\n请生成一个新的深度或思辨问题。";
+        }
+
+        StringBuilder builder = new StringBuilder("已使用主题（避免重复）：\n");
+        for (String topic : recentTopics) {
+            builder.append("- ").append(topic).append('\n');
+        }
+        builder.append("请生成一个新的深度或思辨问题。");
+        return builder.toString();
     }
 
     private String formatUserEventCarePrompt(List<UserEventLog> eventLogs) {
@@ -219,11 +315,43 @@ public class UserEventLogConsumer {
         return builder.toString();
     }
 
+    private DailyDiscussionQuestion parseDailyDiscussionQuestion(String content) {
+        if (!StringUtils.hasText(content)) {
+            return null;
+        }
+
+        try {
+            JSONObject jsonObject = new JSONObject(normalizeJson(content));
+            String topic = jsonObject.optString(UserEventLogConstant.DISCUSSION_TOPIC_JSON_KEY, "");
+            String message = jsonObject.optString(UserEventLogConstant.DISCUSSION_MESSAGE_JSON_KEY, "");
+            if (!StringUtils.hasText(topic) || !StringUtils.hasText(message)) {
+                return null;
+            }
+            return new DailyDiscussionQuestion(topic.trim(), message.trim());
+        } catch (JSONException e) {
+            log.warn("每日深度话题生成结果不是有效JSON: {}", content);
+            return null;
+        }
+    }
+
+    private String normalizeJson(String content) {
+        String trimmedContent = content.trim();
+        int beginIndex = trimmedContent.indexOf('{');
+        int endIndex = trimmedContent.lastIndexOf('}');
+        if (beginIndex < 0 || endIndex < beginIndex) {
+            return trimmedContent;
+        }
+        return trimmedContent.substring(beginIndex, endIndex + 1);
+    }
+
     private void updateLastChatInfo(UserChatHistory message) {
         userCharacterInfoService.update(new UserCharacterInfo(), new LambdaUpdateWrapper<UserCharacterInfo>()
                 .eq(UserCharacterInfo::getUserWorldId, message.getUserWorldId())
                 .eq(UserCharacterInfo::getCharacterId, message.getCharacterId())
                 .set(UserCharacterInfo::getLastChatTime, message.getTimestamp())
                 .set(UserCharacterInfo::getLastChatContent, message.getContent()));
+    }
+
+    private record DailyDiscussionQuestion(String topic, String message) {
     }
 }

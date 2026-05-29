@@ -211,4 +211,87 @@ java -jar target/galchat-0.0.1-SNAPSHOT.jar
 - Ollama embedding 模型维度需要与 `VectorConfiguration` 中的 `dimensions(1024)` 保持一致。
 - Java 服务当前固定调用本机 `http://localhost:8081` 和 `http://localhost:8082`，如果 Python 服务部署在其他机器，需要同步调整 Java 侧地址配置或代码。
 - Redis 承担队列、延迟任务、缓存和分布式锁能力，部署时需要保证 Redis 可用且数据淘汰策略不会误删关键队列。
-- 当前项目没有提供 Dockerfile 或 docker-compose，部署以手动准备依赖、打包 JAR、后台运行服务为主。
+- 已补充完整容器化部署文件，见下方“Docker 部署”。
+
+## Docker 部署
+
+项目现在提供了完整的容器编排，包含以下服务：
+
+- `frontend`：Vue 前端，使用 Nginx 托管静态资源并反向代理 `/api`、`/ws`
+- `backend`：Spring Boot 服务
+- `bert-service`：输入完整性判断服务
+- `reranker-service`：文档 rerank 服务
+- `ollama`：Embedding 模型服务，启动时自动拉取模型
+- `postgres`：PostgreSQL + pgvector
+- `redis`：Redis
+
+### 1. 准备环境变量
+
+复制示例文件并按实际环境填写：
+
+```bash
+cp .env.docker.example .env
+```
+
+至少需要确认这些值：
+
+- `POSTGRES_PASSWORD`
+- `SPRING_AI_DEEPSEEK_API_KEY`
+- `ALIYUN_OSS_ACCESS_KEY_ID`
+- `ALIYUN_OSS_ACCESS_KEY_SECRET`
+
+如需调整 embedding 模型，可修改：
+
+```bash
+OLLAMA_EMBEDDING_MODEL=qwen3-embedding:latest
+SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_DIMENSIONS=1024
+```
+
+### 2. 启动整套服务
+
+```bash
+docker compose up -d --build
+```
+
+首次启动会做几件事：
+
+- `postgres` 自动执行 [`src/test/java/com/me/galchat/init/console.sql`](src/test/java/com/me/galchat/init/console.sql)
+- `ollama` 自动拉取 `OLLAMA_EMBEDDING_MODEL` 指定的模型
+- `reranker-service` 首次运行时会下载 `BAAI/bge-reranker-v2-m3`，下载时间取决于网络
+
+### 3. 访问地址
+
+- 前端：http://localhost
+- 后端 API：http://localhost:8080
+- WebSocket：ws://localhost/ws/{sid}
+- Ollama：http://localhost:11434
+
+### 4. 常用命令
+
+查看日志：
+
+```bash
+docker compose logs -f backend
+docker compose logs -f ollama
+docker compose logs -f reranker-service
+```
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+连同数据卷一起删除：
+
+```bash
+docker compose down -v
+```
+
+### 5. 部署说明
+
+- 前端通过 [`docker/frontend/nginx.conf`](docker/frontend/nginx.conf) 代理后端接口，不需要额外配置 `VITE_API_BASE_URL`
+- Spring Boot 现在支持通过环境变量覆盖数据库、Redis、Ollama、DeepSeek、OSS、Python 服务地址
+- Java 侧原本写死的 `http://localhost:8081` 和 `http://localhost:8082` 已改为 `GALCHAT_BERT_URL`、`GALCHAT_RERANKER_URL`
+- 两个 Python 服务默认监听 `0.0.0.0`，可直接被其他容器访问
+- 当前 Compose 默认按 CPU 方式运行；如果服务器有 GPU，建议再按实际环境补充 Ollama / PyTorch 的 GPU 配置

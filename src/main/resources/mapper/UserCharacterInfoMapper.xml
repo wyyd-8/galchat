@@ -9,4 +9,15 @@
           AND character_id = #{characterId}
         RETURNING favor_value
     </select>
+
+    <select id="appendUserInfoPrompt" resultType="java.lang.String">
+        UPDATE user_character_info
+        SET user_info_prompt = CASE
+            WHEN NULLIF(BTRIM(user_info_prompt), '') IS NULL THEN #{userInfoPrompt}
+            ELSE user_info_prompt || E'\n' || #{userInfoPrompt}
+        END
+        WHERE user_world_id = #{userWorldId}
+          AND character_id = #{characterId}
+        RETURNING user_info_prompt
+    </select>
 </mapper>

@@ -2,6 +2,7 @@ package com.me.galchat.controller;
 
 
 import com.me.galchat.domain.Result;
+import com.me.galchat.domain.dto.UserCharacterPromptDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.ICharacterTemplateService;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -59,6 +61,18 @@ public class UserCharacterController {
     public Result listCharacters(@PathVariable Long userWorldId) {
         checkUserWorldId(userWorldId);
         return Result.success(userCharacterInfoService.listByUserWorldId(userWorldId));
+    }
+
+    @PutMapping("/{userWorldId}/{characterId}/prompt")
+    public Result updateUserInfoPrompt(@PathVariable Long userWorldId, @PathVariable Long characterId,
+                                       @RequestBody UserCharacterPromptDTO promptDTO) {
+        checkUserWorldId(userWorldId);
+        checkCharacterId(characterId);
+        if (promptDTO == null) {
+            throw new UserRequestException("请求参数不能为空");
+        }
+        userCharacterInfoService.updateUserInfoPrompt(userWorldId, characterId, promptDTO.getUserInfoPrompt());
+        return Result.success();
     }
 
     private void checkUserWorldId(Long userWorldId) {

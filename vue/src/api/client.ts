@@ -197,6 +197,16 @@ export const api = {
       method: 'POST',
     })
   },
+  updateCharacterPrompt(
+    userWorldId: number,
+    characterId: number,
+    payload: { userInfoPrompt?: string },
+  ) {
+    return request<void>(`/character/${userWorldId}/${characterId}/prompt`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
   listHistory(userWorldId: number, characterId: number, size = 30) {
     const params = new URLSearchParams({
       userworldid: String(userWorldId),

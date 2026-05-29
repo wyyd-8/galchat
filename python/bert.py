@@ -1,5 +1,4 @@
-from pathlib import Path
-import os
+﻿from pathlib import Path
 
 import jieba
 import torch
@@ -88,8 +87,4 @@ def predict(req: PredictRequest) -> bool:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(
-        app,
-        host=os.getenv("BERT_HOST", "0.0.0.0"),
-        port=int(os.getenv("BERT_PORT", "8081")),
-    )
+    uvicorn.run(app, host="localhost", port=8081)

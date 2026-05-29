@@ -2,7 +2,6 @@ package com.me.galchat.service.impl;
 
 import com.me.galchat.service.InputCompletionClassifier;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -16,14 +15,13 @@ public class BertInputCompletionClassifier implements InputCompletionClassifier 
 
     private final RestClient restClient;
 
-    public BertInputCompletionClassifier(
-            @Value("${galchat.service.bert-url:http://localhost:8081}") String baseUrl) {
+    public BertInputCompletionClassifier() {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(1));
         requestFactory.setReadTimeout(Duration.ofSeconds(2));
 
         this.restClient = RestClient.builder()
-                .baseUrl(baseUrl)
+                .baseUrl("http://localhost:8081")
                 .requestFactory(requestFactory)
                 .build();
     }

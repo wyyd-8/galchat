@@ -17,8 +17,11 @@ public class LocalDocumentReranker implements DocumentReranker {
 
     private final RestClient restClient;
 
-    public LocalDocumentReranker(
-            @Value("${galchat.service.reranker-url:http://localhost:8082}") String baseUrl) {
+    public LocalDocumentReranker() {
+        this("http://localhost:8082");
+    }
+
+    LocalDocumentReranker(String baseUrl) {
         this(restClientBuilder(baseUrl));
     }
 

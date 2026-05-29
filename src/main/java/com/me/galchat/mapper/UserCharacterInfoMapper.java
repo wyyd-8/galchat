@@ -17,4 +17,8 @@ public interface UserCharacterInfoMapper extends BaseMapper<UserCharacterInfo> {
     Integer updateFavorValue(@Param("userWorldId") Long userWorldId,
                              @Param("characterId") Long characterId,
                              @Param("favorChange") Integer favorChange);
+
+    String appendUserInfoPrompt(@Param("userWorldId") Long userWorldId,
+                                @Param("characterId") Long characterId,
+                                @Param("userInfoPrompt") String userInfoPrompt);
 }

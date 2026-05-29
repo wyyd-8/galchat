@@ -1,0 +1,70 @@
+<script setup lang="ts">
+import type { ComponentPublicInstance } from 'vue'
+import { ChatDotRound } from '@element-plus/icons-vue'
+import type { UiMessage } from '@/types/ui'
+
+const messageInput = defineModel<string>('messageInput', { required: true })
+const messageScroller = defineModel<HTMLElement | null>('messageScroller', { required: true })
+
+defineProps<{
+  loading: { history: boolean; sending: boolean }
+  messageList: UiMessage[]
+  selectedCharacterName: string
+}>()
+
+const emit = defineEmits<{
+  handleComposerFocus: []
+  sendMessage: []
+}>()
+
+function bindMessageScroller(element: Element | ComponentPublicInstance | null) {
+  messageScroller.value = element instanceof HTMLElement ? element : null
+}
+</script>
+
+<template>
+  <section class="chat-stage">
+    <div class="chat-window">
+      <div :ref="bindMessageScroller" class="messages" v-loading="loading.history">
+        <div v-if="messageList.length === 0" class="empty-chat">
+          <el-icon><ChatDotRound /></el-icon>
+          <h3>和 {{ selectedCharacterName }} 开始对话</h3>
+          <p>角色会结合世界背景、历史记忆、剧情事件和好感度回应。</p>
+        </div>
+
+        <article
+          v-for="message in messageList"
+          :key="message.id"
+          class="message"
+          :class="message.role"
+        >
+          <div v-if="message.role === 'thinking'" class="thinking-content">
+            <p>{{ message.content }}</p>
+          </div>
+          <div v-else-if="message.role === 'tool'" class="tool-line">
+            <span>{{ message.content }}</span>
+          </div>
+          <div v-else class="message-bubble">
+            <p>{{ message.content }}</p>
+            <small v-if="message.time">{{ message.time }}</small>
+          </div>
+        </article>
+      </div>
+
+      <div class="composer">
+        <el-input
+          v-model="messageInput"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 4 }"
+          resize="none"
+          placeholder="输入给角色的消息"
+          @focus="emit('handleComposerFocus')"
+          @keydown.enter.exact.prevent="emit('sendMessage')"
+        />
+        <el-button type="primary" :loading="loading.sending" @click="emit('sendMessage')">
+          发送
+        </el-button>
+      </div>
+    </div>
+  </section>
+</template>

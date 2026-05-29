@@ -8,6 +8,7 @@ import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.memory.UserChatMemory;
 import com.me.galchat.model.DeepSeekChatModel;
 import com.me.galchat.tool.UserCharacterFavorTools;
+import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -24,12 +25,13 @@ public class CommonConfiguration {
                                           TopicBoundaryService topicBoundaryService,
                                           @Qualifier("thinkChatMemory") UserChatMemory thinkChatMemory,
                                           VectorTools vectorTools,
-                                          UserCharacterFavorTools userCharacterFavorTools) {
+                                          UserCharacterFavorTools userCharacterFavorTools,
+                                          UserCharacterInfoTools userCharacterInfoTools) {
         return ChatClient
                 .builder(model)
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(thinkChatMemory, topicBoundaryService).build())
-                .defaultTools(vectorTools, userCharacterFavorTools)
+                .defaultTools(vectorTools, userCharacterFavorTools, userCharacterInfoTools)
                 .build();
     }
 
@@ -38,12 +40,13 @@ public class CommonConfiguration {
                                        TopicBoundaryService topicBoundaryService,
                                        @Qualifier("defaultChatMemory") UserChatMemory defaultChatMemory,
                                        VectorTools vectorTools,
-                                       UserCharacterFavorTools userCharacterFavorTools) {
+                                       UserCharacterFavorTools userCharacterFavorTools,
+                                       UserCharacterInfoTools userCharacterInfoTools) {
         return ChatClient
                 .builder(model)
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(defaultChatMemory, topicBoundaryService).build())
-                .defaultTools(vectorTools, userCharacterFavorTools)
+                .defaultTools(vectorTools, userCharacterFavorTools, userCharacterInfoTools)
                 .build();
     }
 

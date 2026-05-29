@@ -82,8 +82,4 @@ def rerank(req: RerankRequest) -> RerankResponse:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(
-        app,
-        host=os.getenv("RERANKER_HOST", "0.0.0.0"),
-        port=int(os.getenv("RERANKER_PORT", "8082")),
-    )
+    uvicorn.run(app, host="localhost", port=8082)

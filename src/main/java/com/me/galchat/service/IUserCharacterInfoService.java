@@ -23,5 +23,9 @@ public interface IUserCharacterInfoService extends IService<UserCharacterInfo> {
 
     void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat);
 
+    void updateUserInfoPrompt(Long userWorldId, Long characterId, String userInfoPrompt);
+
+    String appendUserInfoPrompt(Long userWorldId, Long characterId, String userInfoPrompt);
+
     String buildCharacterPrompt(Long userWorldId, Long characterId);
 }

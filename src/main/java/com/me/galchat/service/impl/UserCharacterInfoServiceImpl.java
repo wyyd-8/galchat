@@ -97,12 +97,40 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     }
 
     @Override
+    public void updateUserInfoPrompt(Long userWorldId, Long characterId, String userInfoPrompt) {
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
+        boolean updated = lambdaUpdate()
+                .eq(UserCharacterInfo::getUserWorldId, userWorldId)
+                .eq(UserCharacterInfo::getCharacterId, characterId)
+                .set(UserCharacterInfo::getUserInfoPrompt,
+                        StringUtils.hasText(userInfoPrompt) ? userInfoPrompt.trim() : null)
+                .update();
+        if (!updated) {
+            throw new UserRequestException("角色不存在");
+        }
+    }
+
+    @Override
+    public String appendUserInfoPrompt(Long userWorldId, Long characterId, String userInfoPrompt) {
+        if (!StringUtils.hasText(userInfoPrompt)) {
+            return null;
+        }
+
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
+        String prompt = baseMapper.appendUserInfoPrompt(userWorldId, characterId, userInfoPrompt.trim());
+        if (prompt == null) {
+            throw new UserRequestException("角色不存在");
+        }
+        return prompt;
+    }
+
+    @Override
     public String buildCharacterPrompt(Long userWorldId, Long characterId) {
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }
 
-        UserCharacterInfo userCharacterInfo = getFavorValueByUserWorldIdAndCharacterId(userWorldId, characterId);
+        UserCharacterInfo userCharacterInfo = getPromptInfoByUserWorldIdAndCharacterId(userWorldId, characterId);
         if (userCharacterInfo == null) {
             throw new UserRequestException("角色不存在");
         }
@@ -116,6 +144,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         appendPromptLine(prompt, "background", template.getBackground());
         appendPromptLine(prompt, "personality", template.getPersonality());
         appendPromptLine(prompt, "favor", favorPrompt);
+        appendPromptLine(prompt, "user_info_prompt", userCharacterInfo.getUserInfoPrompt());
         return prompt.toString();
     }
 
@@ -135,6 +164,32 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
         UserCharacterInfo userCharacterInfo = lambdaQuery()
                 .select(UserCharacterInfo::getFavorValue)
+                .eq(UserCharacterInfo::getUserWorldId, userWorldId)
+                .eq(UserCharacterInfo::getCharacterId, characterId)
+                .one();
+        if (userCharacterInfo != null && userCharacterInfo.getFavorValue() != null) {
+            redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, cacheKey, String.valueOf(userCharacterInfo.getFavorValue()));
+        }
+        return userCharacterInfo;
+    }
+
+    private UserCharacterInfo getPromptInfoByUserWorldIdAndCharacterId(Long userWorldId, Long characterId) {
+        String cacheKey = buildFavorCacheKey(userWorldId, characterId);
+        Object cachedFavorValue = redisTemplate.opsForHash().get(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, cacheKey);
+        if (cachedFavorValue != null) {
+            UserCharacterInfo userCharacterInfo = lambdaQuery()
+                    .select(UserCharacterInfo::getUserInfoPrompt)
+                    .eq(UserCharacterInfo::getUserWorldId, userWorldId)
+                    .eq(UserCharacterInfo::getCharacterId, characterId)
+                    .one();
+            if (userCharacterInfo != null) {
+                userCharacterInfo.setFavorValue(Integer.valueOf(String.valueOf(cachedFavorValue)));
+            }
+            return userCharacterInfo;
+        }
+
+        UserCharacterInfo userCharacterInfo = lambdaQuery()
+                .select(UserCharacterInfo::getFavorValue, UserCharacterInfo::getUserInfoPrompt)
                 .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                 .eq(UserCharacterInfo::getCharacterId, characterId)
                 .one();

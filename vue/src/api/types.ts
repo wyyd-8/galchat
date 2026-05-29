@@ -51,6 +51,7 @@ export interface UserCharacter {
   lastChatTime?: string
   lastChatContent?: string
   favorValue?: number
+  userInfoPrompt?: string
 }
 
 export interface CharacterTemplate {

@@ -108,6 +108,7 @@ CREATE TABLE user_character_info (
     last_chat_time TIMESTAMP,
     last_chat_content TEXT,
     favor_value INT DEFAULT 0,
+    user_info_prompt TEXT,
     PRIMARY KEY (user_world_id, character_id)
 );
 

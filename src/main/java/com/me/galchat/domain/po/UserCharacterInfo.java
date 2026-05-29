@@ -40,5 +40,7 @@ public class UserCharacterInfo implements Serializable {
 
     private Integer favorValue;
 
+    private String userInfoPrompt;
+
 
 }

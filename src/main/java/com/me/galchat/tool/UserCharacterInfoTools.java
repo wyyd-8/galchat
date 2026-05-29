@@ -20,14 +20,14 @@ public class UserCharacterInfoTools {
 
     @Tool(description = """
             工具描述：
-            向当前角色的 user_info_prompt 追加一条长期用户信息。
-            当用户在对话中明确告诉当前角色稳定、可复用的个人信息、偏好、称呼、关系设定、重要习惯或希望角色以后记住的内容时，可以调用本工具。
+            向当前角色的 user_info_prompt 追加一条用户信息。
+            当用户在对话中告诉当前角色个人信息、偏好、称呼、关系设定、重要习惯或希望角色以后记住的内容时，必须调用本工具。
             使用流程：
-            1. 仅提炼用户明确表达且适合长期参考的信息，不要记录普通寒暄、一次性情绪、临时动作或不确定推测。
+            1. 仅提炼用户表达的信息，不要记录普通寒暄、一次性情绪、临时动作或不确定推测。
             2. content 传入一条简洁自然的中文记录，保留必要细节，避免写成对话回复。
             3. 本工具会把 content 追加到现有 user_info_prompt 后面，不会覆盖用户手动编辑的已有内容。
             注意事项：
-            不要记录敏感隐私或用户没有要求长期记住的信息；不要重复追加已经存在或语义相同的内容。
+            不要记录敏感隐私；不要重复追加已经存在或语义相同的内容。
             """)
     public void appendUserInfoPrompt(@ToolParam(description = "要追加到 user_info_prompt 的长期用户信息") String content,
                                        ToolContext context) {

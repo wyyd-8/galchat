@@ -34,6 +34,9 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoMapper, UserCharacterInfo> implements IUserCharacterInfoService {
 
+    private static final String FAVOR_VALUE_CACHE_FIELD = "favorValue";
+    private static final String USER_INFO_PROMPT_CACHE_FIELD = "userInfoPrompt";
+
     private final ICharacterTemplateService characterTemplateService;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final StringRedisTemplate redisTemplate;
@@ -53,7 +56,8 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 .setCharacterId(template.getId())
                 .setCharacterName(template.getName())
                 .setCharacterImage(template.getImage())
-                .setFavorValue(template.getInitFavor());
+                .setFavorValue(template.getInitFavor())
+                .setUserInfoPrompt("");
         save(userCharacterInfo);
     }
 
@@ -68,6 +72,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
             throw new UserRequestException("角色不存在");
         }
         redisTemplate.opsForHash().delete(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, userWorldId + ":" + characterId);
+        evictPromptInfoCache(userWorldId, characterId);
     }
 
     @Override
@@ -92,6 +97,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         }
         redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
                 buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
+        evictPromptInfoCache(userWorldId, characterId);
         insertFavorLog(userWorldId, characterId, favorValue - oldFavorValue, bindingChat);
         return;
     }
@@ -103,11 +109,12 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                 .eq(UserCharacterInfo::getCharacterId, characterId)
                 .set(UserCharacterInfo::getUserInfoPrompt,
-                        StringUtils.hasText(userInfoPrompt) ? userInfoPrompt.trim() : null)
+                        StringUtils.hasText(userInfoPrompt) ? userInfoPrompt.trim() : "")
                 .update();
         if (!updated) {
             throw new UserRequestException("角色不存在");
         }
+        evictPromptInfoCache(userWorldId, characterId);
     }
 
     @Override
@@ -121,6 +128,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         if (prompt == null) {
             throw new UserRequestException("角色不存在");
         }
+        evictPromptInfoCache(userWorldId, characterId);
         return prompt;
     }
 
@@ -174,18 +182,9 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     }
 
     private UserCharacterInfo getPromptInfoByUserWorldIdAndCharacterId(Long userWorldId, Long characterId) {
-        String cacheKey = buildFavorCacheKey(userWorldId, characterId);
-        Object cachedFavorValue = redisTemplate.opsForHash().get(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, cacheKey);
-        if (cachedFavorValue != null) {
-            UserCharacterInfo userCharacterInfo = lambdaQuery()
-                    .select(UserCharacterInfo::getUserInfoPrompt)
-                    .eq(UserCharacterInfo::getUserWorldId, userWorldId)
-                    .eq(UserCharacterInfo::getCharacterId, characterId)
-                    .one();
-            if (userCharacterInfo != null) {
-                userCharacterInfo.setFavorValue(Integer.valueOf(String.valueOf(cachedFavorValue)));
-            }
-            return userCharacterInfo;
+        UserCharacterInfo cachedPromptInfo = getCachedPromptInfo(userWorldId, characterId);
+        if (cachedPromptInfo != null) {
+            return cachedPromptInfo;
         }
 
         UserCharacterInfo userCharacterInfo = lambdaQuery()
@@ -194,7 +193,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 .eq(UserCharacterInfo::getCharacterId, characterId)
                 .one();
         if (userCharacterInfo != null && userCharacterInfo.getFavorValue() != null) {
-            redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, cacheKey, String.valueOf(userCharacterInfo.getFavorValue()));
+            cachePromptInfo(userWorldId, characterId, userCharacterInfo);
         }
         return userCharacterInfo;
     }
@@ -209,6 +208,32 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     private String buildFavorCacheKey(Long userWorldId, Long characterId) {
         return userWorldId + ":" + characterId;
+    }
+
+    private String buildPromptInfoCacheKey(Long userWorldId, Long characterId) {
+        return RedisConstant.USER_CHARACTER_PROMPT_INFO_KEY_PREFIX + userWorldId + ":" + characterId;
+    }
+
+    private UserCharacterInfo getCachedPromptInfo(Long userWorldId, Long characterId) {
+        List<Object> values = redisTemplate.opsForHash().multiGet(buildPromptInfoCacheKey(userWorldId, characterId),
+                List.of(FAVOR_VALUE_CACHE_FIELD, USER_INFO_PROMPT_CACHE_FIELD));
+        if (values == null || values.size() != 2 || values.get(0) == null || values.get(1) == null) {
+            return null;
+        }
+
+        return new UserCharacterInfo()
+                .setFavorValue(Integer.valueOf(String.valueOf(values.get(0))))
+                .setUserInfoPrompt(String.valueOf(values.get(1)));
+    }
+
+    private void cachePromptInfo(Long userWorldId, Long characterId, UserCharacterInfo userCharacterInfo) {
+        redisTemplate.opsForHash().putAll(buildPromptInfoCacheKey(userWorldId, characterId), Map.of(
+                FAVOR_VALUE_CACHE_FIELD, String.valueOf(userCharacterInfo.getFavorValue()),
+                USER_INFO_PROMPT_CACHE_FIELD, userCharacterInfo.getUserInfoPrompt()));
+    }
+
+    private void evictPromptInfoCache(Long userWorldId, Long characterId) {
+        redisTemplate.delete(buildPromptInfoCacheKey(userWorldId, characterId));
     }
 
     private String getFavorPrompt(Map<String, String> favorability, Integer favorValue) {

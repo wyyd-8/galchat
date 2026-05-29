@@ -60,6 +60,9 @@ const {
   worldDetailLoading,
   worldDetails,
   worldDetailForm,
+  worldSettingsDialogVisible,
+  worldSettingsLoading,
+  worldSettingsForm,
   startStoryDialogVisible,
   advanceStoryDialogVisible,
   endStoryDialogVisible,
@@ -111,6 +114,8 @@ const {
   updateCharacterPrompt,
   submitCreateCharacterTemplate,
   openWorldDetails,
+  openWorldSettings,
+  submitWorldSettings,
   submitWorldDetail,
   deleteWorldDetail,
   nextCreateWorldStep,
@@ -161,6 +166,7 @@ const {
         :selected-world-name="selectedWorldName"
         :selected-character-name="selectedCharacterName"
         @open-world-details="openWorldDetails"
+        @open-world-settings="openWorldSettings"
         @open-create-character-template="openCreateCharacterTemplate"
         @open-create-character="openCreateCharacter"
         @refresh-workspace="refreshWorkspace"
@@ -376,10 +382,13 @@ const {
         </section>
 
         <section v-else-if="createWorldStep === 2" class="create-step-panel">
-          <el-form-item label="主动聊天功能">
+          <el-form-item label="主动提醒功能">
             <el-switch v-model="createWorldForm.acitvePushStatus" active-text="开启" inactive-text="关闭" />
             <p class="field-help">
-              开启后，系统可根据聊天中提及的事件触发后续主动关怀；主动聊天会记录聊天提及事件，仅用于主动聊天功能。
+              开启后，系统会记录聊天中提及的现实世界里用户发生的事件，并用于定时触发后续主动提醒与关怀。
+            </p>
+            <p class="field-help danger-help">
+              注意：本功能不适用于希望进行沉浸式角色扮演的世界，适用于指定背景、人物的日常对话世界；不正确的选择可能导致定时生成的聊天记录异常，此时请忽略对应消息。
             </p>
           </el-form-item>
         </section>
@@ -429,6 +438,52 @@ const {
           下一步
         </el-button>
         <el-button v-else type="primary" @click="submitCreateWorld">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="worldSettingsDialogVisible" title="世界设置" width="560px">
+      <el-form label-position="top" class="world-settings-form" @submit.prevent>
+        <el-form-item label="世界名称">
+          <el-input v-model="worldSettingsForm.name" maxlength="30" show-word-limit placeholder="请输入世界名称" />
+        </el-form-item>
+
+        <el-form-item label="主动提醒功能">
+          <el-switch v-model="worldSettingsForm.acitvePushStatus" active-text="开启" inactive-text="关闭" />
+          <p class="field-help">
+            开启后，系统会记录聊天中提及的现实世界里用户发生的事件，并用于定时触发后续主动提醒与关怀。
+          </p>
+        </el-form-item>
+
+        <el-form-item label="好感度提升难度">
+          <el-radio-group v-model="worldSettingsForm.favorSystemStatus" class="option-stack">
+            <el-radio value="EASY" border>
+              简单
+              <span>面对陌生人，人们总是倾向于信任，而非怀疑。角色更容易被善意、陪伴和选择打动。</span>
+            </el-radio>
+            <el-radio value="NORMAL" border>
+              标准
+              <span>关系会随着稳定互动自然推进。好感变化克制但可感知，适合大多数日常和剧情向世界。</span>
+            </el-radio>
+            <el-radio value="HARD" border>
+              困难
+              <span>信任需要更长时间建立。角色会更看重持续行动、关键承诺和明确选择。</span>
+            </el-radio>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item label="优化输入">
+          <el-switch v-model="worldSettingsForm.eotDetectionStatus" active-text="开启" inactive-text="关闭" />
+          <p class="field-help">
+            开启后会判断用户输入是否完成，能更快得到响应，但可能出现“抢答”的情况。
+          </p>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="worldSettingsDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="worldSettingsLoading" @click="submitWorldSettings">
+          保存设置
+        </el-button>
       </template>
     </el-dialog>
 
@@ -1624,7 +1679,8 @@ const {
 }
 
 .create-world-form,
-.template-form {
+.template-form,
+.world-settings-form {
   max-height: 58vh;
   overflow: auto;
   padding-right: 4px;

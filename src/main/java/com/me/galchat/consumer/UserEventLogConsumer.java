@@ -109,12 +109,17 @@ public class UserEventLogConsumer {
             return;
         }
         List<Long> userEventLogIds = task.getUserEventLogIds() == null ? List.of() : task.getUserEventLogIds();
-        if (userEventLogIds.isEmpty() && !UserEventLogConstant.TASK_TYPE_DAILY_CARE.equals(task.getTaskType())) {
+        boolean dailyDiscussionTask = userEventLogIds.isEmpty()
+                && UserEventLogConstant.TASK_TYPE_DAILY_CARE.equals(task.getTaskType());
+        if (userEventLogIds.isEmpty() && !dailyDiscussionTask) {
             return;
         }
 
         UserWorldPrefix userWorld = userWorldPrefixService.getById(task.getUserWorldId());
-        if (userWorld == null || !Boolean.TRUE.equals(userWorld.getAcitvePushStatus())) {
+        if (userWorld == null) {
+            return;
+        }
+        if (!dailyDiscussionTask && !Boolean.TRUE.equals(userWorld.getAcitvePushStatus())) {
             log.info("用户世界未开启主动推送，跳过用户事件关怀任务, userWorldId:{}, characterId:{}",
                     task.getUserWorldId(), task.getCharacterId());
             return;

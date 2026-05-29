@@ -10,6 +10,7 @@ public final class RedisConstant {
     public static final String USER_EVENT_LOG_DELAY_QUEUE_NAME = "user:event:log:delay:queue";
     public static final String WORLD_USER_AUTH_KEY = "world:user:auth";
     public static final String USER_CHARACTER_FAVOR_VALUE_KEY = "user:character:favor";
+    public static final String USER_CHARACTER_PROMPT_INFO_KEY_PREFIX = "user:character:prompt:";
     public static final String CHAT_MEMORY_STEP_KEY_PREFIX = "chat:memory:step:";
     public static final String TOPIC_BOUNDARY_KEY_PREFIX = "chat:topic:boundary:";
     public static final String STORY_ACTIVE_KEY_PREFIX = "chat:story:active:";

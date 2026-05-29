@@ -183,6 +183,12 @@ export const api = {
   getUserWorld(id: number) {
     return request<UserWorld>(`/world/${id}`)
   },
+  updateUserWorld(id: number, payload: Partial<Pick<UserWorld, 'name' | 'acitvePushStatus' | 'favorSystemStatus' | 'eotDetectionStatus'>>) {
+    return request<void>(`/world/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
   listCharacters(userWorldId: number) {
     return request<UserCharacter[]>(`/character/${userWorldId}`)
   },

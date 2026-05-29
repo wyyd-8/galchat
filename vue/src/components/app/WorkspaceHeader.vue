@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { EditPen, House, Plus, Refresh } from '@element-plus/icons-vue'
+import { EditPen, House, Plus, Refresh, Setting } from '@element-plus/icons-vue'
 
 defineProps<{
   isWorldSelectionMode: boolean
@@ -14,6 +14,7 @@ const emit = defineEmits<{
   openWorldDetails: []
   openCreateCharacterTemplate: []
   openCreateCharacter: []
+  openWorldSettings: []
   refreshWorkspace: []
 }>()
 </script>
@@ -60,7 +61,14 @@ const emit = defineEmits<{
       >
         创建新角色
       </el-button>
-      <el-button :icon="Refresh" circle @click="emit('refreshWorkspace')" />
+      <el-tooltip
+        v-if="!isWorldSelectionMode && hasSelectedWorld && !hasSelectedCharacter"
+        content="世界设置"
+        placement="bottom"
+      >
+        <el-button :icon="Setting" circle @click="emit('openWorldSettings')" />
+      </el-tooltip>
+      <el-button v-else :icon="Refresh" circle @click="emit('refreshWorkspace')" />
     </div>
   </header>
 </template>

@@ -74,10 +74,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setName(userWorldPrefix.getName())
                 .setAcitvePushStatus(userWorldPrefix.getAcitvePushStatus())
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
-                .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
-                .setThinkStatus(oldUserWorld.getThinkStatus())
-                .setAddSpecialPrompt(userWorldPrefix.getAddSpecialPrompt())
-                .setMyWorld(oldUserWorld.getMyWorld());
+                .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus());
         updateById(updateUserWorld);
     }
 

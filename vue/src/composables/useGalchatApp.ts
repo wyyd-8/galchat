@@ -123,6 +123,14 @@ export function useGalchatApp() {
     about: '',
     details: '',
   })
+  const worldSettingsDialogVisible = ref(false)
+  const worldSettingsLoading = ref(false)
+  const worldSettingsForm = reactive({
+    name: '',
+    acitvePushStatus: true,
+    favorSystemStatus: 'NORMAL',
+    eotDetectionStatus: true,
+  })
 
   const startStoryDialogVisible = ref(false)
   const advanceStoryDialogVisible = ref(false)
@@ -838,6 +846,55 @@ export function useGalchatApp() {
     await loadWorldDetails()
   }
 
+  function openWorldSettings() {
+    const world = selectedWorldDetail.value || selectedWorld.value
+    if (!world) {
+      return
+    }
+
+    worldSettingsForm.name = world.name || ''
+    worldSettingsForm.acitvePushStatus = world.acitvePushStatus ?? true
+    worldSettingsForm.favorSystemStatus = world.favorSystemStatus || 'NORMAL'
+    worldSettingsForm.eotDetectionStatus = world.eotDetectionStatus ?? true
+    worldSettingsDialogVisible.value = true
+  }
+
+  async function submitWorldSettings() {
+    const worldId = selectedWorldId.value
+    if (!worldId) {
+      return
+    }
+    if (!worldSettingsForm.name.trim()) {
+      ElMessage.warning('请输入世界名称')
+      return
+    }
+
+    worldSettingsLoading.value = true
+    try {
+      await api.updateUserWorld(worldId, {
+        name: worldSettingsForm.name.trim(),
+        acitvePushStatus: worldSettingsForm.acitvePushStatus,
+        favorSystemStatus: worldSettingsForm.favorSystemStatus,
+        eotDetectionStatus: worldSettingsForm.eotDetectionStatus,
+      })
+      const updatedWorld = await api.getUserWorld(worldId)
+      selectedWorldDetail.value = updatedWorld
+      selectedWorld.value = {
+        ...(selectedWorld.value || updatedWorld),
+        ...updatedWorld,
+      }
+      userWorlds.value = userWorlds.value.map((world) =>
+        world.id === worldId ? { ...world, name: updatedWorld.name, image: updatedWorld.image } : world,
+      )
+      worldSettingsDialogVisible.value = false
+      ElMessage.success('世界设置已保存')
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '保存世界设置失败')
+    } finally {
+      worldSettingsLoading.value = false
+    }
+  }
+
   async function loadWorldDetails() {
     const worldId = selectedTemplateWorldId.value
     if (!worldId) {
@@ -1438,6 +1495,9 @@ export function useGalchatApp() {
     worldDetailLoading,
     worldDetails,
     worldDetailForm,
+    worldSettingsDialogVisible,
+    worldSettingsLoading,
+    worldSettingsForm,
     startStoryDialogVisible,
     advanceStoryDialogVisible,
     endStoryDialogVisible,
@@ -1493,6 +1553,8 @@ export function useGalchatApp() {
     updateCharacterPrompt,
     submitCreateCharacterTemplate,
     openWorldDetails,
+    openWorldSettings,
+    submitWorldSettings,
     submitWorldDetail,
     deleteWorldDetail,
     nextCreateWorldStep,

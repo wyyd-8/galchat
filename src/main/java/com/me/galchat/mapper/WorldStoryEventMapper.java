@@ -2,6 +2,7 @@ package com.me.galchat.mapper;
 
 import com.me.galchat.domain.po.WorldStoryEvent;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * <p>
@@ -13,4 +14,5 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
  */
 public interface WorldStoryEventMapper extends BaseMapper<WorldStoryEvent> {
 
+    int deleteByUserWorldIdWithCharacters(@Param("userWorldId") Long userWorldId);
 }

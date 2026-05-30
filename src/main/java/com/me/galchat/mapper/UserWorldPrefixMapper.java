@@ -2,7 +2,7 @@ package com.me.galchat.mapper;
 
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * <p>
@@ -14,6 +14,9 @@ import org.apache.ibatis.annotations.Select;
  */
 public interface UserWorldPrefixMapper extends BaseMapper<UserWorldPrefix> {
 
-    @Select("SELECT background FROM world_template WHERE id = #{worldId}")
     String getBackground(Long worldId);
+
+    UserWorldPrefix selectByIdAndUserId(@Param("id") Long id, @Param("userId") Long userId);
+
+    int deleteByIdAndUserId(@Param("id") Long id, @Param("userId") Long userId);
 }

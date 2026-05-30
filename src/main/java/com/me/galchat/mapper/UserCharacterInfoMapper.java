@@ -21,4 +21,6 @@ public interface UserCharacterInfoMapper extends BaseMapper<UserCharacterInfo> {
     String appendUserInfoPrompt(@Param("userWorldId") Long userWorldId,
                                 @Param("characterId") Long characterId,
                                 @Param("userInfoPrompt") String userInfoPrompt);
+
+    int countByUserWorldId(@Param("userWorldId") Long userWorldId);
 }

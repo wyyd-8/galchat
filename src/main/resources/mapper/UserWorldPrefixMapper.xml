@@ -2,4 +2,37 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.me.galchat.mapper.UserWorldPrefixMapper">
 
+    <select id="getBackground" resultType="java.lang.String">
+        SELECT background
+        FROM world_template
+        WHERE id = #{worldId}
+    </select>
+
+    <select id="selectByIdAndUserId" resultType="com.me.galchat.domain.po.UserWorldPrefix">
+        SELECT id,
+               user_id,
+               world_id,
+               name,
+               image,
+               acitve_push_status,
+               favor_system_status,
+               eot_detection_status,
+               think_status,
+               add_special_prompt,
+               my_world
+        FROM user_world_prefix
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </select>
+
+    <delete id="deleteByIdAndUserId">
+        DELETE FROM user_world_prefix
+        WHERE id = #{id}
+          AND user_id = #{userId}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM user_character_info
+              WHERE user_world_id = #{id}
+          )
+    </delete>
 </mapper>

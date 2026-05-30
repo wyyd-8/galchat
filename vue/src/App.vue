@@ -4,6 +4,7 @@ import {
   Message,
   Plus,
   Upload,
+  WarningFilled,
 } from '@element-plus/icons-vue'
 import AppSidebar from '@/components/app/AppSidebar.vue'
 import CharacterPanel from '@/components/app/CharacterPanel.vue'
@@ -57,10 +58,12 @@ const {
   createTemplateForm,
   createCharacterDialogVisible,
   createCharacterTemplateDialogVisible,
+  characterDeleteDialogVisible,
   characterImageUploading,
   createCharacterImageFileName,
   characterCreating,
   characterPromptSaving,
+  characterDeleting,
   characterTemplateLoading,
   addCharacterForm,
   createCharacterForm,
@@ -70,6 +73,8 @@ const {
   worldDetailForm,
   worldSettingsDialogVisible,
   worldSettingsLoading,
+  worldDeleteDialogVisible,
+  worldDeleting,
   worldSettingsForm,
   startStoryDialogVisible,
   advanceStoryDialogVisible,
@@ -126,10 +131,14 @@ const {
   removeFavorabilityRow,
   submitCreateCharacter,
   updateCharacterPrompt,
+  openDeleteCharacterConfirm,
+  submitDeleteCharacter,
   submitCreateCharacterTemplate,
   openWorldDetails,
   openWorldSettings,
   submitWorldSettings,
+  openDeleteWorldConfirm,
+  submitDeleteWorld,
   submitWorldDetail,
   deleteWorldDetail,
   nextCreateWorldStep,
@@ -235,6 +244,7 @@ const {
       :active-story="activeStory"
       :prompt-saving="characterPromptSaving"
       @update-user-info-prompt="updateCharacterPrompt"
+      @open-delete-character="openDeleteCharacterConfirm"
     />
 
     <el-dialog v-model="authDialogVisible" width="420px" :close-on-click-modal="false">
@@ -539,12 +549,79 @@ const {
             开启后会判断用户输入是否完成，能更快得到响应，但可能出现“抢答”的情况。
           </p>
         </el-form-item>
+
+        <div class="settings-danger-zone">
+          <el-button
+            class="danger-full-button"
+            type="danger"
+            :icon="Delete"
+            @click="openDeleteWorldConfirm"
+          >
+            删除该世界
+          </el-button>
+        </div>
       </el-form>
 
       <template #footer>
         <el-button @click="worldSettingsDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="worldSettingsLoading" @click="submitWorldSettings">
           保存设置
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="worldDeleteDialogVisible"
+      title="确认删除世界"
+      width="460px"
+      :close-on-click-modal="!worldDeleting"
+      :close-on-press-escape="!worldDeleting"
+    >
+      <div class="delete-confirm">
+        <el-icon><WarningFilled /></el-icon>
+        <div>
+          <h4>此操作不可恢复</h4>
+          <p>
+            在删除世界前，你需要手动删除所有当前世界下的角色
+          </p>
+          <p>
+            删除世界「{{ selectedWorldName }}」会同时删除当前世界下的所有事件与个性化设置。
+          </p>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button :disabled="worldDeleting" @click="worldDeleteDialogVisible = false">取消</el-button>
+        <el-button type="danger" :icon="Delete" :loading="worldDeleting" @click="submitDeleteWorld">
+          删除该世界
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="characterDeleteDialogVisible"
+      title="确认删除角色"
+      width="460px"
+      :close-on-click-modal="!characterDeleting"
+      :close-on-press-escape="!characterDeleting"
+    >
+      <div class="delete-confirm">
+        <el-icon><WarningFilled /></el-icon>
+        <div>
+          <h4>此操作不可恢复</h4>
+          <p>删除角色「{{ selectedCharacterName }}」会清除该角色相关聊天、好感与记忆数据。</p>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button :disabled="characterDeleting" @click="characterDeleteDialogVisible = false">取消</el-button>
+        <el-button
+          type="danger"
+          :icon="Delete"
+          :loading="characterDeleting"
+          @click="submitDeleteCharacter"
+        >
+          删除该角色
         </el-button>
       </template>
     </el-dialog>
@@ -1680,7 +1757,9 @@ const {
   height: 100vh;
   position: sticky;
   top: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 22px 18px;
   border-left: 1px solid rgba(42, 52, 71, 0.1);
   background: rgba(255, 255, 255, 0.9);
@@ -1694,14 +1773,20 @@ const {
 
 .collapse-button {
   width: 34px;
+  min-width: 34px;
   height: 34px;
+  min-height: 34px;
+  flex: 0 0 34px;
   border: 1px solid rgba(42, 52, 71, 0.12);
   border-radius: 8px;
   display: grid;
   place-items: center;
+  align-self: flex-end;
   margin-left: auto;
+  padding: 0;
   background: #fff;
   cursor: pointer;
+  line-height: 1;
 }
 
 .character-panel h3,
@@ -1713,6 +1798,15 @@ const {
 .character-panel h3 {
   font-size: 20px;
   font-weight: 800;
+}
+
+.character-panel-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .panel-stat {
@@ -1775,6 +1869,62 @@ const {
   display: block;
   margin-top: 6px;
   color: #7a8494;
+}
+
+.character-danger-zone,
+.settings-danger-zone {
+  border-top: 1px solid rgba(192, 53, 53, 0.18);
+}
+
+.character-danger-zone {
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+.settings-danger-zone {
+  margin-top: 6px;
+  padding-top: 16px;
+}
+
+.danger-full-button {
+  width: 100%;
+}
+
+.delete-confirm {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(192, 53, 53, 0.18);
+  border-radius: 8px;
+  background: #fff7f7;
+}
+
+.delete-confirm .el-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #c03535;
+  background: #ffe3e3;
+  font-size: 22px;
+}
+
+.delete-confirm h4,
+.delete-confirm p {
+  margin: 0;
+}
+
+.delete-confirm h4 {
+  color: #9f2d2d;
+  font-weight: 800;
+}
+
+.delete-confirm p {
+  margin-top: 6px;
+  color: #5f3030;
+  line-height: 1.6;
 }
 
 .dialog-title h3,

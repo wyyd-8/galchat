@@ -6,17 +6,27 @@ import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.WorldTemplate;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserWorldPrefixMapper;
+import com.me.galchat.mapper.VectorStoreCleanupMapper;
+import com.me.galchat.mapper.WorldEventLogMapper;
+import com.me.galchat.mapper.WorldStoryEventMapper;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * <p>
@@ -30,8 +40,14 @@ import java.util.List;
 @RequiredArgsConstructor
 public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMapper, UserWorldPrefix> implements IUserWorldPrefixService {
 
+    private static final long REDIS_SCAN_COUNT = 1_000L;
+
     private final IWorldTemplateService worldTemplateService;
     private final StringRedisTemplate redisTemplate;
+    private final UserCharacterInfoMapper userCharacterInfoMapper;
+    private final WorldEventLogMapper worldEventLogMapper;
+    private final WorldStoryEventMapper worldStoryEventMapper;
+    private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
 
     @Override
     public List<UserWorldPrefix> listBaseInfoByUserId(Long userId) {
@@ -79,10 +95,23 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteUserWorld(Long userId, Long id) {
-        UserWorldPrefix userWorld = getExistingUserWorld(userId, id);
-        removeById(userWorld.getId());
-        redisTemplate.opsForHash().delete(RedisConstant.WORLD_USER_AUTH_KEY, String.valueOf(userWorld.getId()));
+        UserWorldPrefix userWorld = baseMapper.selectByIdAndUserId(id, userId);
+        if (userWorld == null) {
+            throw new UserRequestException("用户世界不存在");
+        }
+
+        Long userWorldId = userWorld.getId();
+        checkNoCharacters(userWorldId);
+        worldStoryEventMapper.deleteByUserWorldIdWithCharacters(userWorldId);
+        worldEventLogMapper.deleteByUserWorldId(userWorldId);
+        vectorStoreCleanupMapper.deleteWorldEventByUserWorldId(userWorldId);
+        int deleted = baseMapper.deleteByIdAndUserId(userWorldId, userId);
+        if (deleted == 0) {
+            throw new UserRequestException("当前世界存在角色，不能删除");
+        }
+        evictUserWorldRedisData(userWorldId);
     }
 
     @Override
@@ -129,6 +158,48 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
             throw new UserRequestException("用户世界不存在");
         }
         return userWorld;
+    }
+
+    private void checkNoCharacters(Long userWorldId) {
+        if (userCharacterInfoMapper.countByUserWorldId(userWorldId) > 0) {
+            throw new UserRequestException("当前世界存在角色，不能删除");
+        }
+    }
+
+    private void evictUserWorldRedisData(Long userWorldId) {
+        String worldFieldPrefix = userWorldId + ":";
+        redisTemplate.opsForHash().delete(RedisConstant.WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
+        deleteHashFieldsByPattern(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, worldFieldPrefix + "*");
+        deleteKeysByPattern(RedisConstant.CHAT_KEY_PREFIX + worldFieldPrefix + "*");
+        deleteKeysByPattern(RedisConstant.USER_CHARACTER_PROMPT_INFO_KEY_PREFIX + worldFieldPrefix + "*");
+        deleteKeysByPattern(RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + worldFieldPrefix + "*");
+        deleteKeysByPattern(RedisConstant.STORY_ACTIVE_KEY_PREFIX + worldFieldPrefix + "*");
+    }
+
+    private void deleteHashFieldsByPattern(String hashKey, String pattern) {
+        List<Object> fields = new ArrayList<>();
+        try (Cursor<Map.Entry<Object, Object>> cursor = redisTemplate.opsForHash()
+                .scan(hashKey, ScanOptions.scanOptions().match(pattern).count(REDIS_SCAN_COUNT).build())) {
+            cursor.forEachRemaining(entry -> fields.add(entry.getKey()));
+        }
+        if (!fields.isEmpty()) {
+            redisTemplate.opsForHash().delete(hashKey, fields.toArray());
+        }
+    }
+
+    private void deleteKeysByPattern(String pattern) {
+        List<String> keys = new ArrayList<>();
+        try (Cursor<String> cursor = redisTemplate.scan(
+                ScanOptions.scanOptions().match(pattern).count(REDIS_SCAN_COUNT).build())) {
+            cursor.forEachRemaining(keys::add);
+        }
+        deleteRedisKeys(keys);
+    }
+
+    private void deleteRedisKeys(Collection<String> keys) {
+        if (!keys.isEmpty()) {
+            redisTemplate.delete(keys);
+        }
     }
 
     @Override

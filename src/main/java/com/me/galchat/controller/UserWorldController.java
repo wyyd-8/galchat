@@ -111,12 +111,12 @@ public class UserWorldController {
         return Result.success();
     }
 
-    @DeleteMapping("/{id}")
-    public Result deleteUserWorld(@PathVariable Long id) {
-        if (id == null) {
+    @DeleteMapping("/{userWorldId}")
+    public Result deleteUserWorld(@PathVariable Long userWorldId) {
+        if (userWorldId == null) {
             throw new UserRequestException("用户世界id不能为空");
         }
-        userWorldPrefixService.deleteUserWorld(currentUserId(), id);
+        userWorldPrefixService.deleteUserWorld(currentUserId(), userWorldId);
         return Result.success();
     }
 

@@ -108,10 +108,12 @@ export function useGalchatApp() {
   })
   const createCharacterDialogVisible = ref(false)
   const createCharacterTemplateDialogVisible = ref(false)
+  const characterDeleteDialogVisible = ref(false)
   const characterImageUploading = ref(false)
   const createCharacterImageFileName = ref('')
   const characterCreating = ref(false)
   const characterPromptSaving = ref(false)
+  const characterDeleting = ref(false)
   const characterTemplateLoading = ref(false)
   const selectedWorldTemplate = ref<WorldTemplate | null>(null)
   const worldCharacterTemplates = ref<CharacterTemplate[]>([])
@@ -138,6 +140,8 @@ export function useGalchatApp() {
   })
   const worldSettingsDialogVisible = ref(false)
   const worldSettingsLoading = ref(false)
+  const worldDeleteDialogVisible = ref(false)
+  const worldDeleting = ref(false)
   const worldSettingsForm = reactive({
     name: '',
     acitvePushStatus: true,
@@ -979,6 +983,38 @@ export function useGalchatApp() {
     }
   }
 
+  function openDeleteCharacterConfirm() {
+    if (!selectedWorldId.value || !selectedCharacter.value) {
+      return
+    }
+    characterDeleteDialogVisible.value = true
+  }
+
+  async function submitDeleteCharacter() {
+    const userWorldId = selectedWorldId.value
+    const characterId = selectedCharacter.value?.characterId
+    if (!userWorldId || !characterId) {
+      return
+    }
+
+    characterDeleting.value = true
+    try {
+      await sendSocketTyping(false)
+      closeChatSocket()
+      await api.deleteCharacter(userWorldId, characterId)
+      characters.value = characters.value.filter((character) => character.characterId !== characterId)
+      selectedCharacter.value = null
+      messageList.value = []
+      characterDeleteDialogVisible.value = false
+      ElMessage.success('角色已删除')
+      await Promise.all([loadCharacters(userWorldId), loadWorldEvents(userWorldId)])
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '删除角色失败')
+    } finally {
+      characterDeleting.value = false
+    }
+  }
+
   async function submitCreateCharacterTemplate() {
     const worldId = selectedTemplateWorldId.value
     if (!worldId) {
@@ -1072,6 +1108,37 @@ export function useGalchatApp() {
       ElMessage.error(error instanceof Error ? error.message : '保存世界设置失败')
     } finally {
       worldSettingsLoading.value = false
+    }
+  }
+
+  function openDeleteWorldConfirm() {
+    if (!selectedWorldId.value) {
+      return
+    }
+    worldDeleteDialogVisible.value = true
+  }
+
+  async function submitDeleteWorld() {
+    const worldId = selectedWorldId.value
+    if (!worldId) {
+      return
+    }
+
+    worldDeleting.value = true
+    try {
+      await sendSocketTyping(false)
+      closeChatSocket()
+      await api.deleteUserWorld(worldId)
+      userWorlds.value = userWorlds.value.filter((world) => world.id !== worldId)
+      worldDeleteDialogVisible.value = false
+      worldSettingsDialogVisible.value = false
+      resetSelection()
+      ElMessage.success('世界已删除')
+      await loadWorlds()
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '删除世界失败')
+    } finally {
+      worldDeleting.value = false
     }
   }
 
@@ -1619,7 +1686,10 @@ export function useGalchatApp() {
     passwordDialogVisible.value = false
     createCharacterDialogVisible.value = false
     createCharacterTemplateDialogVisible.value = false
+    characterDeleteDialogVisible.value = false
     worldDetailDialogVisible.value = false
+    worldSettingsDialogVisible.value = false
+    worldDeleteDialogVisible.value = false
     authMode.value = 'login'
     authDialogVisible.value = true
   }
@@ -1638,7 +1708,10 @@ export function useGalchatApp() {
     createTemplateDialogVisible.value = false
     createCharacterDialogVisible.value = false
     createCharacterTemplateDialogVisible.value = false
+    characterDeleteDialogVisible.value = false
     worldDetailDialogVisible.value = false
+    worldSettingsDialogVisible.value = false
+    worldDeleteDialogVisible.value = false
     startStoryDialogVisible.value = false
     authMode.value = 'login'
     authDialogVisible.value = true
@@ -1702,10 +1775,12 @@ export function useGalchatApp() {
     createTemplateForm,
     createCharacterDialogVisible,
     createCharacterTemplateDialogVisible,
+    characterDeleteDialogVisible,
     characterImageUploading,
     createCharacterImageFileName,
     characterCreating,
     characterPromptSaving,
+    characterDeleting,
     characterTemplateLoading,
     selectedWorldTemplate,
     worldCharacterTemplates,
@@ -1717,6 +1792,8 @@ export function useGalchatApp() {
     worldDetailForm,
     worldSettingsDialogVisible,
     worldSettingsLoading,
+    worldDeleteDialogVisible,
+    worldDeleting,
     worldSettingsForm,
     startStoryDialogVisible,
     advanceStoryDialogVisible,
@@ -1777,10 +1854,14 @@ export function useGalchatApp() {
     removeFavorabilityRow,
     submitCreateCharacter,
     updateCharacterPrompt,
+    openDeleteCharacterConfirm,
+    submitDeleteCharacter,
     submitCreateCharacterTemplate,
     openWorldDetails,
     openWorldSettings,
     submitWorldSettings,
+    openDeleteWorldConfirm,
+    submitDeleteWorld,
     submitWorldDetail,
     deleteWorldDetail,
     nextCreateWorldStep,

@@ -20,4 +20,10 @@
           AND character_id = #{characterId}
         RETURNING user_info_prompt
     </select>
+
+    <select id="countByUserWorldId" resultType="int">
+        SELECT COUNT(1)
+        FROM user_character_info
+        WHERE user_world_id = #{userWorldId}
+    </select>
 </mapper>

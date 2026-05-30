@@ -214,6 +214,11 @@ export const api = {
       body: JSON.stringify(payload),
     })
   },
+  deleteUserWorld(id: number) {
+    return request<void>(`/world/${id}`, {
+      method: 'DELETE',
+    })
+  },
   listCharacters(userWorldId: number) {
     return request<UserCharacter[]>(`/character/${userWorldId}`)
   },
@@ -229,6 +234,11 @@ export const api = {
   addCharacter(userWorldId: number, characterId: number) {
     return request<void>(`/character/${userWorldId}/${characterId}`, {
       method: 'POST',
+    })
+  },
+  deleteCharacter(userWorldId: number, characterId: number) {
+    return request<void>(`/character/${userWorldId}/${characterId}`, {
+      method: 'DELETE',
     })
   },
   updateCharacterPrompt(

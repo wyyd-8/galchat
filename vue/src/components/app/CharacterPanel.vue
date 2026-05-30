@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowLeft, ArrowRight, Check, Close, Edit } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Check, Close, Delete, Edit } from '@element-plus/icons-vue'
 import type { ActiveStory, UserCharacter } from '@/api/types'
 import { firstText, formatTime, imageStyle } from '@/utils/ui'
 
@@ -15,6 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:collapsed': [value: boolean]
   'update-user-info-prompt': [value: string]
+  'open-delete-character': []
 }>()
 
 const localCollapsed = computed({
@@ -72,7 +73,7 @@ function savePrompt() {
       </el-icon>
     </button>
 
-    <template v-if="!localCollapsed">
+    <div v-if="!localCollapsed" class="character-panel-content">
       <span class="avatar portrait" :style="imageStyle(selectedCharacter.characterImage)">
         <span v-if="!selectedCharacter.characterImage">
           {{ firstText(selectedCharacter.characterName) }}
@@ -137,6 +138,17 @@ function savePrompt() {
         <p>{{ activeStory?.storyEvent.title || '暂无进行中的事件' }}</p>
         <small>{{ activeStory?.storyEvent.currentScene }}</small>
       </div>
-    </template>
+
+      <div class="character-danger-zone">
+        <el-button
+          class="danger-full-button"
+          type="danger"
+          :icon="Delete"
+          @click="emit('open-delete-character')"
+        >
+          删除该角色
+        </el-button>
+      </div>
+    </div>
   </aside>
 </template>

@@ -1,30 +1,13 @@
 package com.me.galchat.utils;
 
+import com.me.galchat.constant.ImageConstant;
 import com.me.galchat.exception.UserRequestException;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.regex.Pattern;
 
 public final class ImageSecurityUtils {
-
-    public static final long MAX_IMAGE_SIZE = 4 * 1024 * 1024;
-
-    private static final Pattern OSS_IMAGE_URL_PATTERN = Pattern.compile(
-            "^https://galchat\\.oss-cn-beijing\\.aliyuncs\\.com/2026/05/[0-9a-fA-F-]+\\.(jpg|jpeg|png|gif|webp|bmp)$"
-    );
-
-    private static final Map<String, Set<String>> ALLOWED_CONTENT_TYPES = Map.of(
-            ".jpg", Set.of("image/jpeg"),
-            ".jpeg", Set.of("image/jpeg"),
-            ".png", Set.of("image/png"),
-            ".gif", Set.of("image/gif"),
-            ".webp", Set.of("image/webp"),
-            ".bmp", Set.of("image/bmp", "image/x-ms-bmp")
-    );
 
     private ImageSecurityUtils() {
     }
@@ -33,13 +16,13 @@ public final class ImageSecurityUtils {
         if (file == null || file.isEmpty()) {
             throw new UserRequestException("请选择要上传的图片");
         }
-        if (file.getSize() > MAX_IMAGE_SIZE) {
+        if (file.getSize() > ImageConstant.MAX_IMAGE_SIZE) {
             throw new UserRequestException("图片大小不能超过4MB");
         }
 
         String extension = getLowercaseExtension(file.getOriginalFilename());
         String contentType = file.getContentType();
-        if (!ALLOWED_CONTENT_TYPES.get(extension).contains(contentType)) {
+        if (!ImageConstant.ALLOWED_CONTENT_TYPES.get(extension).contains(contentType)) {
             throw new UserRequestException("仅支持 JPG、PNG、GIF、WEBP、BMP 图片");
         }
 
@@ -58,7 +41,7 @@ public final class ImageSecurityUtils {
             throw new UserRequestException("图片文件必须包含有效后缀");
         }
         String extension = filename.substring(lastDotIndex).toLowerCase(Locale.ROOT);
-        if (!ALLOWED_CONTENT_TYPES.containsKey(extension)) {
+        if (!ImageConstant.ALLOWED_CONTENT_TYPES.containsKey(extension)) {
             throw new UserRequestException("仅支持 JPG、PNG、GIF、WEBP、BMP 图片");
         }
         return extension;
@@ -69,7 +52,7 @@ public final class ImageSecurityUtils {
             return "";
         }
         String normalized = imageUrl.trim();
-        if (!OSS_IMAGE_URL_PATTERN.matcher(normalized).matches()) {
+        if (!ImageConstant.OSS_IMAGE_URL_PATTERN.matcher(normalized).matches()) {
             throw new UserRequestException("图片地址必须来自指定上传路径");
         }
         return normalized;

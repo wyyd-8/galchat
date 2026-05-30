@@ -19,6 +19,8 @@ public final class RedisConstant {
     public static final String EMAIL_VERIFY_COOLDOWN_KEY_PREFIX = "user:email:verify:cooldown:";
     public static final String EMAIL_VERIFY_ATTEMPT_KEY_PREFIX = "user:email:verify:attempt:";
     public static final String EMAIL_VERIFY_FREEZE_KEY_PREFIX = "user:email:verify:freeze:";
+    public static final String FAVOR_VALUE_HASH_FIELD = "favorValue";
+    public static final String USER_INFO_PROMPT_HASH_FIELD = "userInfoPrompt";
 
     public static final String TYPING_SUFFIX = ":typing";
     public static final String INPUT_SUFFIX = ":input";
@@ -32,6 +34,7 @@ public final class RedisConstant {
     public static final Duration EMAIL_VERIFY_ATTEMPT_TTL = Duration.ofMinutes(1);
     public static final Duration EMAIL_VERIFY_FREEZE_TTL = Duration.ofMinutes(30);
     public static final int EMAIL_VERIFY_MAX_ATTEMPTS = 10;
+    public static final long REDIS_SCAN_COUNT = 1_000L;
 
     private RedisConstant() {
     }

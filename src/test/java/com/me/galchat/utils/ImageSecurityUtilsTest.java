@@ -1,5 +1,6 @@
 package com.me.galchat.utils;
 
+import com.me.galchat.constant.ImageConstant;
 import com.me.galchat.exception.UserRequestException;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
@@ -29,7 +30,7 @@ class ImageSecurityUtilsTest {
                 "file",
                 "cover.png",
                 "image/png",
-                new byte[(int) ImageSecurityUtils.MAX_IMAGE_SIZE + 1]
+                new byte[(int) ImageConstant.MAX_IMAGE_SIZE + 1]
         );
 
         assertThrows(UserRequestException.class, () -> ImageSecurityUtils.validateUploadImage(file));

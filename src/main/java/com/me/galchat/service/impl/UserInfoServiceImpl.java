@@ -42,7 +42,6 @@ import java.util.Map;
 public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> implements IUserInfoService {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-    private static final String EMAIL_VERIFICATION_SUBJECT = "邮箱验证 - GalChat";
 
     private final StringRedisTemplate redisTemplate;
     private final AliyunEmailSender emailSender;
@@ -121,7 +120,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
         String codeKey = buildEmailVerifyCodeKey(normalizedEmail, verificationCode);
         redisTemplate.opsForValue().set(codeKey, normalizedEmail, RedisConstant.EMAIL_VERIFY_CODE_TTL);
 
-        boolean sent = emailSender.sendSimpleMail(normalizedEmail, EMAIL_VERIFICATION_SUBJECT,
+        boolean sent = emailSender.sendSimpleMail(normalizedEmail, UserConstant.EMAIL_VERIFICATION_SUBJECT,
                 buildEmailVerificationContent(verificationCode));
         if (!sent) {
             redisTemplate.delete(codeKey);
@@ -154,7 +153,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
         String codeKey = buildEmailVerifyCodeKey(normalizedEmail, verificationCode);
         redisTemplate.opsForValue().set(codeKey, normalizedEmail, RedisConstant.EMAIL_VERIFY_CODE_TTL);
 
-        boolean sent = emailSender.sendSimpleMail(normalizedEmail, EMAIL_VERIFICATION_SUBJECT,
+        boolean sent = emailSender.sendSimpleMail(normalizedEmail, UserConstant.EMAIL_VERIFICATION_SUBJECT,
                 buildEmailVerificationContent(verificationCode));
         if (!sent) {
             redisTemplate.delete(codeKey);

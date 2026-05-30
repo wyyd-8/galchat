@@ -23,10 +23,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MutiSearchService {
 
-    private static final int PRE_CHAT_WORLD_DETAIL_LIMIT = 2;
-    private static final int PRE_CHAT_HISTORY_LIMIT = 1;
-    private static final int PRE_CHAT_WORLD_EVENT_LIMIT = 1;
-
     private final ChatHistoryVectorService chatHistoryVectorService;
     private final WorldDetailVectorService worldDetailVectorService;
     private final WorldEventVectorService worldEventVectorService;
@@ -45,13 +41,13 @@ public class MutiSearchService {
 
         CompletableFuture<List<Document>> worldDetailFuture = CompletableFuture.supplyAsync(() ->
                 queryWithSource(() -> worldDetailVectorService.queryWorldDetail(userWorld.getWorldId(), query),
-                        VectorConstant.WORLD_DETAIL_SOURCE, PRE_CHAT_WORLD_DETAIL_LIMIT));
+                        VectorConstant.WORLD_DETAIL_SOURCE, VectorConstant.PRE_CHAT_WORLD_DETAIL_LIMIT));
         CompletableFuture<List<Document>> chatHistoryFuture = CompletableFuture.supplyAsync(() ->
                 queryWithSource(() -> chatHistoryVectorService.queryChatHistory(userWorldId, characterId, query),
-                        VectorConstant.CHAT_HISTORY_SOURCE, PRE_CHAT_HISTORY_LIMIT));
+                        VectorConstant.CHAT_HISTORY_SOURCE, VectorConstant.PRE_CHAT_HISTORY_LIMIT));
         CompletableFuture<List<Document>> worldEventFuture = CompletableFuture.supplyAsync(() ->
                 queryWithSource(() -> worldEventVectorService.queryWorldEvent(userWorldId, characterId, query),
-                        VectorConstant.WORLD_EVENT_SOURCE, PRE_CHAT_WORLD_EVENT_LIMIT));
+                        VectorConstant.WORLD_EVENT_SOURCE, VectorConstant.PRE_CHAT_WORLD_EVENT_LIMIT));
 
         List<Document> documents = new ArrayList<>();
         documents.addAll(worldDetailFuture.join());

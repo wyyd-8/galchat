@@ -16,6 +16,8 @@
 
 package com.me.galchat.model;
 
+import com.me.galchat.constant.ChatConstant;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -90,8 +92,6 @@ public class DeepSeekChatModel implements ChatModel {
 	private static final ChatModelObservationConvention DEFAULT_OBSERVATION_CONVENTION = new DefaultChatModelObservationConvention();
 
 	private static final ToolCallingManager DEFAULT_TOOL_CALLING_MANAGER = ToolCallingManager.builder().build();
-
-	private static final String RAW_TOOL_CALLS_METADATA_KEY = "deepSeekRawToolCalls";
 
 	/**
 	 * The default options used for the chat completion requests.
@@ -355,7 +355,7 @@ public class DeepSeekChatModel implements ChatModel {
 
 		Map<String, Object> properties = new HashMap<>(metadata);
 		if (!CollectionUtils.isEmpty(rawToolCalls)) {
-			properties.put(RAW_TOOL_CALLS_METADATA_KEY, rawToolCalls);
+			properties.put(ChatConstant.DEEPSEEK_RAW_TOOL_CALLS_METADATA_KEY, rawToolCalls);
 		}
 
 		DeepSeekAssistantMessage.Builder builder = new DeepSeekAssistantMessage.Builder();
@@ -423,7 +423,7 @@ public class DeepSeekChatModel implements ChatModel {
 			}
 			if (output.getMetadata() != null) {
 				properties.putAll(output.getMetadata());
-				appendRawToolCalls(output.getMetadata().get(RAW_TOOL_CALLS_METADATA_KEY));
+				appendRawToolCalls(output.getMetadata().get(ChatConstant.DEEPSEEK_RAW_TOOL_CALLS_METADATA_KEY));
 			}
 			if (CollectionUtils.isEmpty(toolCalls()) && !CollectionUtils.isEmpty(output.getToolCalls())) {
 				appendAssistantToolCalls(output.getToolCalls());
@@ -485,7 +485,7 @@ public class DeepSeekChatModel implements ChatModel {
 
 		private AssistantMessage assistantMessage() {
 			List<AssistantMessage.ToolCall> toolCalls = toolCalls();
-			properties.remove(RAW_TOOL_CALLS_METADATA_KEY);
+			properties.remove(ChatConstant.DEEPSEEK_RAW_TOOL_CALLS_METADATA_KEY);
 			if (!reasoningContent.isEmpty()) {
 				return new DeepSeekAssistantMessage.Builder()
 						.content(content.toString())

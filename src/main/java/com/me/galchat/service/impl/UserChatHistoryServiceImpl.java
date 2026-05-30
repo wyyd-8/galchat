@@ -50,8 +50,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMapper, UserChatHistory> implements IUserChatHistoryService {
 
-    private static final int MAX_CONSECUTIVE_WITHDRAW_COUNT = 3;
-
     private final IUserWorldPrefixService userWorldPrefixService;
     private final UserChatThinkingHistoryMapper userChatThinkingHistoryMapper;
     private final UserChatToolCallMapper userChatToolCallMapper;
@@ -105,7 +103,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         if (candidate.userMessage() == null) {
             throw new UserRequestException("没有可撤回的用户消息");
         }
-        if (candidate.consecutiveWithdrawCount() >= MAX_CONSECUTIVE_WITHDRAW_COUNT) {
+        if (candidate.consecutiveWithdrawCount() >= ChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT) {
             throw new UserRequestException("最多只能连续撤回3条消息");
         }
 
@@ -150,7 +148,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                         .or()
                         .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE))
                 .orderByDesc(UserChatHistory::getId)
-                .last("limit " + (MAX_CONSECUTIVE_WITHDRAW_COUNT + 1))
+                .last("limit " + (ChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT + 1))
                 .list();
 
         int consecutiveWithdrawCount = 0;

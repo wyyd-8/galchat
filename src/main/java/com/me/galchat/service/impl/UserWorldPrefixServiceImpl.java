@@ -40,8 +40,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMapper, UserWorldPrefix> implements IUserWorldPrefixService {
 
-    private static final long REDIS_SCAN_COUNT = 1_000L;
-
     private final IWorldTemplateService worldTemplateService;
     private final StringRedisTemplate redisTemplate;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
@@ -179,7 +177,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     private void deleteHashFieldsByPattern(String hashKey, String pattern) {
         List<Object> fields = new ArrayList<>();
         try (Cursor<Map.Entry<Object, Object>> cursor = redisTemplate.opsForHash()
-                .scan(hashKey, ScanOptions.scanOptions().match(pattern).count(REDIS_SCAN_COUNT).build())) {
+                .scan(hashKey, ScanOptions.scanOptions().match(pattern).count(RedisConstant.REDIS_SCAN_COUNT).build())) {
             cursor.forEachRemaining(entry -> fields.add(entry.getKey()));
         }
         if (!fields.isEmpty()) {
@@ -190,7 +188,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     private void deleteKeysByPattern(String pattern) {
         List<String> keys = new ArrayList<>();
         try (Cursor<String> cursor = redisTemplate.scan(
-                ScanOptions.scanOptions().match(pattern).count(REDIS_SCAN_COUNT).build())) {
+                ScanOptions.scanOptions().match(pattern).count(RedisConstant.REDIS_SCAN_COUNT).build())) {
             cursor.forEachRemaining(keys::add);
         }
         deleteRedisKeys(keys);

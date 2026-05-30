@@ -47,9 +47,6 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoMapper, UserCharacterInfo> implements IUserCharacterInfoService {
 
-    private static final String FAVOR_VALUE_CACHE_FIELD = "favorValue";
-    private static final String USER_INFO_PROMPT_CACHE_FIELD = "userInfoPrompt";
-
     private final ICharacterTemplateService characterTemplateService;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final StringRedisTemplate redisTemplate;
@@ -337,7 +334,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     private UserCharacterInfo getCachedPromptInfo(Long userWorldId, Long characterId) {
         List<Object> values = redisTemplate.opsForHash().multiGet(buildPromptInfoCacheKey(userWorldId, characterId),
-                List.of(FAVOR_VALUE_CACHE_FIELD, USER_INFO_PROMPT_CACHE_FIELD));
+                List.of(RedisConstant.FAVOR_VALUE_HASH_FIELD, RedisConstant.USER_INFO_PROMPT_HASH_FIELD));
         if (values == null || values.size() != 2 || values.get(0) == null || values.get(1) == null) {
             return null;
         }
@@ -349,8 +346,8 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     private void cachePromptInfo(Long userWorldId, Long characterId, UserCharacterInfo userCharacterInfo) {
         redisTemplate.opsForHash().putAll(buildPromptInfoCacheKey(userWorldId, characterId), Map.of(
-                FAVOR_VALUE_CACHE_FIELD, String.valueOf(userCharacterInfo.getFavorValue()),
-                USER_INFO_PROMPT_CACHE_FIELD, userCharacterInfo.getUserInfoPrompt()));
+                RedisConstant.FAVOR_VALUE_HASH_FIELD, String.valueOf(userCharacterInfo.getFavorValue()),
+                RedisConstant.USER_INFO_PROMPT_HASH_FIELD, userCharacterInfo.getUserInfoPrompt()));
     }
 
     private void evictPromptInfoCache(Long userWorldId, Long characterId) {

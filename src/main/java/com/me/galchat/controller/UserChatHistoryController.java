@@ -7,6 +7,7 @@ import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.IUserChatHistoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 
@@ -39,6 +40,14 @@ public class UserChatHistoryController {
         }
 
         return Result.success(userChatHistoryService.listHistory(userWorldId, characterId, id, size));
+    }
+
+    @PostMapping("/withdraw")
+    public Result withdrawLatestUserMessage(@RequestParam("userworldid") Long userWorldId,
+                                            @RequestParam("characterid") Long characterId) {
+        checkRequest(userWorldId, characterId);
+        userChatHistoryService.withdrawLatestUserMessage(userWorldId, characterId);
+        return Result.success();
     }
 
     private void checkRequest(Long userWorldId, Long characterId) {

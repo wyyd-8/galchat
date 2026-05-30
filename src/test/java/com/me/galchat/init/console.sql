@@ -54,6 +54,7 @@ CREATE TABLE user_world_prefix (
     favor_system_status VARCHAR(50) DEFAULT 'EASY',
     eot_detection_status BOOLEAN DEFAULT FALSE,
     think_status BOOLEAN DEFAULT FALSE,
+    my_world boolean DEFAULT FALSE,
     add_special_prompt BOOLEAN DEFAULT FALSE
 );
 

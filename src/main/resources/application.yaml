@@ -50,3 +50,6 @@ galchat:
     endpoint: https://oss-cn-beijing.aliyuncs.com
     bucket-name: galchat
     region: cn-beijing
+  aliemail:
+    account-name: usercheck@galchat.top
+    reply-to-address: false

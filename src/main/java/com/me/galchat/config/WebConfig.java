@@ -18,7 +18,7 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(tokenInterceptor)
                 .addPathPatterns("/**")//拦截所有请求
-                .excludePathPatterns("/user/login", "/user/register");//不拦截/login的请求(excludePathPatterns优先级更高)
+                .excludePathPatterns("/user/login", "/user/register", "/user/register/email-code");//不拦截/login的请求(excludePathPatterns优先级更高)
     }
 
 }

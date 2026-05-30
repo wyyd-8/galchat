@@ -124,10 +124,16 @@ export const api = {
       body: JSON.stringify({ email, password }),
     })
   },
-  register(email: string, password: string) {
+  register(email: string, password: string, verificationCode: string) {
     return request<UserToken>('/user/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, verificationCode }),
+    })
+  },
+  sendRegisterEmailCode(email: string) {
+    return request<void>('/user/register/email-code', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
     })
   },
   getUserInfo() {
@@ -139,7 +145,17 @@ export const api = {
       body: JSON.stringify(payload),
     })
   },
-  updatePassword(payload: { email: string; oldPassword: string; newPassword: string }) {
+  sendPasswordEmailCode(email: string) {
+    return request<void>('/user/password/email-code', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    })
+  },
+  updatePassword(payload: {
+    email: string
+    newPassword: string
+    verificationCode: string
+  }) {
     return request<void>('/user/password', {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -220,6 +236,15 @@ export const api = {
       size: String(size),
     })
     return request<ChatHistory[]>(`/history?${params.toString()}`)
+  },
+  withdrawLatestMessage(userWorldId: number, characterId: number) {
+    const params = new URLSearchParams({
+      userworldid: String(userWorldId),
+      characterid: String(characterId),
+    })
+    return request<void>(`/history/withdraw?${params.toString()}`, {
+      method: 'POST',
+    })
   },
   listStories(userWorldId: number) {
     return request<StoryListItem[]>(`/worldevent/story/list/${userWorldId}`)

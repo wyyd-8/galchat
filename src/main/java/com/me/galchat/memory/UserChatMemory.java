@@ -394,6 +394,7 @@ public class UserChatMemory implements ChatMemory {
      */
     private List<String> excludedTypes() {
         List<String> excludedTypes = new ArrayList<>(List.of(MessageType.SYSTEM.getValue(), MessageType.TOOL.getValue()));
+        excludedTypes.add(ChatConstant.WITHDRAWN_TYPE);
         if (!includeAutoSearchInfo) {
             excludedTypes.add(ChatConstant.AUTO_SEARCH_INFO_TYPE);
         }

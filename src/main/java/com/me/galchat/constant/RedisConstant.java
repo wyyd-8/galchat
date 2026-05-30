@@ -15,6 +15,10 @@ public final class RedisConstant {
     public static final String TOPIC_BOUNDARY_KEY_PREFIX = "chat:topic:boundary:";
     public static final String STORY_ACTIVE_KEY_PREFIX = "chat:story:active:";
     public static final String USER_CHARACTER_LOCK_PREFIX = "chat:user:character:lock:";
+    public static final String EMAIL_VERIFY_CODE_KEY_PREFIX = "user:email:verify:code:";
+    public static final String EMAIL_VERIFY_COOLDOWN_KEY_PREFIX = "user:email:verify:cooldown:";
+    public static final String EMAIL_VERIFY_ATTEMPT_KEY_PREFIX = "user:email:verify:attempt:";
+    public static final String EMAIL_VERIFY_FREEZE_KEY_PREFIX = "user:email:verify:freeze:";
 
     public static final String TYPING_SUFFIX = ":typing";
     public static final String INPUT_SUFFIX = ":input";
@@ -23,6 +27,11 @@ public final class RedisConstant {
     public static final Duration CHAT_MEMORY_STEP_TTL = Duration.ofDays(1);
     public static final Duration LAST_ASSISTANT_TTL = Duration.ofHours(1);
     public static final Duration INPUT_STATE_TTL = Duration.ofHours(1);
+    public static final Duration EMAIL_VERIFY_CODE_TTL = Duration.ofMinutes(5);
+    public static final Duration EMAIL_VERIFY_COOLDOWN_TTL = Duration.ofMinutes(1);
+    public static final Duration EMAIL_VERIFY_ATTEMPT_TTL = Duration.ofMinutes(1);
+    public static final Duration EMAIL_VERIFY_FREEZE_TTL = Duration.ofMinutes(30);
+    public static final int EMAIL_VERIFY_MAX_ATTEMPTS = 10;
 
     private RedisConstant() {
     }

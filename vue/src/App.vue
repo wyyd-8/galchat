@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Delete,
+  Message,
   Plus,
 } from '@element-plus/icons-vue'
 import AppSidebar from '@/components/app/AppSidebar.vue'
@@ -25,10 +26,14 @@ const {
   authMode,
   authForm,
   authLoading,
+  authCodeLoading,
+  authCodeCooldown,
   accountDialogVisible,
   accountLoading,
   passwordDialogVisible,
   passwordLoading,
+  passwordCodeLoading,
+  passwordCodeCooldown,
   accountForm,
   passwordForm,
   loading,
@@ -86,9 +91,13 @@ const {
   averageFavor,
   activeStoryTitle,
   selectedStoryCharacterIds,
+  canWithdrawLatestMessage,
   isWorldActive,
   isCharacterActive,
   submitAuth,
+  switchAuthMode,
+  sendRegisterEmailCode,
+  sendPasswordEmailCode,
   openAccountSettings,
   openPasswordSettings,
   submitAccountProfile,
@@ -129,6 +138,7 @@ const {
   submitEndStory,
   handleComposerFocus,
   sendMessage,
+  withdrawLatestMessage,
   logout,
 } = useGalchatApp()
 </script>
@@ -203,8 +213,10 @@ const {
         :loading="loading"
         :message-list="messageList"
         :selected-character-name="selectedCharacterName"
+        :can-withdraw-message="canWithdrawLatestMessage"
         @handle-composer-focus="handleComposerFocus"
         @send-message="sendMessage"
+        @withdraw-message="withdrawLatestMessage"
       />
     </main>
 
@@ -239,15 +251,44 @@ const {
           <el-input
             v-model="authForm.password"
             type="password"
-            autocomplete="current-password"
+            :autocomplete="authMode === 'login' ? 'current-password' : 'new-password'"
             show-password
             @keydown.enter="submitAuth"
           />
         </el-form-item>
+        <el-form-item v-if="authMode === 'register'" label="确认密码">
+          <el-input
+            v-model="authForm.confirmPassword"
+            type="password"
+            autocomplete="new-password"
+            show-password
+            @keydown.enter="submitAuth"
+          />
+        </el-form-item>
+        <el-form-item v-if="authMode === 'register'" label="邮箱验证码">
+          <div class="auth-code-row">
+            <el-input
+              v-model="authForm.verificationCode"
+              autocomplete="one-time-code"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6位数字验证码"
+              @keydown.enter="submitAuth"
+            />
+            <el-button
+              :icon="Message"
+              :loading="authCodeLoading"
+              :disabled="authCodeCooldown > 0 || authCodeLoading || !authForm.email.trim()"
+              @click="sendRegisterEmailCode"
+            >
+              {{ authCodeCooldown > 0 ? `${authCodeCooldown}s` : '发送' }}
+            </el-button>
+          </div>
+        </el-form-item>
       </el-form>
 
       <template #footer>
-        <el-button @click="authMode = authMode === 'login' ? 'register' : 'login'">
+        <el-button @click="switchAuthMode">
           {{ authMode === 'login' ? '去注册' : '去登录' }}
         </el-button>
         <el-button type="primary" :loading="authLoading" @click="submitAuth">
@@ -263,7 +304,7 @@ const {
             <el-input v-model="accountForm.username" placeholder="请输入用户名" />
           </el-form-item>
           <el-form-item label="邮箱">
-            <el-input v-model="accountForm.email" autocomplete="email" placeholder="请输入邮箱" />
+            <el-input v-model="accountForm.email" autocomplete="email" disabled />
           </el-form-item>
         </div>
         <el-form-item label="生日">
@@ -287,19 +328,33 @@ const {
     <el-dialog v-model="passwordDialogVisible" title="修改密码" width="520px">
       <el-form label-position="top" v-loading="passwordLoading">
         <el-form-item label="邮箱">
-          <el-input v-model="passwordForm.email" autocomplete="email" placeholder="请输入邮箱" />
+          <el-input v-model="passwordForm.email" autocomplete="email" disabled />
         </el-form-item>
-        <el-form-item label="旧密码">
-          <el-input v-model="passwordForm.oldPassword" type="password" show-password />
+        <el-form-item label="邮箱验证码">
+          <div class="auth-code-row">
+            <el-input
+              v-model="passwordForm.verificationCode"
+              autocomplete="one-time-code"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6位数字验证码"
+            />
+            <el-button
+              :icon="Message"
+              :loading="passwordCodeLoading"
+              :disabled="passwordCodeCooldown > 0 || passwordCodeLoading || !passwordForm.email.trim()"
+              @click="sendPasswordEmailCode"
+            >
+              {{ passwordCodeCooldown > 0 ? `${passwordCodeCooldown}s` : '发送' }}
+            </el-button>
+          </div>
         </el-form-item>
-        <div class="account-form-grid">
-          <el-form-item label="新密码">
-            <el-input v-model="passwordForm.newPassword" type="password" show-password />
-          </el-form-item>
-          <el-form-item label="确认新密码">
-            <el-input v-model="passwordForm.confirmPassword" type="password" show-password />
-          </el-form-item>
-        </div>
+        <el-form-item label="新密码">
+          <el-input v-model="passwordForm.newPassword" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="确认新密码">
+          <el-input v-model="passwordForm.confirmPassword" type="password" show-password />
+        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -1551,12 +1606,18 @@ const {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: end;
   padding: 14px;
   border-top: 1px solid rgba(42, 52, 71, 0.1);
   background: #fff;
+}
+
+.withdraw-button {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
 }
 
 .character-panel {
@@ -1672,6 +1733,17 @@ const {
 
 .dialog-title p {
   margin-top: 4px;
+}
+
+.auth-code-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  gap: 10px;
+}
+
+.auth-code-row .el-button {
+  min-width: 0;
 }
 
 .create-steps {
@@ -1937,7 +2009,11 @@ const {
   }
 
   .composer {
-    grid-template-columns: 1fr;
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .composer .el-button--primary {
+    grid-column: 1 / -1;
   }
 
   .favorability-row {

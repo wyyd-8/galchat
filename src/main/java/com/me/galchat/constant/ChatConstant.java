@@ -6,6 +6,7 @@ public final class ChatConstant {
     public static final String TOOL_TYPE = "tool";
     public static final String RESPONSE_TYPE = "reponse";
     public static final String AUTO_SEARCH_INFO_TYPE = "auto_search_info";
+    public static final String WITHDRAWN_TYPE = "withdrawn";
     public static final String STORY_START_TYPE = "story_start";
     public static final String STORY_PROGRESS_TYPE = "story_progress";
     public static final String STORY_END_TYPE = "story_end";

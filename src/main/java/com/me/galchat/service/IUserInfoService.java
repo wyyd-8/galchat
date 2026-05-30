@@ -22,6 +22,10 @@ public interface IUserInfoService extends IService<UserInfo> {
 
     UserTokenVO register(UserAuthDTO userAuthDTO);
 
+    void sendRegisterEmailVerificationCode(String email);
+
+    void sendPasswordEmailVerificationCode(Integer userId, String email);
+
     void updateUserInfo(Integer userId, UserProfileDTO userProfileDTO);
 
     void updatePassword(Integer userId, UserPasswordDTO userPasswordDTO);

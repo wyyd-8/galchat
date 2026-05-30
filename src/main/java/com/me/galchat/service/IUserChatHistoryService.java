@@ -17,4 +17,6 @@ public interface IUserChatHistoryService extends IService<UserChatHistory> {
 
     List<UserChatHistory> listHistory(Long userWorldId, Long characterId, Long id, Integer size);
 
+    void withdrawLatestUserMessage(Long userWorldId, Long characterId);
+
 }

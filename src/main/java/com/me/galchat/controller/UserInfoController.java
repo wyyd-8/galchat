@@ -40,6 +40,12 @@ public class UserInfoController {
         return Result.success(userInfoService.register(userAuthDTO));
     }
 
+    @PostMapping("/register/email-code")
+    public Result sendRegisterEmailVerificationCode(@RequestBody UserAuthDTO userAuthDTO) {
+        userInfoService.sendRegisterEmailVerificationCode(userAuthDTO == null ? null : userAuthDTO.getEmail());
+        return Result.success();
+    }
+
     @GetMapping("/info")
     public Result getUserInfo() {
         return Result.success(userInfoService.getInfoById(CurrentHolder.getCurrentId()));
@@ -54,6 +60,13 @@ public class UserInfoController {
     @PutMapping("/password")
     public Result updatePassword(@RequestBody UserPasswordDTO userPasswordDTO) {
         userInfoService.updatePassword(CurrentHolder.getCurrentId(), userPasswordDTO);
+        return Result.success();
+    }
+
+    @PostMapping("/password/email-code")
+    public Result sendPasswordEmailVerificationCode(@RequestBody UserPasswordDTO userPasswordDTO) {
+        userInfoService.sendPasswordEmailVerificationCode(CurrentHolder.getCurrentId(),
+                userPasswordDTO == null ? null : userPasswordDTO.getEmail());
         return Result.success();
     }
 }

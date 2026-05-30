@@ -5,6 +5,7 @@ export interface UiMessage {
   role: 'user' | 'assistant' | 'thinking' | 'tool' | 'story'
   content: string
   time?: string
+  complete?: boolean
 }
 
 export interface FavorabilityRow {

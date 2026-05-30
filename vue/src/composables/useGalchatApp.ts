@@ -36,12 +36,18 @@ export function useGalchatApp() {
   const sidebarMode = ref<SidebarMode>('worlds')
   const authDialogVisible = ref(!session.token)
   const authMode = ref<'login' | 'register'>('login')
-  const authForm = reactive({ email: '', password: '' })
+  const authForm = reactive({ email: '', password: '', confirmPassword: '', verificationCode: '' })
   const authLoading = ref(false)
+  const authCodeLoading = ref(false)
+  const authCodeCooldown = ref(0)
+  let authCodeTimer: number | undefined
   const accountDialogVisible = ref(false)
   const accountLoading = ref(false)
   const passwordDialogVisible = ref(false)
   const passwordLoading = ref(false)
+  const passwordCodeLoading = ref(false)
+  const passwordCodeCooldown = ref(0)
+  let passwordCodeTimer: number | undefined
   const accountForm = reactive({
     username: '',
     email: '',
@@ -49,9 +55,9 @@ export function useGalchatApp() {
   })
   const passwordForm = reactive({
     email: '',
-    oldPassword: '',
     newPassword: '',
     confirmPassword: '',
+    verificationCode: '',
   })
 
   const loading = reactive({
@@ -61,6 +67,7 @@ export function useGalchatApp() {
     events: false,
     history: false,
     sending: false,
+    withdrawing: false,
   })
 
   const worldTemplates = ref<WorldTemplate[]>([])
@@ -194,6 +201,30 @@ export function useGalchatApp() {
   const selectedStoryCharacterIds = computed(
     () => new Set(activeStory.value?.characters.map((character) => character.characterId) || []),
   )
+  const canWithdrawLatestMessage = computed(() => {
+    if (
+      loading.history ||
+      loading.sending ||
+      loading.withdrawing ||
+      !selectedWorldId.value ||
+      !selectedCharacter.value
+    ) {
+      return false
+    }
+
+    const conversationMessages = messageList.value.filter((message) =>
+      message.role === 'user' || message.role === 'assistant',
+    )
+    const latestConversationMessage = conversationMessages.at(-1)
+    if (
+      latestConversationMessage?.role !== 'assistant' ||
+      latestConversationMessage.complete === false
+    ) {
+      return false
+    }
+
+    return conversationMessages.some((message) => message.role === 'user')
+  })
 
   watch(
     () => createWorldForm.thinkStatus,
@@ -321,9 +352,102 @@ export function useGalchatApp() {
     localStorage.setItem('galchat.username', username)
   }
 
+  function startAuthCodeCooldown(seconds = 60) {
+    if (authCodeTimer) {
+      window.clearInterval(authCodeTimer)
+    }
+    authCodeCooldown.value = seconds
+    authCodeTimer = window.setInterval(() => {
+      authCodeCooldown.value -= 1
+      if (authCodeCooldown.value <= 0 && authCodeTimer) {
+        window.clearInterval(authCodeTimer)
+        authCodeTimer = undefined
+        authCodeCooldown.value = 0
+      }
+    }, 1000)
+  }
+
+  function switchAuthMode() {
+    authMode.value = authMode.value === 'login' ? 'register' : 'login'
+    authForm.confirmPassword = ''
+    authForm.verificationCode = ''
+  }
+
+  function startPasswordCodeCooldown(seconds = 60) {
+    if (passwordCodeTimer) {
+      window.clearInterval(passwordCodeTimer)
+    }
+    passwordCodeCooldown.value = seconds
+    passwordCodeTimer = window.setInterval(() => {
+      passwordCodeCooldown.value -= 1
+      if (passwordCodeCooldown.value <= 0 && passwordCodeTimer) {
+        window.clearInterval(passwordCodeTimer)
+        passwordCodeTimer = undefined
+        passwordCodeCooldown.value = 0
+      }
+    }, 1000)
+  }
+
+  async function sendRegisterEmailCode() {
+    if (authMode.value !== 'register') {
+      return
+    }
+    if (!authForm.email.trim()) {
+      ElMessage.warning('请输入邮箱')
+      return
+    }
+    if (authCodeCooldown.value > 0) {
+      return
+    }
+
+    authCodeLoading.value = true
+    try {
+      await api.sendRegisterEmailCode(authForm.email.trim())
+      startAuthCodeCooldown()
+      ElMessage.success('验证码已发送')
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '验证码发送失败')
+    } finally {
+      authCodeLoading.value = false
+    }
+  }
+
+  async function sendPasswordEmailCode() {
+    if (!passwordForm.email.trim()) {
+      ElMessage.warning('邮箱为空，请重新打开修改密码窗口')
+      return
+    }
+    if (passwordCodeCooldown.value > 0) {
+      return
+    }
+
+    passwordCodeLoading.value = true
+    try {
+      await api.sendPasswordEmailCode(passwordForm.email.trim())
+      startPasswordCodeCooldown()
+      ElMessage.success('验证码已发送')
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '验证码发送失败')
+    } finally {
+      passwordCodeLoading.value = false
+    }
+  }
+
   async function submitAuth() {
     if (!authForm.email.trim() || !authForm.password.trim()) {
       ElMessage.warning('请输入邮箱和密码')
+      return
+    }
+    if (authMode.value === 'register' && !authForm.confirmPassword) {
+      ElMessage.warning('请确认密码')
+      return
+    }
+    if (authMode.value === 'register' && authForm.password !== authForm.confirmPassword) {
+      ElMessage.warning('两次输入的密码不一致')
+      return
+    }
+    if (authMode.value === 'register' && !authForm.verificationCode.trim()) {
+      ElMessage.warning('请输入邮箱验证码')
       return
     }
 
@@ -332,7 +456,11 @@ export function useGalchatApp() {
       const isRegister = authMode.value === 'register'
       const result =
         isRegister
-          ? await api.register(authForm.email.trim(), authForm.password)
+          ? await api.register(
+              authForm.email.trim(),
+              authForm.password,
+              authForm.verificationCode.trim(),
+            )
           : await api.login(authForm.email.trim(), authForm.password)
 
       saveSession(result)
@@ -341,6 +469,8 @@ export function useGalchatApp() {
       session.username = result.username
       authDialogVisible.value = false
       authForm.password = ''
+      authForm.confirmPassword = ''
+      authForm.verificationCode = ''
       ElMessage.success(isRegister ? '注册成功' : '登录成功')
       await loadAppData()
       if (isRegister) {
@@ -375,9 +505,9 @@ export function useGalchatApp() {
   async function openPasswordSettings() {
     passwordDialogVisible.value = true
     passwordForm.email = accountForm.email || ''
-    passwordForm.oldPassword = ''
     passwordForm.newPassword = ''
     passwordForm.confirmPassword = ''
+    passwordForm.verificationCode = ''
     passwordLoading.value = true
     try {
       const user = await api.getUserInfo()
@@ -390,8 +520,8 @@ export function useGalchatApp() {
   }
 
   async function submitAccountProfile() {
-    if (!accountForm.username.trim() || !accountForm.email.trim()) {
-      ElMessage.warning('请输入用户名和邮箱')
+    if (!accountForm.username.trim()) {
+      ElMessage.warning('请输入用户名')
       return
     }
 
@@ -399,11 +529,11 @@ export function useGalchatApp() {
     try {
       await api.updateUserInfo({
         username: accountForm.username.trim(),
-        email: accountForm.email.trim(),
         birthday: accountForm.birthday || undefined,
       })
       syncSessionUser(accountForm.username.trim())
       ElMessage.success('账号资料已保存')
+      accountDialogVisible.value = false
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '保存账号资料失败')
     } finally {
@@ -412,8 +542,12 @@ export function useGalchatApp() {
   }
 
   async function submitPassword() {
-    if (!passwordForm.email.trim() || !passwordForm.oldPassword || !passwordForm.newPassword) {
-      ElMessage.warning('请输入邮箱、旧密码和新密码')
+    if (!passwordForm.email.trim() || !passwordForm.newPassword) {
+      ElMessage.warning('请输入邮箱和新密码')
+      return
+    }
+    if (!passwordForm.verificationCode.trim()) {
+      ElMessage.warning('请输入邮箱验证码')
       return
     }
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
@@ -425,12 +559,12 @@ export function useGalchatApp() {
     try {
       await api.updatePassword({
         email: passwordForm.email.trim(),
-        oldPassword: passwordForm.oldPassword,
         newPassword: passwordForm.newPassword,
+        verificationCode: passwordForm.verificationCode.trim(),
       })
-      passwordForm.oldPassword = ''
       passwordForm.newPassword = ''
       passwordForm.confirmPassword = ''
+      passwordForm.verificationCode = ''
       ElMessage.success('密码已更新')
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '更新密码失败')
@@ -1325,7 +1459,9 @@ export function useGalchatApp() {
     })
 
     if (!hasAssistantContent) {
-      ensureAssistantMessage().content = '暂时没有收到角色回复。'
+      const fallbackMessage = ensureAssistantMessage()
+      fallbackMessage.content = '暂时没有收到角色回复。'
+      fallbackMessage.complete = false
     }
   }
 
@@ -1373,6 +1509,7 @@ export function useGalchatApp() {
         id: `assistant-error-${Date.now()}`,
         role: 'assistant',
         content: '发送失败，请稍后再试。',
+        complete: false,
       })
       ElMessage.error(error instanceof Error ? error.message : '发送失败')
     } finally {
@@ -1380,6 +1517,25 @@ export function useGalchatApp() {
         loading.sending = false
       }
       await scrollToBottom()
+    }
+  }
+
+  async function withdrawLatestMessage() {
+    const userWorldId = selectedWorldId.value
+    const characterId = selectedCharacter.value?.characterId
+    if (!userWorldId || !characterId || !canWithdrawLatestMessage.value) {
+      return
+    }
+
+    loading.withdrawing = true
+    try {
+      await api.withdrawLatestMessage(userWorldId, characterId)
+      ElMessage.success('已撤回上一轮消息')
+      await Promise.all([loadHistory(), loadCharacters(userWorldId), loadWorldEvents(userWorldId)])
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '撤回失败')
+    } finally {
+      loading.withdrawing = false
     }
   }
 
@@ -1447,6 +1603,12 @@ export function useGalchatApp() {
 
   onBeforeUnmount(() => {
     window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorizedSession)
+    if (authCodeTimer) {
+      window.clearInterval(authCodeTimer)
+    }
+    if (passwordCodeTimer) {
+      window.clearInterval(passwordCodeTimer)
+    }
     closeChatSocket()
   })
 
@@ -1457,10 +1619,14 @@ export function useGalchatApp() {
     authMode,
     authForm,
     authLoading,
+    authCodeLoading,
+    authCodeCooldown,
     accountDialogVisible,
     accountLoading,
     passwordDialogVisible,
     passwordLoading,
+    passwordCodeLoading,
+    passwordCodeCooldown,
     accountForm,
     passwordForm,
     loading,
@@ -1523,9 +1689,13 @@ export function useGalchatApp() {
     averageFavor,
     activeStoryTitle,
     selectedStoryCharacterIds,
+    canWithdrawLatestMessage,
     isWorldActive,
     isCharacterActive,
     submitAuth,
+    switchAuthMode,
+    sendRegisterEmailCode,
+    sendPasswordEmailCode,
     openAccountSettings,
     openPasswordSettings,
     submitAccountProfile,
@@ -1568,6 +1738,7 @@ export function useGalchatApp() {
     submitEndStory,
     handleComposerFocus,
     sendMessage,
+    withdrawLatestMessage,
     logout,
   }
 }

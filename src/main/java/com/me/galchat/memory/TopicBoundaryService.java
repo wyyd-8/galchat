@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RequiredArgsConstructor
 @Service
@@ -98,6 +99,30 @@ public class TopicBoundaryService {
         vectorizeClosedStoryTopic(conversationInfo, endMessageId);
         redisTemplate.delete(buildActiveStoryKey(conversationInfo));
         redisTemplate.delete(buildKey(conversationInfo));
+    }
+
+    public void clearBoundaryIfReferences(Long userWorldId, Long characterId, Set<Long> messageIds) {
+        if (userWorldId == null || characterId == null || messageIds == null || messageIds.isEmpty()) {
+            return;
+        }
+
+        ConversationInfo conversationInfo = new ConversationInfo(userWorldId, characterId, null);
+        TopicBoundary boundary = getBoundary(conversationInfo);
+        boolean previousReferenced = messageIds.contains(boundary.previousStartId());
+        boolean currentReferenced = messageIds.contains(boundary.currentStartId());
+        if (previousReferenced) {
+            redisTemplate.delete(buildKey(conversationInfo));
+            return;
+        }
+
+        if (currentReferenced) {
+            if (boundary.previousStartId() == null) {
+                redisTemplate.delete(buildKey(conversationInfo));
+                return;
+            }
+            saveBoundary(conversationInfo,
+                    new TopicBoundary(null, boundary.previousStartId(), boundary.previousStartId()));
+        }
     }
 
     private void vectorizeClosedStoryTopic(ConversationInfo conversationInfo, Long endMessageId) {

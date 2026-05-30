@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ComponentPublicInstance } from 'vue'
-import { ChatDotRound } from '@element-plus/icons-vue'
+import { ChatDotRound, RefreshLeft } from '@element-plus/icons-vue'
 import type { UiMessage } from '@/types/ui'
 
 const messageInput = defineModel<string>('messageInput', { required: true })
@@ -10,11 +10,13 @@ defineProps<{
   loading: { history: boolean; sending: boolean }
   messageList: UiMessage[]
   selectedCharacterName: string
+  canWithdrawMessage: boolean
 }>()
 
 const emit = defineEmits<{
   handleComposerFocus: []
   sendMessage: []
+  withdrawMessage: []
 }>()
 
 function bindMessageScroller(element: Element | ComponentPublicInstance | null) {
@@ -52,6 +54,15 @@ function bindMessageScroller(element: Element | ComponentPublicInstance | null) 
       </div>
 
       <div class="composer">
+        <el-button
+          class="withdraw-button"
+          :disabled="!canWithdrawMessage"
+          aria-label="撤回上一轮消息"
+          title="撤回上一轮消息"
+          @click="emit('withdrawMessage')"
+        >
+          <el-icon><RefreshLeft /></el-icon>
+        </el-button>
         <el-input
           v-model="messageInput"
           type="textarea"

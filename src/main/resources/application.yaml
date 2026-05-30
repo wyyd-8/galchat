@@ -1,6 +1,10 @@
 spring:
   application:
     name: galchat
+  servlet:
+    multipart:
+      max-file-size: 4MB
+      max-request-size: 4MB
   ai:
     deepseek:
       base-url: https://api.deepseek.com

@@ -5,6 +5,7 @@ import com.me.galchat.domain.po.WorldTemplate;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.WorldTemplateMapper;
 import com.me.galchat.service.IWorldTemplateService;
+import com.me.galchat.utils.ImageSecurityUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -50,9 +51,10 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
         if (worldTemplate == null) {
             throw new UserRequestException("请求参数不能为空");
         }
+        String image = ImageSecurityUtils.normalizeOssImageUrl(worldTemplate.getImage());
         WorldTemplate newWorldTemplate = new WorldTemplate()
                 .setName(worldTemplate.getName())
-                .setImage(worldTemplate.getImage())
+                .setImage(image)
                 .setAuthor(worldTemplate.getAuthor())
                 .setAuthorId(userId)
                 .setBackground(worldTemplate.getBackground())

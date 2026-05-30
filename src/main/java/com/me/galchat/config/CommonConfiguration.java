@@ -10,6 +10,7 @@ import com.me.galchat.model.DeepSeekChatModel;
 import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
+import com.me.galchat.vector.MutiSearchService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -24,13 +25,15 @@ public class CommonConfiguration {
     public ChatClient deepThinkChatClient(@Qualifier("deepSeekThinkingChatModel") DeepSeekChatModel model,
                                           TopicBoundaryService topicBoundaryService,
                                           @Qualifier("thinkChatMemory") UserChatMemory thinkChatMemory,
+                                          MutiSearchService mutiSearchService,
                                           VectorTools vectorTools,
                                           UserCharacterFavorTools userCharacterFavorTools,
                                           UserCharacterInfoTools userCharacterInfoTools) {
         return ChatClient
                 .builder(model)
                 .defaultAdvisors(new SimpleLoggerAdvisor())
-                .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(thinkChatMemory, topicBoundaryService).build())
+                .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(thinkChatMemory, topicBoundaryService,
+                        mutiSearchService).build())
                 .defaultTools(vectorTools, userCharacterFavorTools, userCharacterInfoTools)
                 .build();
     }
@@ -39,13 +42,15 @@ public class CommonConfiguration {
     public ChatClient normalChatClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model,
                                        TopicBoundaryService topicBoundaryService,
                                        @Qualifier("defaultChatMemory") UserChatMemory defaultChatMemory,
+                                       MutiSearchService mutiSearchService,
                                        VectorTools vectorTools,
                                        UserCharacterFavorTools userCharacterFavorTools,
                                        UserCharacterInfoTools userCharacterInfoTools) {
         return ChatClient
                 .builder(model)
                 .defaultAdvisors(new SimpleLoggerAdvisor())
-                .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(defaultChatMemory, topicBoundaryService).build())
+                .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(defaultChatMemory, topicBoundaryService,
+                        mutiSearchService).build())
                 .defaultTools(vectorTools, userCharacterFavorTools, userCharacterInfoTools)
                 .build();
     }

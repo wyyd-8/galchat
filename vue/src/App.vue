@@ -3,6 +3,7 @@ import {
   Delete,
   Message,
   Plus,
+  Upload,
 } from '@element-plus/icons-vue'
 import AppSidebar from '@/components/app/AppSidebar.vue'
 import CharacterPanel from '@/components/app/CharacterPanel.vue'
@@ -52,10 +53,12 @@ const {
   createWorldForm,
   createTemplateDialogVisible,
   templateImageUploading,
+  createTemplateImageFileName,
   createTemplateForm,
   createCharacterDialogVisible,
   createCharacterTemplateDialogVisible,
   characterImageUploading,
+  createCharacterImageFileName,
   characterCreating,
   characterPromptSaving,
   characterTemplateLoading,
@@ -86,7 +89,9 @@ const {
   selectedWorldName,
   selectedCharacterName,
   createWorldStepIsLast,
+  availableCharacterTemplates,
   availableCharacterTemplateIds,
+  selectedAddCharacterTemplate,
   selectedCreateTemplate,
   averageFavor,
   activeStoryTitle,
@@ -137,6 +142,7 @@ const {
   openEndStory,
   submitEndStory,
   handleComposerFocus,
+  handleComposerCompositionChange,
   sendMessage,
   withdrawLatestMessage,
   logout,
@@ -215,6 +221,7 @@ const {
         :selected-character-name="selectedCharacterName"
         :can-withdraw-message="canWithdrawLatestMessage"
         @handle-composer-focus="handleComposerFocus"
+        @handle-composer-composition-change="handleComposerCompositionChange"
         @send-message="sendMessage"
         @withdraw-message="withdrawLatestMessage"
       />
@@ -544,6 +551,13 @@ const {
 
     <el-dialog v-model="createTemplateDialogVisible" title="创建新的世界模板" width="760px">
       <el-form label-position="top" class="template-form">
+        <el-form-item label="可见性">
+          <el-switch v-model="createTemplateForm.visible" active-text="公开" inactive-text="私有" />
+          <p class="field-help">
+            公开模板可在模板列表中被看见，私有模板仅用于当前用户可访问范围。角色模板会在世界创建完成后添加，并由系统自动绑定到对应世界模板。
+          </p>
+        </el-form-item>
+
         <div class="template-form-grid">
           <el-form-item label="模板名称">
             <el-input v-model="createTemplateForm.name" placeholder="例如：雾港学院" />
@@ -562,14 +576,24 @@ const {
 
         <el-form-item label="封面图片">
           <div class="upload-row">
-            <el-input v-model="createTemplateForm.image" placeholder="上传后自动回填图片 URL" />
-            <label class="upload-button">
-              <input type="file" accept="image/*" @change="handleTemplateImageChange" />
+            <el-input
+              :model-value="createTemplateImageFileName"
+              readonly
+              placeholder="上传成功后显示原文件名"
+            />
+            <label class="upload-button" :class="{ 'is-disabled': templateImageUploading }">
+              <input
+                type="file"
+                accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,image/jpeg,image/png,image/gif,image/webp,image/bmp"
+                :disabled="templateImageUploading"
+                @change="handleTemplateImageChange"
+              />
+              <el-icon><Upload /></el-icon>
               <span>{{ templateImageUploading ? '上传中' : '上传图片' }}</span>
             </label>
           </div>
           <p class="field-help">
-            图片会通过后端上传接口保存，并将返回 URL 写入模板；图片 URL 会用于世界与模板展示。
+            图片会通过后端上传接口保存，提交时使用上传接口返回的图片地址。
           </p>
         </el-form-item>
 
@@ -585,12 +609,6 @@ const {
           </p>
         </el-form-item>
 
-        <el-form-item label="可见性">
-          <el-switch v-model="createTemplateForm.visible" active-text="公开" inactive-text="私有" />
-          <p class="field-help">
-            公开模板可在模板列表中被看见，私有模板仅用于当前用户可访问范围。角色模板会在世界创建完成后添加，并由系统自动绑定到对应世界模板。
-          </p>
-        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -601,7 +619,7 @@ const {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="createCharacterDialogVisible" title="创建新角色" width="520px">
+    <el-dialog v-model="createCharacterDialogVisible" title="创建新角色" width="560px">
       <el-form label-position="top" v-loading="characterTemplateLoading">
         <el-form-item label="角色模板">
           <el-select
@@ -610,19 +628,46 @@ const {
             placeholder="选择当前世界的角色模板"
           >
             <el-option
-              v-for="characterId in availableCharacterTemplateIds"
-              :key="characterId"
-              :label="characterTemplateLabel(characterId)"
-              :value="characterId"
-            />
+              v-for="character in availableCharacterTemplates"
+              :key="character.id"
+              :label="characterTemplateLabel(character.id)"
+              :value="character.id"
+            >
+              <div class="character-template-option">
+                <div class="character-template-option-image" :style="imageStyle(character.image)">
+                  <span v-if="!character.image">{{ firstText(character.name) }}</span>
+                </div>
+                <span>{{ character.name || characterTemplateLabel(character.id) }}</span>
+              </div>
+            </el-option>
           </el-select>
           <p class="field-help">
             新角色只能从当前世界模板已有的角色模板创建；已经添加到该世界的角色不会再次显示。
           </p>
         </el-form-item>
 
+        <div v-if="selectedAddCharacterTemplate" class="selected-character-template">
+          <div class="selected-character-template-image" :style="imageStyle(selectedAddCharacterTemplate.image)">
+            <span v-if="!selectedAddCharacterTemplate.image">
+              {{ firstText(selectedAddCharacterTemplate.name) }}
+            </span>
+          </div>
+          <div>
+            <strong>{{ selectedAddCharacterTemplate.name || characterTemplateLabel(selectedAddCharacterTemplate.id) }}</strong>
+          </div>
+        </div>
+
+        <el-form-item v-if="selectedAddCharacterTemplate" label="用户信息提示词">
+          <el-input
+            v-model="addCharacterForm.userInfoPrompt"
+            type="textarea"
+            :autosize="{ minRows: 4, maxRows: 8 }"
+            placeholder="写下这个角色需要记住的用户信息"
+          />
+        </el-form-item>
+
         <el-empty
-          v-if="!characterTemplateLoading && availableCharacterTemplateIds.length === 0"
+          v-if="!characterTemplateLoading && availableCharacterTemplates.length === 0"
           description="当前世界没有可添加的角色模板"
           :image-size="72"
         />
@@ -632,7 +677,7 @@ const {
         <el-button @click="createCharacterDialogVisible = false">取消</el-button>
         <el-button
           type="primary"
-          :disabled="availableCharacterTemplateIds.length === 0"
+          :disabled="availableCharacterTemplateIds.length === 0 || !addCharacterForm.characterId"
           :loading="characterCreating || characterTemplateLoading"
           @click="submitCreateCharacter"
         >
@@ -654,9 +699,19 @@ const {
 
         <el-form-item label="角色图片">
           <div class="upload-row">
-            <el-input v-model="createCharacterForm.image" placeholder="上传后自动回填图片 URL" />
-            <label class="upload-button">
-              <input type="file" accept="image/*" @change="handleCharacterImageChange" />
+            <el-input
+              :model-value="createCharacterImageFileName"
+              readonly
+              placeholder="上传成功后显示原文件名"
+            />
+            <label class="upload-button" :class="{ 'is-disabled': characterImageUploading }">
+              <input
+                type="file"
+                accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,image/jpeg,image/png,image/gif,image/webp,image/bmp"
+                :disabled="characterImageUploading"
+                @change="handleCharacterImageChange"
+              />
+              <el-icon><Upload /></el-icon>
               <span>{{ characterImageUploading ? '上传中' : '上传图片' }}</span>
             </label>
           </div>
@@ -1803,6 +1858,55 @@ const {
   color: #697386;
 }
 
+.character-template-option {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.character-template-option-image,
+.selected-character-template-image {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #dfe8ec;
+  background-size: cover;
+  background-position: center;
+  color: #285c74;
+  font-weight: 800;
+}
+
+.character-template-option-image {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.selected-character-template {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -2px 0 18px;
+  padding: 12px;
+  border: 1px solid rgba(42, 52, 71, 0.1);
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.selected-character-template strong {
+  font-weight: 800;
+}
+
+.selected-character-template-image {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  font-size: 22px;
+}
+
 .option-stack {
   width: 100%;
   display: grid;
@@ -1940,9 +2044,15 @@ const {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   color: #285c74;
   background: #fff;
   cursor: pointer;
+}
+
+.upload-button.is-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .upload-button input {
@@ -1950,6 +2060,10 @@ const {
   inset: 0;
   opacity: 0;
   cursor: pointer;
+}
+
+.upload-button.is-disabled input {
+  cursor: not-allowed;
 }
 
 @media (max-width: 1100px) {

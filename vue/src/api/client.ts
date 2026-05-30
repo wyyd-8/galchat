@@ -21,6 +21,15 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const TOKEN_KEY = 'galchat.token'
 export const UNAUTHORIZED_EVENT = 'galchat:unauthorized'
+const MAX_IMAGE_SIZE = 4 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/x-ms-bmp',
+])
 
 function token() {
   return localStorage.getItem(TOKEN_KEY)
@@ -208,6 +217,9 @@ export const api = {
   listCharacters(userWorldId: number) {
     return request<UserCharacter[]>(`/character/${userWorldId}`)
   },
+  listCharacterTemplates(worldId: number) {
+    return request<CharacterTemplate[]>(`/character/templates/${worldId}`)
+  },
   createCharacterTemplate(worldId: number, payload: CharacterTemplate) {
     return request<void>(`/character/templates/${worldId}`, {
       method: 'POST',
@@ -276,6 +288,13 @@ export const api = {
 }
 
 export async function uploadImage(file: File) {
+  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+    throw new Error('仅支持 JPG、PNG、GIF、WEBP、BMP 图片')
+  }
+  if (file.size > MAX_IMAGE_SIZE) {
+    throw new Error('图片大小不能超过4MB')
+  }
+
   const formData = new FormData()
   formData.append('file', file)
 

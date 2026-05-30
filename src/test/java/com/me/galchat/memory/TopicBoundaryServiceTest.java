@@ -2,7 +2,6 @@ package com.me.galchat.memory;
 
 import com.me.galchat.constant.ChatConstant;
 import com.me.galchat.constant.RedisConstant;
-import com.me.galchat.tool.VectorTools;
 import com.me.galchat.vector.ChatHistoryVectorService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -37,7 +36,7 @@ class TopicBoundaryServiceTest {
         ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
         ChatHistoryVectorService chatHistoryVectorService = mock(ChatHistoryVectorService.class);
         TopicBoundaryService topicBoundaryService = new TopicBoundaryService(redisTemplate, mock(ChatClient.class),
-                mock(UserChatMemory.class), mock(VectorTools.class), chatHistoryVectorService);
+                mock(UserChatMemory.class), chatHistoryVectorService);
 
         String activeStoryKey = RedisConstant.STORY_ACTIVE_KEY_PREFIX + "1:2";
         String boundaryKey = RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + "1:2";
@@ -58,7 +57,7 @@ class TopicBoundaryServiceTest {
         ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
         ChatHistoryVectorService chatHistoryVectorService = mock(ChatHistoryVectorService.class);
         TopicBoundaryService topicBoundaryService = new TopicBoundaryService(redisTemplate, mock(ChatClient.class),
-                mock(UserChatMemory.class), mock(VectorTools.class), chatHistoryVectorService);
+                mock(UserChatMemory.class), chatHistoryVectorService);
 
         String activeStoryKey = RedisConstant.STORY_ACTIVE_KEY_PREFIX + "1:2";
         String boundaryKey = RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + "1:2";
@@ -87,7 +86,7 @@ class TopicBoundaryServiceTest {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
         TopicBoundaryService topicBoundaryService = new TopicBoundaryService(redisTemplate, mock(ChatClient.class),
-                mock(UserChatMemory.class), mock(VectorTools.class), mock(ChatHistoryVectorService.class));
+                mock(UserChatMemory.class), mock(ChatHistoryVectorService.class));
 
         String boundaryKey = RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + "1:2";
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
@@ -122,7 +121,7 @@ class TopicBoundaryServiceTest {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
         TopicBoundaryService topicBoundaryService = new TopicBoundaryService(redisTemplate, mock(ChatClient.class),
-                mock(UserChatMemory.class), mock(VectorTools.class), mock(ChatHistoryVectorService.class));
+                mock(UserChatMemory.class), mock(ChatHistoryVectorService.class));
 
         String boundaryKey = RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + "1:2";
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);

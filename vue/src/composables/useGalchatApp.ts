@@ -25,6 +25,8 @@ import type {
 import type { FavorabilityRow, SidebarMode, UiMessage } from '@/types/ui'
 import { formatTime, splitMessageContent } from '@/utils/ui'
 
+type CharacterTemplateBase = CharacterTemplate & { id: number }
+
 export function useGalchatApp() {
   const sessionSnapshot = currentSession()
   const session = reactive({
@@ -96,6 +98,7 @@ export function useGalchatApp() {
   })
   const createTemplateDialogVisible = ref(false)
   const templateImageUploading = ref(false)
+  const createTemplateImageFileName = ref('')
   const createTemplateForm = reactive({
     name: '',
     image: '',
@@ -106,13 +109,16 @@ export function useGalchatApp() {
   const createCharacterDialogVisible = ref(false)
   const createCharacterTemplateDialogVisible = ref(false)
   const characterImageUploading = ref(false)
+  const createCharacterImageFileName = ref('')
   const characterCreating = ref(false)
   const characterPromptSaving = ref(false)
   const characterTemplateLoading = ref(false)
   const selectedWorldTemplate = ref<WorldTemplate | null>(null)
+  const worldCharacterTemplates = ref<CharacterTemplate[]>([])
   const characterTemplateLabels = reactive<Record<number, string>>({})
   const addCharacterForm = reactive({
     characterId: undefined as number | undefined,
+    userInfoPrompt: '',
   })
   const createCharacterForm = reactive({
     name: '',
@@ -166,6 +172,7 @@ export function useGalchatApp() {
   let chatSocketConnecting: Promise<WebSocket> | null = null
   let lastSocketTypingContext: string | null = null
   let ignoreNextInputTypingChange = false
+  let messageInputComposing = false
   let typingSignalVersion = 0
 
   const isLoggedIn = computed(() => Boolean(session.token))
@@ -180,8 +187,16 @@ export function useGalchatApp() {
   const selectedCharacterName = computed(() => selectedCharacter.value?.characterName || '未选择角色')
   const createWorldStepIsLast = computed(() => createWorldStep.value === 4)
   const existingCharacterIds = computed(() => new Set(characters.value.map((character) => character.characterId)))
+  const availableCharacterTemplates = computed(() =>
+    worldCharacterTemplates.value
+      .filter(hasCharacterTemplateId)
+      .filter((template) => !existingCharacterIds.value.has(template.id)),
+  )
   const availableCharacterTemplateIds = computed(() =>
-    (selectedWorldTemplate.value?.characterIds || []).filter((id) => !existingCharacterIds.value.has(id)),
+    availableCharacterTemplates.value.map((template) => template.id),
+  )
+  const selectedAddCharacterTemplate = computed(() =>
+    availableCharacterTemplates.value.find((template) => template.id === addCharacterForm.characterId) || null,
   )
   const selectedCreateTemplate = computed(() =>
     worldTemplates.value.find((template) => template.id === createWorldForm.worldId),
@@ -237,13 +252,17 @@ export function useGalchatApp() {
     },
   )
 
+  function isComposerTyping(value = messageInput.value) {
+    return messageInputComposing || value.length > 0
+  }
+
   watch(messageInput, (value) => {
     if (ignoreNextInputTypingChange) {
       ignoreNextInputTypingChange = false
       return
     }
 
-    void sendSocketTyping(value.length > 0)
+    void sendSocketTyping(isComposerTyping(value))
   })
 
   watch(
@@ -254,7 +273,7 @@ export function useGalchatApp() {
       selectedWorldDetail.value?.thinkStatus,
     ],
     () => {
-      if (messageInput.value.length > 0) {
+      if (isComposerTyping()) {
         void sendSocketTyping(true)
       }
     },
@@ -750,6 +769,7 @@ export function useGalchatApp() {
   function openCreateTemplate() {
     createTemplateForm.name = ''
     createTemplateForm.image = ''
+    createTemplateImageFileName.value = ''
     createTemplateForm.author = session.username || ''
     createTemplateForm.background = ''
     createTemplateForm.visible = true
@@ -767,6 +787,7 @@ export function useGalchatApp() {
     templateImageUploading.value = true
     try {
       createTemplateForm.image = await uploadImage(file)
+      createTemplateImageFileName.value = file.name
       ElMessage.success('图片已上传')
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '图片上传失败')
@@ -786,6 +807,7 @@ export function useGalchatApp() {
     characterImageUploading.value = true
     try {
       createCharacterForm.image = await uploadImage(file)
+      createCharacterImageFileName.value = file.name
       ElMessage.success('图片已上传')
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '图片上传失败')
@@ -823,24 +845,42 @@ export function useGalchatApp() {
 
   function openCreateCharacter() {
     addCharacterForm.characterId = undefined
+    addCharacterForm.userInfoPrompt = ''
     createCharacterDialogVisible.value = true
     void loadSelectedWorldTemplate()
   }
 
   function characterTemplateLabel(characterId: number) {
-    return characterTemplateLabels[characterId] || `角色模板 #${characterId}`
+    return worldCharacterTemplates.value.find((template) => template.id === characterId)?.name
+      || characterTemplateLabels[characterId]
+      || `角色模板 #${characterId}`
+  }
+
+  function hasCharacterTemplateId(template: CharacterTemplate): template is CharacterTemplateBase {
+    return typeof template.id === 'number'
   }
 
   async function loadSelectedWorldTemplate() {
     const worldId = selectedTemplateWorldId.value
     if (!worldId) {
       selectedWorldTemplate.value = null
+      worldCharacterTemplates.value = []
       return null
     }
 
     characterTemplateLoading.value = true
     try {
-      selectedWorldTemplate.value = await api.getWorldTemplate(worldId)
+      const [worldTemplate, characterTemplates] = await Promise.all([
+        api.getWorldTemplate(worldId),
+        api.listCharacterTemplates(worldId),
+      ])
+      selectedWorldTemplate.value = worldTemplate
+      worldCharacterTemplates.value = characterTemplates
+      characterTemplates.forEach((template) => {
+        if (template.id && template.name) {
+          characterTemplateLabels[template.id] = template.name
+        }
+      })
       return selectedWorldTemplate.value
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '加载角色模板失败')
@@ -853,6 +893,7 @@ export function useGalchatApp() {
   function openCreateCharacterTemplate() {
     createCharacterForm.name = ''
     createCharacterForm.image = ''
+    createCharacterImageFileName.value = ''
     createCharacterForm.background = ''
     createCharacterForm.personality = ''
     createCharacterForm.initFavor = 0
@@ -894,9 +935,14 @@ export function useGalchatApp() {
       return
     }
 
+    const characterId = addCharacterForm.characterId
+    const normalizedPrompt = addCharacterForm.userInfoPrompt.trim()
     characterCreating.value = true
     try {
-      await api.addCharacter(userWorldId, addCharacterForm.characterId)
+      await api.addCharacter(userWorldId, characterId)
+      await api.updateCharacterPrompt(userWorldId, characterId, {
+        userInfoPrompt: normalizedPrompt || undefined,
+      })
       createCharacterDialogVisible.value = false
       ElMessage.success('角色已添加')
       await loadCharacters(userWorldId)
@@ -1378,9 +1424,14 @@ export function useGalchatApp() {
   }
 
   function handleComposerFocus() {
-    if (messageInput.value.length > 0) {
+    if (isComposerTyping()) {
       void sendSocketTyping(true)
     }
+  }
+
+  function handleComposerCompositionChange(isComposing: boolean, value = messageInput.value) {
+    messageInputComposing = isComposing
+    void sendSocketTyping(isComposerTyping(value))
   }
 
   async function sendSocketChat(payload: ChatMessagePayload) {
@@ -1647,14 +1698,17 @@ export function useGalchatApp() {
     createWorldForm,
     createTemplateDialogVisible,
     templateImageUploading,
+    createTemplateImageFileName,
     createTemplateForm,
     createCharacterDialogVisible,
     createCharacterTemplateDialogVisible,
     characterImageUploading,
+    createCharacterImageFileName,
     characterCreating,
     characterPromptSaving,
     characterTemplateLoading,
     selectedWorldTemplate,
+    worldCharacterTemplates,
     addCharacterForm,
     createCharacterForm,
     worldDetailDialogVisible,
@@ -1684,7 +1738,9 @@ export function useGalchatApp() {
     selectedWorldName,
     selectedCharacterName,
     createWorldStepIsLast,
+    availableCharacterTemplates,
     availableCharacterTemplateIds,
+    selectedAddCharacterTemplate,
     selectedCreateTemplate,
     averageFavor,
     activeStoryTitle,
@@ -1737,6 +1793,7 @@ export function useGalchatApp() {
     openEndStory,
     submitEndStory,
     handleComposerFocus,
+    handleComposerCompositionChange,
     sendMessage,
     withdrawLatestMessage,
     logout,

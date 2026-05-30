@@ -208,28 +208,6 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 保存主 AI 提前向量检索得到的信息。
-     * 该消息用特殊 type 存储，组装主 prompt 时会被还原为 UserMessage。
-     *
-     * @param conversationInfo 会话定位信息
-     * @param content 自动检索结果文本
-     * 调用来源：TopicBoundaryService 在新话题首条用户消息后触发。
-     */
-    void saveAutoSearchInfo(ConversationInfo conversationInfo, String content) {
-        if (!StringUtils.hasText(content)) {
-            return;
-        }
-
-        UserChatHistory userChatHistory = new UserChatHistory()
-                .setUserWorldId(conversationInfo.getUserWorldId())
-                .setCharacterId(conversationInfo.getCharacterId())
-                .setContent(content)
-                .setType(ChatConstant.AUTO_SEARCH_INFO_TYPE)
-                .setTimestamp(LocalDateTime.now());
-        userChatHistoryMapper.insert(userChatHistory);
-    }
-
-    /**
      * 清空指定会话的可见历史和辅助表记录。
      *
      * @param conversationId 字符串形式的会话标识

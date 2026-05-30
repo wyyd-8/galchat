@@ -1,17 +1,14 @@
 package com.me.galchat.memory;
 
 import com.me.galchat.constant.ChatConstant;
-import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.DateTimeConstant;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
-import com.me.galchat.tool.VectorTools;
 import com.me.galchat.vector.ChatHistoryVectorService;
 import lombok.RequiredArgsConstructor;
 import org.json.JSONObject;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -19,7 +16,6 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 @RequiredArgsConstructor
@@ -29,7 +25,6 @@ public class TopicBoundaryService {
     private final StringRedisTemplate redisTemplate;
     private final ChatClient topicClient;
     private final UserChatMemory topicChatMemory;
-    private final VectorTools vectorTools;
     private final ChatHistoryVectorService chatHistoryVectorService;
 
     public TopicBoundary updateAfterUserMessage(ConversationInfo baseConversation, UserChatHistory userMessage) {
@@ -49,7 +44,6 @@ public class TopicBoundaryService {
 
         saveBoundary(baseConversation, newBoundary);
         if (!sameTopic) {
-            searchInfoAfterFirstMessageInTopic(userMessage);
             vectorizeClosedTopic(userMessage, oldBoundary);
         }
         return newBoundary;
@@ -177,23 +171,6 @@ public class TopicBoundaryService {
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    private void searchInfoAfterFirstMessageInTopic(UserChatHistory message) {
-        if (!StringUtils.hasText(message.getContent())) {
-            return;
-        }
-
-        String searchInfo = vectorTools.searchInfo(message.getContent(), new ToolContext(Map.of(
-                ChatToolContextConstant.USER_WORLD_ID_KEY, message.getUserWorldId(),
-                ChatToolContextConstant.CHARACTER_ID_KEY, message.getCharacterId()
-        )));
-        if (!StringUtils.hasText(searchInfo)) {
-            return;
-        }
-
-        topicChatMemory.saveAutoSearchInfo(new ConversationInfo(message.getUserWorldId(), message.getCharacterId(), null),
-                ChatConstant.AUTO_SEARCH_INFO_PREFIX + searchInfo);
     }
 
     public TopicBoundary getBoundary(ConversationInfo conversationInfo) {

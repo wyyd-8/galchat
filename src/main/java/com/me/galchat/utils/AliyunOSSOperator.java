@@ -37,7 +37,7 @@ public class AliyunOSSOperator {
         //获取当前系统日期的字符串,格式为 yyyy/MM
         String dir = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM"));
         //生成一个新的不重复的文件名
-        String newFileName = UUID.randomUUID() + originalFilename.substring(originalFilename.lastIndexOf("."));
+        String newFileName = UUID.randomUUID() + ImageSecurityUtils.getLowercaseExtension(originalFilename);
         String objectName = dir + "/" + newFileName;
 
         // 创建OSSClient实例。
@@ -57,11 +57,13 @@ public class AliyunOSSOperator {
                             + "but was rejected with an error response for some reason."
                             + "Error Message: {}, Error Code: {}, Request ID: {}, Host ID: {}",
                     oe.getErrorMessage(), oe.getErrorCode(), oe.getRequestId(), oe.getHostId());
+            throw oe;
         } catch (ClientException ce) {
             log.info("Caught an ClientException, which means the client encountered "
                     + "a serious internal problem while trying to communicate with OSS, "
                     + "such as not being able to access the network."
                     + "Error Message: {}", ce.getMessage());
+            throw ce;
         } finally {
             ossClient.shutdown();
         }

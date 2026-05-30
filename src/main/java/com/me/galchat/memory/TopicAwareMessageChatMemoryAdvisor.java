@@ -5,6 +5,7 @@ import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.service.ChatUserMessageListener;
+import com.me.galchat.vector.MutiSearchService;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
@@ -34,6 +35,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
 
     private final UserChatMemory chatMemory;
     private final TopicBoundaryService topicBoundaryService;
+    private final MutiSearchService mutiSearchService;
     private final String defaultConversationId;
     private final int order;
     private final Scheduler scheduler;
@@ -41,10 +43,12 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
     private TopicAwareMessageChatMemoryAdvisor(Builder builder) {
         Assert.notNull(builder.chatMemory, "chatMemory cannot be null");
         Assert.notNull(builder.topicBoundaryService, "topicBoundaryService cannot be null");
+        Assert.notNull(builder.mutiSearchService, "mutiSearchService cannot be null");
         Assert.hasText(builder.defaultConversationId, "defaultConversationId cannot be null or empty");
         Assert.notNull(builder.scheduler, "scheduler cannot be null");
         this.chatMemory = builder.chatMemory;
         this.topicBoundaryService = builder.topicBoundaryService;
+        this.mutiSearchService = builder.mutiSearchService;
         this.defaultConversationId = builder.defaultConversationId;
         this.order = builder.order;
         this.scheduler = builder.scheduler;
@@ -71,6 +75,8 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         List<Message> processedMessages = new ArrayList<>(memoryMessages);
         processedMessages.addAll(removeLastUserOrToolResponseMessage(chatClientRequest.prompt().getInstructions()));
         ensureFirstSystemMessage(processedMessages);
+        appendReferenceMemoryToLastUserMessage(processedMessages,
+                preSearchReferenceMemory(baseConversation, boundary, windowHistories, savedUserMessage, userMessage));
         appendSuffixToFirstNonSystemMessage(processedMessages,
                 firstMessageSuffixPrompt(chatClientRequest.prompt().getOptions()));
 
@@ -168,6 +174,131 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         }
     }
 
+    static void appendReferenceMemoryToLastUserMessage(List<Message> messages, String referenceMemory) {
+        if (messages == null || messages.isEmpty() || !StringUtils.hasText(referenceMemory)) {
+            return;
+        }
+
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Message message = messages.get(i);
+            if (!MessageType.USER.equals(message.getMessageType())) {
+                continue;
+            }
+
+            String text = message.getText() == null ? "" : message.getText();
+            Message copiedMessage = copyWithText(message, text + "\n\n【可参考的相关记忆】\n"
+                    + "以下内容来自自动检索，不一定可靠；如果与当前对话无关或冲突，请忽略。\n"
+                    + referenceMemory);
+            if (copiedMessage == null) {
+                continue;
+            }
+            messages.set(i, copiedMessage);
+            return;
+        }
+    }
+
+    private String preSearchReferenceMemory(ConversationInfo conversationInfo, TopicBoundary boundary,
+                                            List<UserChatHistory> windowHistories, UserChatHistory savedUserMessage,
+                                            Message userMessage) {
+        if (!MessageType.USER.equals(userMessage.getMessageType())) {
+            return "";
+        }
+
+        String query = buildPreSearchQuery(windowHistories, boundary, savedUserMessage);
+        if (!StringUtils.hasText(query)) {
+            return "";
+        }
+        return mutiSearchService.searchBeforeChat(conversationInfo.getUserWorldId(),
+                conversationInfo.getCharacterId(), query);
+    }
+
+    static String buildPreSearchQuery(List<UserChatHistory> histories, TopicBoundary boundary,
+                                      UserChatHistory currentUserMessage) {
+        if (currentUserMessage == null || !StringUtils.hasText(currentUserMessage.getContent())) {
+            return "";
+        }
+
+        List<UserChatHistory> queryHistories = new ArrayList<>();
+        if (boundary != null && !Objects.equals(boundary.currentStartId(), currentUserMessage.getId())) {
+            queryHistories.addAll(previousTurnHistories(histories, boundary.currentStartId(),
+                    currentUserMessage.getId()));
+        }
+        queryHistories.add(currentUserMessage);
+        return formatPreSearchHistories(queryHistories);
+    }
+
+    private static List<UserChatHistory> previousTurnHistories(List<UserChatHistory> histories, Long currentStartId,
+                                                               Long currentUserMessageId) {
+        if (histories == null || histories.isEmpty()) {
+            return List.of();
+        }
+
+        UserChatHistory previousUserMessage = null;
+        List<UserChatHistory> assistantMessages = new ArrayList<>();
+        for (UserChatHistory history : histories) {
+            if (history == null || history.getId() == null) {
+                continue;
+            }
+            if (currentStartId != null && history.getId() < currentStartId) {
+                continue;
+            }
+            if (currentUserMessageId != null && history.getId() >= currentUserMessageId) {
+                break;
+            }
+
+            if (isUserHistory(history)) {
+                previousUserMessage = history;
+                assistantMessages.clear();
+            }
+            else if (previousUserMessage != null && isAssistantHistory(history)) {
+                assistantMessages.add(history);
+            }
+        }
+
+        if (previousUserMessage == null) {
+            return List.of();
+        }
+        List<UserChatHistory> previousTurn = new ArrayList<>();
+        previousTurn.add(previousUserMessage);
+        previousTurn.addAll(assistantMessages);
+        return previousTurn;
+    }
+
+    private static String formatPreSearchHistories(List<UserChatHistory> histories) {
+        StringBuilder builder = new StringBuilder();
+        for (UserChatHistory history : histories) {
+            if (!StringUtils.hasText(history.getContent())) {
+                continue;
+            }
+            builder.append(formatPreSearchRole(history)).append(": ")
+                    .append(history.getContent())
+                    .append('\n');
+        }
+        return builder.toString();
+    }
+
+    private static String formatPreSearchRole(UserChatHistory history) {
+        if (isAssistantHistory(history)) {
+            return "assistant";
+        }
+        return "user";
+    }
+
+    private static boolean isUserHistory(UserChatHistory history) {
+        return MessageType.USER.getValue().equals(normalizeHistoryType(history.getType()));
+    }
+
+    private static boolean isAssistantHistory(UserChatHistory history) {
+        return MessageType.ASSISTANT.getValue().equals(normalizeHistoryType(history.getType()));
+    }
+
+    private static String normalizeHistoryType(String type) {
+        if (!StringUtils.hasText(type)) {
+            return MessageType.USER.getValue();
+        }
+        return type.toLowerCase(Locale.ROOT);
+    }
+
     private static Message copyWithText(Message message, String text) {
         if (message instanceof DeepSeekAssistantMessage deepSeekAssistantMessage) {
             return new DeepSeekAssistantMessage.Builder()
@@ -247,21 +378,25 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         }
     }
 
-    public static Builder builder(UserChatMemory chatMemory, TopicBoundaryService topicBoundaryService) {
-        return new Builder(chatMemory, topicBoundaryService);
+    public static Builder builder(UserChatMemory chatMemory, TopicBoundaryService topicBoundaryService,
+                                  MutiSearchService mutiSearchService) {
+        return new Builder(chatMemory, topicBoundaryService, mutiSearchService);
     }
 
     public static class Builder {
 
         private final UserChatMemory chatMemory;
         private final TopicBoundaryService topicBoundaryService;
+        private final MutiSearchService mutiSearchService;
         private String defaultConversationId = ChatMemory.DEFAULT_CONVERSATION_ID;
         private int order = Advisor.DEFAULT_CHAT_MEMORY_PRECEDENCE_ORDER;
         private Scheduler scheduler = BaseChatMemoryAdvisor.DEFAULT_SCHEDULER;
 
-        private Builder(UserChatMemory chatMemory, TopicBoundaryService topicBoundaryService) {
+        private Builder(UserChatMemory chatMemory, TopicBoundaryService topicBoundaryService,
+                        MutiSearchService mutiSearchService) {
             this.chatMemory = chatMemory;
             this.topicBoundaryService = topicBoundaryService;
+            this.mutiSearchService = mutiSearchService;
         }
 
         public Builder defaultConversationId(String defaultConversationId) {

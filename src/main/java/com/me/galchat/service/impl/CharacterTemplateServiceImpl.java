@@ -8,12 +8,15 @@ import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CharacterTemplateMapper;
 import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IWorldTemplateService;
+import com.me.galchat.utils.ImageSecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -50,6 +53,19 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
     }
 
     @Override
+    public List<CharacterTemplate> listCharacterBaseInfoByWorldId(Long userId, Long worldId) {
+        WorldTemplate worldTemplate = worldTemplateService.getWorldTemplateById(userId, worldId);
+        Long[] characterIds = worldTemplate.getCharacterIds();
+        if (characterIds == null || characterIds.length == 0) {
+            return Collections.emptyList();
+        }
+        return lambdaQuery()
+                .select(CharacterTemplate::getId, CharacterTemplate::getName, CharacterTemplate::getImage)
+                .in(CharacterTemplate::getId, Arrays.asList(characterIds))
+                .list();
+    }
+
+    @Override
     @Transactional
     public void createCharacterTemplate(Long userId, Long worldId, CharacterTemplate characterTemplate) {
         if (characterTemplate == null) {
@@ -62,10 +78,11 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
         if (!Objects.equals(worldTemplate.getAuthorId(), userId)) {
             throw new UserAuthException("无权新增该世界角色");
         }
+        String image = ImageSecurityUtils.normalizeOssImageUrl(characterTemplate.getImage());
 
         CharacterTemplate newCharacterTemplate = new CharacterTemplate()
                 .setName(characterTemplate.getName())
-                .setImage(characterTemplate.getImage())
+                .setImage(image)
                 .setBackground(characterTemplate.getBackground())
                 .setPersonality(characterTemplate.getPersonality())
                 .setFavorability(characterTemplate.getFavorability())

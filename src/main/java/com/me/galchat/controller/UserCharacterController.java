@@ -41,6 +41,12 @@ public class UserCharacterController {
         return Result.success();
     }
 
+    @GetMapping("/templates/{worldId}")
+    public Result listCharacterTemplates(@PathVariable Long worldId) {
+        checkWorldId(worldId);
+        return Result.success(characterTemplateService.listCharacterBaseInfoByWorldId(currentUserId(), worldId));
+    }
+
     @PostMapping("/{userWorldId}/{characterId}")
     public Result addCharacter(@PathVariable Long userWorldId, @PathVariable Long characterId) {
         checkUserWorldId(userWorldId);

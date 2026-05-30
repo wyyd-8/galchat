@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import type { ComponentPublicInstance } from 'vue'
+import { ref } from 'vue'
 import { ChatDotRound, RefreshLeft } from '@element-plus/icons-vue'
 import type { UiMessage } from '@/types/ui'
 
 const messageInput = defineModel<string>('messageInput', { required: true })
 const messageScroller = defineModel<HTMLElement | null>('messageScroller', { required: true })
+const composerComposing = ref(false)
 
 defineProps<{
   loading: { history: boolean; sending: boolean }
@@ -15,12 +17,31 @@ defineProps<{
 
 const emit = defineEmits<{
   handleComposerFocus: []
+  handleComposerCompositionChange: [isComposing: boolean, value: string]
   sendMessage: []
   withdrawMessage: []
 }>()
 
 function bindMessageScroller(element: Element | ComponentPublicInstance | null) {
   messageScroller.value = element instanceof HTMLElement ? element : null
+}
+
+function handleCompositionChange(isComposing: boolean, event: CompositionEvent) {
+  composerComposing.value = isComposing
+  const target = event.target
+  const value = target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
+    ? target.value
+    : messageInput.value
+  emit('handleComposerCompositionChange', isComposing, value)
+}
+
+function handleComposerEnter(event: KeyboardEvent) {
+  if (composerComposing.value || event.isComposing || event.keyCode === 229) {
+    return
+  }
+
+  event.preventDefault()
+  emit('sendMessage')
 }
 </script>
 
@@ -70,7 +91,9 @@ function bindMessageScroller(element: Element | ComponentPublicInstance | null) 
           resize="none"
           placeholder="输入给角色的消息"
           @focus="emit('handleComposerFocus')"
-          @keydown.enter.exact.prevent="emit('sendMessage')"
+          @compositionstart="handleCompositionChange(true, $event)"
+          @compositionend="handleCompositionChange(false, $event)"
+          @keydown.enter.exact="handleComposerEnter"
         />
         <el-button type="primary" :loading="loading.sending" @click="emit('sendMessage')">
           发送

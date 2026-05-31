@@ -7,7 +7,7 @@ public final class VectorConstant {
     public static final int PRE_CHAT_WORLD_DETAIL_LIMIT = 2;
     public static final int PRE_CHAT_HISTORY_LIMIT = 1;
     public static final int PRE_CHAT_WORLD_EVENT_LIMIT = 1;
-    public static final double WORLD_EVENT_DISTANCE_THRESHOLD = 0.27;
+    public static final double WORLD_EVENT_DISTANCE_THRESHOLD = 0.5;
 
     public static final String SOURCE_METADATA_KEY = "source";
     public static final String TIMESTAMP_METADATA_KEY = "timestamp";

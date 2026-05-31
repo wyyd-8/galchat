@@ -16,10 +16,10 @@ spring:
     model:
       embedding: ollama
     ollama:
-        embedding:
-          options:
-            model: qwen3-embedding:latest
-            dimensions: 1024
+      embedding:
+        options:
+          model: qwen3-embedding:latest
+          dimensions: 1024
   cache:
     type: redis
     # 不配置 cache-names 或留空，则任何 @Cacheable 新名称都会自动创建

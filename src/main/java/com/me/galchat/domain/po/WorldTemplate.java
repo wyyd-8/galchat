@@ -2,13 +2,11 @@ package com.me.galchat.domain.po;
 
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import java.io.Serializable;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
-import org.apache.ibatis.type.ArrayTypeHandler;
 
 /**
  * <p>
@@ -36,9 +34,6 @@ public class WorldTemplate implements Serializable {
     private String author;
 
     private String background;
-
-    @TableField(typeHandler = ArrayTypeHandler.class)
-    private Long[] characterIds;
 
     private Long authorId;
 

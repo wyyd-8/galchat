@@ -30,6 +30,8 @@ public class CharacterTemplate implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
 
+    private Long worldId;
+
     private String name;
 
     private String image;

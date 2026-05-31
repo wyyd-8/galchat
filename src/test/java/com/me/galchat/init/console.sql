@@ -16,7 +16,6 @@ CREATE TABLE world_template (
     image VARCHAR(255),
     author VARCHAR(255),
     background TEXT,
-    character_ids BIGINT[] DEFAULT '{}',
     author_id BIGINT,
     visible BOOLEAN DEFAULT TRUE
 );
@@ -36,6 +35,7 @@ CREATE INDEX idx_world_detail_world_id
 
 CREATE TABLE character_template (
     id BIGSERIAL PRIMARY KEY,
+    world_id BIGINT NOT NULL,
     name VARCHAR(255) NOT NULL,
     image VARCHAR(255),
     background TEXT,
@@ -43,6 +43,9 @@ CREATE TABLE character_template (
     favorability JSONB,
     init_favor INT DEFAULT 0
 );
+
+CREATE INDEX idx_character_template_world_id
+    ON character_template (world_id);
 
 CREATE TABLE user_world_prefix (
     id BIGSERIAL PRIMARY KEY,

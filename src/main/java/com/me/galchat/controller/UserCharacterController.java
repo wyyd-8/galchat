@@ -4,9 +4,12 @@ package com.me.galchat.controller;
 import com.me.galchat.domain.Result;
 import com.me.galchat.domain.dto.UserCharacterPromptDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
+import com.me.galchat.domain.po.UserWorldPrefix;
+import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IUserCharacterInfoService;
+import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -33,6 +36,7 @@ public class UserCharacterController {
 
     private final IUserCharacterInfoService userCharacterInfoService;
     private final ICharacterTemplateService characterTemplateService;
+    private final IUserWorldPrefixService userWorldPrefixService;
 
     @PostMapping("/templates/{worldId}")
     public Result createCharacterTemplate(@PathVariable Long worldId, @RequestBody CharacterTemplate characterTemplate) {
@@ -45,6 +49,25 @@ public class UserCharacterController {
     public Result listCharacterTemplates(@PathVariable Long worldId) {
         checkWorldId(worldId);
         return Result.success(characterTemplateService.listCharacterBaseInfoByWorldId(currentUserId(), worldId));
+    }
+
+    @GetMapping("/templates/my/{userWorldId}/{characterId}")
+    public Result getMyCharacterTemplate(@PathVariable Long userWorldId, @PathVariable Long characterId) {
+        checkUserWorldId(userWorldId);
+        checkCharacterId(characterId);
+        UserWorldPrefix userWorld = getMyWorld(currentUserId(), userWorldId);
+        return Result.success(characterTemplateService.getCharacterTemplateByWorldId(userWorld.getWorldId(), characterId));
+    }
+
+    @PutMapping("/templates/my/{userWorldId}/{characterId}")
+    public Result updateMyCharacterTemplate(@PathVariable Long userWorldId, @PathVariable Long characterId,
+                                            @RequestBody CharacterTemplate characterTemplate) {
+        checkUserWorldId(userWorldId);
+        checkCharacterId(characterId);
+        Long userId = currentUserId();
+        UserWorldPrefix userWorld = getMyWorld(userId, userWorldId);
+        characterTemplateService.updateCharacterTemplate(userId, userWorld.getWorldId(), characterId, characterTemplate);
+        return Result.success();
     }
 
     @PostMapping("/{userWorldId}/{characterId}")
@@ -97,6 +120,14 @@ public class UserCharacterController {
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }
+    }
+
+    private UserWorldPrefix getMyWorld(Long userId, Long userWorldId) {
+        UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(userId, userWorldId, true);
+        if (!Boolean.TRUE.equals(userWorld.getMyWorld())) {
+            throw new UserAuthException("无权操作该世界角色");
+        }
+        return userWorld;
     }
 
     private Long currentUserId() {

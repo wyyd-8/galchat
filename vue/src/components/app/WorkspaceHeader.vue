@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { EditPen, House, Plus, Refresh, Setting } from '@element-plus/icons-vue'
+import { Avatar, EditPen, House, Plus, Refresh, Setting } from '@element-plus/icons-vue'
 
 defineProps<{
   isWorldSelectionMode: boolean
@@ -44,14 +44,14 @@ const emit = defineEmits<{
         :icon="EditPen"
         @click="emit('openWorldDetails')"
       >
-        修改世界设定
+        修改世界模板
       </el-button>
       <el-button
         v-if="!isWorldSelectionMode && hasSelectedWorld && canEditSelectedWorld"
-        :icon="Plus"
+        :icon="Avatar"
         @click="emit('openCreateCharacterTemplate')"
       >
-        创建角色模板
+        修改角色模板
       </el-button>
       <el-button
         v-if="!isWorldSelectionMode && hasSelectedWorld"

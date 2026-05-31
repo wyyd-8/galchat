@@ -11,6 +11,7 @@ import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
 import com.me.galchat.domain.po.UserEventLog;
+import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterFavorLogMapper;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
@@ -33,6 +34,7 @@ import org.springframework.util.StringUtils;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -60,13 +62,16 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     @Override
     public void addCharacter(Long userWorldId, Long characterId) {
-        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
+        UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(userWorldId, true);
         UserCharacterInfo oldCharacter = getByUserWorldIdAndCharacterId(userWorldId, characterId);
         if (oldCharacter != null) {
             throw new UserRequestException("角色已存在");
         }
 
         CharacterTemplate template = characterTemplateService.getCharacterTemplateById(characterId);
+        if (!Objects.equals(template.getWorldId(), userWorld.getWorldId())) {
+            throw new UserRequestException("角色模板不属于该世界");
+        }
         UserCharacterInfo userCharacterInfo = new UserCharacterInfo()
                 .setUserWorldId(userWorldId)
                 .setCharacterId(template.getId())

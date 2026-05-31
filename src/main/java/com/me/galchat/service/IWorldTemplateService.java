@@ -19,5 +19,9 @@ public interface IWorldTemplateService extends IService<WorldTemplate> {
 
     WorldTemplate getWorldTemplateById(Long userId, Long id);
 
+    WorldTemplate getOwnWorldTemplate(Long userId, Long id);
+
     void createWorldTemplate(Long userId, WorldTemplate worldTemplate);
+
+    void updateWorldTemplate(Long userId, Long id, WorldTemplate worldTemplate);
 }

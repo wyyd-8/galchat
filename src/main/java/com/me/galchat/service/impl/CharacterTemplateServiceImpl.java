@@ -10,12 +10,11 @@ import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.ImageSecurityUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -38,6 +37,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
     public CharacterTemplate getCharacterTemplateById(Long id) {
         CharacterTemplate template = lambdaQuery()
                 .select(CharacterTemplate::getId,
+                        CharacterTemplate::getWorldId,
                         CharacterTemplate::getName,
                         CharacterTemplate::getImage,
                         CharacterTemplate::getBackground,
@@ -53,15 +53,31 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
     }
 
     @Override
-    public List<CharacterTemplate> listCharacterBaseInfoByWorldId(Long userId, Long worldId) {
-        WorldTemplate worldTemplate = worldTemplateService.getWorldTemplateById(userId, worldId);
-        Long[] characterIds = worldTemplate.getCharacterIds();
-        if (characterIds == null || characterIds.length == 0) {
-            return Collections.emptyList();
+    public CharacterTemplate getCharacterTemplateByWorldId(Long worldId, Long id) {
+        CharacterTemplate template = lambdaQuery()
+                .select(CharacterTemplate::getId,
+                        CharacterTemplate::getWorldId,
+                        CharacterTemplate::getName,
+                        CharacterTemplate::getImage,
+                        CharacterTemplate::getBackground,
+                        CharacterTemplate::getPersonality,
+                        CharacterTemplate::getFavorability,
+                        CharacterTemplate::getInitFavor)
+                .eq(CharacterTemplate::getId, id)
+                .eq(CharacterTemplate::getWorldId, worldId)
+                .one();
+        if (template == null) {
+            throw new UserRequestException("角色模板不存在");
         }
+        return template;
+    }
+
+    @Override
+    public List<CharacterTemplate> listCharacterBaseInfoByWorldId(Long userId, Long worldId) {
+        worldTemplateService.getWorldTemplateById(userId, worldId);
         return lambdaQuery()
                 .select(CharacterTemplate::getId, CharacterTemplate::getName, CharacterTemplate::getImage)
-                .in(CharacterTemplate::getId, Arrays.asList(characterIds))
+                .eq(CharacterTemplate::getWorldId, worldId)
                 .list();
     }
 
@@ -81,6 +97,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
         String image = ImageSecurityUtils.normalizeOssImageUrl(characterTemplate.getImage());
 
         CharacterTemplate newCharacterTemplate = new CharacterTemplate()
+                .setWorldId(worldId)
                 .setName(characterTemplate.getName())
                 .setImage(image)
                 .setBackground(characterTemplate.getBackground())
@@ -88,18 +105,33 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
                 .setFavorability(characterTemplate.getFavorability())
                 .setInitFavor(characterTemplate.getInitFavor());
         save(newCharacterTemplate);
-
-        worldTemplateService.updateById(new WorldTemplate()
-                .setId(worldId)
-                .setCharacterIds(appendCharacterId(worldTemplate.getCharacterIds(), newCharacterTemplate.getId())));
     }
 
-    private Long[] appendCharacterId(Long[] characterIds, Long characterId) {
-        if (characterIds == null || characterIds.length == 0) {
-            return new Long[]{characterId};
+    @Override
+    @Transactional
+    @CacheEvict(cacheNames = "characterTemplate", key = "#id")
+    public void updateCharacterTemplate(Long userId, Long worldId, Long id, CharacterTemplate characterTemplate) {
+        if (characterTemplate == null) {
+            throw new UserRequestException("请求参数不能为空");
         }
-        Long[] newCharacterIds = Arrays.copyOf(characterIds, characterIds.length + 1);
-        newCharacterIds[characterIds.length] = characterId;
-        return newCharacterIds;
+        WorldTemplate worldTemplate = worldTemplateService.getById(worldId);
+        if (worldTemplate == null) {
+            throw new UserRequestException("世界模板不存在");
+        }
+        if (!Objects.equals(worldTemplate.getAuthorId(), userId)) {
+            throw new UserAuthException("无权修改该世界角色");
+        }
+        CharacterTemplate oldCharacterTemplate = getCharacterTemplateByWorldId(worldId, id);
+        String image = characterTemplate.getImage() == null ? null : ImageSecurityUtils.normalizeOssImageUrl(characterTemplate.getImage());
+
+        CharacterTemplate updateCharacterTemplate = new CharacterTemplate()
+                .setId(oldCharacterTemplate.getId())
+                .setName(characterTemplate.getName())
+                .setImage(image)
+                .setBackground(characterTemplate.getBackground())
+                .setPersonality(characterTemplate.getPersonality())
+                .setFavorability(characterTemplate.getFavorability())
+                .setInitFavor(characterTemplate.getInitFavor());
+        updateById(updateCharacterTemplate);
     }
 }

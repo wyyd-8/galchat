@@ -97,6 +97,7 @@ export function useGalchatApp() {
     addSpecialPrompt: false,
   })
   const createTemplateDialogVisible = ref(false)
+  const createTemplateMode = ref<'create' | 'edit'>('create')
   const templateImageUploading = ref(false)
   const createTemplateImageFileName = ref('')
   const createTemplateForm = reactive({
@@ -108,6 +109,8 @@ export function useGalchatApp() {
   })
   const createCharacterDialogVisible = ref(false)
   const createCharacterTemplateDialogVisible = ref(false)
+  const characterTemplateMode = ref<'create' | 'edit'>('create')
+  const selectedEditCharacterTemplateId = ref<number | undefined>()
   const characterDeleteDialogVisible = ref(false)
   const characterImageUploading = ref(false)
   const createCharacterImageFileName = ref('')
@@ -196,14 +199,32 @@ export function useGalchatApp() {
       .filter(hasCharacterTemplateId)
       .filter((template) => !existingCharacterIds.value.has(template.id)),
   )
+  const editableCharacterTemplates = computed(() =>
+    worldCharacterTemplates.value.filter(hasCharacterTemplateId),
+  )
   const availableCharacterTemplateIds = computed(() =>
     availableCharacterTemplates.value.map((template) => template.id),
   )
   const selectedAddCharacterTemplate = computed(() =>
     availableCharacterTemplates.value.find((template) => template.id === addCharacterForm.characterId) || null,
   )
+  const selectedEditCharacterTemplate = computed(() =>
+    worldCharacterTemplates.value.find((template) => template.id === selectedEditCharacterTemplateId.value) || null,
+  )
   const selectedCreateTemplate = computed(() =>
     worldTemplates.value.find((template) => template.id === createWorldForm.worldId),
+  )
+  const createTemplateDialogTitle = computed(() =>
+    createTemplateMode.value === 'edit' ? '修改世界模板' : '创建新的世界模板',
+  )
+  const createTemplateSubmitLabel = computed(() =>
+    createTemplateMode.value === 'edit' ? '保存模板' : '创建模板',
+  )
+  const createCharacterTemplateDialogTitle = computed(() =>
+    characterTemplateMode.value === 'edit' ? '修改角色模板' : '创建角色模板',
+  )
+  const createCharacterTemplateSubmitLabel = computed(() =>
+    characterTemplateMode.value === 'edit' ? '保存模板' : '创建模板',
   )
 
   const averageFavor = computed(() => {
@@ -255,6 +276,19 @@ export function useGalchatApp() {
       }
     },
   )
+
+  watch(selectedEditCharacterTemplateId, (characterId) => {
+    if (
+      characterTemplateMode.value !== 'edit' ||
+      !createCharacterTemplateDialogVisible.value ||
+      !selectedWorldId.value ||
+      !characterId
+    ) {
+      return
+    }
+
+    void loadEditableCharacterTemplate(characterId)
+  })
 
   function isComposerTyping(value = messageInput.value) {
     return messageInputComposing || value.length > 0
@@ -771,6 +805,7 @@ export function useGalchatApp() {
   }
 
   function openCreateTemplate() {
+    createTemplateMode.value = 'create'
     createTemplateForm.name = ''
     createTemplateForm.image = ''
     createTemplateImageFileName.value = ''
@@ -778,6 +813,31 @@ export function useGalchatApp() {
     createTemplateForm.background = ''
     createTemplateForm.visible = true
     createTemplateDialogVisible.value = true
+  }
+
+  async function openEditWorldTemplate() {
+    const userWorldId = selectedWorldId.value
+    if (!userWorldId || !canEditSelectedWorld.value) {
+      return
+    }
+
+    createTemplateMode.value = 'edit'
+    createTemplateDialogVisible.value = true
+    templateImageUploading.value = true
+    try {
+      const template = await api.getMyWorldTemplate(userWorldId)
+      createTemplateForm.name = template.name || ''
+      createTemplateForm.image = template.image || ''
+      createTemplateImageFileName.value = template.image ? '已使用现有图片' : ''
+      createTemplateForm.author = template.author || ''
+      createTemplateForm.background = template.background || ''
+      createTemplateForm.visible = template.visible ?? true
+    } catch (error) {
+      createTemplateDialogVisible.value = false
+      ElMessage.error(error instanceof Error ? error.message : '加载世界模板失败')
+    } finally {
+      templateImageUploading.value = false
+    }
   }
 
   async function handleTemplateImageChange(event: Event) {
@@ -827,13 +887,26 @@ export function useGalchatApp() {
     }
 
     await withMessage(async () => {
-      await api.createWorldTemplate({
+      const payload: WorldTemplate = {
         name: createTemplateForm.name.trim(),
         image: createTemplateForm.image.trim(),
         author: createTemplateForm.author.trim(),
         background: createTemplateForm.background.trim(),
         visible: createTemplateForm.visible,
-      })
+      }
+      if (createTemplateMode.value === 'edit') {
+        const userWorldId = selectedWorldId.value
+        if (!userWorldId) {
+          return
+        }
+        await api.updateMyWorldTemplate(userWorldId, payload)
+        await Promise.all([loadWorldTemplates(), loadSelectedWorldTemplate()])
+        createTemplateDialogVisible.value = false
+        ElMessage.success('世界模板已保存')
+        return
+      }
+
+      await api.createWorldTemplate(payload)
       await loadWorldTemplates()
       const createdTemplate = worldTemplates.value.find(
         (template) =>
@@ -845,6 +918,11 @@ export function useGalchatApp() {
       createTemplateDialogVisible.value = false
       ElMessage.success(createdTemplate ? '模板已创建并选中' : '模板已创建，请在列表中选择')
     }, '创建模板失败')
+  }
+
+  async function openWorldDetailsFromTemplateDialog() {
+    createTemplateDialogVisible.value = false
+    await openWorldDetails()
   }
 
   function openCreateCharacter() {
@@ -895,6 +973,20 @@ export function useGalchatApp() {
   }
 
   function openCreateCharacterTemplate() {
+    characterTemplateMode.value = 'edit'
+    selectedEditCharacterTemplateId.value = undefined
+    resetCharacterTemplateForm()
+    createCharacterTemplateDialogVisible.value = true
+    void loadSelectedWorldTemplate()
+  }
+
+  function openCreateCharacterTemplateForm() {
+    characterTemplateMode.value = 'create'
+    selectedEditCharacterTemplateId.value = undefined
+    resetCharacterTemplateForm()
+  }
+
+  function resetCharacterTemplateForm() {
     createCharacterForm.name = ''
     createCharacterForm.image = ''
     createCharacterImageFileName.value = ''
@@ -902,7 +994,43 @@ export function useGalchatApp() {
     createCharacterForm.personality = ''
     createCharacterForm.initFavor = 0
     createCharacterForm.favorabilityRows = []
-    createCharacterTemplateDialogVisible.value = true
+  }
+
+  function fillCharacterTemplateForm(template: CharacterTemplate) {
+    createCharacterForm.name = template.name || ''
+    createCharacterForm.image = template.image || ''
+    createCharacterImageFileName.value = template.image ? '已使用现有图片' : ''
+    createCharacterForm.background = template.background || ''
+    createCharacterForm.personality = template.personality || ''
+    createCharacterForm.initFavor = template.initFavor || 0
+    createCharacterForm.favorabilityRows = Object.entries(template.favorability || {}).map(
+      ([threshold, prompt]) => ({
+        id: `favor-${threshold}-${Date.now()}-${Math.random()}`,
+        threshold: Number(threshold),
+        prompt,
+      }),
+    )
+  }
+
+  async function loadEditableCharacterTemplate(characterId: number) {
+    const userWorldId = selectedWorldId.value
+    if (!userWorldId) {
+      return
+    }
+
+    characterTemplateLoading.value = true
+    try {
+      const template = await api.getMyCharacterTemplate(userWorldId, characterId)
+      fillCharacterTemplateForm(template)
+      if (template.id && template.name) {
+        characterTemplateLabels[template.id] = template.name
+      }
+    } catch (error) {
+      resetCharacterTemplateForm()
+      ElMessage.error(error instanceof Error ? error.message : '加载角色模板失败')
+    } finally {
+      characterTemplateLoading.value = false
+    }
   }
 
   function addFavorabilityRow() {
@@ -1027,7 +1155,6 @@ export function useGalchatApp() {
 
     characterCreating.value = true
     try {
-      const before = selectedWorldTemplate.value || (await loadSelectedWorldTemplate())
       const payload: CharacterTemplate = {
         name: createCharacterForm.name.trim(),
         image: createCharacterForm.image.trim(),
@@ -1036,17 +1163,31 @@ export function useGalchatApp() {
         initFavor: createCharacterForm.initFavor,
         favorability: parseFavorability(createCharacterForm.favorabilityRows),
       }
+
+      if (characterTemplateMode.value === 'edit') {
+        const userWorldId = selectedWorldId.value
+        const characterId = selectedEditCharacterTemplateId.value
+        if (!userWorldId || !characterId) {
+          ElMessage.warning('请先选择角色模板')
+          return
+        }
+        await api.updateMyCharacterTemplate(userWorldId, characterId, payload)
+        characterTemplateLabels[characterId] = payload.name
+        await loadSelectedWorldTemplate()
+        const updatedTemplate = worldCharacterTemplates.value.find((template) => template.id === characterId)
+        if (updatedTemplate) {
+          fillCharacterTemplateForm(updatedTemplate)
+        }
+        ElMessage.success('角色模板已保存')
+        return
+      }
+
       await api.createCharacterTemplate(worldId, payload)
       await loadSelectedWorldTemplate()
-      const beforeIds = new Set(before?.characterIds || [])
-      const createdCharacterId = selectedWorldTemplate.value?.characterIds?.find((id) => !beforeIds.has(id))
-      if (createdCharacterId) {
-        characterTemplateLabels[createdCharacterId] = payload.name
-      }
       createCharacterTemplateDialogVisible.value = false
       ElMessage.success('角色模板已创建')
     } catch (error) {
-      ElMessage.error(error instanceof Error ? error.message : '创建角色模板失败')
+      ElMessage.error(error instanceof Error ? error.message : '保存角色模板失败')
     } finally {
       characterCreating.value = false
     }
@@ -1770,11 +1911,14 @@ export function useGalchatApp() {
     createWorldStep,
     createWorldForm,
     createTemplateDialogVisible,
+    createTemplateMode,
     templateImageUploading,
     createTemplateImageFileName,
     createTemplateForm,
     createCharacterDialogVisible,
     createCharacterTemplateDialogVisible,
+    characterTemplateMode,
+    selectedEditCharacterTemplateId,
     characterDeleteDialogVisible,
     characterImageUploading,
     createCharacterImageFileName,
@@ -1816,9 +1960,15 @@ export function useGalchatApp() {
     selectedCharacterName,
     createWorldStepIsLast,
     availableCharacterTemplates,
+    editableCharacterTemplates,
     availableCharacterTemplateIds,
     selectedAddCharacterTemplate,
+    selectedEditCharacterTemplate,
     selectedCreateTemplate,
+    createTemplateDialogTitle,
+    createTemplateSubmitLabel,
+    createCharacterTemplateDialogTitle,
+    createCharacterTemplateSubmitLabel,
     averageFavor,
     activeStoryTitle,
     selectedStoryCharacterIds,
@@ -1844,12 +1994,15 @@ export function useGalchatApp() {
     selectCharacter,
     openCreateWorld,
     openCreateTemplate,
+    openEditWorldTemplate,
     handleTemplateImageChange,
     handleCharacterImageChange,
     submitCreateTemplate,
+    openWorldDetailsFromTemplateDialog,
     openCreateCharacter,
     characterTemplateLabel,
     openCreateCharacterTemplate,
+    openCreateCharacterTemplateForm,
     addFavorabilityRow,
     removeFavorabilityRow,
     submitCreateCharacter,

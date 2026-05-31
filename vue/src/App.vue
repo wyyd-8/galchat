@@ -53,11 +53,14 @@ const {
   createWorldStep,
   createWorldForm,
   createTemplateDialogVisible,
+  createTemplateMode,
   templateImageUploading,
   createTemplateImageFileName,
   createTemplateForm,
   createCharacterDialogVisible,
   createCharacterTemplateDialogVisible,
+  characterTemplateMode,
+  selectedEditCharacterTemplateId,
   characterDeleteDialogVisible,
   characterImageUploading,
   createCharacterImageFileName,
@@ -95,9 +98,15 @@ const {
   selectedCharacterName,
   createWorldStepIsLast,
   availableCharacterTemplates,
+  editableCharacterTemplates,
   availableCharacterTemplateIds,
   selectedAddCharacterTemplate,
+  selectedEditCharacterTemplate,
   selectedCreateTemplate,
+  createTemplateDialogTitle,
+  createTemplateSubmitLabel,
+  createCharacterTemplateDialogTitle,
+  createCharacterTemplateSubmitLabel,
   averageFavor,
   activeStoryTitle,
   selectedStoryCharacterIds,
@@ -121,12 +130,15 @@ const {
   selectCharacter,
   openCreateWorld,
   openCreateTemplate,
+  openEditWorldTemplate,
   handleTemplateImageChange,
   handleCharacterImageChange,
   submitCreateTemplate,
+  openWorldDetailsFromTemplateDialog,
   openCreateCharacter,
   characterTemplateLabel,
   openCreateCharacterTemplate,
+  openCreateCharacterTemplateForm,
   addFavorabilityRow,
   removeFavorabilityRow,
   submitCreateCharacter,
@@ -190,7 +202,7 @@ const {
         :can-edit-selected-world="canEditSelectedWorld"
         :selected-world-name="selectedWorldName"
         :selected-character-name="selectedCharacterName"
-        @open-world-details="openWorldDetails"
+        @open-world-details="openEditWorldTemplate"
         @open-world-settings="openWorldSettings"
         @open-create-character-template="openCreateCharacterTemplate"
         @open-create-character="openCreateCharacter"
@@ -626,7 +638,7 @@ const {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="createTemplateDialogVisible" title="创建新的世界模板" width="760px">
+    <el-dialog v-model="createTemplateDialogVisible" :title="createTemplateDialogTitle" width="760px">
       <el-form label-position="top" class="template-form">
         <el-form-item label="可见性">
           <el-switch v-model="createTemplateForm.visible" active-text="公开" inactive-text="私有" />
@@ -689,10 +701,23 @@ const {
       </el-form>
 
       <template #footer>
-        <el-button @click="createTemplateDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="templateImageUploading" @click="submitCreateTemplate">
-          创建模板
-        </el-button>
+        <div class="dialog-footer-actions">
+          <el-button
+            v-if="createTemplateMode === 'edit'"
+            plain
+            :icon="Plus"
+            @click="openWorldDetailsFromTemplateDialog"
+          >
+            修改世界设定
+          </el-button>
+          <span v-else />
+          <div>
+            <el-button @click="createTemplateDialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="templateImageUploading" @click="submitCreateTemplate">
+              {{ createTemplateSubmitLabel }}
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
@@ -763,9 +788,38 @@ const {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="createCharacterTemplateDialogVisible" title="创建角色模板" width="720px">
-      <el-form label-position="top" class="template-form">
-        <div class="template-form-grid">
+    <el-dialog v-model="createCharacterTemplateDialogVisible" :title="createCharacterTemplateDialogTitle" width="720px">
+      <el-form label-position="top" class="template-form" v-loading="characterTemplateLoading">
+        <el-form-item v-if="characterTemplateMode === 'edit'" label="角色模板">
+          <el-select
+            v-model="selectedEditCharacterTemplateId"
+            filterable
+            placeholder="选择要修改的角色模板"
+          >
+            <el-option
+              v-for="character in editableCharacterTemplates"
+              :key="character.id"
+              :label="characterTemplateLabel(character.id)"
+              :value="character.id"
+            >
+              <div class="character-template-option">
+                <div class="character-template-option-image" :style="imageStyle(character.image)">
+                  <span v-if="!character.image">{{ firstText(character.name) }}</span>
+                </div>
+                <span>{{ character.name || characterTemplateLabel(character.id) }}</span>
+              </div>
+            </el-option>
+          </el-select>
+          <p class="field-help">
+            选择当前世界模板下的角色模板后，可以在下方查看并修改完整信息。
+          </p>
+        </el-form-item>
+
+        <div
+          v-if="characterTemplateMode === 'create' || selectedEditCharacterTemplate"
+          class="template-form-content"
+        >
+          <div class="template-form-grid">
           <el-form-item label="模板名称">
             <el-input v-model="createCharacterForm.name" placeholder="例如：林澈" />
           </el-form-item>
@@ -841,17 +895,38 @@ const {
             </div>
           </div>
         </el-form-item>
+        </div>
+
+        <el-empty
+          v-else
+          description="请选择一个角色模板"
+          :image-size="72"
+        />
       </el-form>
 
       <template #footer>
-        <el-button @click="createCharacterTemplateDialogVisible = false">取消</el-button>
-        <el-button
-          type="primary"
-          :loading="characterCreating || characterImageUploading"
-          @click="submitCreateCharacterTemplate"
-        >
-          创建模板
-        </el-button>
+        <div class="dialog-footer-actions">
+          <el-button
+            v-if="characterTemplateMode === 'edit'"
+            plain
+            :icon="Plus"
+            @click="openCreateCharacterTemplateForm"
+          >
+            创建角色模板
+          </el-button>
+          <span v-else />
+          <div>
+            <el-button @click="createCharacterTemplateDialogVisible = false">取消</el-button>
+            <el-button
+              type="primary"
+              :disabled="characterTemplateMode === 'edit' && !selectedEditCharacterTemplateId"
+              :loading="characterCreating || characterImageUploading"
+              @click="submitCreateCharacterTemplate"
+            >
+              {{ createCharacterTemplateSubmitLabel }}
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
@@ -2105,6 +2180,14 @@ const {
   margin-top: 18px;
   padding-top: 16px;
   border-top: 1px solid rgba(42, 52, 71, 0.1);
+}
+
+.dialog-footer-actions {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .dialog-section-title h4,

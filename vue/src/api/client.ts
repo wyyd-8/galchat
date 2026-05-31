@@ -176,9 +176,18 @@ export const api = {
   getWorldTemplate(id: number) {
     return request<WorldTemplate>(`/world/templates/${id}`)
   },
+  getMyWorldTemplate(userWorldId: number) {
+    return request<WorldTemplate>(`/world/templates/my/${userWorldId}`)
+  },
   createWorldTemplate(payload: WorldTemplate) {
     return request<void>('/world/templates', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  updateMyWorldTemplate(userWorldId: number, payload: WorldTemplate) {
+    return request<void>(`/world/templates/my/${userWorldId}`, {
+      method: 'PUT',
       body: JSON.stringify(payload),
     })
   },
@@ -225,9 +234,18 @@ export const api = {
   listCharacterTemplates(worldId: number) {
     return request<CharacterTemplate[]>(`/character/templates/${worldId}`)
   },
+  getMyCharacterTemplate(userWorldId: number, characterId: number) {
+    return request<CharacterTemplate>(`/character/templates/my/${userWorldId}/${characterId}`)
+  },
   createCharacterTemplate(worldId: number, payload: CharacterTemplate) {
     return request<void>(`/character/templates/${worldId}`, {
       method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  updateMyCharacterTemplate(userWorldId: number, characterId: number, payload: CharacterTemplate) {
+    return request<void>(`/character/templates/my/${userWorldId}/${characterId}`, {
+      method: 'PUT',
       body: JSON.stringify(payload),
     })
   },

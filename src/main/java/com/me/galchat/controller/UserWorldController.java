@@ -5,6 +5,7 @@ import com.me.galchat.domain.Result;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.WorldDetail;
 import com.me.galchat.domain.po.WorldTemplate;
+import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IWorldDetailService;
@@ -53,6 +54,23 @@ public class UserWorldController {
     @PostMapping("/templates")
     public Result createWorldTemplate(@RequestBody WorldTemplate worldTemplate) {
         worldTemplateService.createWorldTemplate(currentUserId(), worldTemplate);
+        return Result.success();
+    }
+
+    @GetMapping("/templates/my/{userWorldId}")
+    public Result getMyWorldTemplate(@PathVariable Long userWorldId) {
+        checkUserWorldId(userWorldId);
+        Long userId = currentUserId();
+        UserWorldPrefix userWorld = getMyWorld(userId, userWorldId);
+        return Result.success(worldTemplateService.getOwnWorldTemplate(userId, userWorld.getWorldId()));
+    }
+
+    @PutMapping("/templates/my/{userWorldId}")
+    public Result updateMyWorldTemplate(@PathVariable Long userWorldId, @RequestBody WorldTemplate worldTemplate) {
+        checkUserWorldId(userWorldId);
+        Long userId = currentUserId();
+        UserWorldPrefix userWorld = getMyWorld(userId, userWorldId);
+        worldTemplateService.updateWorldTemplate(userId, userWorld.getWorldId(), worldTemplate);
         return Result.success();
     }
 
@@ -126,6 +144,20 @@ public class UserWorldController {
             throw new UserRequestException("用户id不能为空");
         }
         return Result.success(userWorldPrefixService.listBaseInfoByUserId(userId));
+    }
+
+    private void checkUserWorldId(Long userWorldId) {
+        if (userWorldId == null) {
+            throw new UserRequestException("用户世界id不能为空");
+        }
+    }
+
+    private UserWorldPrefix getMyWorld(Long userId, Long userWorldId) {
+        UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(userId, userWorldId, true);
+        if (!Boolean.TRUE.equals(userWorld.getMyWorld())) {
+            throw new UserAuthException("无权操作该世界模板");
+        }
+        return userWorld;
     }
 
     private Long currentUserId() {

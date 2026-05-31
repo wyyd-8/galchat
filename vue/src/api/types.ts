@@ -24,7 +24,6 @@ export interface WorldTemplate {
   image?: string
   author?: string
   background?: string
-  characterIds?: number[]
   authorId?: number
   visible?: boolean
 }
@@ -56,6 +55,7 @@ export interface UserCharacter {
 
 export interface CharacterTemplate {
   id?: number
+  worldId?: number
   name: string
   image?: string
   background?: string

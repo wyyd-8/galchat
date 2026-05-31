@@ -129,7 +129,10 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                         .or()
                         .eq(UserChatHistory::getType, MessageType.USER.getValue())
                         .or()
-                        .in(UserChatHistory::getType, storyMessageTypes()))
+                        .in(UserChatHistory::getType, storyMessageTypes())
+                        .or(unlinkedAssistantWrapper -> unlinkedAssistantWrapper
+                                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                                .isNull(UserChatHistory::getUserMessageId)))
                 .orderByDesc(UserChatHistory::getId)
                 .last("limit " + size)
                 .list();

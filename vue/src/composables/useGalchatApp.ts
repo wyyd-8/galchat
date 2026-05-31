@@ -19,6 +19,7 @@ import type {
   StoryListItem,
   UserCharacter,
   UserWorld,
+  WorldArchive,
   WorldDetail,
   WorldTemplate,
 } from '@/api/types'
@@ -143,6 +144,8 @@ export function useGalchatApp() {
   })
   const worldSettingsDialogVisible = ref(false)
   const worldSettingsLoading = ref(false)
+  const worldImporting = ref(false)
+  const worldExporting = ref(false)
   const worldDeleteDialogVisible = ref(false)
   const worldDeleting = ref(false)
   const worldSettingsForm = reactive({
@@ -1252,6 +1255,55 @@ export function useGalchatApp() {
     }
   }
 
+  function downloadTextFile(content: string, filename: string, type: string) {
+    const blob = new Blob([content], { type })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  function sanitizeFilename(name: string) {
+    return name.trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-')
+  }
+
+  async function exportCurrentWorld() {
+    const worldId = selectedWorldId.value
+    if (!worldId) {
+      return
+    }
+
+    worldExporting.value = true
+    try {
+      const archive = await api.exportMyWorldArchive(worldId)
+      const name = sanitizeFilename(selectedWorldName.value) || `world-${worldId}`
+      downloadTextFile(archive, `galchat-${name}.json`, 'application/json;charset=utf-8')
+      ElMessage.success('世界已导出')
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '导出世界失败')
+    } finally {
+      worldExporting.value = false
+    }
+  }
+
+  async function importWorldArchive(file: File) {
+    worldImporting.value = true
+    try {
+      const archive = JSON.parse(await file.text()) as WorldArchive
+      const result = await api.importWorldArchive(archive)
+      await loadWorlds()
+      ElMessage.success(`世界「${result.name}」已导入`)
+    } catch (error) {
+      ElMessage.error(error instanceof SyntaxError ? '导入文件不是有效的 JSON' : error instanceof Error ? error.message : '导入世界失败')
+    } finally {
+      worldImporting.value = false
+    }
+  }
+
   function openDeleteWorldConfirm() {
     if (!selectedWorldId.value) {
       return
@@ -1936,6 +1988,8 @@ export function useGalchatApp() {
     worldDetailForm,
     worldSettingsDialogVisible,
     worldSettingsLoading,
+    worldImporting,
+    worldExporting,
     worldDeleteDialogVisible,
     worldDeleting,
     worldSettingsForm,
@@ -2013,6 +2067,8 @@ export function useGalchatApp() {
     openWorldDetails,
     openWorldSettings,
     submitWorldSettings,
+    exportCurrentWorld,
+    importWorldArchive,
     openDeleteWorldConfirm,
     submitDeleteWorld,
     submitWorldDetail,

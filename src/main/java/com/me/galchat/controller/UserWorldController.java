@@ -2,16 +2,21 @@ package com.me.galchat.controller;
 
 
 import com.me.galchat.domain.Result;
+import com.me.galchat.domain.dto.WorldArchiveDTO;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.WorldDetail;
 import com.me.galchat.domain.po.WorldTemplate;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.service.IWorldArchiveService;
 import com.me.galchat.service.IWorldDetailService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +25,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * <p>
@@ -37,6 +43,8 @@ public class UserWorldController {
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IWorldTemplateService worldTemplateService;
     private final IWorldDetailService worldDetailService;
+    private final IWorldArchiveService worldArchiveService;
+    private final ObjectMapper objectMapper;
 
     @GetMapping("/templates")
     public Result listWorldTemplates() {
@@ -72,6 +80,23 @@ public class UserWorldController {
         UserWorldPrefix userWorld = getMyWorld(userId, userWorldId);
         worldTemplateService.updateWorldTemplate(userId, userWorld.getWorldId(), worldTemplate);
         return Result.success();
+    }
+
+    @GetMapping("/templates/my/{userWorldId}/export")
+    public ResponseEntity<String> exportMyWorld(@PathVariable Long userWorldId) {
+        checkUserWorldId(userWorldId);
+        WorldArchiveDTO archive = worldArchiveService.exportMyWorld(currentUserId(), userWorldId);
+        String filename = "galchat-world-" + userWorldId + ".json";
+        String json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(archive);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(json);
+    }
+
+    @PostMapping("/import")
+    public Result importWorld(@RequestBody WorldArchiveDTO archive) {
+        return Result.success(worldArchiveService.importWorld(currentUserId(), archive));
     }
 
     @GetMapping("/templates/{worldId}/details")

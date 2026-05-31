@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ArrowRight, Plus } from '@element-plus/icons-vue'
+import { ref } from 'vue'
+import { ArrowRight, Plus, Upload } from '@element-plus/icons-vue'
 import type { UserWorld, WorldTemplate } from '@/api/types'
 import { firstText, imageStyle } from '@/utils/ui'
 
@@ -7,12 +8,29 @@ defineProps<{
   loading: { worlds: boolean }
   userWorlds: UserWorld[]
   worldTemplates: WorldTemplate[]
+  worldImporting: boolean
 }>()
 
 const emit = defineEmits<{
   selectWorld: [world: UserWorld]
   openCreateWorld: [template?: WorldTemplate]
+  importWorld: [file: File]
 }>()
+
+const importInput = ref<HTMLInputElement | null>(null)
+
+function openImportPicker() {
+  importInput.value?.click()
+}
+
+function handleImportChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (file) {
+    emit('importWorld', file)
+  }
+}
 </script>
 
 <template>
@@ -23,7 +41,22 @@ const emit = defineEmits<{
           <h3>已有世界</h3>
           <p>继续你的世界、角色关系和剧情进度。</p>
         </div>
-        <el-button :icon="Plus" type="primary" @click="emit('openCreateWorld')">创建世界</el-button>
+        <div class="section-actions">
+          <input
+            ref="importInput"
+            class="visually-hidden-input"
+            type="file"
+            hidden
+            tabindex="-1"
+            aria-hidden="true"
+            accept=".json,application/json"
+            @change="handleImportChange"
+          />
+          <el-button :icon="Upload" :loading="worldImporting" @click="openImportPicker">
+            导入世界
+          </el-button>
+          <el-button :icon="Plus" type="primary" @click="emit('openCreateWorld')">创建世界</el-button>
+        </div>
       </div>
 
       <div class="world-grid">

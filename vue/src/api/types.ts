@@ -71,6 +71,45 @@ export interface WorldDetail {
   details?: string
 }
 
+export interface WorldArchive {
+  formatVersion: number
+  world: {
+    name: string
+    image?: string
+    author?: string
+    background: string
+    visible?: boolean
+  }
+  userWorld?: {
+    name?: string
+    acitvePushStatus?: boolean
+    favorSystemStatus?: string
+    eotDetectionStatus?: boolean
+    thinkStatus?: boolean
+    addSpecialPrompt?: boolean
+  }
+  details?: Array<{
+    about?: string
+    details?: string
+  }>
+  characters?: Array<{
+    name: string
+    image?: string
+    background?: string
+    personality?: string
+    favorability?: Record<string, string>
+    initFavor?: number
+  }>
+}
+
+export interface WorldArchiveImportResult {
+  userWorldId: number
+  worldId: number
+  name: string
+  detailCount: number
+  characterCount: number
+}
+
 export interface ChatHistory {
   id?: number
   userWorldId?: number

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   Delete,
+  Download,
   Message,
   Plus,
   Upload,
@@ -76,6 +77,8 @@ const {
   worldDetailForm,
   worldSettingsDialogVisible,
   worldSettingsLoading,
+  worldImporting,
+  worldExporting,
   worldDeleteDialogVisible,
   worldDeleting,
   worldSettingsForm,
@@ -149,6 +152,8 @@ const {
   openWorldDetails,
   openWorldSettings,
   submitWorldSettings,
+  exportCurrentWorld,
+  importWorldArchive,
   openDeleteWorldConfirm,
   submitDeleteWorld,
   submitWorldDetail,
@@ -214,8 +219,10 @@ const {
         :loading="loading"
         :user-worlds="userWorlds"
         :world-templates="worldTemplates"
+        :world-importing="worldImporting"
         @select-world="selectWorld"
         @open-create-world="openCreateWorld"
+        @import-world="importWorldArchive"
       />
 
       <WorldOverview
@@ -469,10 +476,7 @@ const {
           <el-form-item label="主动提醒功能">
             <el-switch v-model="createWorldForm.acitvePushStatus" active-text="开启" inactive-text="关闭" />
             <p class="field-help">
-              开启后，系统会记录聊天中提及的现实世界里用户发生的事件，并用于定时触发后续主动提醒与关怀。
-            </p>
-            <p class="field-help danger-help">
-              注意：本功能不适用于希望进行沉浸式角色扮演的世界，适用于指定背景、人物的日常对话世界；不正确的选择可能导致定时生成的聊天记录异常，此时请忽略对应消息。
+              开启后，系统会记录聊天中提及的事件，并用于定时触发后续主动提醒与关怀。
             </p>
           </el-form-item>
         </section>
@@ -495,7 +499,7 @@ const {
               开启后，思考过程会更偏向角色第一人称内心独白；仅在思考模式下生效。
             </p>
             <p class="field-help danger-help">
-              注意：此功能会导致角色难以主动调用工具，从而发生记忆与世界观详细缺失、事件检索失效、好感度增加困难等问题，请谨慎开启。
+              注意：此功能会导致角色难以主动调用工具，从而发生事件检索失效、好感度增加困难等问题，请谨慎开启。
             </p>
           </el-form-item>
         </section>
@@ -534,7 +538,7 @@ const {
         <el-form-item label="主动提醒功能">
           <el-switch v-model="worldSettingsForm.acitvePushStatus" active-text="开启" inactive-text="关闭" />
           <p class="field-help">
-            开启后，系统会记录聊天中提及的现实世界里用户发生的事件，并用于定时触发后续主动提醒与关怀。
+            开启后，系统会记录聊天中提及的事件，并用于定时触发后续主动提醒与关怀。
           </p>
         </el-form-item>
 
@@ -575,10 +579,22 @@ const {
       </el-form>
 
       <template #footer>
-        <el-button @click="worldSettingsDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="worldSettingsLoading" @click="submitWorldSettings">
-          保存设置
-        </el-button>
+        <div class="dialog-footer-actions">
+          <el-button
+            :icon="Download"
+            :loading="worldExporting"
+            plain
+            @click="exportCurrentWorld"
+          >
+            导出世界
+          </el-button>
+          <div>
+            <el-button @click="worldSettingsDialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="worldSettingsLoading" @click="submitWorldSettings">
+              保存设置
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
@@ -1416,6 +1432,22 @@ const {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.visually-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .section-heading h3 {

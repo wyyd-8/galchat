@@ -14,6 +14,8 @@ import type {
   UserInfo,
   UserToken,
   UserWorld,
+  WorldArchive,
+  WorldArchiveImportResult,
   WorldDetail,
   WorldTemplate,
 } from './types'
@@ -102,6 +104,29 @@ async function request<T>(path: string, init: RequestInit = {}) {
   return result.data as T
 }
 
+async function requestText(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers)
+  const currentToken = token()
+
+  if (currentToken) {
+    headers.set('token', currentToken)
+  }
+
+  const response = await fetch(endpoint(path), {
+    ...init,
+    headers,
+  })
+
+  if (!response.ok) {
+    if (handleUnauthorized(response)) {
+      throw new Error('登录状态已失效，请重新登录')
+    }
+    throw new Error(await readError(response))
+  }
+
+  return response.text()
+}
+
 export function saveSession(session: UserToken) {
   localStorage.setItem(TOKEN_KEY, session.token)
   localStorage.setItem('galchat.userId', String(session.id))
@@ -188,6 +213,15 @@ export const api = {
   updateMyWorldTemplate(userWorldId: number, payload: WorldTemplate) {
     return request<void>(`/world/templates/my/${userWorldId}`, {
       method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
+  exportMyWorldArchive(userWorldId: number) {
+    return requestText(`/world/templates/my/${userWorldId}/export`)
+  },
+  importWorldArchive(payload: WorldArchive) {
+    return request<WorldArchiveImportResult>('/world/import', {
+      method: 'POST',
       body: JSON.stringify(payload),
     })
   },

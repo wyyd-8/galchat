@@ -10,11 +10,14 @@ const props = defineProps<{
   selectedWorldName: string
   activeStory: ActiveStory | null
   promptSaving: boolean
+  favorSaving: boolean
+  canEditFavor: boolean
 }>()
 
 const emit = defineEmits<{
   'update:collapsed': [value: boolean]
   'update-user-info-prompt': [value: string]
+  'update-favor-value': [value: number]
   'open-delete-character': []
 }>()
 
@@ -25,14 +28,28 @@ const localCollapsed = computed({
 
 const promptEditing = ref(false)
 const userInfoPromptDraft = ref('')
+const favorEditing = ref(false)
+const favorDraft = ref<number | undefined>(0)
 
 watch(
   () => props.selectedCharacter,
   (character) => {
     promptEditing.value = false
     userInfoPromptDraft.value = character?.userInfoPrompt || ''
+    favorEditing.value = false
+    favorDraft.value = character?.favorValue ?? 0
   },
   { immediate: true },
+)
+
+watch(
+  () => props.favorSaving,
+  (saving, wasSaving) => {
+    if (wasSaving && !saving) {
+      favorEditing.value = false
+      favorDraft.value = props.selectedCharacter?.favorValue ?? 0
+    }
+  },
 )
 
 watch(
@@ -48,6 +65,22 @@ watch(
 function startPromptEditing() {
   userInfoPromptDraft.value = props.selectedCharacter?.userInfoPrompt || ''
   promptEditing.value = true
+}
+
+function startFavorEditing() {
+  favorDraft.value = props.selectedCharacter?.favorValue ?? 0
+  favorEditing.value = true
+}
+
+function cancelFavorEditing() {
+  favorDraft.value = props.selectedCharacter?.favorValue ?? 0
+  favorEditing.value = false
+}
+
+function saveFavor() {
+  if (typeof favorDraft.value === 'number') {
+    emit('update-favor-value', favorDraft.value)
+  }
 }
 
 function cancelPromptEditing() {
@@ -84,7 +117,35 @@ function savePrompt() {
 
       <div class="panel-stat">
         <span>好感度</span>
-        <strong>{{ selectedCharacter.favorValue ?? 0 }}</strong>
+        <div v-if="favorEditing" class="favor-edit-row">
+          <el-input-number
+            v-model="favorDraft"
+            :min="0"
+            :max="100"
+            :step="1"
+            step-strictly
+            size="small"
+          />
+          <el-button :icon="Close" text circle @click="cancelFavorEditing" />
+          <el-button
+            type="primary"
+            :icon="Check"
+            :loading="favorSaving"
+            text
+            circle
+            @click="saveFavor"
+          />
+        </div>
+        <div v-else class="favor-value-row">
+          <strong>{{ selectedCharacter.favorValue ?? 0 }}</strong>
+          <el-button
+            v-if="canEditFavor"
+            :icon="Edit"
+            text
+            circle
+            @click="startFavorEditing"
+          />
+        </div>
       </div>
       <el-progress
         :percentage="Math.max(0, Math.min(100, selectedCharacter.favorValue ?? 0))"

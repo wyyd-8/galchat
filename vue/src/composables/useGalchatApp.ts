@@ -117,6 +117,7 @@ export function useGalchatApp() {
   const createCharacterImageFileName = ref('')
   const characterCreating = ref(false)
   const characterPromptSaving = ref(false)
+  const characterFavorSaving = ref(false)
   const characterDeleting = ref(false)
   const characterTemplateLoading = ref(false)
   const selectedWorldTemplate = ref<WorldTemplate | null>(null)
@@ -351,7 +352,7 @@ export function useGalchatApp() {
 
   function toUiMessage(history: ChatHistory): UiMessage {
     const role = messageRole(history)
-    const content = history.content || (role === 'tool' ? '调用了角色记忆与状态工具' : '')
+    const content = history.content || (role === 'tool' ? '调用了工具' : '')
     return {
       id: `history-${history.id || `${role}-${Math.random()}`}`,
       role,
@@ -363,7 +364,7 @@ export function useGalchatApp() {
   function toSplitUiMessages(history: ChatHistory, idPrefix = 'history'): UiMessage[] {
     const role = messageRole(history)
     const content = replaceAiPronouns(
-      history.content || (role === 'tool' ? '调用了角色记忆与状态工具' : ''),
+      history.content || (role === 'tool' ? '调用了工具' : ''),
       role,
     )
 
@@ -817,9 +818,28 @@ export function useGalchatApp() {
     loading.characters = true
     try {
       characters.value = await api.listCharacters(userWorldId)
+      syncSelectedCharacter(userWorldId)
     } finally {
       loading.characters = false
     }
+  }
+
+  function syncSelectedCharacter(userWorldId: number, characterId = selectedCharacter.value?.characterId) {
+    if (!characterId || selectedWorldId.value !== userWorldId) {
+      return
+    }
+
+    const updatedCharacter = characters.value.find(
+      (character) => character.characterId === characterId,
+    )
+    if (updatedCharacter) {
+      selectedCharacter.value = updatedCharacter
+    }
+  }
+
+  async function refreshCurrentChatStatus(userWorldId: number, characterId = selectedCharacter.value?.characterId) {
+    await Promise.all([loadCharacters(userWorldId), loadWorldEvents(userWorldId)])
+    syncSelectedCharacter(userWorldId, characterId)
   }
 
   async function loadWorldEvents(userWorldId: number) {
@@ -1190,6 +1210,34 @@ export function useGalchatApp() {
       ElMessage.error(error instanceof Error ? error.message : '保存角色提示词失败')
     } finally {
       characterPromptSaving.value = false
+    }
+  }
+
+  async function updateCharacterFavor(favorValue: number) {
+    const userWorldId = selectedWorldId.value
+    const character = selectedCharacter.value
+    if (!userWorldId || !character || !canEditSelectedWorld.value) {
+      return
+    }
+    if (!Number.isFinite(favorValue) || favorValue < 0 || favorValue > 100) {
+      ElMessage.warning('好感度必须在0-100之间')
+      return
+    }
+
+    const normalizedFavorValue = Math.round(favorValue)
+    characterFavorSaving.value = true
+    try {
+      await api.updateMyCharacterFavor(userWorldId, character.characterId, normalizedFavorValue)
+      character.favorValue = normalizedFavorValue
+      const cachedCharacter = characters.value.find((item) => item.characterId === character.characterId)
+      if (cachedCharacter) {
+        cachedCharacter.favorValue = normalizedFavorValue
+      }
+      ElMessage.success('好感度已保存')
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '保存好感度失败')
+    } finally {
+      characterFavorSaving.value = false
     }
   }
 
@@ -1654,6 +1702,9 @@ export function useGalchatApp() {
 
     appendHistoryMessage(data, true)
     void scrollToBottom()
+    if (messageRole(data) === 'assistant' && data.userWorldId && data.characterId) {
+      void refreshCurrentChatStatus(data.userWorldId, data.characterId)
+    }
   }
 
   function ensureChatSocket(userWorldId: number) {
@@ -1836,7 +1887,7 @@ export function useGalchatApp() {
         messageList.value.push({
           id: `tool-${Date.now()}-${Math.random()}`,
           role: 'tool',
-          content: chunk.content || '调用了记忆检索或好感度工具',
+          content: chunk.content || '调用了工具',
         })
         void scrollToBottom()
         return
@@ -1890,10 +1941,10 @@ export function useGalchatApp() {
     try {
       if (isThinkingChat) {
         await sendStreamingChat(payload)
+        await refreshCurrentChatStatus(userWorldId, characterId)
       } else {
         await sendSocketChat(payload)
       }
-      await Promise.all([loadCharacters(userWorldId), loadWorldEvents(userWorldId)])
     } catch (error) {
       messageList.value.push({
         id: `assistant-error-${Date.now()}`,
@@ -2053,6 +2104,7 @@ export function useGalchatApp() {
     createCharacterImageFileName,
     characterCreating,
     characterPromptSaving,
+    characterFavorSaving,
     characterDeleting,
     characterTemplateLoading,
     selectedWorldTemplate,
@@ -2138,6 +2190,7 @@ export function useGalchatApp() {
     removeFavorabilityRow,
     submitCreateCharacter,
     updateCharacterPrompt,
+    updateCharacterFavor,
     openDeleteCharacterConfirm,
     submitDeleteCharacter,
     submitCreateCharacterTemplate,

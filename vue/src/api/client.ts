@@ -283,6 +283,12 @@ export const api = {
       body: JSON.stringify(payload),
     })
   },
+  updateMyCharacterFavor(userWorldId: number, characterId: number, favorValue: number) {
+    return request<void>(`/character/my/${userWorldId}/${characterId}/favor`, {
+      method: 'PUT',
+      body: JSON.stringify({ favorValue }),
+    })
+  },
   addCharacter(userWorldId: number, characterId: number) {
     return request<void>(`/character/${userWorldId}/${characterId}`, {
       method: 'POST',

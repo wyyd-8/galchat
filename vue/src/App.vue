@@ -67,6 +67,7 @@ const {
   createCharacterImageFileName,
   characterCreating,
   characterPromptSaving,
+  characterFavorSaving,
   characterDeleting,
   characterTemplateLoading,
   addCharacterForm,
@@ -146,6 +147,7 @@ const {
   removeFavorabilityRow,
   submitCreateCharacter,
   updateCharacterPrompt,
+  updateCharacterFavor,
   openDeleteCharacterConfirm,
   submitDeleteCharacter,
   submitCreateCharacterTemplate,
@@ -262,7 +264,10 @@ const {
       :selected-world-name="selectedWorldName"
       :active-story="activeStory"
       :prompt-saving="characterPromptSaving"
+      :favor-saving="characterFavorSaving"
+      :can-edit-favor="canEditSelectedWorld"
       @update-user-info-prompt="updateCharacterPrompt"
+      @update-favor-value="updateCharacterFavor"
       @open-delete-character="openDeleteCharacterConfirm"
     />
 
@@ -1560,14 +1565,14 @@ const {
 }
 
 .metric-strip span,
-.panel-stat span {
+.panel-stat > span {
   display: block;
   color: #697386;
   font-size: 13px;
 }
 
 .metric-strip strong,
-.panel-stat strong {
+.panel-stat .favor-value-row strong {
   display: block;
   margin-top: 4px;
   font-size: 28px;
@@ -1918,6 +1923,37 @@ const {
 
 .panel-stat {
   margin: 22px 0 8px;
+}
+
+.favor-value-row,
+.favor-edit-row {
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+}
+
+.favor-value-row {
+  display: flex;
+}
+
+.favor-edit-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.favor-edit-row .el-input-number {
+  width: 100%;
+  min-width: 0;
+}
+
+.favor-edit-row .el-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
 }
 
 .info-block {

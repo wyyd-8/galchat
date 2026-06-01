@@ -2,6 +2,7 @@ package com.me.galchat.controller;
 
 
 import com.me.galchat.domain.Result;
+import com.me.galchat.domain.dto.UserCharacterFavorDTO;
 import com.me.galchat.domain.dto.UserCharacterPromptDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.UserWorldPrefix;
@@ -67,6 +68,23 @@ public class UserCharacterController {
         Long userId = currentUserId();
         UserWorldPrefix userWorld = getMyWorld(userId, userWorldId);
         characterTemplateService.updateCharacterTemplate(userId, userWorld.getWorldId(), characterId, characterTemplate);
+        return Result.success();
+    }
+
+    @PutMapping("/my/{userWorldId}/{characterId}/favor")
+    public Result updateMyCharacterFavor(@PathVariable Long userWorldId, @PathVariable Long characterId,
+                                         @RequestBody UserCharacterFavorDTO favorDTO) {
+        checkUserWorldId(userWorldId);
+        checkCharacterId(characterId);
+        if (favorDTO == null || favorDTO.getFavorValue() == null) {
+            throw new UserRequestException("好感度不能为空");
+        }
+        Integer favorValue = favorDTO.getFavorValue();
+        if (favorValue < 0 || favorValue > 100) {
+            throw new UserRequestException("好感度必须在0-100之间");
+        }
+        getMyWorld(currentUserId(), userWorldId);
+        userCharacterInfoService.setFavorValue(userWorldId, characterId, favorValue);
         return Result.success();
     }
 

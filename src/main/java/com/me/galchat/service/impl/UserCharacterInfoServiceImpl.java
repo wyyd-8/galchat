@@ -226,6 +226,21 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     }
 
     @Override
+    public void setFavorValue(Long userWorldId, Long characterId, Integer favorValue) {
+        boolean updated = lambdaUpdate()
+                .eq(UserCharacterInfo::getUserWorldId, userWorldId)
+                .eq(UserCharacterInfo::getCharacterId, characterId)
+                .set(UserCharacterInfo::getFavorValue, favorValue)
+                .update();
+        if (!updated) {
+            throw new UserRequestException("角色不存在");
+        }
+        redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
+                buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
+        evictPromptInfoCache(userWorldId, characterId);
+    }
+
+    @Override
     public void updateUserInfoPrompt(Long userWorldId, Long characterId, String userInfoPrompt) {
         userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         boolean updated = lambdaUpdate()
@@ -245,8 +260,6 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         if (!StringUtils.hasText(userInfoPrompt)) {
             return null;
         }
-
-        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         String prompt = baseMapper.appendUserInfoPrompt(userWorldId, characterId, userInfoPrompt.trim());
         if (prompt == null) {
             throw new UserRequestException("角色不存在");

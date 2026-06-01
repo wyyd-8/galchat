@@ -1,214 +1,261 @@
 # GalChat
 
-GalChat 是一个基于 Spring Boot 的角色聊天与互动故事后端服务。项目围绕“用户世界”“角色模板”“长期记忆”“剧情事件”和“主动关怀”组织业务，通过 DeepSeek 聊天模型生成角色回复，结合 PostgreSQL + pgvector 做背景、历史和世界事件检索，并使用 Redis/Redisson 处理输入合并、延时队列、会话状态和缓存。
+GalChat 是一个面向角色聊天与互动故事的全栈项目。后端基于 Spring Boot，负责用户、世界、角色、剧情事件、聊天记忆、向量检索与 AI 回复编排；前端基于 Vue 3 + Vite，提供世界管理、角色管理、聊天与故事推进界面；`python/` 目录提供本地输入完整性判断和 rerank 辅助服务。
 
-## 功能概要
+## 功能概览
 
-- 用户注册、登录、资料与密码管理。
-- 世界模板、世界详情、用户世界实例的创建与维护。
-- 角色模板导入、用户世界角色绑定、好感度记录与更新。
-- WebSocket 实时聊天，支持分片输入、输入完成判断、异步生成回复。
-- Spring AI + DeepSeek 角色回复，支持工具调用、长期记忆检索和好感度更新。
-- PostgreSQL pgvector 向量检索，覆盖世界详情、聊天历史和世界事件。
-- 互动故事事件的开启、推进、结束和总结入库。
-- 用户事件识别与延迟主动关怀推送。
-- 本地 Python 服务提供 BERT 输入完整性判断和文档 rerank 能力。
+- 用户注册、登录、邮箱验证码、资料维护与密码修改
+- 世界模板、用户世界、世界详情的创建、编辑、导入和导出
+- 角色模板、用户世界角色绑定、角色提示词和好感度相关能力
+- 基于 DeepSeek 的角色回复生成，支持 SSE 流式输出
+- WebSocket 实时聊天连接，支持按用户世界建立会话
+- PostgreSQL + pgvector 向量检索，覆盖世界详情、聊天历史和世界事件
+- 长期记忆、话题边界识别、聊天记录撤回和历史查询
+- 互动故事事件的开启、推进、结束和归档
+- Redis 队列、延迟任务、缓存和分布式锁
+- 本地 Python BERT 服务用于输入完整性判断，本地 reranker 服务用于召回结果重排
 
 ## 技术栈
 
-- Java 21
-- Spring Boot 4.0.5
-- Spring AI 2.0.0-M4
-- Maven Wrapper
-- MyBatis-Plus
-- PostgreSQL + pgvector
-- Redis + Redisson
-- DeepSeek Chat Model
-- Ollama Embedding Model
-- WebSocket
-- Python FastAPI / PyTorch / Transformers
-- Aliyun OSS
+| 模块 | 技术 |
+| --- | --- |
+| 后端 | Java 21, Spring Boot 4.0.5, Spring AI 2.0.0-M4, MyBatis-Plus |
+| AI | DeepSeek Chat, Ollama Embedding |
+| 数据 | PostgreSQL, pgvector, Redis, Redisson |
+| 前端 | Vue 3, TypeScript, Vite, Element Plus |
+| Python 辅助服务 | FastAPI, PyTorch, Transformers, jieba |
+| 文件与通知 | Aliyun OSS, Aliyun Direct Mail |
 
 ## 项目结构
 
 ```text
 .
-├── pom.xml                         # Maven 项目配置与 Java 依赖
-├── mvnw / mvnw.cmd                 # Maven Wrapper
-├── HELP.md                         # Spring Initializr 生成的参考文档
-├── src
-│   ├── main
-│   │   ├── java/com/me/galchat
-│   │   │   ├── GalchatApplication.java      # Spring Boot 启动入口
-│   │   │   ├── config/                      # Web、Redis、WebSocket、AI、向量库等配置
-│   │   │   ├── controller/                  # REST API 控制器
-│   │   │   ├── service/                     # 业务服务接口与实现
-│   │   │   ├── mapper/                      # MyBatis-Plus Mapper
-│   │   │   ├── domain/                      # DTO、VO、PO 与统一响应对象
-│   │   │   ├── websocket/                   # WebSocket 会话与消息处理
-│   │   │   ├── consumer/                    # Redis 队列消费者
-│   │   │   ├── task/                        # 定时任务
-│   │   │   ├── vector/                      # 向量写入与检索服务
-│   │   │   ├── memory/                      # 对话记忆与话题边界处理
-│   │   │   ├── tool/                        # AI 工具调用
-│   │   │   ├── interceptor/                 # Token 拦截与 DeepSeek 请求拦截
-│   │   │   ├── exception/                   # 全局异常处理
-│   │   │   ├── constant/                    # 常量定义
-│   │   │   └── utils/                       # JWT、OSS、上下文等工具类
-│   │   └── resources
-│   │       ├── application.yaml             # 本地默认配置
-│   │       └── mapper/                      # MyBatis XML 映射文件
-│   └── test
-│       ├── java/com/me/galchat/GalchatApplicationTests.java
-│       └── java/com/me/galchat/init/console.sql  # 数据库初始化 SQL
-└── python
-    ├── bert.py                      # 输入完整性判断服务，默认端口 8081
-    ├── reranker_server.py           # 本地 reranker 服务，默认端口 8082
-    └── bert_model/                  # 本地 BERT 模型文件
+|-- pom.xml                         # 后端 Maven 配置
+|-- mvnw / mvnw.cmd                 # Maven Wrapper
+|-- src
+|   |-- main
+|   |   |-- java/com/me/galchat
+|   |   |   |-- GalchatApplication.java
+|   |   |   |-- config/             # Web、Redis、WebSocket、AI、向量库等配置
+|   |   |   |-- controller/         # REST API 控制器
+|   |   |   |-- service/            # 业务服务接口与实现
+|   |   |   |-- mapper/             # MyBatis Mapper
+|   |   |   |-- domain/             # DTO、VO、PO 和统一响应
+|   |   |   |-- websocket/          # WebSocket 入口
+|   |   |   |-- consumer/           # Redis 队列消费者
+|   |   |   |-- task/               # 定时任务
+|   |   |   |-- vector/             # 向量写入与检索服务
+|   |   |   |-- memory/             # 聊天记忆与话题边界
+|   |   |   |-- tool/               # AI 工具调用
+|   |   |   |-- interceptor/        # Token、DeepSeek 请求相关拦截器
+|   |   |   |-- exception/          # 全局异常处理
+|   |   |   `-- utils/              # JWT、OSS、上下文等工具
+|   |   `-- resources
+|   |       |-- application.yaml    # 本地默认配置
+|   |       `-- mapper/             # MyBatis XML 映射
+|   `-- test
+|       `-- java/com/me/galchat/init/console.sql
+|-- vue                              # 前端项目
+|   |-- package.json
+|   |-- vite.config.ts               # /api 与 /ws 开发代理
+|   `-- src
+`-- python
+    |-- bert.py                      # 输入完整性判断服务，默认 localhost:8081
+    `-- reranker_server.py           # rerank 服务，默认 localhost:8082
 ```
 
-## 主要接口
-
-默认服务端口为 Spring Boot 默认的 `8080`。除 `/user/login` 和 `/user/register` 外，HTTP 接口默认需要在请求头携带 `token`。
-
-| 模块 | 路径 |
-| --- | --- |
-| 用户 | `/user/login`, `/user/register`, `/user/info`, `/user/password` |
-| 聊天 | `/ai/chat` |
-| 聊天历史 | `/history` |
-| 世界 | `/world/**` |
-| 角色 | `/character/**` |
-| 世界事件 | `/worldevent/**` |
-| WebSocket | `/ws/{sid}` |
-
-## 部署流程
-
-### 1. 准备基础环境
-
-安装以下运行依赖：
+## 环境要求
 
 - JDK 21
-- PostgreSQL，并安装 `pgvector` 扩展
+- Node.js 20.19+ 或 22.12+
+- PostgreSQL，并启用 `pgvector` 扩展
 - Redis
-- Ollama，并拉取 embedding 模型：
+- Ollama，并准备 1024 维 embedding 模型
+- Python 3.10+，仅在启用本地 BERT / reranker 服务时需要
+- DeepSeek API Key
+- Aliyun OSS / Aliyun Direct Mail 配置，仅在使用图片上传、邮箱验证码等能力时需要
 
-```bash
-ollama pull quentinz/bge-large-zh-v1.5
-```
+默认配置位于 `src/main/resources/application.yaml`。其中包含本地开发用的数据库、Redis、DeepSeek、Ollama、OSS 和邮件配置。首次运行前请按自己的环境修改，生产环境请使用环境变量或外部配置覆盖敏感信息，不要提交真实密钥。
 
-如需启用本地 BERT 完整性判断和 reranker，还需要 Python 3.10+，并安装依赖：
+## 快速启动
 
-```bash
-pip install fastapi uvicorn torch transformers pydantic jieba
-```
+### 1. 初始化数据库
 
-### 2. 初始化数据库
-
-创建 PostgreSQL 数据库后，执行初始化 SQL：
+创建 PostgreSQL 数据库后执行初始化脚本：
 
 ```bash
 psql -h localhost -U <username> -d <database> -f src/test/java/com/me/galchat/init/console.sql
 ```
 
-该脚本会创建 `vector` 扩展、业务表和索引。项目启动后，Spring AI 的 `PgVectorStore` 还会初始化以下向量表：
+该脚本会创建业务表、索引以及 `vector` 扩展。后端启动后，Spring AI 的 `PgVectorStore` 还会初始化以下向量表：
 
 - `world_detail_vector_store`
 - `chat_history_vector_store`
 - `world_event_vector_store`
 
-### 3. 配置运行参数
+### 2. 准备 Redis 和 Ollama
 
-本地默认配置位于 `src/main/resources/application.yaml`。部署到服务器时建议使用环境变量或外部配置覆盖敏感信息，不要把真实密钥提交到仓库。
-
-常用配置项：
+启动 Redis 后，准备默认 embedding 模型：
 
 ```bash
-export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/postgres
-export SPRING_DATASOURCE_USERNAME=<postgres-user>
-export SPRING_DATASOURCE_PASSWORD=<postgres-password>
-
-export SPRING_DATA_REDIS_HOST=localhost
-export SPRING_DATA_REDIS_PORT=6379
-export SPRING_DATA_REDIS_DATABASE=0
-
-export SPRING_AI_DEEPSEEK_BASE_URL=https://api.deepseek.com
-export SPRING_AI_DEEPSEEK_API_KEY=<deepseek-api-key>
-export SPRING_AI_DEEPSEEK_CHAT_OPTIONS_MODEL=<deepseek-model>
-
-export SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_MODEL=quentinz/bge-large-zh-v1.5
-
-export GALCHAT_ALIOSS_ENDPOINT=https://oss-cn-beijing.aliyuncs.com
-export GALCHAT_ALIOSS_BUCKET_NAME=<bucket-name>
-export GALCHAT_ALIOSS_REGION=cn-beijing
-export ALIYUN_OSS_ACCESS_KEY_ID=<access-key-id>
-export ALIYUN_OSS_ACCESS_KEY_SECRET=<access-key-secret>
+ollama pull qwen3-embedding:latest
 ```
 
-### 4. 启动 Python 辅助服务
+当前向量配置固定为 1024 维。如果更换 embedding 模型，需要同步确认模型维度与 `VectorConfiguration` 中的 `dimensions(1024)` 保持一致。
 
-完整性判断服务默认监听 `localhost:8081`：
+### 3. 启动 Python 辅助服务
+
+如果只想先跑通主流程，可以暂时不启动这两个服务；Java 侧在调用失败时会做降级处理。完整体验建议启动。
+
+安装依赖：
+
+```bash
+pip install fastapi uvicorn torch transformers pydantic jieba
+```
+
+输入完整性判断服务，默认监听 `localhost:8081`：
 
 ```bash
 python python/bert.py
 ```
 
-reranker 服务默认监听 `localhost:8082`：
+该服务默认读取 `python/bert_model` 目录下的本地模型。
+
+reranker 服务，默认监听 `localhost:8082`：
 
 ```bash
 python python/reranker_server.py
 ```
 
-`reranker_server.py` 默认使用 `BAAI/bge-reranker-v2-m3`，可通过 `RERANKER_MODEL_PATH` 指向本地模型目录：
+默认模型为 `BAAI/bge-reranker-v2-m3`。如需使用本地模型目录：
 
 ```bash
 RERANKER_MODEL_PATH=/path/to/bge-reranker-v2-m3 python python/reranker_server.py
 ```
 
-如果这两个服务未启动，Java 服务会降级处理：BERT 判断失败时使用 3 秒兜底任务，reranker 失败时返回向量召回的原始顺序。
+Windows PowerShell 可使用：
 
-### 5. 构建 Java 服务
-
-```bash
-./mvnw clean package
+```powershell
+$env:RERANKER_MODEL_PATH="C:\path\to\bge-reranker-v2-m3"
+python python/reranker_server.py
 ```
 
-如果测试环境没有准备 PostgreSQL、Redis、Ollama、DeepSeek 等外部依赖，可以先跳过测试构建：
+### 4. 启动后端
 
-```bash
-./mvnw clean package -DskipTests
+Windows：
+
+```powershell
+.\mvnw.cmd spring-boot:run
 ```
 
-### 6. 启动应用
-
-```bash
-java -jar target/galchat-0.0.1-SNAPSHOT.jar
-```
-
-服务启动后：
-
-- HTTP API 地址：`http://localhost:8080`
-- WebSocket 地址：`ws://localhost:8080/ws/{sid}`
-- 健康检查可使用 Spring Boot Actuator 默认端点，例如 `http://localhost:8080/actuator/health`
-
-## 本地开发
-
-直接运行：
+macOS / Linux：
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-运行测试：
+后端默认地址：
+
+- HTTP API: `http://localhost:8080`
+- WebSocket: `ws://localhost:8080/ws/{sid}`
+- Actuator Health: `http://localhost:8080/actuator/health`
+
+### 5. 启动前端
 
 ```bash
-./mvnw test
+cd vue
+npm install
+npm run dev
 ```
 
-## 部署注意事项
+Vite 默认运行在 `http://localhost:5173`。开发环境中，`vue/vite.config.ts` 会将：
 
-- `application.yaml` 中的本地配置仅适合开发环境，生产环境请使用外部配置管理数据库密码、DeepSeek Key、OSS Key 和 JWT 密钥。
-- PostgreSQL 必须启用 `pgvector`，否则向量库初始化会失败。
-- Ollama embedding 模型维度需要与 `VectorConfiguration` 中的 `dimensions(1024)` 保持一致。
-- Java 服务当前固定调用本机 `http://localhost:8081` 和 `http://localhost:8082`，如果 Python 服务部署在其他机器，需要同步调整 Java 侧地址配置或代码。
-- Redis 承担队列、延迟任务、缓存和分布式锁能力，部署时需要保证 Redis 可用且数据淘汰策略不会误删关键队列。
-- 当前项目没有提供 Dockerfile 或 docker-compose，部署以手动准备依赖、打包 JAR、后台运行服务为主。
+- `/api` 代理到 `http://localhost:8080`
+- `/ws` 代理到 `ws://localhost:8080`
+
+前端也支持通过 `VITE_API_BASE_URL` 覆盖 API 根地址。
+
+## 常用命令
+
+后端测试：
+
+```powershell
+.\mvnw.cmd test
+```
+
+后端打包：
+
+```powershell
+.\mvnw.cmd clean package
+```
+
+如果本地没有准备 PostgreSQL、Redis、Ollama、DeepSeek 等测试依赖，可以先跳过测试：
+
+```powershell
+.\mvnw.cmd clean package -DskipTests
+```
+
+前端类型检查和构建：
+
+```bash
+cd vue
+npm run type-check
+npm run build
+```
+
+前端预览生产构建：
+
+```bash
+cd vue
+npm run preview
+```
+
+## 主要接口
+
+除登录、注册和注册邮箱验证码接口外，HTTP 接口默认需要在请求头携带 `token`。
+
+| 模块 | 路径 |
+| --- | --- |
+| 用户 | `POST /user/login`, `POST /user/register`, `POST /user/register/email-code`, `GET/PUT /user/info`, `PUT /user/password` |
+| 世界 | `/world/**` |
+| 角色 | `/character/**` |
+| 聊天 | `POST /ai/chat` |
+| 聊天历史 | `GET /history`, `POST /history/withdraw` |
+| 世界事件 | `/worldevent/story/**` |
+| 图片上传 | `POST /upload` |
+| WebSocket | `/ws/{sid}` |
+
+## 配置说明
+
+常用配置项如下，可直接修改 `application.yaml`，也可以用 Spring Boot 环境变量形式覆盖：
+
+```bash
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/postgres
+SPRING_DATASOURCE_USERNAME=<postgres-user>
+SPRING_DATASOURCE_PASSWORD=<postgres-password>
+
+SPRING_DATA_REDIS_HOST=localhost
+SPRING_DATA_REDIS_PORT=6379
+SPRING_DATA_REDIS_DATABASE=0
+
+SPRING_AI_DEEPSEEK_BASE_URL=https://api.deepseek.com
+SPRING_AI_DEEPSEEK_API_KEY=<deepseek-api-key>
+SPRING_AI_DEEPSEEK_CHAT_OPTIONS_MODEL=<deepseek-model>
+
+SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_MODEL=qwen3-embedding:latest
+
+GALCHAT_ALIOSS_ENDPOINT=https://oss-cn-beijing.aliyuncs.com
+GALCHAT_ALIOSS_BUCKET_NAME=<bucket-name>
+GALCHAT_ALIOSS_REGION=cn-beijing
+ALIYUN_OSS_ACCESS_KEY_ID=<access-key-id>
+ALIYUN_OSS_ACCESS_KEY_SECRET=<access-key-secret>
+```
+
+## 开发注意事项
+
+- `application.yaml` 当前偏向本地开发配置，生产环境请使用外部配置管理数据库密码、DeepSeek Key、OSS Key 和 JWT 相关密钥。
+- PostgreSQL 必须启用 `pgvector`，否则向量表和检索能力无法正常工作。
+- Redis 承担缓存、队列、延迟任务和分布式锁能力，开发与部署时需要保持可用。
+- Java 服务当前直接调用本机 `http://localhost:8081` 和 `http://localhost:8082`。如果 Python 服务部署在其他机器，需要同步调整 Java 侧配置或代码。
+- 前端开发环境依赖 Vite 代理；生产部署时需要让前端静态资源能够访问后端 API 与 WebSocket 地址。
+- 当前仓库没有提供 Dockerfile 或 docker-compose，部署流程以手动准备依赖、构建产物和启动服务为主。

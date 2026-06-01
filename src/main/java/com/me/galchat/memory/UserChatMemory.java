@@ -158,7 +158,26 @@ public class UserChatMemory implements ChatMemory {
         UserChatHistory userChatHistory = toVisibleUserChatHistory(conversationInfo, message);
         userChatHistoryMapper.insert(userChatHistory);
         initializeStepNoIfUserMessage(userChatHistory);
+        deleteOneWithdrawnPlaceholderIfUserMessage(conversationInfo, userChatHistory);
         return userChatHistory;
+    }
+
+    private void deleteOneWithdrawnPlaceholderIfUserMessage(ConversationInfo conversationInfo,
+                                                            UserChatHistory userChatHistory) {
+        if (!isUserHistory(userChatHistory)) {
+            return;
+        }
+
+        UserChatHistory withdrawnPlaceholder = userChatHistoryMapper.selectOne(new LambdaQueryWrapper<UserChatHistory>()
+                .select(UserChatHistory::getId)
+                .eq(UserChatHistory::getUserWorldId, conversationInfo.getUserWorldId())
+                .eq(UserChatHistory::getCharacterId, conversationInfo.getCharacterId())
+                .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE)
+                .orderByDesc(UserChatHistory::getId)
+                .last("limit 1"));
+        if (withdrawnPlaceholder != null && withdrawnPlaceholder.getId() != null) {
+            userChatHistoryMapper.deleteById(withdrawnPlaceholder.getId());
+        }
     }
 
     /**
@@ -252,8 +271,10 @@ public class UserChatMemory implements ChatMemory {
             saveThinkingIfPresent(userMessageId, stepNo, assistantMessage);
             saveToolCallsIfPresent(userMessageId, stepNo, assistantMessage);
 
-            if (StringUtils.hasText(message.getText())) {
-                userChatHistoryMapper.insert(toVisibleUserChatHistory(conversationInfo, userMessageId, stepNo, message));
+            String visibleContent = trimAssistantVisiblePrefix(userMessageId, message.getText());
+            if (StringUtils.hasText(visibleContent)) {
+                userChatHistoryMapper.insert(toVisibleUserChatHistory(conversationInfo, userMessageId, stepNo,
+                        message, visibleContent));
             }
         }
     }
@@ -272,6 +293,7 @@ public class UserChatMemory implements ChatMemory {
         }
 
         String reasoningContent = deepSeekAssistantMessage.getReasoningContent();
+        reasoningContent = trimAlreadySavedReasoning(userMessageId, reasoningContent);
         if (!StringUtils.hasText(reasoningContent)) {
             return;
         }
@@ -281,6 +303,68 @@ public class UserChatMemory implements ChatMemory {
                 .setStepNo(stepNo)
                 .setReasoningContent(reasoningContent);
         userChatThinkingHistoryMapper.insert(thinkingHistory);
+    }
+
+    /**
+     * 流式工具调用会先单独保存 tool_call 前的 reasoning，最后的聚合响应又会带上整轮 reasoning。
+     * 保存聚合响应时扣掉已落库的前缀，避免历史查询中重复展示同一段思考。
+     *
+     * @param userMessageId 用户消息 id
+     * @param reasoningContent 当前 assistant 消息携带的 reasoning_content
+     * @return 去掉已保存前缀后的新增 reasoning_content
+     */
+    private String trimAlreadySavedReasoning(Long userMessageId, String reasoningContent) {
+        if (!StringUtils.hasText(reasoningContent) || userMessageId == null || userChatThinkingHistoryMapper == null) {
+            return reasoningContent;
+        }
+
+        String savedReasoning = savedReasoningPrefix(userMessageId);
+        if (!StringUtils.hasText(savedReasoning) || !reasoningContent.startsWith(savedReasoning)) {
+            return reasoningContent;
+        }
+        return reasoningContent.substring(savedReasoning.length()).stripLeading();
+    }
+
+    /**
+     * 按保存顺序拼出当前用户消息下已落库的 reasoning 前缀。
+     *
+     * @param userMessageId 用户消息 id
+     * @return 已保存 reasoning_content 拼接结果
+     */
+    private String savedReasoningPrefix(Long userMessageId) {
+        List<UserChatThinkingHistory> thinkingHistories = userChatThinkingHistoryMapper.selectList(
+                new LambdaQueryWrapper<UserChatThinkingHistory>()
+                        .eq(UserChatThinkingHistory::getUserMessageId, userMessageId)
+                        .orderByAsc(UserChatThinkingHistory::getStepNo)
+                        .orderByAsc(UserChatThinkingHistory::getId));
+        StringBuilder builder = new StringBuilder();
+        for (UserChatThinkingHistory thinkingHistory : thinkingHistories) {
+            String content = thinkingHistory.getReasoningContent();
+            if (content != null) {
+                builder.append(content);
+            }
+        }
+        return builder.toString();
+    }
+
+    /**
+     * 模型偶尔会把已保存为 thinking 的前缀也混进最终 assistant 文本。
+     * 这些内容查询历史时会单独展示，所以可见回复入库前需要删掉同样的前缀。
+     *
+     * @param userMessageId 用户消息 id
+     * @param visibleContent assistant 可见文本
+     * @return 去掉已保存 reasoning 前缀后的可见文本
+     */
+    private String trimAssistantVisiblePrefix(Long userMessageId, String visibleContent) {
+        if (!StringUtils.hasText(visibleContent) || userMessageId == null || userChatThinkingHistoryMapper == null) {
+            return visibleContent;
+        }
+
+        String savedReasoning = savedReasoningPrefix(userMessageId);
+        if (!StringUtils.hasText(savedReasoning) || !visibleContent.startsWith(savedReasoning)) {
+            return visibleContent;
+        }
+        return visibleContent.substring(savedReasoning.length()).stripLeading();
     }
 
     /**
@@ -355,10 +439,25 @@ public class UserChatMemory implements ChatMemory {
      */
     private UserChatHistory toVisibleUserChatHistory(ConversationInfo conversationInfo, Long userMessageId,
                                                      Integer stepNo, Message message) {
+        return toVisibleUserChatHistory(conversationInfo, userMessageId, stepNo, message, message.getText());
+    }
+
+    /**
+     * 将一条 assistant 可见消息转换为 UserChatHistory，并使用指定 content 入库。
+     *
+     * @param conversationInfo 会话定位信息
+     * @param userMessageId 用户消息 id，可为 null
+     * @param stepNo assistant 输出步骤号，可为 null
+     * @param message 待转换消息
+     * @param content 入库文本
+     * @return 可插入 user_chat_history 的实体
+     */
+    private UserChatHistory toVisibleUserChatHistory(ConversationInfo conversationInfo, Long userMessageId,
+                                                     Integer stepNo, Message message, String content) {
         return new UserChatHistory()
                 .setUserWorldId(conversationInfo.getUserWorldId())
                 .setCharacterId(conversationInfo.getCharacterId())
-                .setContent(message.getText())
+                .setContent(content)
                 .setUserMessageId(userMessageId)
                 .setStepNo(stepNo)
                 .setType(message.getMessageType().getValue())

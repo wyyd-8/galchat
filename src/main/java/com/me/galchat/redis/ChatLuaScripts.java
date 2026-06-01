@@ -69,7 +69,6 @@ public class ChatLuaScripts {
             local lastAssistantKey = KEYS[3]
             local expectedRevision = tonumber(ARGV[1])
             local expectedLength = tonumber(ARGV[2])
-            local triggerType = ARGV[3]
             local current = redis.call('GET', typingKey)
             if not current then
                 return nil
@@ -84,7 +83,7 @@ public class ChatLuaScripts {
             local isTyping = tonumber(parts[1]) or 0
             local length = tonumber(parts[2]) or 0
             local revision = tonumber(parts[3]) or 0
-            if triggerType ~= 'bert' and isTyping ~= 0 then
+            if isTyping ~= 0 then
                 return nil
             end
             if length ~= expectedLength or revision ~= expectedRevision then

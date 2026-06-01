@@ -1,23 +1,62 @@
 package com.me.galchat.memory;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.domain.po.ConversationInfo;
 import com.me.galchat.domain.po.UserChatHistory;
+import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.mapper.UserChatThinkingHistoryMapper;
 import com.me.galchat.mapper.UserChatToolCallMapper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class UserChatMemoryTest {
+
+    @BeforeAll
+    static void initMybatisPlusTableInfo() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserChatHistory.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserChatThinkingHistory.class);
+    }
+
+    @Test
+    void saveUserMessageDeletesOneLatestWithdrawnPlaceholder() {
+        UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
+        doAnswer(invocation -> {
+            UserChatHistory history = invocation.getArgument(0);
+            history.setId(42L);
+            return 1;
+        }).when(historyMapper).insert(any(UserChatHistory.class));
+        when(historyMapper.selectOne(any())).thenReturn(new UserChatHistory()
+                .setId(21L)
+                .setType(ChatConstant.WITHDRAWN_TYPE));
+
+        UserChatMemory memory = UserChatMemory.builder(historyMapper).build();
+
+        memory.save(new ConversationInfo(1L, 2L, null), new UserMessage("新消息"));
+
+        verify(historyMapper).deleteById(21L);
+    }
 
     @Test
     void toPromptMessagesKeepsEmptyToolResultAfterToolCall() {
@@ -55,5 +94,68 @@ class UserChatMemoryTest {
         ToolResponseMessage toolResponseMessage = (ToolResponseMessage) messages.get(2);
         assertThat(toolResponseMessage.getResponses()).singleElement()
                 .satisfies(response -> assertThat(response.responseData()).isEqualTo(""));
+    }
+
+    @Test
+    void saveAssistantMessagesTrimsAlreadySavedReasoningPrefix() {
+        UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
+        UserChatThinkingHistoryMapper thinkingMapper = mock(UserChatThinkingHistoryMapper.class);
+        UserChatThinkingHistory savedThinking = new UserChatThinkingHistory()
+                .setId(10L)
+                .setUserMessageId(1L)
+                .setStepNo(1)
+                .setReasoningContent("先决定调用工具。");
+        when(thinkingMapper.selectOne(any())).thenReturn(savedThinking);
+        when(thinkingMapper.selectList(any())).thenReturn(List.of(savedThinking));
+
+        UserChatMemory memory = UserChatMemory.builder(historyMapper)
+                .thinkingHistoryMapper(thinkingMapper)
+                .build();
+
+        memory.saveAssistantMessages(new ConversationInfo(1L, 2L, null), 1L, List.of(
+                new DeepSeekAssistantMessage.Builder()
+                        .content("工具返回后继续回复。")
+                        .reasoningContent("先决定调用工具。工具成功后组织回复。")
+                        .build()));
+
+        var thinkingCaptor = forClass(UserChatThinkingHistory.class);
+        verify(thinkingMapper).insert(thinkingCaptor.capture());
+        assertThat(thinkingCaptor.getValue().getReasoningContent()).isEqualTo("工具成功后组织回复。");
+        assertThat(thinkingCaptor.getValue().getStepNo()).isEqualTo(2);
+    }
+
+    @Test
+    void saveAssistantMessagesTrimsReasoningPrefixFromVisibleAssistantContent() {
+        UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
+        UserChatThinkingHistoryMapper thinkingMapper = mock(UserChatThinkingHistoryMapper.class);
+        List<UserChatThinkingHistory> savedThinkingHistories = new ArrayList<>(List.of(new UserChatThinkingHistory()
+                .setId(10L)
+                .setUserMessageId(1L)
+                .setStepNo(1)
+                .setReasoningContent("先决定调用工具。")));
+        when(thinkingMapper.selectOne(any()))
+                .thenAnswer(invocation -> savedThinkingHistories.getLast());
+        when(thinkingMapper.selectList(any()))
+                .thenAnswer(invocation -> List.copyOf(savedThinkingHistories));
+        doAnswer(invocation -> {
+            UserChatThinkingHistory thinkingHistory = invocation.getArgument(0);
+            thinkingHistory.setId(11L);
+            savedThinkingHistories.add(thinkingHistory);
+            return 1;
+        }).when(thinkingMapper).insert(any(UserChatThinkingHistory.class));
+
+        UserChatMemory memory = UserChatMemory.builder(historyMapper)
+                .thinkingHistoryMapper(thinkingMapper)
+                .build();
+
+        memory.saveAssistantMessages(new ConversationInfo(1L, 2L, null), 1L, List.of(
+                new DeepSeekAssistantMessage.Builder()
+                        .content("先决定调用工具。工具成功后组织回复。（最终回复）")
+                        .reasoningContent("先决定调用工具。工具成功后组织回复。")
+                        .build()));
+
+        var historyCaptor = forClass(UserChatHistory.class);
+        verify(historyMapper).insert(historyCaptor.capture());
+        assertThat(historyCaptor.getValue().getContent()).isEqualTo("（最终回复）");
     }
 }

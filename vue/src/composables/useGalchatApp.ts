@@ -1,5 +1,5 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 import {
   api,
   clearSession,
@@ -184,6 +184,7 @@ export function useGalchatApp() {
   let ignoreNextInputTypingChange = false
   let messageInputComposing = false
   let typingSignalVersion = 0
+  let browserNotificationPermissionRequested = false
 
   const isLoggedIn = computed(() => Boolean(session.token))
   const hasSelectedWorld = computed(() => Boolean(selectedWorld.value))
@@ -336,19 +337,35 @@ export function useGalchatApp() {
     return 'user'
   }
 
+  function shouldReplaceAiPronouns() {
+    return Boolean(selectedWorldDetail.value?.addSpecialPrompt || selectedWorld.value?.addSpecialPrompt)
+  }
+
+  function replaceAiPronouns(content: string, role: UiMessage['role']) {
+    if (!shouldReplaceAiPronouns() || (role !== 'assistant' && role !== 'thinking')) {
+      return content
+    }
+
+    return content.replace(/[他她]/g, 'ta')
+  }
+
   function toUiMessage(history: ChatHistory): UiMessage {
     const role = messageRole(history)
+    const content = history.content || (role === 'tool' ? '调用了角色记忆与状态工具' : '')
     return {
       id: `history-${history.id || `${role}-${Math.random()}`}`,
       role,
-      content: history.content || (role === 'tool' ? '调用了角色记忆与状态工具' : ''),
+      content: replaceAiPronouns(content, role),
       time: formatTime(history.timestamp),
     }
   }
 
   function toSplitUiMessages(history: ChatHistory, idPrefix = 'history'): UiMessage[] {
     const role = messageRole(history)
-    const content = history.content || (role === 'tool' ? '调用了角色记忆与状态工具' : '')
+    const content = replaceAiPronouns(
+      history.content || (role === 'tool' ? '调用了角色记忆与状态工具' : ''),
+      role,
+    )
 
     return splitMessageContent(content).map((part, index) => ({
       id: `${idPrefix}-${history.id || Date.now()}-${index}`,
@@ -372,6 +389,68 @@ export function useGalchatApp() {
     }
 
     messageList.value.push(toUiMessage(history))
+  }
+
+  function notifyBrowserMessage(title: string, body: string, tag: string) {
+    if (!body || !('Notification' in window)) {
+      return
+    }
+
+    const showNotification = () => {
+      new window.Notification(title, {
+        body,
+        tag,
+      })
+    }
+
+    if (window.Notification.permission === 'granted') {
+      showNotification()
+      return
+    }
+
+    if (window.Notification.permission !== 'default' || browserNotificationPermissionRequested) {
+      return
+    }
+
+    browserNotificationPermissionRequested = true
+    void window.Notification.requestPermission()
+      .then((permission) => {
+        if (permission === 'granted') {
+          showNotification()
+        }
+      })
+      .catch(() => undefined)
+  }
+
+  function notifyPushedMessage(history: ChatHistory) {
+    const role = messageRole(history)
+    if (role !== 'assistant' && role !== 'story') {
+      return
+    }
+
+    const content = replaceAiPronouns((history.content || '').trim(), role)
+    if (!content) {
+      return
+    }
+
+    const characterName = characters.value.find(
+      (character) => character.characterId === history.characterId,
+    )?.characterName
+    const title = role === 'story'
+      ? `${selectedWorldName.value} 有新的事件消息`
+      : `${characterName || selectedCharacterName.value || '角色'} 发来消息`
+    const message = content.length > 90 ? `${content.slice(0, 90)}...` : content
+    const tag = `galchat-${history.userWorldId || selectedWorldId.value || 'world'}-${history.characterId || 'story'}`
+
+    ElNotification({
+      title,
+      message,
+      type: 'info',
+      position: 'top-right',
+      duration: 4500,
+      showClose: true,
+    })
+    notifyBrowserMessage(title, message, tag)
   }
 
   function buildSelectedChatPayload(message = ''): ChatMessagePayload | null {
@@ -1181,6 +1260,7 @@ export function useGalchatApp() {
         if (updatedTemplate) {
           fillCharacterTemplateForm(updatedTemplate)
         }
+        createCharacterTemplateDialogVisible.value = false
         ElMessage.success('角色模板已保存')
         return
       }
@@ -1567,6 +1647,7 @@ export function useGalchatApp() {
     if (!data || typeof data.type !== 'string' || typeof data.content !== 'string') {
       return
     }
+    notifyPushedMessage(data)
     if (!isSelectedChatHistory(data)) {
       return
     }
@@ -1729,7 +1810,7 @@ export function useGalchatApp() {
     }
 
     const appendThinking = (content?: string) => {
-      const value = content || '正在整理记忆'
+      const value = replaceAiPronouns(content || '正在整理记忆', 'thinking')
       const lastMessage = messageList.value[messageList.value.length - 1]
       if (lastMessage?.role === 'thinking') {
         lastMessage.content += value
@@ -1762,7 +1843,7 @@ export function useGalchatApp() {
       }
 
       if (chunk.type === 'reponse' || chunk.type === 'response') {
-        const content = chunk.content || ''
+        const content = replaceAiPronouns(chunk.content || '', 'assistant')
         ensureAssistantMessage().content += content
         hasAssistantContent ||= Boolean(content.trim())
         void scrollToBottom()
@@ -1783,7 +1864,7 @@ export function useGalchatApp() {
     const characterId = selectedCharacter.value?.characterId
     const isThinkingChat = Boolean(selectedWorldDetail.value?.thinkStatus)
 
-    if ((isThinkingChat && loading.sending) || !content || !worldId || !userWorldId || !characterId) {
+    if (loading.sending || !content || !worldId || !userWorldId || !characterId) {
       return
     }
 
@@ -1803,9 +1884,7 @@ export function useGalchatApp() {
     })
     ignoreNextInputTypingChange = true
     messageInput.value = ''
-    if (isThinkingChat) {
-      loading.sending = true
-    }
+    loading.sending = true
     await scrollToBottom()
 
     try {
@@ -1824,9 +1903,7 @@ export function useGalchatApp() {
       })
       ElMessage.error(error instanceof Error ? error.message : '发送失败')
     } finally {
-      if (isThinkingChat) {
-        loading.sending = false
-      }
+      loading.sending = false
       await scrollToBottom()
     }
   }

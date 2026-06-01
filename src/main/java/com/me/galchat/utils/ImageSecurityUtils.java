@@ -47,12 +47,12 @@ public final class ImageSecurityUtils {
         return extension;
     }
 
-    public static String normalizeOssImageUrl(String imageUrl) {
+    public static String normalizeLocalImageUrl(String imageUrl) {
         if (imageUrl == null || imageUrl.isBlank()) {
             return "";
         }
         String normalized = imageUrl.trim();
-        if (!ImageConstant.OSS_IMAGE_URL_PATTERN.matcher(normalized).matches()) {
+        if (!ImageConstant.LOCAL_IMAGE_URL_PATTERN.matcher(normalized).matches()) {
             throw new UserRequestException("图片地址必须来自指定上传路径");
         }
         return normalized;

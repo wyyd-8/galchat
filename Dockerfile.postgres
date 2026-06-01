@@ -1,0 +1,9 @@
+# syntax=docker/dockerfile:1
+
+FROM pgvector/pgvector:pg17
+
+ENV POSTGRES_USER=wyyd
+ENV POSTGRES_DB=postgres
+ENV POSTGRES_HOST_AUTH_METHOD=trust
+
+COPY src/test/java/com/me/galchat/init/console.sql /docker-entrypoint-initdb.d/01-console.sql

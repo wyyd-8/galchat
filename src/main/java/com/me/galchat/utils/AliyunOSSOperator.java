@@ -13,7 +13,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
-@Component
+// @Component
 @Slf4j
 public class AliyunOSSOperator {
 
@@ -26,7 +26,7 @@ public class AliyunOSSOperator {
     @Value("${aliyun.oss.region}")
     private String region;*/
 
-    @Autowired
+    // @Autowired
     private OSSProperties aliOssProperties;
 
     public String upload(byte[] content, String originalFilename) throws Exception {

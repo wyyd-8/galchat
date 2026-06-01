@@ -174,7 +174,7 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
     private WorldTemplate createWorldTemplate(Long userId, WorldArchiveDTO.WorldArchive archiveWorld) {
         WorldTemplate worldTemplate = new WorldTemplate()
                 .setName(archiveWorld.getName().trim())
-                .setImage(ImageSecurityUtils.normalizeOssImageUrl(archiveWorld.getImage()))
+                .setImage(ImageSecurityUtils.normalizeLocalImageUrl(archiveWorld.getImage()))
                 .setAuthor(archiveWorld.getAuthor())
                 .setAuthorId(userId)
                 .setBackground(archiveWorld.getBackground())

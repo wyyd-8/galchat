@@ -79,6 +79,42 @@ GalChat 是一个面向角色聊天与互动故事的全栈项目。后端基于
 
 ## 快速启动
 
+### Docker 单机部署
+
+当前分支提供一套单机 Docker 部署文件，包含前端 nginx、后端 Spring Boot、Python BERT、Python reranker、PostgreSQL/pgvector、Redis 和 Ollama。部署时只向宿主机暴露 `80` 端口，容器之间共享网络命名空间，因此现有 `application.yaml` 中的 `localhost` 配置可以保持不变。
+
+启动：
+
+```bash
+docker compose up -d --build
+```
+
+访问：
+
+```text
+http://localhost
+```
+
+停止：
+
+```bash
+docker compose down
+```
+
+如需同时清空 PostgreSQL、Redis 和 Ollama 数据卷：
+
+```bash
+docker compose down -v
+```
+
+说明：
+
+- PostgreSQL 首次创建数据卷时会执行 `src/test/java/com/me/galchat/init/console.sql`，并启用 `vector` 扩展。
+- Docker 部署不需要额外准备 `.env` 文件；数据库用户名、库名和无密码访问方式按当前 `application.yaml` 固化在 `Dockerfile.postgres` 中。
+- Ollama 容器启动后会尝试拉取 `qwen3-embedding:4b`。如果服务器无法访问模型源，可进入容器后手动准备该模型。
+- Python BERT 镜像会复制本地 `python/bert_model`。该目录当前在 `.gitignore` 中，如果换机器部署，需要先把模型目录放回同一路径。
+- 上传图片会保存到后端本地 `uploads/` 目录，接口返回 `/uploads/<文件名>`；Docker 部署时该目录挂载为 `uploads-data` 数据卷。
+
 ### 1. 初始化数据库
 
 创建 PostgreSQL 数据库后执行初始化脚本：
@@ -98,7 +134,7 @@ psql -h localhost -U <username> -d <database> -f src/test/java/com/me/galchat/in
 启动 Redis 后，准备默认 embedding 模型：
 
 ```bash
-ollama pull qwen3-embedding:latest
+ollama pull qwen3-embedding:4b
 ```
 
 当前向量配置固定为 1024 维。如果更换 embedding 模型，需要同步确认模型维度与 `VectorConfiguration` 中的 `dimensions(1024)` 保持一致。
@@ -242,7 +278,7 @@ SPRING_AI_DEEPSEEK_BASE_URL=https://api.deepseek.com
 SPRING_AI_DEEPSEEK_API_KEY=<deepseek-api-key>
 SPRING_AI_DEEPSEEK_CHAT_OPTIONS_MODEL=<deepseek-model>
 
-SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_MODEL=qwen3-embedding:latest
+SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_MODEL=qwen3-embedding:4b
 
 GALCHAT_ALIOSS_ENDPOINT=https://oss-cn-beijing.aliyuncs.com
 GALCHAT_ALIOSS_BUCKET_NAME=<bucket-name>
@@ -257,5 +293,5 @@ ALIYUN_OSS_ACCESS_KEY_SECRET=<access-key-secret>
 - PostgreSQL 必须启用 `pgvector`，否则向量表和检索能力无法正常工作。
 - Redis 承担缓存、队列、延迟任务和分布式锁能力，开发与部署时需要保持可用。
 - Java 服务当前直接调用本机 `http://localhost:8081` 和 `http://localhost:8082`。如果 Python 服务部署在其他机器，需要同步调整 Java 侧配置或代码。
-- 前端开发环境依赖 Vite 代理；生产部署时需要让前端静态资源能够访问后端 API 与 WebSocket 地址。
-- 当前仓库没有提供 Dockerfile 或 docker-compose，部署流程以手动准备依赖、构建产物和启动服务为主。
+- 前端开发环境依赖 Vite 代理；`/api`、`/ws` 和 `/uploads` 会代理到后端。
+- Docker 单机部署见“Docker 单机部署”章节；手动部署仍可按上面的本地启动步骤分别准备依赖、构建产物和启动服务。

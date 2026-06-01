@@ -94,7 +94,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
         if (!Objects.equals(worldTemplate.getAuthorId(), userId)) {
             throw new UserAuthException("无权新增该世界角色");
         }
-        String image = ImageSecurityUtils.normalizeOssImageUrl(characterTemplate.getImage());
+        String image = ImageSecurityUtils.normalizeLocalImageUrl(characterTemplate.getImage());
 
         CharacterTemplate newCharacterTemplate = new CharacterTemplate()
                 .setWorldId(worldId)
@@ -122,7 +122,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
             throw new UserAuthException("无权修改该世界角色");
         }
         CharacterTemplate oldCharacterTemplate = getCharacterTemplateByWorldId(worldId, id);
-        String image = characterTemplate.getImage() == null ? null : ImageSecurityUtils.normalizeOssImageUrl(characterTemplate.getImage());
+        String image = characterTemplate.getImage() == null ? null : ImageSecurityUtils.normalizeLocalImageUrl(characterTemplate.getImage());
 
         CharacterTemplate updateCharacterTemplate = new CharacterTemplate()
                 .setId(oldCharacterTemplate.getId())

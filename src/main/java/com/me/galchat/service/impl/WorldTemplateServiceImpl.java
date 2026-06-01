@@ -65,7 +65,7 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
         if (worldTemplate == null) {
             throw new UserRequestException("请求参数不能为空");
         }
-        String image = ImageSecurityUtils.normalizeOssImageUrl(worldTemplate.getImage());
+        String image = ImageSecurityUtils.normalizeLocalImageUrl(worldTemplate.getImage());
         WorldTemplate newWorldTemplate = new WorldTemplate()
                 .setName(worldTemplate.getName())
                 .setImage(image)
@@ -83,7 +83,7 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
             throw new UserRequestException("请求参数不能为空");
         }
         WorldTemplate oldWorldTemplate = getOwnWorldTemplate(userId, id);
-        String image = worldTemplate.getImage() == null ? null : ImageSecurityUtils.normalizeOssImageUrl(worldTemplate.getImage());
+        String image = worldTemplate.getImage() == null ? null : ImageSecurityUtils.normalizeLocalImageUrl(worldTemplate.getImage());
         WorldTemplate updateWorldTemplate = new WorldTemplate()
                 .setId(oldWorldTemplate.getId())
                 .setName(worldTemplate.getName())

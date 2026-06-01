@@ -42,8 +42,8 @@ public class UserInfoController {
 
     @PostMapping("/register/email-code")
     public Result sendRegisterEmailVerificationCode(@RequestBody UserAuthDTO userAuthDTO) {
-        userInfoService.sendRegisterEmailVerificationCode(userAuthDTO == null ? null : userAuthDTO.getEmail());
-        return Result.success();
+        return Result.success(userInfoService.sendRegisterEmailVerificationCode(
+                userAuthDTO == null ? null : userAuthDTO.getEmail()));
     }
 
     @GetMapping("/info")

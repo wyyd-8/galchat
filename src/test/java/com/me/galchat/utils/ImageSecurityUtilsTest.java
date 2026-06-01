@@ -49,18 +49,18 @@ class ImageSecurityUtilsTest {
     }
 
     @Test
-    void normalizeOssImageUrlOnlyAcceptsConfiguredPath() {
+    void normalizeLocalImageUrlOnlyAcceptsConfiguredPath() {
         assertEquals(
-                "https://galchat.oss-cn-beijing.aliyuncs.com/2026/05/550e8400-e29b-41d4-a716-446655440000.png",
-                ImageSecurityUtils.normalizeOssImageUrl(
-                        " https://galchat.oss-cn-beijing.aliyuncs.com/2026/05/550e8400-e29b-41d4-a716-446655440000.png "
+                "/uploads/550e8400-e29b-41d4-a716-446655440000.png",
+                ImageSecurityUtils.normalizeLocalImageUrl(
+                        " /uploads/550e8400-e29b-41d4-a716-446655440000.png "
                 )
         );
 
-        assertThrows(UserRequestException.class, () -> ImageSecurityUtils.normalizeOssImageUrl(
-                "https://galchat.oss-cn-beijing.aliyuncs.com/2026/06/550e8400-e29b-41d4-a716-446655440000.png"
+        assertThrows(UserRequestException.class, () -> ImageSecurityUtils.normalizeLocalImageUrl(
+                "/uploads/not-a-uuid.png"
         ));
-        assertThrows(UserRequestException.class, () -> ImageSecurityUtils.normalizeOssImageUrl(
+        assertThrows(UserRequestException.class, () -> ImageSecurityUtils.normalizeLocalImageUrl(
                 "https://example.com/2026/05/550e8400-e29b-41d4-a716-446655440000.png"
         ));
     }

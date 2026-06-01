@@ -22,7 +22,7 @@ public interface IUserInfoService extends IService<UserInfo> {
 
     UserTokenVO register(UserAuthDTO userAuthDTO);
 
-    void sendRegisterEmailVerificationCode(String email);
+    String sendRegisterEmailVerificationCode(String email);
 
     void sendPasswordEmailVerificationCode(Integer userId, String email);
 

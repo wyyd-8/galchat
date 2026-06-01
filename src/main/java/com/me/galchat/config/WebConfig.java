@@ -4,7 +4,13 @@ import com.me.galchat.interceptor.TokenInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.nio.file.Path;
+
+import static com.me.galchat.constant.ImageConstant.LOCAL_UPLOAD_DIR;
+import static com.me.galchat.constant.ImageConstant.LOCAL_UPLOAD_URL_PREFIX;
 
 /*
 同时有拦截器和过滤器时，会先执行过滤器，再执行拦截器
@@ -18,7 +24,15 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(tokenInterceptor)
                 .addPathPatterns("/**")//拦截所有请求
-                .excludePathPatterns("/user/login", "/user/register", "/user/register/email-code");//不拦截/login的请求(excludePathPatterns优先级更高)
+                .excludePathPatterns("/user/login", "/user/register", "/user/register/email-code",
+                        LOCAL_UPLOAD_URL_PREFIX + "**");//不拦截/login的请求(excludePathPatterns优先级更高)
+    }
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        String uploadLocation = Path.of(LOCAL_UPLOAD_DIR).toAbsolutePath().normalize().toUri().toString();
+        registry.addResourceHandler(LOCAL_UPLOAD_URL_PREFIX + "**")
+                .addResourceLocations(uploadLocation);
     }
 
 }

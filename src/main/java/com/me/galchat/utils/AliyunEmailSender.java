@@ -9,16 +9,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-@Component
+// @Component
 @Slf4j
 public class AliyunEmailSender {
 
     private final Client dmClient;
 
-    @Value("${galchat.aliemail.account-name}")
+    // @Value("${galchat.aliemail.account-name}")
     private String accountName;
 
-    @Value("${galchat.aliemail.reply-to-address:false}")
+    // @Value("${galchat.aliemail.reply-to-address:false}")
     private boolean replyToAddress;
 
     public AliyunEmailSender(Client dmClient) {

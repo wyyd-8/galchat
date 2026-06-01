@@ -34,3 +34,6 @@ build/
 
 ### 模型 ###
 /python/bert_model/
+
+### 本地上传 ###
+/uploads/

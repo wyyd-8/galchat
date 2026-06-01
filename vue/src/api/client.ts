@@ -165,7 +165,7 @@ export const api = {
     })
   },
   sendRegisterEmailCode(email: string) {
-    return request<void>('/user/register/email-code', {
+    return request<string>('/user/register/email-code', {
       method: 'POST',
       body: JSON.stringify({ email }),
     })

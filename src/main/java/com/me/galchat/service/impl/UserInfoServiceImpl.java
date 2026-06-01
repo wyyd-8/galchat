@@ -14,8 +14,9 @@ import com.me.galchat.service.IUserInfoService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.utils.JwtUtils;
-import com.me.galchat.utils.AliyunEmailSender;
+// import com.me.galchat.utils.AliyunEmailSender;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -39,12 +40,13 @@ import java.util.Map;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> implements IUserInfoService {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final StringRedisTemplate redisTemplate;
-    private final AliyunEmailSender emailSender;
+    // private final AliyunEmailSender emailSender;
 
     @Override
     public UserInfo getInfoById(Integer id) {
@@ -94,13 +96,10 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
     }
 
     @Override
-    public void sendRegisterEmailVerificationCode(String email) {
+    public String sendRegisterEmailVerificationCode(String email) {
         String normalizedEmail = normalizeEmail(email);
         if (!StringUtils.hasText(normalizedEmail)) {
             throw new UserRequestException("邮箱不能为空");
-        }
-        if (!normalizedEmail.matches("[0-9]{8}@bjtu.edu.cn")) {
-            throw new UserRequestException("测试阶段，请使用校园邮箱");
         }
 
         UserInfo existed = getByEmail(normalizedEmail);
@@ -120,13 +119,16 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
         String codeKey = buildEmailVerifyCodeKey(normalizedEmail, verificationCode);
         redisTemplate.opsForValue().set(codeKey, normalizedEmail, RedisConstant.EMAIL_VERIFY_CODE_TTL);
 
-        boolean sent = emailSender.sendSimpleMail(normalizedEmail, UserConstant.EMAIL_VERIFICATION_SUBJECT,
-                buildEmailVerificationContent(verificationCode));
+        log.info("阿里云邮件发送已停用，注册验证码: email={}, code={}", normalizedEmail, verificationCode);
+        // boolean sent = emailSender.sendSimpleMail(normalizedEmail, UserConstant.EMAIL_VERIFICATION_SUBJECT,
+        //         buildEmailVerificationContent(verificationCode));
+        boolean sent = true;
         if (!sent) {
             redisTemplate.delete(codeKey);
             redisTemplate.delete(cooldownKey);
             throw new UserRequestException("验证码邮件发送失败，请稍后重试");
         }
+        return verificationCode;
     }
 
     @Override
@@ -153,8 +155,10 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
         String codeKey = buildEmailVerifyCodeKey(normalizedEmail, verificationCode);
         redisTemplate.opsForValue().set(codeKey, normalizedEmail, RedisConstant.EMAIL_VERIFY_CODE_TTL);
 
-        boolean sent = emailSender.sendSimpleMail(normalizedEmail, UserConstant.EMAIL_VERIFICATION_SUBJECT,
-                buildEmailVerificationContent(verificationCode));
+        log.info("阿里云邮件发送已停用，密码验证码: email={}, code={}", normalizedEmail, verificationCode);
+        // boolean sent = emailSender.sendSimpleMail(normalizedEmail, UserConstant.EMAIL_VERIFICATION_SUBJECT,
+        //         buildEmailVerificationContent(verificationCode));
+        boolean sent = true;
         if (!sent) {
             redisTemplate.delete(codeKey);
             redisTemplate.delete(cooldownKey);

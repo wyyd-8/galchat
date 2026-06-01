@@ -8,8 +8,12 @@ public final class ImageConstant {
 
     public static final long MAX_IMAGE_SIZE = 4 * 1024 * 1024;
 
-    public static final Pattern OSS_IMAGE_URL_PATTERN = Pattern.compile(
-            "^https://galchat\\.oss-cn-beijing\\.aliyuncs\\.com/2026/05/[0-9a-fA-F-]+\\.(jpg|jpeg|png|gif|webp|bmp)$"
+    public static final String LOCAL_UPLOAD_DIR = "uploads";
+
+    public static final String LOCAL_UPLOAD_URL_PREFIX = "/uploads/";
+
+    public static final Pattern LOCAL_IMAGE_URL_PATTERN = Pattern.compile(
+            "^/uploads/[0-9a-fA-F-]+\\.(jpg|jpeg|png|gif|webp|bmp)$"
     );
 
     public static final Map<String, Set<String>> ALLOWED_CONTENT_TYPES = Map.of(

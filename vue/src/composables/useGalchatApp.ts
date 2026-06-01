@@ -542,9 +542,9 @@ export function useGalchatApp() {
 
     authCodeLoading.value = true
     try {
-      await api.sendRegisterEmailCode(authForm.email.trim())
+      authForm.verificationCode = await api.sendRegisterEmailCode(authForm.email.trim())
       startAuthCodeCooldown()
-      ElMessage.success('验证码已发送')
+      ElMessage.success('验证码已自动填写')
     } catch (error) {
       ElMessage.error(error instanceof Error ? error.message : '验证码发送失败')
     } finally {

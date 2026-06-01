@@ -1,0 +1,89 @@
+name: galchat
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    restart: unless-stopped
+
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    network_mode: service:web
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U wyyd -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    build:
+      context: .
+      dockerfile: Dockerfile.redis
+    network_mode: service:web
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ollama:
+    build:
+      context: .
+      dockerfile: Dockerfile.ollama
+    network_mode: service:web
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+
+  bert:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    command: ["uvicorn", "bert:app", "--host", "0.0.0.0", "--port", "8081"]
+    network_mode: service:web
+    restart: unless-stopped
+
+  reranker:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    command: ["uvicorn", "reranker_server:app", "--host", "0.0.0.0", "--port", "8082"]
+    network_mode: service:web
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    network_mode: service:web
+    volumes:
+      - uploads-data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      bert:
+        condition: service_started
+      reranker:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  ollama-data:
+  uploads-data:

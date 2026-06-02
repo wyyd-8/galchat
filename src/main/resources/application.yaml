@@ -8,7 +8,7 @@ spring:
   ai:
     deepseek:
       base-url: https://api.deepseek.com
-      api-key: sk-c267b8feed9b4b72ba27c64f4db855af
+      api-key:
       chat:
         options:
           model: deepseek-v4-flash
@@ -18,7 +18,7 @@ spring:
     ollama:
       embedding:
         options:
-          model: qwen3-embedding:latest
+          model: qwen3-embedding:4b
           dimensions: 1024
   cache:
     type: redis

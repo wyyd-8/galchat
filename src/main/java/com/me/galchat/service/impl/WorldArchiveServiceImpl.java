@@ -1,7 +1,6 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.dto.WorldArchiveDTO;
 import com.me.galchat.domain.dto.WorldArchiveImportResultDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
@@ -21,7 +20,6 @@ import java.util.Objects;
 
 import com.me.galchat.utils.ImageSecurityUtils;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -31,13 +29,11 @@ import org.springframework.util.StringUtils;
 public class WorldArchiveServiceImpl implements IWorldArchiveService {
 
     private static final int FORMAT_VERSION = 1;
-    private static final String DEFAULT_FAVOR_SYSTEM_STATUS = "NORMAL";
 
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IWorldTemplateService worldTemplateService;
     private final IWorldDetailService worldDetailService;
     private final ICharacterTemplateService characterTemplateService;
-    private final StringRedisTemplate redisTemplate;
 
     @Override
     public WorldArchiveDTO exportMyWorld(Long userId, Long userWorldId) {
@@ -50,7 +46,6 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
         return new WorldArchiveDTO()
                 .setFormatVersion(FORMAT_VERSION)
                 .setWorld(toArchiveWorld(worldTemplate))
-                .setUserWorld(toArchiveUserWorld(userWorld))
                 .setDetails(details.stream().map(this::toArchiveDetail).toList())
                 .setCharacters(characters.stream().map(this::toArchiveCharacter).toList());
     }
@@ -62,7 +57,6 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
 
         WorldArchiveDTO.WorldArchive archiveWorld = archive.getWorld();
         WorldTemplate worldTemplate = createWorldTemplate(userId, archiveWorld);
-        UserWorldPrefix userWorld = createUserWorld(userId, worldTemplate, archive.getUserWorld());
 
         List<WorldArchiveDTO.WorldDetailArchive> details = emptyIfNull(archive.getDetails());
         for (WorldArchiveDTO.WorldDetailArchive detail : details) {
@@ -85,9 +79,8 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
         }
 
         return new WorldArchiveImportResultDTO()
-                .setUserWorldId(userWorld.getId())
                 .setWorldId(worldTemplate.getId())
-                .setName(userWorld.getName())
+                .setName(worldTemplate.getName())
                 .setDetailCount(details.size())
                 .setCharacterCount(characters.size());
     }
@@ -107,16 +100,6 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
                 .setAuthor(worldTemplate.getAuthor())
                 .setBackground(worldTemplate.getBackground())
                 .setVisible(worldTemplate.getVisible());
-    }
-
-    private WorldArchiveDTO.UserWorldArchive toArchiveUserWorld(UserWorldPrefix userWorld) {
-        return new WorldArchiveDTO.UserWorldArchive()
-                .setName(userWorld.getName())
-                .setAcitvePushStatus(userWorld.getAcitvePushStatus())
-                .setFavorSystemStatus(userWorld.getFavorSystemStatus())
-                .setEotDetectionStatus(userWorld.getEotDetectionStatus())
-                .setThinkStatus(userWorld.getThinkStatus())
-                .setAddSpecialPrompt(userWorld.getAddSpecialPrompt());
     }
 
     private WorldArchiveDTO.WorldDetailArchive toArchiveDetail(WorldDetail detail) {
@@ -181,40 +164,6 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
                 .setVisible(!Boolean.FALSE.equals(archiveWorld.getVisible()));
         worldTemplateService.save(worldTemplate);
         return worldTemplate;
-    }
-
-    private UserWorldPrefix createUserWorld(Long userId, WorldTemplate worldTemplate,
-                                            WorldArchiveDTO.UserWorldArchive archiveUserWorld) {
-        UserWorldPrefix userWorld = new UserWorldPrefix()
-                .setUserId(userId)
-                .setWorldId(worldTemplate.getId())
-                .setName(importedUserWorldName(archiveUserWorld, worldTemplate))
-                .setImage(worldTemplate.getImage())
-                .setAcitvePushStatus(archiveUserWorld == null || !Boolean.FALSE.equals(archiveUserWorld.getAcitvePushStatus()))
-                .setFavorSystemStatus(importedFavorSystemStatus(archiveUserWorld))
-                .setEotDetectionStatus(archiveUserWorld != null && Boolean.TRUE.equals(archiveUserWorld.getEotDetectionStatus()))
-                .setThinkStatus(archiveUserWorld == null || !Boolean.FALSE.equals(archiveUserWorld.getThinkStatus()))
-                .setAddSpecialPrompt(archiveUserWorld != null && Boolean.TRUE.equals(archiveUserWorld.getAddSpecialPrompt()))
-                .setMyWorld(true);
-        userWorldPrefixService.save(userWorld);
-        redisTemplate.opsForHash().put(RedisConstant.WORLD_USER_AUTH_KEY,
-                String.valueOf(userWorld.getId()),
-                String.valueOf(userId));
-        return userWorld;
-    }
-
-    private String importedUserWorldName(WorldArchiveDTO.UserWorldArchive archiveUserWorld, WorldTemplate worldTemplate) {
-        if (archiveUserWorld != null && StringUtils.hasText(archiveUserWorld.getName())) {
-            return archiveUserWorld.getName().trim();
-        }
-        return worldTemplate.getName();
-    }
-
-    private String importedFavorSystemStatus(WorldArchiveDTO.UserWorldArchive archiveUserWorld) {
-        if (archiveUserWorld != null && StringUtils.hasText(archiveUserWorld.getFavorSystemStatus())) {
-            return archiveUserWorld.getFavorSystemStatus();
-        }
-        return DEFAULT_FAVOR_SYSTEM_STATUS;
     }
 
     private <T> List<T> emptyIfNull(List<T> values) {

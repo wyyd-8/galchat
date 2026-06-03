@@ -348,23 +348,50 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 模型偶尔会把已保存为 thinking 的前缀也混进最终 assistant 文本。
-     * 这些内容查询历史时会单独展示，所以可见回复入库前需要删掉同样的前缀。
+     * 流式工具调用会先单独保存 assistant 可见内容，最后的聚合响应又会带上整轮 assistant 可见内容。
+     * 保存聚合响应时扣掉已落库的前缀，避免历史查询中重复展示同一段回复。
      *
      * @param userMessageId 用户消息 id
      * @param visibleContent assistant 可见文本
-     * @return 去掉已保存 reasoning 前缀后的可见文本
+     * @return 去掉已保存 assistant 可见前缀后的新增可见文本
      */
     private String trimAssistantVisiblePrefix(Long userMessageId, String visibleContent) {
-        if (!StringUtils.hasText(visibleContent) || userMessageId == null || userChatThinkingHistoryMapper == null) {
+        if (!StringUtils.hasText(visibleContent) || userMessageId == null) {
             return visibleContent;
         }
 
-        String savedReasoning = savedReasoningPrefix(userMessageId);
-        if (!StringUtils.hasText(savedReasoning) || !visibleContent.startsWith(savedReasoning)) {
+        String savedVisibleContent = savedAssistantVisiblePrefix(userMessageId);
+        if (!StringUtils.hasText(savedVisibleContent) || !visibleContent.startsWith(savedVisibleContent)) {
             return visibleContent;
         }
-        return visibleContent.substring(savedReasoning.length()).stripLeading();
+        return visibleContent.substring(savedVisibleContent.length()).stripLeading();
+    }
+
+    /**
+     * 按保存顺序拼出当前用户消息下已落库的 assistant 可见内容前缀。
+     *
+     * @param userMessageId 用户消息 id
+     * @return 已保存 assistant 可见内容拼接结果
+     */
+    private String savedAssistantVisiblePrefix(Long userMessageId) {
+        List<UserChatHistory> assistantHistories = userChatHistoryMapper.selectList(
+                new LambdaQueryWrapper<UserChatHistory>()
+                        .eq(UserChatHistory::getUserMessageId, userMessageId)
+                        .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                        .orderByAsc(UserChatHistory::getStepNo)
+                        .orderByAsc(UserChatHistory::getId));
+        if (assistantHistories == null || assistantHistories.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (UserChatHistory assistantHistory : assistantHistories) {
+            String content = assistantHistory.getContent();
+            if (content != null) {
+                builder.append(content);
+            }
+        }
+        return builder.toString();
     }
 
     /**

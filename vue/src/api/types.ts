@@ -35,11 +35,23 @@ export interface UserWorld {
   name: string
   image?: string
   acitvePushStatus?: boolean
+  dailyCompanionMode?: boolean
   favorSystemStatus?: string
   eotDetectionStatus?: boolean
   thinkStatus?: boolean
   addSpecialPrompt?: boolean
   myWorld?: boolean
+}
+
+export interface UserWorldSave {
+  userWorldId: number
+  savedAt?: string
+  remark?: string
+  characterFavors?: Array<{
+    characterId: number
+    characterName: string
+    favorValue?: number
+  }>
 }
 
 export interface UserCharacter {
@@ -80,14 +92,6 @@ export interface WorldArchive {
     background: string
     visible?: boolean
   }
-  userWorld?: {
-    name?: string
-    acitvePushStatus?: boolean
-    favorSystemStatus?: string
-    eotDetectionStatus?: boolean
-    thinkStatus?: boolean
-    addSpecialPrompt?: boolean
-  }
   details?: Array<{
     about?: string
     details?: string
@@ -103,7 +107,6 @@ export interface WorldArchive {
 }
 
 export interface WorldArchiveImportResult {
-  userWorldId: number
   worldId: number
   name: string
   detailCount: number

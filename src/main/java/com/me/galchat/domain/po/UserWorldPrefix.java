@@ -38,6 +38,8 @@ public class UserWorldPrefix implements Serializable {
 
     private Boolean acitvePushStatus;
 
+    private Boolean dailyCompanionMode;
+
     private String favorSystemStatus;
 
     private Boolean eotDetectionStatus;

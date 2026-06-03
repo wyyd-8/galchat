@@ -7,8 +7,6 @@ import lombok.experimental.Accessors;
 @Accessors(chain = true)
 public class WorldArchiveImportResultDTO {
 
-    private Long userWorldId;
-
     private Long worldId;
 
     private String name;

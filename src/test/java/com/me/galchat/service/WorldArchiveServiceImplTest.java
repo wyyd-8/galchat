@@ -1,7 +1,6 @@
 package com.me.galchat.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
-import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.dto.WorldArchiveDTO;
 import com.me.galchat.domain.dto.WorldArchiveImportResultDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
@@ -13,13 +12,12 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.redis.core.HashOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,13 +30,14 @@ class WorldArchiveServiceImplTest {
         IWorldDetailService worldDetailService = mock(IWorldDetailService.class);
         ICharacterTemplateService characterTemplateService = mock(ICharacterTemplateService.class);
         WorldArchiveServiceImpl archiveService = new WorldArchiveServiceImpl(userWorldPrefixService,
-                worldTemplateService, worldDetailService, characterTemplateService, mock(StringRedisTemplate.class));
+                worldTemplateService, worldDetailService, characterTemplateService);
 
         UserWorldPrefix userWorld = new UserWorldPrefix()
                 .setId(10L)
                 .setWorldId(20L)
                 .setName("我的世界")
                 .setAcitvePushStatus(true)
+                .setDailyCompanionMode(false)
                 .setFavorSystemStatus("NORMAL")
                 .setEotDetectionStatus(false)
                 .setThinkStatus(true)
@@ -77,7 +76,6 @@ class WorldArchiveServiceImplTest {
         assertThat(archive.getFormatVersion()).isEqualTo(1);
         assertThat(archive.getWorld().getName()).isEqualTo("世界");
         assertThat(archive.getWorld().getVisible()).isFalse();
-        assertThat(archive.getUserWorld().getName()).isEqualTo("我的世界");
         assertThat(archive.getDetails()).singleElement()
                 .satisfies(item -> assertThat(item.getDetails()).isEqualTo("详情"));
         assertThat(archive.getCharacters()).singleElement()
@@ -88,26 +86,17 @@ class WorldArchiveServiceImplTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void importWorldCreatesOwnedWorldAndRestoresDetailsAndCharacters() {
+    void importWorldCreatesTemplateOnlyAndRestoresDetailsAndCharacters() {
         IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
         IWorldTemplateService worldTemplateService = mock(IWorldTemplateService.class);
         IWorldDetailService worldDetailService = mock(IWorldDetailService.class);
         ICharacterTemplateService characterTemplateService = mock(ICharacterTemplateService.class);
-        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        HashOperations<String, Object, Object> hashOperations = mock(HashOperations.class);
         WorldArchiveServiceImpl archiveService = new WorldArchiveServiceImpl(userWorldPrefixService,
-                worldTemplateService, worldDetailService, characterTemplateService, redisTemplate);
+                worldTemplateService, worldDetailService, characterTemplateService);
 
-        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
         when(worldTemplateService.save(any(WorldTemplate.class))).thenAnswer(invocation -> {
             WorldTemplate worldTemplate = invocation.getArgument(0);
             worldTemplate.setId(200L);
-            return true;
-        });
-        when(userWorldPrefixService.save(any(UserWorldPrefix.class))).thenAnswer(invocation -> {
-            UserWorldPrefix userWorld = invocation.getArgument(0);
-            userWorld.setId(300L);
             return true;
         });
 
@@ -119,13 +108,6 @@ class WorldArchiveServiceImplTest {
                         .setAuthor("作者")
                         .setBackground("背景")
                         .setVisible(false))
-                .setUserWorld(new WorldArchiveDTO.UserWorldArchive()
-                        .setName(" 当前世界 ")
-                        .setAcitvePushStatus(false)
-                        .setFavorSystemStatus("SILENT")
-                        .setEotDetectionStatus(true)
-                        .setThinkStatus(false)
-                        .setAddSpecialPrompt(true))
                 .setDetails(List.of(new WorldArchiveDTO.WorldDetailArchive()
                         .setAbout("地点")
                         .setDetails("详情")))
@@ -140,23 +122,19 @@ class WorldArchiveServiceImplTest {
         WorldArchiveImportResultDTO result = archiveService.importWorld(1L, archive);
 
         ArgumentCaptor<WorldTemplate> worldCaptor = ArgumentCaptor.forClass(WorldTemplate.class);
-        ArgumentCaptor<UserWorldPrefix> userWorldCaptor = ArgumentCaptor.forClass(UserWorldPrefix.class);
         ArgumentCaptor<CharacterTemplate> characterCaptor = ArgumentCaptor.forClass(CharacterTemplate.class);
 
         verify(worldTemplateService).save(worldCaptor.capture());
-        verify(userWorldPrefixService).save(userWorldCaptor.capture());
+        verify(userWorldPrefixService, never()).save(any(UserWorldPrefix.class));
         verify(worldDetailService).createWorldDetail(eq(1L), eq(200L), any(WorldDetail.class));
         verify(characterTemplateService).createCharacterTemplate(eq(1L), eq(200L), characterCaptor.capture());
-        verify(hashOperations).put(RedisConstant.WORLD_USER_AUTH_KEY, "300", "1");
 
         assertThat(worldCaptor.getValue().getName()).isEqualTo("世界");
         assertThat(worldCaptor.getValue().getAuthorId()).isEqualTo(1L);
         assertThat(worldCaptor.getValue().getVisible()).isFalse();
-        assertThat(userWorldCaptor.getValue().getName()).isEqualTo("当前世界");
-        assertThat(userWorldCaptor.getValue().getMyWorld()).isTrue();
         assertThat(characterCaptor.getValue().getName()).isEqualTo("角色");
-        assertThat(result.getUserWorldId()).isEqualTo(300L);
         assertThat(result.getWorldId()).isEqualTo(200L);
+        assertThat(result.getName()).isEqualTo("世界");
         assertThat(result.getDetailCount()).isEqualTo(1);
         assertThat(result.getCharacterCount()).isEqualTo(1);
     }

@@ -64,6 +64,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setName(StringUtils.hasText(userWorldPrefix.getName()) ? userWorldPrefix.getName() : template.getName())
                 .setImage(template.getImage())
                 .setAcitvePushStatus(userWorldPrefix.getAcitvePushStatus())
+                .setDailyCompanionMode(Boolean.TRUE.equals(userWorldPrefix.getDailyCompanionMode()))
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
                 .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
                 .setThinkStatus(userWorldPrefix.getThinkStatus())

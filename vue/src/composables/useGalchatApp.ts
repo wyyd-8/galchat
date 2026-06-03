@@ -19,6 +19,7 @@ import type {
   StoryListItem,
   UserCharacter,
   UserWorld,
+  UserWorldSave,
   WorldArchive,
   WorldDetail,
   WorldTemplate,
@@ -71,6 +72,7 @@ export function useGalchatApp() {
     history: false,
     sending: false,
     withdrawing: false,
+    worldSave: false,
   })
 
   const worldTemplates = ref<WorldTemplate[]>([])
@@ -81,6 +83,8 @@ export function useGalchatApp() {
   const selectedCharacter = ref<UserCharacter | null>(null)
   const stories = ref<StoryListItem[]>([])
   const activeStory = ref<ActiveStory | null>(null)
+  const worldSave = ref<UserWorldSave | null>(null)
+  const worldSaveActionLoading = ref(false)
   const storyDetailDialogVisible = ref(false)
   const storyDetailLoading = ref(false)
   const selectedStoryDetail = ref<StoryDetail | null>(null)
@@ -92,6 +96,7 @@ export function useGalchatApp() {
     worldId: undefined as number | undefined,
     name: '',
     acitvePushStatus: true,
+    dailyCompanionMode: true,
     favorSystemStatus: 'NORMAL',
     eotDetectionStatus: true,
     thinkStatus: true,
@@ -798,6 +803,7 @@ export function useGalchatApp() {
         api.getUserWorld(world.id),
         loadCharacters(world.id),
         loadWorldEvents(world.id),
+        loadWorldSave(world.id),
       ])
       selectedWorldDetail.value = detail
     }, '加载世界失败')
@@ -856,6 +862,59 @@ export function useGalchatApp() {
     }
   }
 
+  async function loadWorldSave(userWorldId: number) {
+    loading.worldSave = true
+    try {
+      worldSave.value = await api.getWorldSave(userWorldId)
+    } finally {
+      loading.worldSave = false
+    }
+  }
+
+  async function submitWorldSave(remark: string, done?: (success: boolean) => void) {
+    const userWorldId = selectedWorldId.value
+    if (!userWorldId) {
+      done?.(false)
+      return
+    }
+
+    worldSaveActionLoading.value = true
+    try {
+      worldSave.value = await api.saveWorld(userWorldId, remark.trim())
+      ElMessage.success('存档已保存')
+      done?.(true)
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '存档失败')
+      done?.(false)
+    } finally {
+      worldSaveActionLoading.value = false
+    }
+  }
+
+  async function submitWorldLoad(done?: (success: boolean) => void) {
+    const userWorldId = selectedWorldId.value
+    if (!userWorldId || !worldSave.value) {
+      done?.(false)
+      return
+    }
+
+    worldSaveActionLoading.value = true
+    try {
+      await api.loadWorldSave(userWorldId)
+      ElMessage.success('读档完成')
+      await Promise.all([loadCharacters(userWorldId), loadWorldEvents(userWorldId)])
+      if (selectedCharacter.value) {
+        await loadHistory()
+      }
+      done?.(true)
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '读档失败')
+      done?.(false)
+    } finally {
+      worldSaveActionLoading.value = false
+    }
+  }
+
   async function openStoryDetail(storyEventId: number) {
     storyDetailDialogVisible.value = true
     storyDetailLoading.value = true
@@ -898,6 +957,7 @@ export function useGalchatApp() {
     createWorldForm.worldId = template?.id
     createWorldForm.name = template?.name || ''
     createWorldForm.acitvePushStatus = true
+    createWorldForm.dailyCompanionMode = true
     createWorldForm.favorSystemStatus = 'NORMAL'
     createWorldForm.thinkStatus = true
     createWorldForm.addSpecialPrompt = false
@@ -1423,10 +1483,10 @@ export function useGalchatApp() {
     try {
       const archive = JSON.parse(await file.text()) as WorldArchive
       const result = await api.importWorldArchive(archive)
-      await loadWorlds()
-      ElMessage.success(`世界「${result.name}」已导入`)
+      await loadWorldTemplates()
+      ElMessage.success(`世界模板「${result.name}」已导入`)
     } catch (error) {
-      ElMessage.error(error instanceof SyntaxError ? '导入文件不是有效的 JSON' : error instanceof Error ? error.message : '导入世界失败')
+      ElMessage.error(error instanceof SyntaxError ? '导入文件不是有效的 JSON' : error instanceof Error ? error.message : '导入世界模板失败')
     } finally {
       worldImporting.value = false
     }
@@ -1558,6 +1618,7 @@ export function useGalchatApp() {
         worldId: createWorldForm.worldId as number,
         name: createWorldForm.name.trim(),
         acitvePushStatus: createWorldForm.acitvePushStatus,
+        dailyCompanionMode: createWorldForm.dailyCompanionMode,
         favorSystemStatus: createWorldForm.favorSystemStatus,
         eotDetectionStatus: thinkStatus ? false : createWorldForm.eotDetectionStatus,
         thinkStatus,
@@ -1993,6 +2054,7 @@ export function useGalchatApp() {
     characters.value = []
     stories.value = []
     activeStory.value = null
+    worldSave.value = null
     messageList.value = []
     sidebarMode.value = 'worlds'
   }
@@ -2083,6 +2145,8 @@ export function useGalchatApp() {
     selectedCharacter,
     stories,
     activeStory,
+    worldSave,
+    worldSaveActionLoading,
     storyDetailDialogVisible,
     storyDetailLoading,
     selectedStoryDetail,
@@ -2173,6 +2237,8 @@ export function useGalchatApp() {
     refreshWorkspace,
     selectWorld,
     openWorldOverview,
+    submitWorldSave,
+    submitWorldLoad,
     openStoryDetail,
     selectCharacter,
     openCreateWorld,

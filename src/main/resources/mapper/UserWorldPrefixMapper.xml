@@ -15,6 +15,7 @@
                name,
                image,
                acitve_push_status,
+               daily_companion_mode,
                favor_system_status,
                eot_detection_status,
                think_status,

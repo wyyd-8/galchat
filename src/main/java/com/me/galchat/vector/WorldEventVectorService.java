@@ -44,6 +44,7 @@ public class WorldEventVectorService {
 
         Map<String, Object> metadata = new HashMap<>();
         metadata.put(VectorConstant.USER_WORLD_ID_METADATA_KEY, worldEventLog.getUserWorldId());
+        metadata.put(VectorConstant.WORLD_EVENT_LOG_ID_METADATA_KEY, worldEventLog.getId());
         metadata.put(VectorConstant.VISIBLE_CHARACTERS_METADATA_KEY, Arrays.asList(worldEventLog.getVisibleCharacters()));
         if (StringUtils.hasText(worldEventLog.getTitle())) {
             metadata.put(VectorConstant.TITLE_METADATA_KEY, worldEventLog.getTitle());

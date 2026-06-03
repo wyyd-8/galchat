@@ -9,7 +9,7 @@ public final class ImageConstant {
     public static final long MAX_IMAGE_SIZE = 4 * 1024 * 1024;
 
     public static final Pattern OSS_IMAGE_URL_PATTERN = Pattern.compile(
-            "^https://galchat\\.oss-cn-beijing\\.aliyuncs\\.com/2026/05/[0-9a-fA-F-]+\\.(jpg|jpeg|png|gif|webp|bmp)$"
+            "^https://galchat\\.oss-cn-beijing\\.aliyuncs\\.com/[0-9]{4}/[0-9]{2}/[0-9a-fA-F-]+\\.(jpg|jpeg|png|gif|webp|bmp)$"
     );
 
     public static final Map<String, Set<String>> ALLOWED_CONTENT_TYPES = Map.of(

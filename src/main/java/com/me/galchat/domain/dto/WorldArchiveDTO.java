@@ -13,8 +13,6 @@ public class WorldArchiveDTO {
 
     private WorldArchive world;
 
-    private UserWorldArchive userWorld;
-
     private List<WorldDetailArchive> details;
 
     private List<CharacterArchive> characters;
@@ -27,17 +25,6 @@ public class WorldArchiveDTO {
         private String author;
         private String background;
         private Boolean visible;
-    }
-
-    @Data
-    @Accessors(chain = true)
-    public static class UserWorldArchive {
-        private String name;
-        private Boolean acitvePushStatus;
-        private String favorSystemStatus;
-        private Boolean eotDetectionStatus;
-        private Boolean thinkStatus;
-        private Boolean addSpecialPrompt;
     }
 
     @Data

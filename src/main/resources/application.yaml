@@ -8,10 +8,10 @@ spring:
   ai:
     deepseek:
       base-url: https://api.deepseek.com
-      api-key:
+      api-key: sk-c267b8feed9b4b72ba27c64f4db855af
       chat:
         options:
-          model: deepseek-v4-flash
+          model: deepseek-v4-pro
           temperature: 1.0
     model:
       embedding: ollama

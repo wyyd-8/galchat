@@ -68,6 +68,8 @@ public class ChatHistoryVectorService {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put(VectorConstant.USER_WORLD_ID_METADATA_KEY, userWorldId);
         metadata.put(VectorConstant.CHARACTER_ID_METADATA_KEY, characterId);
+        metadata.put(VectorConstant.START_MESSAGE_ID_METADATA_KEY, start);
+        metadata.put(VectorConstant.END_MESSAGE_ID_METADATA_KEY, end);
         if (histories.getFirst().getTimestamp() != null) {
             metadata.put(VectorConstant.TIMESTAMP_METADATA_KEY,
                     histories.getFirst().getTimestamp().format(DateTimeConstant.DATE_TIME_FORMATTER));

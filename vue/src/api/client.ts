@@ -14,6 +14,7 @@ import type {
   UserInfo,
   UserToken,
   UserWorld,
+  UserWorldSave,
   WorldArchive,
   WorldArchiveImportResult,
   WorldDetail,
@@ -260,6 +261,20 @@ export const api = {
   deleteUserWorld(id: number) {
     return request<void>(`/world/${id}`, {
       method: 'DELETE',
+    })
+  },
+  getWorldSave(userWorldId: number) {
+    return request<UserWorldSave | null>(`/world-saves/${userWorldId}`)
+  },
+  saveWorld(userWorldId: number, remark: string) {
+    return request<UserWorldSave>(`/world-saves/${userWorldId}`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    })
+  },
+  loadWorldSave(userWorldId: number) {
+    return request<void>(`/world-saves/${userWorldId}/load`, {
+      method: 'POST',
     })
   },
   listCharacters(userWorldId: number) {

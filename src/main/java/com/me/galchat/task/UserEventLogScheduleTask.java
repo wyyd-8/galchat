@@ -66,7 +66,7 @@ public class UserEventLogScheduleTask {
     public void scheduleDailyUserEventCare() {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime dayBegin = LocalDateTime.of(now.toLocalDate(), LocalTime.MIN);
-        LocalDateTime nextDayBegin = LocalDateTime.now();
+        LocalDateTime nextDayBegin = LocalDateTime.of(now.toLocalDate(), LocalTime.MAX);
         List<UserEventLog> eventLogs = userEventLogService.listUpcomingUserEventLogs(dayBegin, nextDayBegin);
         Map<EventTaskKey, List<Long>> eventIdsByTask = eventLogs.stream()
                 .collect(Collectors.groupingBy(this::eventTaskKey,

@@ -205,10 +205,19 @@ public class ChatServiceImpl implements IChatService {
 
     private String buildSystemPrompt(Long worldId, Long userWorldId, Long characterId) {
         StringBuilder prompt = new StringBuilder();
-        appendPrompt(prompt, ChatConstant.CHAT_SYSTEM_INSTRUCTIONS);
+        appendPrompt(prompt, ChatConstant.CHAT_SYSTEM_INSTRUCTIONS_TEMPLATE
+                .formatted(buildInteractionRequirements(userWorldId)));
         appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(worldId));
         appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(userWorldId, characterId));
         return prompt.toString();
+    }
+
+    private String buildInteractionRequirements(Long userWorldId) {
+        UserWorldPrefix userWorld = userWorldPrefixService.getById(userWorldId);
+        if (userWorld != null && Boolean.FALSE.equals(userWorld.getDailyCompanionMode())) {
+            return ChatConstant.IMMERSIVE_ROLE_INTERACTION_REQUIREMENTS;
+        }
+        return ChatConstant.DAILY_COMPANION_INTERACTION_REQUIREMENTS;
     }
 
     private void appendPrompt(StringBuilder prompt, String content) {

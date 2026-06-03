@@ -54,6 +54,7 @@ CREATE TABLE user_world_prefix (
     name VARCHAR(255),
     image VARCHAR(255),
     acitve_push_status BOOLEAN DEFAULT FALSE,
+    daily_companion_mode BOOLEAN DEFAULT FALSE,
     favor_system_status VARCHAR(50) DEFAULT 'EASY',
     eot_detection_status BOOLEAN DEFAULT FALSE,
     think_status BOOLEAN DEFAULT FALSE,
@@ -190,3 +191,18 @@ CREATE INDEX idx_user_event_log_world_time
 
 CREATE INDEX idx_user_event_log_time_world_character
     ON user_event_log (time, user_world_id, character_id, id);
+
+CREATE TABLE user_world_save (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    user_world_id BIGINT NOT NULL,
+    remark TEXT,
+    saved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    format_version INT NOT NULL DEFAULT 1,
+    character_favors JSONB NOT NULL DEFAULT '[]',
+    snapshot JSONB NOT NULL,
+    UNIQUE (user_id, user_world_id)
+);
+
+CREATE INDEX idx_user_world_save_world
+    ON user_world_save (user_world_id);

@@ -105,6 +105,7 @@ class UserChatMemoryTest {
                 .setUserMessageId(1L)
                 .setStepNo(1)
                 .setReasoningContent("先决定调用工具。");
+        when(historyMapper.selectList(any())).thenReturn(List.of());
         when(thinkingMapper.selectOne(any())).thenReturn(savedThinking);
         when(thinkingMapper.selectList(any())).thenReturn(List.of(savedThinking));
 
@@ -125,37 +126,32 @@ class UserChatMemoryTest {
     }
 
     @Test
-    void saveAssistantMessagesTrimsReasoningPrefixFromVisibleAssistantContent() {
+    void saveAssistantMessagesTrimsAlreadySavedVisibleAssistantPrefix() {
         UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
-        UserChatThinkingHistoryMapper thinkingMapper = mock(UserChatThinkingHistoryMapper.class);
-        List<UserChatThinkingHistory> savedThinkingHistories = new ArrayList<>(List.of(new UserChatThinkingHistory()
+        List<UserChatHistory> savedAssistantHistories = new ArrayList<>(List.of(new UserChatHistory()
                 .setId(10L)
                 .setUserMessageId(1L)
                 .setStepNo(1)
-                .setReasoningContent("先决定调用工具。")));
-        when(thinkingMapper.selectOne(any()))
-                .thenAnswer(invocation -> savedThinkingHistories.getLast());
-        when(thinkingMapper.selectList(any()))
-                .thenAnswer(invocation -> List.copyOf(savedThinkingHistories));
+                .setType(MessageType.ASSISTANT.getValue())
+                .setContent("工具调用前说一句。")));
+        when(historyMapper.selectList(any()))
+                .thenAnswer(invocation -> List.copyOf(savedAssistantHistories));
         doAnswer(invocation -> {
-            UserChatThinkingHistory thinkingHistory = invocation.getArgument(0);
-            thinkingHistory.setId(11L);
-            savedThinkingHistories.add(thinkingHistory);
+            UserChatHistory history = invocation.getArgument(0);
+            history.setId(11L);
+            savedAssistantHistories.add(history);
             return 1;
-        }).when(thinkingMapper).insert(any(UserChatThinkingHistory.class));
+        }).when(historyMapper).insert(any(UserChatHistory.class));
 
-        UserChatMemory memory = UserChatMemory.builder(historyMapper)
-                .thinkingHistoryMapper(thinkingMapper)
-                .build();
+        UserChatMemory memory = UserChatMemory.builder(historyMapper).build();
 
         memory.saveAssistantMessages(new ConversationInfo(1L, 2L, null), 1L, List.of(
-                new DeepSeekAssistantMessage.Builder()
-                        .content("先决定调用工具。工具成功后组织回复。（最终回复）")
-                        .reasoningContent("先决定调用工具。工具成功后组织回复。")
+                AssistantMessage.builder()
+                        .content("工具调用前说一句。工具返回后继续回复。")
                         .build()));
 
         var historyCaptor = forClass(UserChatHistory.class);
         verify(historyMapper).insert(historyCaptor.capture());
-        assertThat(historyCaptor.getValue().getContent()).isEqualTo("（最终回复）");
+        assertThat(historyCaptor.getValue().getContent()).isEqualTo("工具返回后继续回复。");
     }
 }

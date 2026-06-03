@@ -9,10 +9,33 @@
         )::jsonb
     </delete>
 
+    <delete id="deleteChatHistoryByConversationAfterEnd">
+        DELETE FROM public.chat_history_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"userWorldId":', #{userWorldId}, ',"characterId":', #{characterId}, '}'
+        )::jsonb
+          AND (metadata::jsonb ->> 'endMessageId')::bigint &gt; #{thresholdEndMessageId}
+    </delete>
+
     <delete id="deleteWorldEventByUserWorldId">
         DELETE FROM public.world_event_vector_store
         WHERE metadata::jsonb @> CONCAT(
             '{"userWorldId":', #{userWorldId}, '}'
+        )::jsonb
+    </delete>
+
+    <delete id="deleteWorldEventByUserWorldIdAfterLogId">
+        DELETE FROM public.world_event_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"userWorldId":', #{userWorldId}, '}'
+        )::jsonb
+          AND (metadata::jsonb ->> 'worldEventLogId')::bigint &gt; #{worldEventLogId}
+    </delete>
+
+    <delete id="deleteWorldEventByLogId">
+        DELETE FROM public.world_event_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"userWorldId":', #{userWorldId}, ',"worldEventLogId":', #{worldEventLogId}, '}'
         )::jsonb
     </delete>
 </mapper>

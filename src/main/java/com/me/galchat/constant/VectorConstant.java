@@ -14,6 +14,9 @@ public final class VectorConstant {
     public static final String USER_WORLD_ID_METADATA_KEY = "userWorldId";
     public static final String WORLD_ID_METADATA_KEY = "worldId";
     public static final String CHARACTER_ID_METADATA_KEY = "characterId";
+    public static final String START_MESSAGE_ID_METADATA_KEY = "startMessageId";
+    public static final String END_MESSAGE_ID_METADATA_KEY = "endMessageId";
+    public static final String WORLD_EVENT_LOG_ID_METADATA_KEY = "worldEventLogId";
     public static final String VISIBLE_CHARACTERS_METADATA_KEY = "visibleCharacters";
     public static final String TITLE_METADATA_KEY = "title";
     public static final String UNKNOWN_TIMESTAMP = "未知";

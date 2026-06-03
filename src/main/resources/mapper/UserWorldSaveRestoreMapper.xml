@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.me.galchat.mapper.UserWorldSaveRestoreMapper">
+
+    <delete id="deleteThinkingAfterChat">
+        DELETE FROM user_chat_thinking_history
+        WHERE user_message_id IN (
+            SELECT id
+            FROM user_chat_history
+            WHERE user_world_id = #{userWorldId}
+              AND id &gt; #{maxChatHistoryId}
+        )
+    </delete>
+
+    <delete id="deleteToolCallsAfterChat">
+        DELETE FROM user_chat_tool_call
+        WHERE user_message_id IN (
+            SELECT id
+            FROM user_chat_history
+            WHERE user_world_id = #{userWorldId}
+              AND id &gt; #{maxChatHistoryId}
+        )
+    </delete>
+
+    <delete id="deleteChatAfter">
+        DELETE FROM user_chat_history
+        WHERE user_world_id = #{userWorldId}
+          AND id &gt; #{maxChatHistoryId}
+    </delete>
+
+    <delete id="deleteFavorLogsAfter">
+        DELETE FROM user_character_favor_log
+        WHERE user_world_id = #{userWorldId}
+          AND id &gt; #{maxFavorLogId}
+    </delete>
+
+    <delete id="deleteUserEventsAfter">
+        DELETE FROM user_event_log
+        WHERE user_world_id = #{userWorldId}
+          AND id &gt; #{maxUserEventLogId}
+    </delete>
+
+    <delete id="deleteWorldEventsAfter">
+        DELETE FROM world_event_log
+        WHERE user_world_id = #{userWorldId}
+          AND id &gt; #{maxWorldEventLogId}
+    </delete>
+
+    <delete id="deleteStoryEventCharactersAfter">
+        DELETE FROM world_story_event_character character_link
+        USING world_story_event story_event
+        WHERE character_link.story_event_id = story_event.id
+          AND story_event.user_world_id = #{userWorldId}
+          AND character_link.id &gt; #{maxStoryEventCharacterId}
+    </delete>
+
+    <delete id="deleteStoryEventsAfter">
+        DELETE FROM world_story_event
+        WHERE user_world_id = #{userWorldId}
+          AND id &gt; #{maxStoryEventId}
+    </delete>
+
+    <delete id="deleteChatHistoryByIds">
+        DELETE FROM user_chat_history
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <delete id="deleteThinkingByUserMessageId">
+        DELETE FROM user_chat_thinking_history
+        WHERE user_message_id = #{userMessageId}
+    </delete>
+
+    <delete id="deleteToolCallsByUserMessageId">
+        DELETE FROM user_chat_tool_call
+        WHERE user_message_id = #{userMessageId}
+    </delete>
+
+    <delete id="deleteFavorLogsByBindingChat">
+        DELETE FROM user_character_favor_log
+        WHERE user_world_id = #{userWorldId}
+          AND character_id = #{characterId}
+          AND binding_chat = #{bindingChat}
+    </delete>
+
+    <insert id="insertChatHistoryWithId">
+        INSERT INTO user_chat_history (
+            id,
+            user_world_id,
+            character_id,
+            content,
+            type,
+            user_message_id,
+            step_no,
+            timestamp
+        )
+        VALUES (
+            #{history.id},
+            #{history.userWorldId},
+            #{history.characterId},
+            #{history.content},
+            #{history.type},
+            #{history.userMessageId},
+            #{history.stepNo},
+            #{history.timestamp}
+        )
+    </insert>
+
+    <insert id="insertThinkingWithId">
+        INSERT INTO user_chat_thinking_history (
+            id,
+            user_message_id,
+            step_no,
+            reasoning_content
+        )
+        VALUES (
+            #{thinking.id},
+            #{thinking.userMessageId},
+            #{thinking.stepNo},
+            #{thinking.reasoningContent}
+        )
+    </insert>
+
+    <insert id="insertToolCallWithId">
+        INSERT INTO user_chat_tool_call (
+            id,
+            user_message_id,
+            step_no,
+            tool_call_id,
+            tool_name,
+            tool_arguments,
+            tool_result
+        )
+        VALUES (
+            #{toolCall.id},
+            #{toolCall.userMessageId},
+            #{toolCall.stepNo},
+            #{toolCall.toolCallId},
+            #{toolCall.toolName},
+            #{toolCall.toolArguments},
+            #{toolCall.toolResult}
+        )
+    </insert>
+
+    <insert id="insertFavorLogWithId">
+        INSERT INTO user_character_favor_log (
+            id,
+            user_world_id,
+            character_id,
+            favor_update,
+            binding_chat,
+            timestamp
+        )
+        VALUES (
+            #{favorLog.id},
+            #{favorLog.userWorldId},
+            #{favorLog.characterId},
+            #{favorLog.favorUpdate},
+            #{favorLog.bindingChat},
+            #{favorLog.timestamp}
+        )
+    </insert>
+
+    <insert id="upsertWorldEventLogWithId">
+        INSERT INTO world_event_log (
+            id,
+            user_world_id,
+            event_description,
+            visible_characters,
+            timestamp,
+            title,
+            story_event_id
+        )
+        VALUES (
+            #{worldEventLog.id},
+            #{worldEventLog.userWorldId},
+            #{worldEventLog.eventDescription},
+            #{worldEventLog.visibleCharacters,jdbcType=ARRAY,typeHandler=org.apache.ibatis.type.ArrayTypeHandler},
+            #{worldEventLog.timestamp},
+            #{worldEventLog.title},
+            #{worldEventLog.storyEventId}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            user_world_id = EXCLUDED.user_world_id,
+            event_description = EXCLUDED.event_description,
+            visible_characters = EXCLUDED.visible_characters,
+            timestamp = EXCLUDED.timestamp,
+            title = EXCLUDED.title,
+            story_event_id = EXCLUDED.story_event_id
+    </insert>
+</mapper>

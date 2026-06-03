@@ -46,6 +46,8 @@ const {
   selectedCharacter,
   stories,
   activeStory,
+  worldSave,
+  worldSaveActionLoading,
   storyDetailDialogVisible,
   storyDetailLoading,
   selectedStoryDetail,
@@ -130,6 +132,8 @@ const {
   refreshWorkspace,
   selectWorld,
   openWorldOverview,
+  submitWorldSave,
+  submitWorldLoad,
   openStoryDetail,
   selectCharacter,
   openCreateWorld,
@@ -232,6 +236,9 @@ const {
         :characters="characters"
         :stories="stories"
         :active-story="activeStory"
+        :world-save="worldSave"
+        :world-save-loading="loading.worldSave"
+        :world-save-action-loading="worldSaveActionLoading"
         :average-favor="averageFavor"
         :active-story-title="activeStoryTitle"
         :selected-story-character-ids="selectedStoryCharacterIds"
@@ -240,6 +247,8 @@ const {
         @open-advance-story="openAdvanceStory"
         @open-end-story="openEndStory"
         @open-story-detail="openStoryDetail"
+        @save-world="submitWorldSave"
+        @load-world="submitWorldLoad"
       />
 
       <ChatStage
@@ -478,6 +487,19 @@ const {
         </section>
 
         <section v-else-if="createWorldStep === 2" class="create-step-panel">
+          <el-form-item label="互动方式">
+            <el-radio-group v-model="createWorldForm.dailyCompanionMode" class="option-stack">
+              <el-radio :value="true" border>
+                日常陪伴
+                <span>你分享现实，我像朋友一样回应。</span>
+              </el-radio>
+              <el-radio :value="false" border>
+                沉浸角色
+                <span>我全程扮演角色，保持故事感。</span>
+              </el-radio>
+            </el-radio-group>
+          </el-form-item>
+
           <el-form-item label="主动提醒功能">
             <el-switch v-model="createWorldForm.acitvePushStatus" active-text="开启" inactive-text="关闭" />
             <p class="field-help">
@@ -1652,6 +1674,115 @@ const {
 
 .active-story p {
   color: #4d5968;
+}
+
+.world-save-metric {
+  min-height: 142px;
+  display: flex;
+  flex-direction: column;
+}
+
+.world-save-actions,
+.save-detail-row {
+  display: flex;
+  align-items: center;
+}
+
+.world-save-actions {
+  margin-top: auto;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.world-save-actions .el-button--primary {
+  --el-button-text-color: #fff;
+  --el-button-hover-text-color: #fff;
+  --el-button-active-text-color: #fff;
+  color: #fff;
+}
+
+.world-save-actions .el-button--primary span {
+  color: #fff;
+}
+
+.world-save-actions .el-button--primary .el-icon {
+  color: #fff;
+}
+
+.save-summary {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.save-summary > div {
+  min-width: 0;
+}
+
+.save-summary span {
+  display: block;
+  color: #697386;
+  font-size: 13px;
+}
+
+.save-summary strong,
+.save-summary p {
+  margin-top: 4px;
+  font-weight: 700;
+}
+
+.world-save-metric .save-summary strong,
+.world-save-metric .save-summary p {
+  display: block;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.save-summary p {
+  color: #4d5968;
+  word-break: break-word;
+}
+
+.save-warning {
+  margin-top: 10px;
+  color: #c03546;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+.save-warning strong {
+  font-weight: 900;
+}
+
+.save-detail-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.save-detail-row {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f5f7fb;
+  border: 1px solid rgba(42, 52, 71, 0.08);
+}
+
+.save-detail-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.save-detail-row strong {
+  color: #285c74;
+  font-weight: 800;
 }
 
 .story-characters {

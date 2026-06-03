@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { ArrowRight, Plus } from '@element-plus/icons-vue'
-import type { ActiveStory, StoryListItem, UserCharacter } from '@/api/types'
-import { firstText, imageStyle } from '@/utils/ui'
+import { computed, ref } from 'vue'
+import { ArrowRight, DocumentAdd, Plus, RefreshLeft } from '@element-plus/icons-vue'
+import type { ActiveStory, StoryListItem, UserCharacter, UserWorldSave } from '@/api/types'
+import { firstText, formatTime, imageStyle } from '@/utils/ui'
 
-defineProps<{
+const props = defineProps<{
   characters: UserCharacter[]
   stories: StoryListItem[]
   activeStory: ActiveStory | null
+  worldSave: UserWorldSave | null
+  worldSaveLoading: boolean
+  worldSaveActionLoading: boolean
   averageFavor: number
   activeStoryTitle: string
   selectedStoryCharacterIds: Set<number>
@@ -18,7 +22,37 @@ const emit = defineEmits<{
   openAdvanceStory: []
   openEndStory: []
   openStoryDetail: [storyEventId: number]
+  saveWorld: [remark: string, done?: (success: boolean) => void]
+  loadWorld: [done?: (success: boolean) => void]
 }>()
+
+const saveDialogVisible = ref(false)
+const loadDialogVisible = ref(false)
+const saveRemark = ref('')
+
+const saveTimeLabel = computed(() => formatTime(props.worldSave?.savedAt))
+const hasWorldSave = computed(() => Boolean(props.worldSave?.savedAt))
+
+function openSaveDialog() {
+  saveRemark.value = props.worldSave?.remark || ''
+  saveDialogVisible.value = true
+}
+
+function submitSave() {
+  emit('saveWorld', saveRemark.value, (success) => {
+    if (success) {
+      saveDialogVisible.value = false
+    }
+  })
+}
+
+function submitLoad() {
+  emit('loadWorld', (success) => {
+    if (success) {
+      loadDialogVisible.value = false
+    }
+  })
+}
 </script>
 
 <template>
@@ -36,9 +70,38 @@ const emit = defineEmits<{
         <span>故事事件</span>
         <strong>{{ stories.length }}</strong>
       </article>
-      <article>
-        <span>进行中</span>
-        <strong>{{ activeStory ? 1 : 0 }}</strong>
+      <article class="world-save-metric" v-loading="worldSaveLoading">
+        <span>存档/读档</span>
+        <div class="save-summary">
+          <div>
+            <span>存档时间</span>
+            <strong>{{ saveTimeLabel || '尚未保存' }}</strong>
+          </div>
+          <div>
+            <span>备注</span>
+            <p>{{ worldSave?.remark || '无备注' }}</p>
+          </div>
+        </div>
+        <div class="world-save-actions">
+          <el-button
+            :icon="DocumentAdd"
+            type="primary"
+            size="small"
+            :loading="worldSaveActionLoading"
+            @click="openSaveDialog"
+          >
+            存档
+          </el-button>
+          <el-button
+            :icon="RefreshLeft"
+            size="small"
+            :disabled="!hasWorldSave"
+            :loading="worldSaveActionLoading"
+            @click="loadDialogVisible = true"
+          >
+            读档
+          </el-button>
+        </div>
       </article>
     </div>
 
@@ -126,5 +189,71 @@ const emit = defineEmits<{
         </div>
       </div>
     </div>
+
+    <el-dialog v-model="saveDialogVisible" width="520px" :close-on-click-modal="false">
+      <template #header>
+        <div class="dialog-title">
+          <h3>保存当前世界进度</h3>
+          <p>为这次存档添加一个便于识别的备注。</p>
+        </div>
+      </template>
+
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="备注">
+          <el-input
+            v-model="saveRemark"
+            type="textarea"
+            :rows="3"
+            maxlength="120"
+            show-word-limit
+            placeholder="例如：主线推进前、角色分歧点..."
+          />
+        </el-form-item>
+      </el-form>
+
+      <p class="save-warning">
+        注意：此功能不能还原存档后的 <strong>删除</strong> 与 <strong>新增</strong> 操作，如希望读档时某个角色被还原，切勿<strong>删除角色</strong>
+      </p>
+      <p v-if="hasWorldSave" class="save-warning">此操作会删除上一个存档</p>
+
+      <template #footer>
+        <el-button @click="saveDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="worldSaveActionLoading" @click="submitSave">确认存档</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="loadDialogVisible" width="560px" :close-on-click-modal="false">
+      <template #header>
+        <div class="dialog-title">
+          <h3>读取世界存档</h3>
+          <p>{{ saveTimeLabel || '尚未保存' }} · {{ worldSave?.remark || '无备注' }}</p>
+        </div>
+      </template>
+
+      <p class="save-warning">
+        注意：当前操作会丢失存档内角色存档后的 <strong>所有相关内容</strong> 且不可恢复，请确认
+      </p>
+
+      <div class="save-detail-list">
+        <div
+          v-for="favor in worldSave?.characterFavors || []"
+          :key="favor.characterId"
+          class="save-detail-row"
+        >
+          <span>{{ favor.characterName }}</span>
+          <strong>{{ favor.favorValue ?? 0 }}</strong>
+        </div>
+        <el-empty
+          v-if="!worldSave?.characterFavors?.length"
+          description="此存档暂无角色好感快照"
+          :image-size="72"
+        />
+      </div>
+
+      <template #footer>
+        <el-button @click="loadDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="worldSaveActionLoading" @click="submitLoad">确认读档</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>

@@ -3,7 +3,6 @@ package com.me.galchat.service.impl;
 import com.me.galchat.service.DocumentReranker;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -32,7 +31,7 @@ public class LocalDocumentReranker implements DocumentReranker {
     private static RestClient.Builder restClientBuilder(String baseUrl) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(1));
-        requestFactory.setReadTimeout(Duration.ofSeconds(5));
+        requestFactory.setReadTimeout(Duration.ofSeconds(60));
 
         return RestClient.builder()
                 .baseUrl(baseUrl)

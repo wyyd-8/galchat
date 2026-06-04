@@ -134,7 +134,7 @@ psql -h localhost -U <username> -d <database> -f src/test/java/com/me/galchat/in
 启动 Redis 后，准备默认 embedding 模型：
 
 ```bash
-ollama pull qwen3-embedding:4b
+ollama pull bge-m3
 ```
 
 当前向量配置固定为 1024 维。如果更换 embedding 模型，需要同步确认模型维度与 `VectorConfiguration` 中的 `dimensions(1024)` 保持一致。
@@ -278,7 +278,7 @@ SPRING_AI_DEEPSEEK_BASE_URL=https://api.deepseek.com
 SPRING_AI_DEEPSEEK_API_KEY=<deepseek-api-key>
 SPRING_AI_DEEPSEEK_CHAT_OPTIONS_MODEL=<deepseek-model>
 
-SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_MODEL=qwen3-embedding:4b
+SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_MODEL=bge-m3
 
 GALCHAT_ALIOSS_ENDPOINT=https://oss-cn-beijing.aliyuncs.com
 GALCHAT_ALIOSS_BUCKET_NAME=<bucket-name>
@@ -293,5 +293,5 @@ ALIYUN_OSS_ACCESS_KEY_SECRET=<access-key-secret>
 - PostgreSQL 必须启用 `pgvector`，否则向量表和检索能力无法正常工作。
 - Redis 承担缓存、队列、延迟任务和分布式锁能力，开发与部署时需要保持可用。
 - Java 服务当前直接调用本机 `http://localhost:8081` 和 `http://localhost:8082`。如果 Python 服务部署在其他机器，需要同步调整 Java 侧配置或代码。
-- 前端开发环境依赖 Vite 代理；`/api`、`/ws` 和 `/uploads` 会代理到后端。
-- Docker 单机部署见“Docker 单机部署”章节；手动部署仍可按上面的本地启动步骤分别准备依赖、构建产物和启动服务。
+- 前端开发环境依赖 Vite 代理；生产部署时需要让前端静态资源能够访问后端 API 与 WebSocket 地址。
+- 当前仓库没有提供 Dockerfile 或 docker-compose，部署流程以手动准备依赖、构建产物和启动服务为主。

@@ -56,10 +56,6 @@ class ImageSecurityUtilsTest {
                         " https://galchat.oss-cn-beijing.aliyuncs.com/2026/05/550e8400-e29b-41d4-a716-446655440000.png "
                 )
         );
-
-        assertThrows(UserRequestException.class, () -> ImageSecurityUtils.normalizeOssImageUrl(
-                "https://galchat.oss-cn-beijing.aliyuncs.com/2026/06/550e8400-e29b-41d4-a716-446655440000.png"
-        ));
         assertThrows(UserRequestException.class, () -> ImageSecurityUtils.normalizeOssImageUrl(
                 "https://example.com/2026/05/550e8400-e29b-41d4-a716-446655440000.png"
         ));

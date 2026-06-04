@@ -98,7 +98,7 @@ psql -h localhost -U <username> -d <database> -f src/test/java/com/me/galchat/in
 启动 Redis 后，准备默认 embedding 模型：
 
 ```bash
-ollama pull qwen3-embedding:latest
+ollama pull bge-m3
 ```
 
 当前向量配置固定为 1024 维。如果更换 embedding 模型，需要同步确认模型维度与 `VectorConfiguration` 中的 `dimensions(1024)` 保持一致。
@@ -110,7 +110,7 @@ ollama pull qwen3-embedding:latest
 安装依赖：
 
 ```bash
-pip install fastapi uvicorn torch transformers pydantic jieba
+pip install fastapi uvicorn torch "transformers>=4.36.0" pydantic jieba
 ```
 
 输入完整性判断服务，默认监听 `localhost:8081`：
@@ -127,16 +127,18 @@ reranker 服务，默认监听 `localhost:8082`：
 python python/reranker_server.py
 ```
 
-默认模型为 `BAAI/bge-reranker-v2-m3`。如需使用本地模型目录：
+默认模型为 `Alibaba-NLP/gte-multilingual-reranker-base`。如需使用本地模型目录：
 
 ```bash
-RERANKER_MODEL_PATH=/path/to/bge-reranker-v2-m3 python python/reranker_server.py
+RERANKER_MODEL_PATH=/path/to/gte-multilingual-reranker-base python python/reranker_server.py
 ```
+
+长文本块可通过 `RERANKER_MAX_LENGTH` 调整最大 token 长度，默认 `8192`；批量大小可通过 `RERANKER_BATCH_SIZE` 调整，默认 `4`。如显存或内存不足，可调小批量大小或输入长度。
 
 Windows PowerShell 可使用：
 
 ```powershell
-$env:RERANKER_MODEL_PATH="C:\path\to\bge-reranker-v2-m3"
+$env:RERANKER_MODEL_PATH="C:\path\to\gte-multilingual-reranker-base"
 python python/reranker_server.py
 ```
 
@@ -242,7 +244,7 @@ SPRING_AI_DEEPSEEK_BASE_URL=https://api.deepseek.com
 SPRING_AI_DEEPSEEK_API_KEY=<deepseek-api-key>
 SPRING_AI_DEEPSEEK_CHAT_OPTIONS_MODEL=<deepseek-model>
 
-SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_MODEL=qwen3-embedding:latest
+SPRING_AI_OLLAMA_EMBEDDING_OPTIONS_MODEL=bge-m3
 
 GALCHAT_ALIOSS_ENDPOINT=https://oss-cn-beijing.aliyuncs.com
 GALCHAT_ALIOSS_BUCKET_NAME=<bucket-name>

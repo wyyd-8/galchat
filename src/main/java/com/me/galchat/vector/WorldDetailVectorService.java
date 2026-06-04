@@ -37,7 +37,7 @@ public class WorldDetailVectorService {
 
         Document document = Document.builder()
                 .id(vectorDocumentId(worldDetail.getId()))
-                .text(worldDetail.getDetails())
+                .text(worldDetail.getAbout() + ":\n" + worldDetail.getDetails())
                 .metadata(VectorConstant.WORLD_ID_METADATA_KEY, worldDetail.getWorldId())
                 .build();
         worldDetailVectorStore.add(List.of(document));

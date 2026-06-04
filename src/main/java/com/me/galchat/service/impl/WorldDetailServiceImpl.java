@@ -45,7 +45,7 @@ public class WorldDetailServiceImpl extends ServiceImpl<WorldDetailMapper, World
         WorldDetail newWorldDetail = new WorldDetail()
                 .setWorldId(worldId)
                 .setAbout(worldDetail.getAbout())
-                .setDetails(worldDetail.getAbout() + ":\n" + worldDetail.getDetails());
+                .setDetails(worldDetail.getDetails());
         save(newWorldDetail);
         worldDetailVectorService.addWorldDetail(newWorldDetail);
     }

@@ -8,7 +8,7 @@ spring:
   ai:
     deepseek:
       base-url: https://api.deepseek.com
-      api-key: sk-c267b8feed9b4b72ba27c64f4db855af
+      api-key: sk-e32f5daaf4824926a76fea2f0d87b473
       chat:
         options:
           model: deepseek-v4-pro

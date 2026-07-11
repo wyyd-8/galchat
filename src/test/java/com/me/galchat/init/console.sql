@@ -206,3 +206,234 @@ CREATE TABLE user_world_save (
 
 CREATE INDEX idx_user_world_save_world
     ON user_world_save (user_world_id);
+
+CREATE TABLE coc_character (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL,
+    actor_type VARCHAR(20) NOT NULL,
+    participant_id BIGINT,
+    name VARCHAR(255) NOT NULL,
+    occupation VARCHAR(255),
+    sex VARCHAR(50),
+    age INT,
+    era VARCHAR(100),
+    birthplace VARCHAR(255),
+    residence VARCHAR(255),
+    creation_method VARCHAR(30),
+    str SMALLINT NOT NULL,
+    con SMALLINT NOT NULL,
+    siz SMALLINT NOT NULL,
+    dex SMALLINT NOT NULL,
+    app SMALLINT NOT NULL,
+    int_value SMALLINT NOT NULL,
+    pow SMALLINT NOT NULL,
+    edu SMALLINT NOT NULL,
+    damage_bonus VARCHAR(20) NOT NULL,
+    build SMALLINT NOT NULL,
+    mov SMALLINT NOT NULL,
+    hp_current SMALLINT NOT NULL,
+    hp_max SMALLINT NOT NULL,
+    san_current SMALLINT NOT NULL,
+    san_max SMALLINT NOT NULL,
+    mp_current SMALLINT NOT NULL,
+    mp_max SMALLINT NOT NULL,
+    luck_current SMALLINT,
+    armor SMALLINT DEFAULT 0,
+    major_wound BOOLEAN DEFAULT FALSE,
+    unconscious BOOLEAN DEFAULT FALSE,
+    dying BOOLEAN DEFAULT FALSE,
+    dead BOOLEAN DEFAULT FALSE,
+    temporary_insanity BOOLEAN DEFAULT FALSE,
+    temporary_insanity_phase VARCHAR(20),
+    temporary_insanity_remaining_rounds INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_coc_character_run_actor
+    ON coc_character (run_id, actor_type, id);
+
+CREATE INDEX idx_coc_character_participant
+    ON coc_character (participant_id);
+
+CREATE UNIQUE INDEX uk_coc_character_run_participant
+    ON coc_character (run_id, participant_id)
+    WHERE participant_id IS NOT NULL;
+
+CREATE UNIQUE INDEX uk_coc_character_run_player
+    ON coc_character (run_id)
+    WHERE participant_id IS NULL AND actor_type = 'PLAYER';
+
+CREATE TABLE coc_skill_def (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    category VARCHAR(100),
+    base_value SMALLINT,
+    base_formula VARCHAR(255),
+    allow_specialization BOOLEAN DEFAULT FALSE,
+    parent_name VARCHAR(255),
+    is_core BOOLEAN DEFAULT TRUE
+);
+
+CREATE INDEX idx_coc_skill_def_parent
+    ON coc_skill_def (parent_name);
+
+INSERT INTO coc_skill_def (
+    name,
+    category,
+    base_value,
+    base_formula,
+    allow_specialization,
+    parent_name,
+    is_core
+) VALUES
+    ('会计', '知识', 5, NULL, FALSE, NULL, TRUE),
+    ('人类学', '知识', 1, NULL, FALSE, NULL, TRUE),
+    ('估价', '知识', 5, NULL, FALSE, NULL, TRUE),
+    ('考古学', '知识', 1, NULL, FALSE, NULL, TRUE),
+    ('取悦', '社交', 15, NULL, FALSE, NULL, TRUE),
+    ('攀爬', '行动', 20, NULL, FALSE, NULL, TRUE),
+    ('信用评级', '资源', 0, NULL, FALSE, NULL, TRUE),
+    ('克苏鲁神话', '知识', 0, NULL, FALSE, NULL, TRUE),
+    ('乔装', '社交', 5, NULL, FALSE, NULL, TRUE),
+    ('闪避', '战斗', NULL, 'DEX/2', FALSE, NULL, TRUE),
+    ('汽车驾驶', '行动', 20, NULL, FALSE, NULL, TRUE),
+    ('电气维修', '技术', 10, NULL, FALSE, NULL, TRUE),
+    ('话术', '社交', 5, NULL, FALSE, NULL, TRUE),
+    ('急救', '医疗', 30, NULL, FALSE, NULL, TRUE),
+    ('历史', '知识', 5, NULL, FALSE, NULL, TRUE),
+    ('恐吓', '社交', 15, NULL, FALSE, NULL, TRUE),
+    ('跳跃', '行动', 20, NULL, FALSE, NULL, TRUE),
+    ('法律', '知识', 5, NULL, FALSE, NULL, TRUE),
+    ('图书馆使用', '知识', 20, NULL, FALSE, NULL, TRUE),
+    ('聆听', '感知', 20, NULL, FALSE, NULL, TRUE),
+    ('锁匠', '技术', 1, NULL, FALSE, NULL, TRUE),
+    ('机械维修', '技术', 10, NULL, FALSE, NULL, TRUE),
+    ('医学', '医疗', 1, NULL, FALSE, NULL, TRUE),
+    ('博物学', '知识', 10, NULL, FALSE, NULL, TRUE),
+    ('导航', '行动', 10, NULL, FALSE, NULL, TRUE),
+    ('神秘学', '知识', 5, NULL, FALSE, NULL, TRUE),
+    ('操作重型机械', '技术', 1, NULL, FALSE, NULL, TRUE),
+    ('说服', '社交', 10, NULL, FALSE, NULL, TRUE),
+    ('精神分析', '医疗', 1, NULL, FALSE, NULL, TRUE),
+    ('心理学', '社交', 10, NULL, FALSE, NULL, TRUE),
+    ('骑术', '行动', 5, NULL, FALSE, NULL, TRUE),
+    ('妙手', '行动', 10, NULL, FALSE, NULL, TRUE),
+    ('侦查', '感知', 25, NULL, FALSE, NULL, TRUE),
+    ('潜行', '行动', 20, NULL, FALSE, NULL, TRUE),
+    ('游泳', '行动', 20, NULL, FALSE, NULL, TRUE),
+    ('投掷', '行动', 20, NULL, FALSE, NULL, TRUE),
+    ('追踪', '感知', 10, NULL, FALSE, NULL, TRUE),
+
+    ('艺术和手艺', '艺术和手艺', 5, NULL, TRUE, NULL, TRUE),
+    ('艺术和手艺:表演', '艺术和手艺', 5, NULL, FALSE, '艺术和手艺', TRUE),
+    ('艺术和手艺:美术', '艺术和手艺', 5, NULL, FALSE, '艺术和手艺', TRUE),
+    ('艺术和手艺:伪造文书', '艺术和手艺', 5, NULL, FALSE, '艺术和手艺', TRUE),
+    ('艺术和手艺:摄影', '艺术和手艺', 5, NULL, FALSE, '艺术和手艺', TRUE),
+
+    ('格斗', '格斗', NULL, NULL, TRUE, NULL, TRUE),
+    ('格斗:斧', '格斗', 15, NULL, FALSE, '格斗', TRUE),
+    ('斗殴', '格斗', 25, NULL, FALSE, '格斗', TRUE),
+    ('格斗:链锯', '格斗', 10, NULL, FALSE, '格斗', TRUE),
+    ('格斗:连枷', '格斗', 10, NULL, FALSE, '格斗', TRUE),
+    ('格斗:绞索', '格斗', 15, NULL, FALSE, '格斗', TRUE),
+    ('格斗:矛', '格斗', 20, NULL, FALSE, '格斗', TRUE),
+    ('格斗:刀剑', '格斗', 20, NULL, FALSE, '格斗', TRUE),
+    ('格斗:鞭', '格斗', 5, NULL, FALSE, '格斗', TRUE),
+
+    ('射击', '射击', NULL, NULL, TRUE, NULL, TRUE),
+    ('射击:弓', '射击', 15, NULL, FALSE, '射击', TRUE),
+    ('射击:火焰喷射器', '射击', 10, NULL, FALSE, '射击', TRUE),
+    ('射击:手枪', '射击', 20, NULL, FALSE, '射击', TRUE),
+    ('射击:重武器', '射击', 10, NULL, FALSE, '射击', TRUE),
+    ('射击:机枪', '射击', 10, NULL, FALSE, '射击', TRUE),
+    ('射击:步枪/霰弹枪', '射击', 25, NULL, FALSE, '射击', TRUE),
+    ('射击:冲锋枪', '射击', 15, NULL, FALSE, '射击', TRUE),
+
+    ('语言', '语言', 1, NULL, TRUE, NULL, TRUE),
+    ('母语', '语言', NULL, 'EDU', FALSE, '语言', TRUE),
+
+    ('科学', '科学', 1, NULL, TRUE, NULL, TRUE),
+    ('科学:天文学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:生物学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:植物学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:化学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:密码学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:工程学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:司法科学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:地质学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:数学', '科学', 10, NULL, FALSE, '科学', TRUE),
+    ('科学:气象学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:药学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:物理学', '科学', 1, NULL, FALSE, '科学', TRUE),
+    ('科学:动物学', '科学', 1, NULL, FALSE, '科学', TRUE),
+
+    ('生存', '生存', 10, NULL, TRUE, NULL, TRUE),
+    ('操纵', '操纵', 1, NULL, TRUE, NULL, TRUE),
+
+    ('计算机使用', '现代技术', 5, NULL, FALSE, NULL, TRUE),
+    ('电子学', '现代技术', 1, NULL, FALSE, NULL, TRUE),
+
+    ('动物驯养', '非常规', 5, NULL, FALSE, NULL, FALSE),
+    ('爆破', '非常规', 1, NULL, FALSE, NULL, FALSE),
+    ('潜水', '非常规', 1, NULL, FALSE, NULL, FALSE),
+    ('催眠', '非常规', 1, NULL, FALSE, NULL, FALSE),
+    ('读唇', '非常规', 1, NULL, FALSE, NULL, FALSE),
+    ('学识', '非常规', 1, NULL, TRUE, NULL, FALSE),
+    ('炮术', '非常规', 1, NULL, TRUE, NULL, FALSE)
+ON CONFLICT (name) DO NOTHING;
+
+CREATE TABLE coc_character_skill (
+    id BIGSERIAL PRIMARY KEY,
+    character_id BIGINT NOT NULL,
+    skill_def_id BIGINT,
+    display_name VARCHAR(255) NOT NULL,
+    category VARCHAR(100),
+    specialization VARCHAR(255) NOT NULL DEFAULT '',
+    base_value SMALLINT,
+    value SMALLINT NOT NULL,
+    is_custom BOOLEAN DEFAULT FALSE,
+    UNIQUE (character_id, display_name, specialization)
+);
+
+CREATE INDEX idx_coc_character_skill_character
+    ON coc_character_skill (character_id);
+
+CREATE INDEX idx_coc_character_skill_name
+    ON coc_character_skill (character_id, display_name);
+
+CREATE TABLE coc_character_weapon (
+    id BIGSERIAL PRIMARY KEY,
+    character_id BIGINT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    skill_name VARCHAR(255),
+    damage VARCHAR(100),
+    range VARCHAR(100),
+    attacks_per_round VARCHAR(50),
+    ammo_capacity INT,
+    remaining_ammo INT,
+    malfunction VARCHAR(50),
+    is_broken BOOLEAN DEFAULT FALSE,
+    notes TEXT
+);
+
+CREATE INDEX idx_coc_character_weapon_character
+    ON coc_character_weapon (character_id);
+
+CREATE TABLE coc_character_profile (
+    id BIGSERIAL PRIMARY KEY,
+    character_id BIGINT NOT NULL UNIQUE,
+    appearance TEXT,
+    ideology TEXT,
+    significant_people TEXT,
+    meaningful_locations TEXT,
+    treasured_possessions TEXT,
+    traits TEXT,
+    injuries_and_scars TEXT,
+    phobias_and_manias TEXT,
+    equipment_text TEXT,
+    assets_text TEXT,
+    spending_level VARCHAR(100),
+    cash VARCHAR(100),
+    notes TEXT
+);

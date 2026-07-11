@@ -1,5 +1,10 @@
 import './style.css'
-import { ThreeDiceBoard, type DiceRollModule, type DiceRollResult } from './dice/ThreeDice'
+import {
+  ThreeDiceBoard,
+  type DiceRollModule,
+  type DiceRollResult,
+  type DiceSkin,
+} from './dice/ThreeDice'
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector)
@@ -9,11 +14,29 @@ function requiredElement<T extends Element>(selector: string): T {
 
 const diceTray = requiredElement<HTMLElement>('#dice-tray')
 const rollButton = requiredElement<HTMLButtonElement>('#roll-button')
+const skinButton = requiredElement<HTMLButtonElement>('#skin-button')
+const skinLabel = requiredElement<HTMLElement>('#skin-label')
 const demoSelect = requiredElement<HTMLSelectElement>('#demo-select')
 const resultValues = requiredElement<HTMLElement>('#result-values')
 const resultTotal = requiredElement<HTMLElement>('#result-total')
 
 const diceBoard = new ThreeDiceBoard(diceTray)
+let activeSkin: DiceSkin = 'classic'
+const SKIN_ORDER: DiceSkin[] = ['classic', 'galaxy', 'moonwhite']
+const SKIN_LABELS: Record<DiceSkin, string> = {
+  classic: '经典皮肤',
+  galaxy: '星穹皮肤',
+  moonwhite: '月白冰晶',
+}
+
+function setSkin(skin: DiceSkin): void {
+  activeSkin = skin
+  diceBoard.setSkin(skin)
+  document.body.dataset.diceSkin = skin
+  skinButton.setAttribute('aria-pressed', String(skin !== 'classic'))
+  skinButton.setAttribute('aria-label', `当前为${SKIN_LABELS[skin]}，点击切换皮肤`)
+  skinLabel.textContent = SKIN_LABELS[skin]
+}
 
 function normalModule(sides: number, values: number[]): DiceRollModule {
   return {
@@ -65,6 +88,7 @@ const DEMOS: Record<string, DiceRollResult> = {
 
 async function play(result: DiceRollResult): Promise<void> {
   rollButton.disabled = true
+  skinButton.disabled = true
   demoSelect.disabled = true
   resultValues.textContent = result.formula
   resultTotal.textContent = '正在播放后端结果…'
@@ -78,11 +102,17 @@ async function play(result: DiceRollResult): Promise<void> {
     resultTotal.textContent = error instanceof Error ? error.message : '未知错误'
   } finally {
     rollButton.disabled = false
+    skinButton.disabled = false
     demoSelect.disabled = false
   }
 }
 
 rollButton.addEventListener('click', () => play(DEMOS[demoSelect.value] ?? DEMOS.standard))
+skinButton.addEventListener('click', async () => {
+  const currentIndex = SKIN_ORDER.indexOf(activeSkin)
+  setSkin(SKIN_ORDER[(currentIndex + 1) % SKIN_ORDER.length])
+  await play(DEMOS[demoSelect.value] ?? DEMOS.standard)
+})
 
 // 正式接入时可直接调用 window.playDiceResult(await response.json())。
 declare global {
@@ -96,3 +126,5 @@ const selectedDemo = new URLSearchParams(window.location.search).get('demo')
 if (selectedDemo && DEMOS[selectedDemo]) {
   demoSelect.value = selectedDemo
 }
+const selectedSkin = new URLSearchParams(window.location.search).get('skin')
+setSkin(SKIN_ORDER.includes(selectedSkin as DiceSkin) ? selectedSkin as DiceSkin : 'classic')

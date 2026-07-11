@@ -24,6 +24,7 @@ export interface DiceRollResult {
 }
 
 type ModelKey = 'd4' | 'd6' | 'd8' | 'd10-ones' | 'd10-tens' | 'd12' | 'd20'
+export type DiceSkin = 'classic' | 'galaxy' | 'moonwhite'
 
 interface DiceModelConfig {
   key: ModelKey
@@ -52,7 +53,8 @@ const SCREEN_UP = new THREE.Vector3(0, 1, 0)
 const GLYPH_UP = new THREE.Vector3(0, 0, -1)
 const Z_AXIS = new THREE.Vector3(0, 0, 1)
 const loader = new GLTFLoader()
-const templatePromises = new Map<ModelKey, Promise<THREE.Group>>()
+const templatePromises = new Map<string, Promise<THREE.Group>>()
+let fogTexture: THREE.CanvasTexture | undefined
 
 const MODEL_CONFIGS: Record<ModelKey, DiceModelConfig> = {
   d4: {
@@ -101,23 +103,161 @@ const MODEL_CONFIGS: Record<ModelKey, DiceModelConfig> = {
   },
 }
 
+const GALAXY_MODEL_URLS: Record<ModelKey, string> = {
+  d4: new URL('../../model/galaxy/D4_四面骰_星穹_baked.glb', import.meta.url).href,
+  d6: new URL('../../model/galaxy/D6_六面骰_星穹_baked.glb', import.meta.url).href,
+  d8: new URL('../../model/galaxy/D8_八面骰_星穹_baked.glb', import.meta.url).href,
+  'd10-ones': new URL('../../model/galaxy/D10_个位骰_0-9_星穹_baked.glb', import.meta.url).href,
+  'd10-tens': new URL('../../model/galaxy/D10_百分骰_00-90_星穹_baked.glb', import.meta.url).href,
+  d12: new URL('../../model/galaxy/D12_十二面骰_星穹_baked.glb', import.meta.url).href,
+  d20: new URL('../../model/galaxy/D20_二十面骰_星穹_baked.glb', import.meta.url).href,
+}
+
+const MOONWHITE_MODEL_URLS: Record<ModelKey, string> = {
+  d4: new URL('../../model/moonwhite/D4_四面骰_月白冰晶_baked.glb', import.meta.url).href,
+  d6: new URL('../../model/moonwhite/D6_六面骰_月白冰晶_baked.glb', import.meta.url).href,
+  d8: new URL('../../model/moonwhite/D8_八面骰_月白冰晶_baked.glb', import.meta.url).href,
+  'd10-ones': new URL('../../model/moonwhite/D10_个位骰_0-9_月白冰晶_baked.glb', import.meta.url).href,
+  'd10-tens': new URL('../../model/moonwhite/D10_百分骰_00-90_月白冰晶_baked.glb', import.meta.url).href,
+  d12: new URL('../../model/moonwhite/D12_十二面骰_月白冰晶_baked.glb', import.meta.url).href,
+  d20: new URL('../../model/moonwhite/D20_二十面骰_月白冰晶_baked.glb', import.meta.url).href,
+}
+
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
-function loadTemplate(config: DiceModelConfig): Promise<THREE.Group> {
-  const cached = templatePromises.get(config.key)
+function galaxyFogTexture(): THREE.CanvasTexture {
+  if (fogTexture) return fogTexture
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('浏览器无法创建星云纹理')
+  const gradient = context.createRadialGradient(64, 64, 2, 64, 64, 62)
+  gradient.addColorStop(0, 'rgba(255,255,255,.72)')
+  gradient.addColorStop(.24, 'rgba(255,255,255,.42)')
+  gradient.addColorStop(.56, 'rgba(255,255,255,.16)')
+  gradient.addColorStop(.78, 'rgba(255,255,255,.05)')
+  gradient.addColorStop(1, 'rgba(255,255,255,0)')
+  context.fillStyle = gradient
+  context.fillRect(0, 0, 128, 128)
+  fogTexture = new THREE.CanvasTexture(canvas)
+  fogTexture.colorSpace = THREE.SRGBColorSpace
+  return fogTexture
+}
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 0x100000000
+  }
+}
+
+function createGalaxyFog(
+  center: THREE.Vector3,
+  size: THREE.Vector3,
+  seed: number,
+  materials: THREE.Material[],
+): THREE.Group {
+  const fog = new THREE.Group()
+  fog.name = 'Galaxy_Runtime_Diffuse_Fog'
+  const random = seededRandom(seed)
+  const radius = Math.min(size.x, size.y, size.z)
+  const layerColors = [0x176dff, 0x4b2cff, 0x9c36ee, 0xf13f9d]
+  const layerSpread = [0.28, 0.20, 0.12]
+  const layerOpacity = [0.10, 0.14, 0.21]
+  const layerScale = [0.54, 0.42, 0.30]
+
+  for (let index = 0; index < 18; index += 1) {
+    const layer = index % 3
+    const colorIndex = layer === 0 ? index % 2 : Math.min(layer + 1, layerColors.length - 1)
+    const material = new THREE.SpriteMaterial({
+      map: galaxyFogTexture(),
+      color: layerColors[colorIndex],
+      transparent: true,
+      opacity: layerOpacity[layer] * (0.72 + random() * 0.48),
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.AdditiveBlending,
+      rotation: random() * Math.PI,
+    })
+    materials.push(material)
+    const sprite = new THREE.Sprite(material)
+    const spread = radius * layerSpread[layer]
+    sprite.position.set(
+      center.x + (random() * 2 - 1) * spread,
+      center.y + (random() * 2 - 1) * spread,
+      center.z + (random() * 2 - 1) * spread,
+    )
+    const scale = radius * layerScale[layer] * (0.72 + random() * 0.56)
+    sprite.scale.set(scale * (0.72 + random() * 0.48), scale, 1)
+    fog.add(sprite)
+  }
+  return fog
+}
+
+function createMoonwhiteMist(
+  center: THREE.Vector3,
+  size: THREE.Vector3,
+  seed: number,
+  materials: THREE.Material[],
+): THREE.Group {
+  const mist = new THREE.Group()
+  mist.name = 'Moonwhite_Runtime_Ice_Mist'
+  const random = seededRandom(seed)
+  const radius = Math.min(size.x, size.y, size.z)
+  const colors = [0x8fd8ff, 0xc7ecff, 0xc8baff, 0xffffff]
+
+  for (let index = 0; index < 12; index += 1) {
+    const layer = index % 3
+    const material = new THREE.SpriteMaterial({
+      map: galaxyFogTexture(),
+      color: colors[index % colors.length],
+      transparent: true,
+      opacity: [0.045, 0.07, 0.105][layer] * (0.75 + random() * 0.45),
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.AdditiveBlending,
+      rotation: random() * Math.PI,
+    })
+    materials.push(material)
+    const sprite = new THREE.Sprite(material)
+    const spread = radius * [0.18, 0.12, 0.065][layer]
+    sprite.position.set(
+      center.x + (random() * 2 - 1) * spread,
+      center.y + (random() * 2 - 1) * spread,
+      center.z + (random() * 2 - 1) * spread,
+    )
+    const scale = radius * [0.42, 0.31, 0.22][layer] * (0.78 + random() * 0.4)
+    sprite.scale.set(scale * (0.8 + random() * 0.35), scale, 1)
+    mist.add(sprite)
+  }
+  return mist
+}
+
+function modelUrl(config: DiceModelConfig, skin: DiceSkin): string {
+  if (skin === 'galaxy') return GALAXY_MODEL_URLS[config.key]
+  if (skin === 'moonwhite') return MOONWHITE_MODEL_URLS[config.key]
+  return config.url
+}
+
+function loadTemplate(config: DiceModelConfig, skin: DiceSkin): Promise<THREE.Group> {
+  const cacheKey = `${skin}:${config.key}`
+  const cached = templatePromises.get(cacheKey)
   if (cached) return cached
-  const promise = loader.loadAsync(config.url).then((gltf) => gltf.scene)
-  templatePromises.set(config.key, promise)
+  const promise = loader.loadAsync(modelUrl(config, skin)).then((gltf) => gltf.scene)
+  templatePromises.set(cacheKey, promise)
   return promise
 }
 
 async function buildModel(
   config: DiceModelConfig,
   faceLabel: string,
+  skin: DiceSkin,
 ): Promise<{ model: THREE.Group; faceNormal: THREE.Vector3; faceUp: THREE.Vector3; dispose: () => void }> {
-  const source = await loadTemplate(config)
+  const source = await loadTemplate(config, skin)
   const content = source.clone(true)
   const geometries: THREE.BufferGeometry[] = []
   const materials: THREE.Material[] = []
@@ -128,6 +268,25 @@ async function buildModel(
     const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material]
     const clonedMaterials = sourceMaterials.map((material) => {
       const clone = material.clone()
+      if (skin === 'galaxy' && object.name.includes('_Body_') && clone instanceof THREE.MeshStandardMaterial) {
+        clone.roughness = 0.16
+        clone.metalness = 0.06
+        clone.emissive.set(0x071748)
+        clone.emissiveIntensity = 0.32
+        clone.emissiveMap = clone.map
+      }
+      if (skin === 'moonwhite' && object.name.includes('_Body_') && clone instanceof THREE.MeshStandardMaterial) {
+        clone.roughness = 0.15
+        clone.metalness = 0.025
+        clone.emissive.set(0x102f58)
+        clone.emissiveIntensity = 0.18
+        clone.emissiveMap = clone.map
+        if (clone instanceof THREE.MeshPhysicalMaterial) {
+          clone.transmission = 0.34
+          clone.thickness = 0.22
+          clone.ior = 1.455
+        }
+      }
       materials.push(clone)
       return clone
     })
@@ -143,6 +302,14 @@ async function buildModel(
   const bounds = new THREE.Box3().setFromObject(bodyNode)
   const center = bounds.getCenter(new THREE.Vector3())
   const size = bounds.getSize(new THREE.Vector3())
+  if (skin === 'galaxy') {
+    const faceSeed = Number.parseInt(faceLabel, 10) || faceLabel.length
+    content.add(createGalaxyFog(center, size, config.faceLabels.length * 101 + faceSeed, materials))
+  }
+  if (skin === 'moonwhite') {
+    const faceSeed = Number.parseInt(faceLabel, 10) || faceLabel.length
+    content.add(createMoonwhiteMist(center, size, config.faceLabels.length * 149 + faceSeed, materials))
+  }
   const scale = 2 / Math.max(size.x, size.y, size.z)
   const numberNodes = new Map<string, THREE.Object3D>()
   content.traverse((object) => {
@@ -179,6 +346,7 @@ async function createDie(
   displayValue: string,
   typeLabelText: string,
   turnSeed: number,
+  skin: DiceSkin,
 ): Promise<RenderedDie> {
   const wrapper = document.createElement('div')
   wrapper.className = `die-slot die-slot-${config.key}`
@@ -197,23 +365,25 @@ async function createDie(
   renderer.setSize(104, 104, false)
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.12
+  renderer.toneMappingExposure = skin === 'galaxy' ? 1.26 : skin === 'moonwhite' ? 1.18 : 1.12
   renderer.domElement.className = 'three-die-canvas'
   renderer.domElement.dataset.frontValue = ''
   renderer.domElement.dataset.modelSource = config.key
+  renderer.domElement.dataset.diceSkin = skin
 
   const scene = new THREE.Scene()
   const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20)
   camera.position.set(0, 0, 4)
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x392552, 2.25))
-  const keyLight = new THREE.DirectionalLight(0xffffff, 3.4)
+  const groundColor = skin === 'moonwhite' ? 0x244d73 : 0x392552
+  scene.add(new THREE.HemisphereLight(0xffffff, groundColor, 2.25))
+  const keyLight = new THREE.DirectionalLight(skin === 'moonwhite' ? 0xdaf5ff : 0xffffff, 3.4)
   keyLight.position.set(-2.5, 4, 5)
   scene.add(keyLight)
-  const rimLight = new THREE.DirectionalLight(0x9d6ee7, 2.1)
+  const rimLight = new THREE.DirectionalLight(skin === 'moonwhite' ? 0xa8d8ff : 0x9d6ee7, 2.1)
   rimLight.position.set(4, -2, 2)
   scene.add(rimLight)
 
-  const built = await buildModel(config, faceLabel)
+  const built = await buildModel(config, faceLabel, skin)
   scene.add(built.model)
   renderer.render(scene, camera)
   wrapper.append(typeLabel, valueLabel, shadow, renderer.domElement)
@@ -236,18 +406,18 @@ async function createDie(
   }
 }
 
-function normalDie(value: DiceRollValue): Promise<RenderedDie> {
+function normalDie(value: DiceRollValue, skin: DiceSkin): Promise<RenderedDie> {
   if (!Number.isInteger(value.value) || value.value < 1 || value.value > value.sides) {
     throw new Error(`D${value.sides} 结果 ${value.value} 无效`)
   }
   if (value.sides === 10) {
     const faceLabel = value.value === 10 ? '0' : String(value.value)
-    return createDie(MODEL_CONFIGS['d10-ones'], faceLabel, String(value.value), 'D10', value.value)
+    return createDie(MODEL_CONFIGS['d10-ones'], faceLabel, String(value.value), 'D10', value.value, skin)
   }
   const key = `d${value.sides}` as ModelKey
   const config = MODEL_CONFIGS[key]
   if (!config) throw new Error(`暂不支持 D${value.sides} 的动画模型`)
-  return createDie(config, String(value.value), String(value.value), `D${value.sides}`, value.value)
+  return createDie(config, String(value.value), String(value.value), `D${value.sides}`, value.value, skin)
 }
 
 function uprightTarget(normal: THREE.Vector3, up: THREE.Vector3): THREE.Quaternion {
@@ -258,11 +428,9 @@ function uprightTarget(normal: THREE.Vector3, up: THREE.Vector3): THREE.Quaterni
 }
 
 function continuousRotation(
-  normal: THREE.Vector3,
-  up: THREE.Vector3,
+  target: THREE.Quaternion,
   turnSeed: number,
-): { x: number; y: number; z: number; target: THREE.Quaternion } {
-  const target = uprightTarget(normal, up)
+): { x: number; y: number; z: number } {
   const targetAngles = new THREE.Euler().setFromQuaternion(target, 'XYZ')
   const fullTurn = Math.PI * 2
   const unwrap = (angle: number, turns: number): number => (
@@ -272,7 +440,6 @@ function continuousRotation(
     x: unwrap(targetAngles.x, 3 + turnSeed % 2),
     y: unwrap(targetAngles.y, 4 + turnSeed % 2),
     z: unwrap(targetAngles.z, 2),
-    target,
   }
 }
 
@@ -285,20 +452,40 @@ async function animateDie(die: RenderedDie, delay: number): Promise<void> {
   die.wrapper.classList.add('is-rolling')
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const duration = reduceMotion ? 180 : 3_600
-  const rotation = continuousRotation(die.faceNormal, die.faceUp, die.turnSeed)
+  const finalTarget = uprightTarget(die.faceNormal, die.faceUp)
+  const randomRoll = (Math.random() * 2 - 1) * Math.PI
+  const landingRoll = Math.abs(randomRoll) < Math.PI / 6
+    ? Math.sign(randomRoll || 1) * Math.PI / 6
+    : randomRoll
+  const landingTarget = new THREE.Quaternion()
+    .setFromAxisAngle(Z_AXIS, landingRoll)
+    .multiply(finalTarget)
+    .normalize()
+  const rotation = continuousRotation(reduceMotion ? finalTarget : landingTarget, die.turnSeed)
+  const rollEnd = 0.84
+  const pauseEnd = 0.875
   const startedAt = performance.now()
 
   await new Promise<void>((resolve) => {
     const frame = (now: number): void => {
       const progress = Math.min((now - startedAt) / duration, 1)
-      const rotationProgress = easeOutCubic(progress)
-      const rotationX = rotation.x * rotationProgress
-      const rotationY = rotation.y * rotationProgress
-      const rotationZ = rotation.z * rotationProgress
-      die.model.rotation.set(rotationX, rotationY, rotationZ, 'XYZ')
-      die.renderer.domElement.dataset.rotationX = rotationX.toFixed(6)
-      die.renderer.domElement.dataset.rotationY = rotationY.toFixed(6)
-      die.renderer.domElement.dataset.rotationZ = rotationZ.toFixed(6)
+      if (reduceMotion || progress < rollEnd) {
+        const rotationProgress = easeOutCubic(reduceMotion ? progress : progress / rollEnd)
+        die.model.rotation.set(
+          rotation.x * rotationProgress,
+          rotation.y * rotationProgress,
+          rotation.z * rotationProgress,
+          'XYZ',
+        )
+      } else if (progress < pauseEnd) {
+        die.model.quaternion.copy(landingTarget)
+      } else {
+        const uprightProgress = easeOutCubic((progress - pauseEnd) / (1 - pauseEnd))
+        die.model.quaternion.slerpQuaternions(landingTarget, finalTarget, uprightProgress)
+      }
+      die.renderer.domElement.dataset.rotationX = die.model.rotation.x.toFixed(6)
+      die.renderer.domElement.dataset.rotationY = die.model.rotation.y.toFixed(6)
+      die.renderer.domElement.dataset.rotationZ = die.model.rotation.z.toFixed(6)
       die.renderer.render(die.scene, die.camera)
       if (progress < 1) requestAnimationFrame(frame)
       else resolve()
@@ -306,10 +493,10 @@ async function animateDie(die: RenderedDie, delay: number): Promise<void> {
     requestAnimationFrame(frame)
   })
 
-  die.model.quaternion.copy(rotation.target)
+  die.model.quaternion.copy(finalTarget)
   die.renderer.render(die.scene, die.camera)
-  const frontDot = die.faceNormal.clone().applyQuaternion(rotation.target).dot(FRONT)
-  const upDot = die.faceUp.clone().applyQuaternion(rotation.target).dot(SCREEN_UP)
+  const frontDot = die.faceNormal.clone().applyQuaternion(finalTarget).dot(FRONT)
+  const upDot = die.faceUp.clone().applyQuaternion(finalTarget).dot(SCREEN_UP)
   die.renderer.domElement.dataset.frontValue = die.frontValue
   die.renderer.domElement.dataset.frontDot = frontDot.toFixed(6)
   die.renderer.domElement.dataset.upDot = upDot.toFixed(6)
@@ -338,7 +525,10 @@ function moduleHeading(module: DiceRollModule): HTMLElement {
   return heading
 }
 
-async function createPercentileModule(module: DiceRollModule): Promise<{ element: HTMLElement; dice: RenderedDie[] }> {
+async function createPercentileModule(
+  module: DiceRollModule,
+  skin: DiceSkin,
+): Promise<{ element: HTMLElement; dice: RenderedDie[] }> {
   const ones = module.dice.find((die) => die.role === 'PERCENTILE_ONES')
   const tens = module.dice.filter((die) => die.role === 'PERCENTILE_TENS')
   if (!ones || tens.length === 0) throw new Error(`${module.expression} 缺少百分骰的十位或个位数据`)
@@ -355,7 +545,14 @@ async function createPercentileModule(module: DiceRollModule): Promise<{ element
 
   for (const tensDie of tens) {
     const tensLabel = tensDie.value === 0 ? '00' : String(tensDie.value * 10)
-    const tensModel = await createDie(MODEL_CONFIGS['d10-tens'], tensLabel, tensLabel, '十位', tensDie.value)
+    const tensModel = await createDie(
+      MODEL_CONFIGS['d10-tens'],
+      tensLabel,
+      tensLabel,
+      '十位',
+      tensDie.value,
+      skin,
+    )
     tensModel.wrapper.classList.add('percentile-tens-die')
     tensModel.wrapper.dataset.percentileOutcome = tensDie.selected ? 'selected' : 'dimmed'
     tensGroup.append(tensModel.wrapper)
@@ -372,6 +569,7 @@ async function createPercentileModule(module: DiceRollModule): Promise<{ element
     String(ones.value),
     '个位',
     ones.value,
+    skin,
   )
   onesModel.wrapper.classList.add('percentile-ones-die')
   onesModel.wrapper.dataset.percentileOutcome = 'selected'
@@ -381,14 +579,17 @@ async function createPercentileModule(module: DiceRollModule): Promise<{ element
   return { element, dice: rendered }
 }
 
-async function createModule(module: DiceRollModule): Promise<{ element: HTMLElement; dice: RenderedDie[] }> {
-  if (module.diceSides === 100) return createPercentileModule(module)
+async function createModule(
+  module: DiceRollModule,
+  skin: DiceSkin,
+): Promise<{ element: HTMLElement; dice: RenderedDie[] }> {
+  if (module.diceSides === 100) return createPercentileModule(module, skin)
   const element = document.createElement('section')
   element.className = 'dice-module'
   element.append(moduleHeading(module))
   const row = document.createElement('div')
   row.className = 'dice-row'
-  const dice = await Promise.all(module.dice.map(normalDie))
+  const dice = await Promise.all(module.dice.map((die) => normalDie(die, skin)))
   row.append(...dice.map((die) => die.wrapper))
   element.append(row)
   return { element, dice }
@@ -396,15 +597,20 @@ async function createModule(module: DiceRollModule): Promise<{ element: HTMLElem
 
 export class ThreeDiceBoard {
   private activeDice: RenderedDie[] = []
+  private skin: DiceSkin = 'classic'
 
   constructor(private readonly diceTray: HTMLElement) {
     this.renderWaitingDice()
   }
 
+  setSkin(skin: DiceSkin): void {
+    this.skin = skin
+  }
+
   async playResult(result: DiceRollResult): Promise<void> {
     if (!result.modules.length) throw new Error('后端掷骰结果不包含骰子模块')
     this.activeDice.forEach((die) => die.dispose())
-    const modules = await Promise.all(result.modules.map(createModule))
+    const modules = await Promise.all(result.modules.map((module) => createModule(module, this.skin)))
     this.activeDice = modules.flatMap((module) => module.dice)
     this.diceTray.replaceChildren(...modules.map((module) => module.element))
     await Promise.all(this.activeDice.map((die, index) => animateDie(die, index * 90)))

@@ -40,6 +40,8 @@ public class WorldStoryEvent implements Serializable {
 
     private String summary;
 
+    private Long conversationId;
+
     private String status;
 
     private LocalDateTime startedAt;

@@ -4,12 +4,19 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocSkillDef;
+import com.me.galchat.domain.po.CharacterTemplate;
+import com.me.galchat.domain.po.UserInfo;
+import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.CocCharacterSkillMapper;
 import com.me.galchat.mapper.CocCharacterWeaponMapper;
 import com.me.galchat.mapper.CocSkillDefMapper;
+import com.me.galchat.mapper.CharacterTemplateMapper;
+import com.me.galchat.mapper.UserInfoMapper;
+import com.me.galchat.utils.CurrentHolder;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -26,14 +33,24 @@ class CharacterCardServiceImplTest {
 
     private CocCharacterMapper characterMapper;
     private CocSkillDefMapper skillDefMapper;
+    private CharacterTemplateMapper characterTemplateMapper;
+    private UserInfoMapper userInfoMapper;
     private CharacterCardServiceImpl service;
 
     @BeforeEach
     void setUp() {
         characterMapper = mock(CocCharacterMapper.class);
         skillDefMapper = mock(CocSkillDefMapper.class);
+        characterTemplateMapper = mock(CharacterTemplateMapper.class);
+        userInfoMapper = mock(UserInfoMapper.class);
         service = new CharacterCardServiceImpl(characterMapper, mock(CocCharacterSkillMapper.class),
-                mock(CocCharacterWeaponMapper.class), mock(CocCharacterProfileMapper.class), skillDefMapper);
+                mock(CocCharacterWeaponMapper.class), mock(CocCharacterProfileMapper.class), skillDefMapper,
+                characterTemplateMapper, userInfoMapper);
+    }
+
+    @AfterEach
+    void tearDown() {
+        CurrentHolder.remove();
     }
 
     @Test
@@ -96,6 +113,37 @@ class CharacterCardServiceImplTest {
         assertThat(skill.getSkillDefId()).isEqualTo(1L);
         assertThat(CharacterCardServiceImpl.resolveActorType(null)).isEqualTo("PLAYER");
         assertThat(CharacterCardServiceImpl.resolveActorType(9L)).isEqualTo("BOT");
+    }
+
+    @Test
+    void fillsBotPlayerNameAndImageFromCharacterTemplate() {
+        when(characterTemplateMapper.selectById(9L)).thenReturn(new CharacterTemplate()
+                .setName("守秘人").setImage("https://example.com/npc.png"));
+        CocCharacter character = new CocCharacter();
+
+        service.fillPlayerAndImage(character, 9L);
+
+        assertThat(character.getPlayerName()).isEqualTo("守秘人");
+        assertThat(character.getImage()).isEqualTo("https://example.com/npc.png");
+    }
+
+    @Test
+    void fillsPlayerNameFromCurrentUser() {
+        CurrentHolder.setCurrentId(3);
+        when(userInfoMapper.selectById(3L)).thenReturn(new UserInfo().setUsername("player"));
+        CocCharacter character = new CocCharacter();
+
+        service.fillPlayerAndImage(character, null);
+
+        assertThat(character.getPlayerName()).isEqualTo("player");
+        assertThat(character.getImage()).isNull();
+    }
+
+    @Test
+    void rejectsPlayerCreationWithoutCurrentUser() {
+        assertThatThrownBy(() -> service.fillPlayerAndImage(new CocCharacter(), null))
+                .isInstanceOf(UserAuthException.class)
+                .hasMessage("用户未登录");
     }
 
     private CocCharacter characterWithAllAttributes(int value) {

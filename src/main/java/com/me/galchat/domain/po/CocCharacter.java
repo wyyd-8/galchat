@@ -19,6 +19,8 @@ public class CocCharacter {
     private String actorType;
     private Long participantId;
     private String name;
+    private String playerName;
+    private String image;
     private String occupation;
     private String sex;
     private Integer age;

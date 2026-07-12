@@ -8,15 +8,21 @@ import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.CocSkillDef;
+import com.me.galchat.domain.po.CharacterTemplate;
+import com.me.galchat.domain.po.UserInfo;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.DiceRollResultVO;
+import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.CocCharacterSkillMapper;
 import com.me.galchat.mapper.CocCharacterWeaponMapper;
 import com.me.galchat.mapper.CocSkillDefMapper;
+import com.me.galchat.mapper.CharacterTemplateMapper;
+import com.me.galchat.mapper.UserInfoMapper;
 import com.me.galchat.service.ICharacterCardService;
+import com.me.galchat.utils.CurrentHolder;
 import com.me.galchat.utils.DiceUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -36,6 +42,8 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     private final CocCharacterWeaponMapper weaponMapper;
     private final CocCharacterProfileMapper profileMapper;
     private final CocSkillDefMapper skillDefMapper;
+    private final CharacterTemplateMapper characterTemplateMapper;
+    private final UserInfoMapper userInfoMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -51,6 +59,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
                 .setParticipantId(createDTO.getParticipantId())
                 .setActorType(resolveActorType(createDTO.getParticipantId()))
                 .setCreationMethod("IMPORT");
+        fillPlayerAndImage(character, createDTO.getParticipantId());
         characterMapper.insert(character);
         Long characterId = character.getId();
 
@@ -213,5 +222,25 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
 
     static String resolveActorType(Long participantId) {
         return participantId == null ? "PLAYER" : "BOT";
+    }
+
+    void fillPlayerAndImage(CocCharacter character, Long participantId) {
+        if (participantId != null) {
+            CharacterTemplate template = characterTemplateMapper.selectById(participantId);
+            if (template == null) {
+                throw new UserRequestException("角色模板不存在");
+            }
+            character.setPlayerName(template.getName()).setImage(template.getImage());
+            return;
+        }
+        Integer userId = CurrentHolder.getCurrentId();
+        if (userId == null) {
+            throw new UserAuthException("用户未登录");
+        }
+        UserInfo user = userInfoMapper.selectById(userId.longValue());
+        if (user == null) {
+            throw new UserRequestException("玩家不存在");
+        }
+        character.setPlayerName(user.getUsername()).setImage(null);
     }
 }

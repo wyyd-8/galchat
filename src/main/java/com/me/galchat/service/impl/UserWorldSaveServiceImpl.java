@@ -3,11 +3,13 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.constant.StoryConstant;
 import com.me.galchat.domain.dto.UserWorldSaveCreateDTO;
 import com.me.galchat.domain.dto.UserWorldSaveSnapshotDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
+import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
@@ -22,6 +24,12 @@ import com.me.galchat.domain.po.WorldStoryEventCharacter;
 import com.me.galchat.domain.vo.UserWorldSaveOverviewVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CharacterTemplateMapper;
+import com.me.galchat.mapper.GroupChatMessageMapper;
+import com.me.galchat.mapper.GroupChatReplyStepMapper;
+import com.me.galchat.mapper.GroupChatThinkingMapper;
+import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.mapper.GroupContextSummaryMapper;
+import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.UserCharacterFavorLogMapper;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
@@ -79,7 +87,14 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private final WorldEventLogMapper worldEventLogMapper;
     private final WorldStoryEventMapper worldStoryEventMapper;
     private final WorldStoryEventCharacterMapper worldStoryEventCharacterMapper;
+    private final GroupConversationMapper groupConversationMapper;
+    private final GroupChatMessageMapper groupChatMessageMapper;
+    private final GroupChatThinkingMapper groupChatThinkingMapper;
+    private final GroupChatTurnMapper groupChatTurnMapper;
+    private final GroupChatReplyStepMapper groupChatReplyStepMapper;
+    private final GroupContextSummaryMapper groupContextSummaryMapper;
     private final StoryOperationLockService storyOperationLockService;
+    private final GroupConversationLockService groupConversationLockService;
     private final StringRedisTemplate redisTemplate;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
     private final WorldEventVectorService worldEventVectorService;
@@ -100,10 +115,13 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(userId, userWorldId, true);
         List<UserCharacterInfo> characters = listCharacters(userWorldId);
         List<RLock> locks = storyOperationLockService.lockStoryCharacters(userWorldId, characterIds(characters));
+        List<GroupConversationLockService.OwnedLock> groupLocks = List.of();
         try {
+            groupLocks = lockActiveGroupConversations(userWorldId);
             UserWorldSave saved = transactionTemplate.execute(status -> doSaveWorld(userId, userWorld, createDTO));
             return toOverview(saved);
         } finally {
+            unlockGroupConversations(groupLocks);
             storyOperationLockService.unlockAll(locks);
         }
     }
@@ -117,12 +135,15 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
 
         List<UserCharacterInfo> characters = listCharacters(userWorldId);
         List<RLock> locks = storyOperationLockService.lockStoryCharacters(userWorldId, characterIds(characters));
+        List<GroupConversationLockService.OwnedLock> groupLocks = List.of();
         try {
+            groupLocks = lockActiveGroupConversations(userWorldId);
             List<Long> deletedUserMessageIds = transactionTemplate.execute(status -> doLoadWorld(userWorldId, snapshot));
             evictRedisData(userWorldId, emptyIfNull(deletedUserMessageIds), snapshot);
             restoreTopicBoundaries(userWorldId, snapshot.getTopicBoundaries());
             restoreDerivedData(userWorldId, snapshot);
         } finally {
+            unlockGroupConversations(groupLocks);
             storyOperationLockService.unlockAll(locks);
         }
     }
@@ -175,6 +196,12 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .setMaxWorldEventLogId(maxWorldEventLogId(userWorldId))
                 .setMaxStoryEventId(maxStoryEventId(userWorldId))
                 .setMaxStoryEventCharacterId(maxStoryEventCharacterId(userWorldId))
+                .setMaxGroupConversationId(maxGroupConversationId(userWorldId))
+                .setMaxGroupMessageId(maxGroupMessageId(userWorldId))
+                .setMaxGroupThinkingId(maxGroupThinkingId(userWorldId))
+                .setMaxGroupTurnId(maxGroupTurnId(userWorldId))
+                .setMaxGroupReplyStepId(maxGroupReplyStepId(userWorldId))
+                .setMaxGroupContextSummaryId(maxGroupContextSummaryId(userWorldId))
                 .setCharacterStates(characterStates(characters))
                 .setTopicBoundaries(topicBoundaries(userWorldId, characters))
                 .setRecentChatRoundsByCharacter(recentChatRounds(userWorldId, characters))
@@ -213,6 +240,22 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         userWorldSaveRestoreMapper.deleteStoryEventCharactersAfter(userWorldId,
                 safeMax(snapshot.getMaxStoryEventCharacterId()));
         userWorldSaveRestoreMapper.deleteStoryEventsAfter(userWorldId, safeMax(snapshot.getMaxStoryEventId()));
+        if (snapshot.getMaxGroupConversationId() != null) {
+            userWorldSaveRestoreMapper.deleteGroupThinkingAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupThinkingId()));
+            userWorldSaveRestoreMapper.deleteGroupReplyStepsAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupReplyStepId()));
+            userWorldSaveRestoreMapper.deleteGroupMessagesAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupMessageId()));
+            userWorldSaveRestoreMapper.deleteGroupTurnsAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupTurnId()));
+            userWorldSaveRestoreMapper.deleteGroupSummariesAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupContextSummaryId()));
+            userWorldSaveRestoreMapper.deleteGroupMembersAfterConversation(userWorldId,
+                    safeMax(snapshot.getMaxGroupConversationId()));
+            userWorldSaveRestoreMapper.deleteGroupConversationsAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupConversationId()));
+        }
     }
 
     private void restoreRecentChatRounds(Long userWorldId, UserWorldSaveSnapshotDTO snapshot) {
@@ -644,6 +687,65 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                         .orderByDesc(WorldStoryEventCharacter::getId)
                         .last("limit 1"));
         return row == null ? 0L : row.getId();
+    }
+
+    private Long maxGroupConversationId(Long userWorldId) {
+        return Objects.requireNonNullElse(groupConversationMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
+    }
+
+    private Long maxGroupMessageId(Long userWorldId) {
+        return Objects.requireNonNullElse(groupChatMessageMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
+    }
+
+    private Long maxGroupThinkingId(Long userWorldId) {
+        return Objects.requireNonNullElse(groupChatThinkingMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
+    }
+
+    private Long maxGroupTurnId(Long userWorldId) {
+        return Objects.requireNonNullElse(groupChatTurnMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
+    }
+
+    private Long maxGroupReplyStepId(Long userWorldId) {
+        return Objects.requireNonNullElse(groupChatReplyStepMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
+    }
+
+    private Long maxGroupContextSummaryId(Long userWorldId) {
+        return Objects.requireNonNullElse(groupContextSummaryMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
+    }
+
+    private List<GroupConversationLockService.OwnedLock> lockActiveGroupConversations(Long userWorldId) {
+        List<Long> conversationIds = groupConversationMapper.selectList(
+                        new LambdaQueryWrapper<GroupConversation>()
+                                .select(GroupConversation::getId)
+                                .eq(GroupConversation::getUserWorldId, userWorldId)
+                                .eq(GroupConversation::getStatus, GroupChatConstant.STATUS_ACTIVE)
+                                .orderByAsc(GroupConversation::getId))
+                .stream()
+                .map(GroupConversation::getId)
+                .toList();
+        List<GroupConversationLockService.OwnedLock> locks = new ArrayList<>();
+        try {
+            for (Long conversationId : conversationIds) {
+                GroupConversationLockService.OwnedLock lock = groupConversationLockService.tryLock(conversationId);
+                if (lock == null) {
+                    throw new UserRequestException("群聊正在生成回复，请稍后再存档或读档");
+                }
+                locks.add(lock);
+            }
+            return locks;
+        } catch (RuntimeException e) {
+            unlockGroupConversations(locks);
+            throw e;
+        }
+    }
+
+    private void unlockGroupConversations(List<GroupConversationLockService.OwnedLock> locks) {
+        if (locks == null) {
+            return;
+        }
+        for (int i = locks.size() - 1; i >= 0; i--) {
+            groupConversationLockService.unlock(locks.get(i));
+        }
     }
 
     private UserWorldSave getRequiredSave(Long userId, Long userWorldId) {

@@ -75,6 +75,51 @@ public class DeepSeekModelConfiguration {
                 observationConvention, toolExecutionEligibilityPredicate);
     }
 
+    /**
+     * 群聊模型不使用 RecordingToolCallingManager。即使调用方未来添加工具，工具执行也不会隐式写入
+     * UserChatMemory；群聊必须使用自己的 message/step 关联记录。
+     */
+    @Bean
+    public DeepSeekChatModel groupDeepSeekThinkingChatModel(
+            DeepSeekConnectionProperties connectionProperties,
+            DeepSeekChatProperties chatProperties,
+            ObjectProvider<RestClient.Builder> restClientBuilderProvider,
+            ObjectProvider<WebClient.Builder> webClientBuilderProvider,
+            ToolCallingManager toolCallingManager,
+            ObjectProvider<RetryTemplate> retryTemplate,
+            ObjectProvider<ResponseErrorHandler> responseErrorHandler,
+            ObjectProvider<ObservationRegistry> observationRegistry,
+            ObjectProvider<ChatModelObservationConvention> observationConvention,
+            ObjectProvider<ToolExecutionEligibilityPredicate> toolExecutionEligibilityPredicate) {
+        return buildChatModel(connectionProperties, chatProperties,
+                restClientBuilderProvider.getIfAvailable(RestClient::builder),
+                webClientBuilderProvider.getIfAvailable(WebClient::builder),
+                toolCallingManager, retryTemplate, responseErrorHandler, observationRegistry,
+                observationConvention, toolExecutionEligibilityPredicate);
+    }
+
+    @Bean
+    public DeepSeekChatModel groupDeepSeekNonThinkingChatModel(
+            DeepSeekConnectionProperties connectionProperties,
+            DeepSeekChatProperties chatProperties,
+            ObjectProvider<RestClient.Builder> restClientBuilderProvider,
+            ObjectProvider<WebClient.Builder> webClientBuilderProvider,
+            ToolCallingManager toolCallingManager,
+            ObjectProvider<RetryTemplate> retryTemplate,
+            ObjectProvider<ResponseErrorHandler> responseErrorHandler,
+            ObjectProvider<ObservationRegistry> observationRegistry,
+            ObjectProvider<ChatModelObservationConvention> observationConvention,
+            ObjectProvider<ToolExecutionEligibilityPredicate> toolExecutionEligibilityPredicate) {
+        RestClient.Builder restClientBuilder = restClientBuilderProvider
+                .getIfAvailable(RestClient::builder)
+                .clone()
+                .requestInterceptor(new DeepSeekThinkingInterceptor());
+        return buildChatModel(connectionProperties, chatProperties, restClientBuilder,
+                webClientBuilderProvider.getIfAvailable(WebClient::builder),
+                toolCallingManager, retryTemplate, responseErrorHandler, observationRegistry,
+                observationConvention, toolExecutionEligibilityPredicate);
+    }
+
     private DeepSeekChatModel buildChatModel(
             DeepSeekConnectionProperties connectionProperties,
             DeepSeekChatProperties chatProperties,

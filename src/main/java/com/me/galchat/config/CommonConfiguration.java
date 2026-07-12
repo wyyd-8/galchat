@@ -123,7 +123,8 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient worldStoryOpeningClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+    public ChatClient worldStoryOpeningClient(
+            @Qualifier("groupDeepSeekNonThinkingChatModel") DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("""
@@ -140,7 +141,8 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient worldStoryAdvanceClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+    public ChatClient worldStoryAdvanceClient(
+            @Qualifier("groupDeepSeekNonThinkingChatModel") DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("""
@@ -156,7 +158,8 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient worldStoryEndClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+    public ChatClient worldStoryEndClient(
+            @Qualifier("groupDeepSeekNonThinkingChatModel") DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("""

@@ -1,0 +1,3 @@
+ALTER TABLE coc_character
+    ADD COLUMN IF NOT EXISTS player_name VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS image VARCHAR(1024);

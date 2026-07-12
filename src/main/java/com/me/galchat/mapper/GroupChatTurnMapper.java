@@ -1,0 +1,17 @@
+package com.me.galchat.mapper;
+
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.me.galchat.domain.po.GroupChatTurn;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+
+public interface GroupChatTurnMapper extends BaseMapper<GroupChatTurn> {
+
+    @Select("""
+            SELECT COALESCE(MAX(turn_row.id), 0)
+            FROM group_chat_turn turn_row
+            JOIN group_conversation conversation ON conversation.id = turn_row.conversation_id
+            WHERE conversation.user_world_id = #{userWorldId}
+            """)
+    Long selectMaxIdByUserWorldId(@Param("userWorldId") Long userWorldId);
+}

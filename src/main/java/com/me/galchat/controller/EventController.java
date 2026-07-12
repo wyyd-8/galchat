@@ -42,8 +42,7 @@ public class EventController {
 
     @PostMapping("/story/start")
     public Result startStory(@RequestBody WorldStoryEventStartDTO startDTO) {
-        worldStoryEventService.startStory(startDTO);
-        return Result.success();
+        return Result.success(worldStoryEventService.startStory(startDTO));
     }
 
     @GetMapping("/story/active/{userWorldId}")

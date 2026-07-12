@@ -36,6 +36,18 @@ public class UserWorldSaveSnapshotDTO {
 
     private Long maxStoryEventCharacterId;
 
+    private Long maxGroupConversationId;
+
+    private Long maxGroupMessageId;
+
+    private Long maxGroupThinkingId;
+
+    private Long maxGroupTurnId;
+
+    private Long maxGroupReplyStepId;
+
+    private Long maxGroupContextSummaryId;
+
     private List<CharacterStateSnapshot> characterStates;
 
     private List<TopicBoundarySnapshot> topicBoundaries;

@@ -17,7 +17,7 @@ public interface IWorldStoryEventService extends IService<WorldStoryEvent> {
 
     WorldStoryEventDetailVO getStoryDetail(Long storyEventId);
 
-    void startStory(WorldStoryEventStartDTO startDTO);
+    WorldStoryEventStartVO startStory(WorldStoryEventStartDTO startDTO);
 
     WorldStoryEventStartVO getActiveStory(Long userWorldId);
 

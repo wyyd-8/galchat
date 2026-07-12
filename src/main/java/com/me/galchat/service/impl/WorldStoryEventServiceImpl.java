@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.constant.StoryConstant;
 import com.me.galchat.domain.dto.WorldStoryEventAdvanceDTO;
 import com.me.galchat.domain.dto.WorldStoryEventEndDTO;
@@ -11,6 +12,8 @@ import com.me.galchat.domain.dto.WorldStoryEventStartDTO;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserWorldPrefix;
+import com.me.galchat.domain.po.GroupChatMessage;
+import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.domain.po.WorldStoryEvent;
 import com.me.galchat.domain.po.WorldStoryEventCharacter;
@@ -19,6 +22,7 @@ import com.me.galchat.domain.vo.WorldStoryEventListVO;
 import com.me.galchat.domain.vo.WorldStoryEventStartVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.WorldStoryEventCharacterMapper;
 import com.me.galchat.mapper.WorldStoryEventMapper;
 import com.me.galchat.memory.TopicBoundaryService;
@@ -37,6 +41,7 @@ import org.json.JSONObject;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -59,6 +64,10 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     private final WorldDetailVectorService worldDetailVectorService;
     private final WorldEventVectorService worldEventVectorService;
     private final StoryOperationLockService storyOperationLockService;
+    private final GroupConversationService groupConversationService;
+    private final GroupConversationLockService groupConversationLockService;
+    private final GroupChatMessageMapper groupChatMessageMapper;
+    private final TransactionTemplate transactionTemplate;
 
     @Resource(name = "worldStoryOpeningClient")
     private ChatClient worldStoryOpeningClient;
@@ -88,6 +97,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         WorldStoryEvent storyEvent = lambdaQuery()
                 .select(WorldStoryEvent::getId,
                         WorldStoryEvent::getUserWorldId,
+                        WorldStoryEvent::getConversationId,
                         WorldStoryEvent::getTitle,
                         WorldStoryEvent::getTheme,
                         WorldStoryEvent::getCurrentScene,
@@ -107,6 +117,7 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return new WorldStoryEventDetailVO(
                 storyEvent.getId(),
                 storyEvent.getUserWorldId(),
+                storyEvent.getConversationId(),
                 storyEvent.getTitle(),
                 storyEvent.getTheme(),
                 storyEvent.getCurrentScene(),
@@ -120,18 +131,18 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     }
 
     @Override
-    public void startStory(WorldStoryEventStartDTO startDTO) {
+    public WorldStoryEventStartVO startStory(WorldStoryEventStartDTO startDTO) {
         checkStartRequest(startDTO);
         List<Long> characterIds = distinctCharacterIds(startDTO.getCharacterIds());
         List<RLock> locks = storyOperationLockService.lockStoryCharacters(startDTO.getUserWorldId(), characterIds);
         try {
-            doStartStory(startDTO, characterIds);
+            return transactionTemplate.execute(status -> doStartStory(startDTO, characterIds));
         } finally {
             storyOperationLockService.unlockAll(locks);
         }
     }
 
-    private void doStartStory(WorldStoryEventStartDTO startDTO, List<Long> characterIds) {
+    private WorldStoryEventStartVO doStartStory(WorldStoryEventStartDTO startDTO, List<Long> characterIds) {
         UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(startDTO.getUserWorldId(), true);
         checkCharacters(startDTO.getUserWorldId(), characterIds);
         checkNoActiveStory(startDTO.getUserWorldId());
@@ -151,7 +162,13 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 .setUpdatedAt(now);
         save(storyEvent);
 
+        GroupConversation conversation = groupConversationService.createStoryConversation(storyEvent, characterIds,
+                formatStoryStartContent(storyEvent, opening.sceneWorldDetails()));
+        storyEvent.setConversationId(conversation.getId()).setUpdatedAt(LocalDateTime.now());
+        updateById(storyEvent);
+
         characterIds.forEach(characterId -> createStoryCharacter(storyEvent, characterId, opening.sceneWorldDetails()));
+        return new WorldStoryEventStartVO(storyEvent, listStoryCharacters(storyEvent.getId()));
     }
 
     @Override
@@ -186,9 +203,12 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         }
         List<RLock> locks = storyOperationLockService.lockStoryCharacters(storyEvent.getUserWorldId(),
                 characterIds(characters));
+        GroupConversationLockService.OwnedLock groupLock = null;
         try {
-            doAdvanceStory(storyEvent, advanceDTO, characters);
+            groupLock = lockStoryConversation(storyEvent);
+            transactionTemplate.executeWithoutResult(status -> doAdvanceStory(storyEvent, advanceDTO, characters));
         } finally {
+            groupConversationLockService.unlock(groupLock);
             storyOperationLockService.unlockAll(locks);
         }
     }
@@ -196,9 +216,14 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     private void doAdvanceStory(WorldStoryEvent storyEvent, WorldStoryEventAdvanceDTO advanceDTO,
                                 List<WorldStoryEventCharacter> characters) {
         userWorldPrefixService.checkUserWorldAuth(storyEvent.getUserWorldId(), false);
-
         StoryProgress storyProgress = buildStoryProgress(storyEvent, advanceDTO.getTransition());
         updateStoryScene(storyEvent, storyProgress.currentScene());
+        if (storyEvent.getConversationId() != null) {
+            groupConversationService.appendSystemEvent(storyEvent.getConversationId(),
+                    formatStoryProgressContent(storyEvent, storyProgress.progress()),
+                    GroupChatConstant.MESSAGE_SYSTEM_EVENT);
+        }
+        // 过渡期继续写入旧单聊记录，避免破坏已有存档与单聊历史；群聊上下文不读取这些记录。
         characters.forEach(character -> createStoryProgressMessage(storyEvent, character, storyProgress.progress()));
         restoreStoryTopics(storyEvent, characters);
     }
@@ -216,9 +241,12 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         }
         List<RLock> locks = storyOperationLockService.lockStoryCharacters(storyEvent.getUserWorldId(),
                 characterIds(characters));
+        GroupConversationLockService.OwnedLock groupLock = null;
         try {
-            doEndStory(storyEvent, endDTO, characters);
+            groupLock = lockStoryConversation(storyEvent);
+            transactionTemplate.executeWithoutResult(status -> doEndStory(storyEvent, endDTO, characters));
         } finally {
+            groupConversationLockService.unlock(groupLock);
             storyOperationLockService.unlockAll(locks);
         }
     }
@@ -226,9 +254,13 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
     private void doEndStory(WorldStoryEvent storyEvent, WorldStoryEventEndDTO endDTO,
                             List<WorldStoryEventCharacter> characters) {
         userWorldPrefixService.checkUserWorldAuth(storyEvent.getUserWorldId(), false);
-
-        List<UserChatHistory> storyHistories = listStoryHistories(storyEvent, characters);
-        String summary = buildStorySummary(storyEvent, endDTO, storyHistories);
+        String summary;
+        if (storyEvent.getConversationId() != null) {
+            summary = buildGroupStorySummary(storyEvent, endDTO,
+                    listGroupStoryHistories(storyEvent.getConversationId()));
+        } else {
+            summary = buildStorySummary(storyEvent, endDTO, listStoryHistories(storyEvent, characters));
+        }
         LocalDateTime now = LocalDateTime.now();
         storyEvent.setSummary(summary)
                 .setStatus(StoryConstant.CLOSED_STATUS)
@@ -236,6 +268,11 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
                 .setUpdatedAt(now);
         updateById(storyEvent);
 
+        if (storyEvent.getConversationId() != null) {
+            groupConversationService.appendSystemEvent(storyEvent.getConversationId(),
+                    formatStoryEndContent(storyEvent, summary), GroupChatConstant.MESSAGE_SYSTEM_EVENT);
+            groupConversationService.close(storyEvent.getConversationId());
+        }
         List<UserChatHistory> endMessages = characters.stream()
                 .map(character -> createStoryEndMessage(storyEvent, character, summary))
                 .toList();
@@ -407,6 +444,24 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return fallbackSummary(storyEvent, endDTO);
     }
 
+    private String buildGroupStorySummary(WorldStoryEvent storyEvent, WorldStoryEventEndDTO endDTO,
+                                          List<GroupChatMessage> storyHistories) {
+        String content = worldStoryEndClient.prompt()
+                .user(formatGroupEndPrompt(storyEvent, endDTO, storyHistories))
+                .call()
+                .content();
+        try {
+            JSONObject jsonObject = new JSONObject(normalizeJson(content));
+            String summary = jsonObject.optString("summary", "");
+            if (StringUtils.hasText(summary)) {
+                return summary.trim();
+            }
+        } catch (JSONException e) {
+            log.warn("群聊故事总结生成结果不是有效JSON: {}", content);
+        }
+        return fallbackSummary(storyEvent, endDTO);
+    }
+
     private String formatAdvancePrompt(WorldStoryEvent storyEvent, String transition) {
         StringBuilder builder = new StringBuilder();
         appendPromptLine(builder, "标题", storyEvent.getTitle());
@@ -430,6 +485,23 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         builder.append("故事消息：\n");
         for (UserChatHistory history : storyHistories) {
             builder.append(formatHistory(history)).append('\n');
+        }
+        return builder.toString();
+    }
+
+    private String formatGroupEndPrompt(WorldStoryEvent storyEvent, WorldStoryEventEndDTO endDTO,
+                                        List<GroupChatMessage> storyHistories) {
+        StringBuilder builder = new StringBuilder();
+        appendPromptLine(builder, "标题", storyEvent.getTitle());
+        appendPromptLine(builder, "主题", storyEvent.getTheme());
+        appendPromptLine(builder, "当前场景", storyEvent.getCurrentScene());
+        appendPromptLine(builder, "故事开场", storyEvent.getOpening());
+        if (endDTO != null) {
+            appendPromptLine(builder, "用户离开说明", endDTO.getEnding());
+        }
+        builder.append("群聊故事消息：\n");
+        for (GroupChatMessage history : storyHistories) {
+            builder.append(formatGroupHistory(history)).append('\n');
         }
         return builder.toString();
     }
@@ -585,6 +657,25 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return histories;
     }
 
+    private List<GroupChatMessage> listGroupStoryHistories(Long conversationId) {
+        return groupChatMessageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
+                .eq(GroupChatMessage::getConversationId, conversationId)
+                .eq(GroupChatMessage::getStatus, GroupChatConstant.STATUS_COMPLETED)
+                .orderByAsc(GroupChatMessage::getSequenceNo));
+    }
+
+    private GroupConversationLockService.OwnedLock lockStoryConversation(WorldStoryEvent storyEvent) {
+        if (storyEvent.getConversationId() == null) {
+            return null;
+        }
+        GroupConversationLockService.OwnedLock lock = groupConversationLockService.tryLock(
+                storyEvent.getConversationId());
+        if (lock == null) {
+            throw new UserRequestException("群聊正在生成回复，请稍后再切换或结束故事");
+        }
+        return lock;
+    }
+
     private void updateStoryCharacterEndMessages(List<WorldStoryEventCharacter> characters,
                                                  List<UserChatHistory> endMessages) {
         for (int i = 0; i < characters.size(); i++) {
@@ -654,6 +745,13 @@ public class WorldStoryEventServiceImpl extends ServiceImpl<WorldStoryEventMappe
         return "[" + (history.getTimestamp() == null ? "unknown" : history.getTimestamp()) + "] "
                 + "characterId=" + history.getCharacterId() + " "
                 + history.getType() + ": " + history.getContent();
+    }
+
+    private String formatGroupHistory(GroupChatMessage history) {
+        return "[sequence=" + history.getSequenceNo() + "] "
+                + history.getSpeakerType()
+                + (history.getSpeakerId() == null ? "" : ":" + history.getSpeakerId())
+                + ": " + history.getContent();
     }
 
     private String fallbackSummary(WorldStoryEvent storyEvent, WorldStoryEventEndDTO endDTO) {

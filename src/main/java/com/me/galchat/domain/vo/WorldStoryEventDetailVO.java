@@ -11,6 +11,7 @@ import java.util.List;
 public class WorldStoryEventDetailVO {
     private Long id;
     private Long userWorldId;
+    private Long conversationId;
     private String title;
     private String theme;
     private String currentScene;

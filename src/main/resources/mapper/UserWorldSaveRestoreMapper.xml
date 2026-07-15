@@ -46,29 +46,6 @@
           AND id &gt; #{maxWorldEventLogId}
     </delete>
 
-    <delete id="deleteStoryEventCharactersAfter">
-        DELETE FROM world_story_event_character character_link
-        USING world_story_event story_event
-        WHERE character_link.story_event_id = story_event.id
-          AND story_event.user_world_id = #{userWorldId}
-          AND character_link.id &gt; #{maxStoryEventCharacterId}
-    </delete>
-
-    <delete id="deleteStoryEventsAfter">
-        DELETE FROM world_story_event
-        WHERE user_world_id = #{userWorldId}
-          AND id &gt; #{maxStoryEventId}
-    </delete>
-
-    <delete id="deleteGroupThinkingAfter">
-        DELETE FROM group_chat_thinking thinking
-        USING group_chat_message message, group_conversation conversation
-        WHERE thinking.message_id = message.id
-          AND message.conversation_id = conversation.id
-          AND conversation.user_world_id = #{userWorldId}
-          AND thinking.id &gt; #{maxGroupThinkingId}
-    </delete>
-
     <delete id="deleteGroupMessagesAfter">
         DELETE FROM group_chat_message message
         USING group_conversation conversation
@@ -100,6 +77,23 @@
         WHERE summary.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
           AND summary.id &gt; #{maxGroupContextSummaryId}
+    </delete>
+
+    <delete id="deleteReplyPlanItemsAfterConversation">
+        DELETE FROM group_reply_plan_item item
+        USING group_reply_plan plan, group_conversation conversation
+        WHERE item.plan_id = plan.id
+          AND plan.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.id &gt; #{maxGroupConversationId}
+    </delete>
+
+    <delete id="deleteReplyPlansAfterConversation">
+        DELETE FROM group_reply_plan plan
+        USING group_conversation conversation
+        WHERE plan.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.id &gt; #{maxGroupConversationId}
     </delete>
 
     <delete id="deleteGroupMembersAfterConversation">
@@ -227,7 +221,7 @@
             visible_characters,
             timestamp,
             title,
-            story_event_id
+            conversation_id
         )
         VALUES (
             #{worldEventLog.id},
@@ -236,7 +230,7 @@
             #{worldEventLog.visibleCharacters,jdbcType=ARRAY,typeHandler=org.apache.ibatis.type.ArrayTypeHandler},
             #{worldEventLog.timestamp},
             #{worldEventLog.title},
-            #{worldEventLog.storyEventId}
+            #{worldEventLog.conversationId}
         )
         ON CONFLICT (id) DO UPDATE SET
             user_world_id = EXCLUDED.user_world_id,
@@ -244,6 +238,6 @@
             visible_characters = EXCLUDED.visible_characters,
             timestamp = EXCLUDED.timestamp,
             title = EXCLUDED.title,
-            story_event_id = EXCLUDED.story_event_id
+            conversation_id = EXCLUDED.conversation_id
     </insert>
 </mapper>

@@ -18,10 +18,13 @@ public class GroupConversation implements Serializable {
     private Long id;
     private Long userWorldId;
     private Long worldId;
-    private Long storyEventId;
+    private Long activeReplyPlanId;
     private String mode;
+    private String title;
+    private String summary;
     private String status;
     private Integer version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime closedAt;
 }

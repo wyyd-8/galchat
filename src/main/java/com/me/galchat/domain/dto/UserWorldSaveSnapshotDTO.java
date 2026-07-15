@@ -5,8 +5,6 @@ import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
 import com.me.galchat.domain.po.WorldEventLog;
-import com.me.galchat.domain.po.WorldStoryEvent;
-import com.me.galchat.domain.po.WorldStoryEventCharacter;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.Data;
@@ -32,15 +30,9 @@ public class UserWorldSaveSnapshotDTO {
 
     private Long maxWorldEventLogId;
 
-    private Long maxStoryEventId;
-
-    private Long maxStoryEventCharacterId;
-
     private Long maxGroupConversationId;
 
     private Long maxGroupMessageId;
-
-    private Long maxGroupThinkingId;
 
     private Long maxGroupTurnId;
 
@@ -55,8 +47,6 @@ public class UserWorldSaveSnapshotDTO {
     private List<CharacterChatRoundsSnapshot> recentChatRoundsByCharacter;
 
     private WorldEventLog lastWorldEventLog;
-
-    private WorldStorySnapshot activeStory;
 
     @Data
     @Accessors(chain = true)
@@ -77,8 +67,6 @@ public class UserWorldSaveSnapshotDTO {
         private Long previousStartId;
         private Long currentStartId;
         private Long lastCheckedMessageId;
-        private Long activeStoryEventId;
-        private Long activeStoryStartMessageId;
     }
 
     @Data
@@ -98,10 +86,4 @@ public class UserWorldSaveSnapshotDTO {
         private List<UserCharacterFavorLog> favorLogs;
     }
 
-    @Data
-    @Accessors(chain = true)
-    public static class WorldStorySnapshot {
-        private WorldStoryEvent storyEvent;
-        private List<WorldStoryEventCharacter> characters;
-    }
 }

@@ -6,13 +6,17 @@ import com.me.galchat.domain.dto.GroupConversationCreateDTO;
 import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupReplyPlan;
+import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserWorldPrefix;
-import com.me.galchat.domain.po.WorldStoryEvent;
+import com.me.galchat.domain.vo.GroupConversationVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatMemberMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.mapper.GroupReplyPlanItemMapper;
+import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +28,10 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +40,8 @@ public class GroupConversationService {
     private final GroupConversationMapper conversationMapper;
     private final GroupChatMemberMapper memberMapper;
     private final GroupChatMessageMapper messageMapper;
+    private final GroupReplyPlanMapper replyPlanMapper;
+    private final GroupReplyPlanItemMapper replyPlanItemMapper;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IUserCharacterInfoService userCharacterInfoService;
 
@@ -42,22 +51,15 @@ public class GroupConversationService {
             throw new UserRequestException("用户世界id不能为空");
         }
         String mode = StringUtils.hasText(dto.getMode()) ? dto.getMode().trim().toLowerCase()
-                : GroupChatConstant.MODE_STORY;
-        return createConversation(dto.getUserWorldId(), mode, dto.getCharacterIds(), null, null);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public GroupConversation createStoryConversation(WorldStoryEvent storyEvent, List<Long> characterIds,
-                                                     String openingContent) {
-        if (storyEvent == null || storyEvent.getId() == null) {
-            throw new UserRequestException("故事事件不能为空");
+                : GroupChatConstant.MODE_CHAT;
+        if (!GroupChatConstant.MODE_CHAT.equals(mode) && !GroupChatConstant.MODE_TRPG.equals(mode)) {
+            throw new UserRequestException("群聊模式仅支持chat或trpg");
         }
-        return createConversation(storyEvent.getUserWorldId(), GroupChatConstant.MODE_STORY, characterIds,
-                storyEvent.getId(), openingContent);
+        return createConversation(dto.getUserWorldId(), mode, dto.getTitle(), dto.getCharacterIds());
     }
 
-    private GroupConversation createConversation(Long userWorldId, String mode, List<Long> characterIds,
-                                                 Long storyEventId, String openingContent) {
+    private GroupConversation createConversation(Long userWorldId, String mode, String title,
+                                                 List<Long> characterIds) {
         UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(userWorldId, true);
         List<Long> distinctCharacterIds = characterIds == null ? List.of() : characterIds.stream()
                 .filter(id -> id != null)
@@ -72,8 +74,8 @@ public class GroupConversationService {
         GroupConversation conversation = new GroupConversation()
                 .setUserWorldId(userWorldId)
                 .setWorldId(userWorld.getWorldId())
-                .setStoryEventId(storyEventId)
                 .setMode(mode)
+                .setTitle(StringUtils.hasText(title) ? title.trim() : "群聊")
                 .setStatus(GroupChatConstant.STATUS_ACTIVE)
                 .setVersion(0)
                 .setCreatedAt(now)
@@ -89,10 +91,33 @@ public class GroupConversationService {
                     .setEnabled(true)
                     .setTalkativeness(0.5));
         }
-        if (StringUtils.hasText(openingContent)) {
-            appendSystemEvent(conversation.getId(), openingContent, GroupChatConstant.MESSAGE_SYSTEM_EVENT);
-        }
+        createDefaultReplyPlan(conversation, distinctCharacterIds, now);
         return conversation;
+    }
+
+    private void createDefaultReplyPlan(GroupConversation conversation, List<Long> characterIds,
+                                        LocalDateTime now) {
+        GroupReplyPlan plan = new GroupReplyPlan()
+                .setConversationId(conversation.getId())
+                .setSource(GroupChatConstant.PLAN_SOURCE_USER)
+                .setCreatedAt(now)
+                .setUpdatedAt(now);
+        replyPlanMapper.insert(plan);
+        for (int i = 0; i < characterIds.size(); i++) {
+            replyPlanItemMapper.insert(new GroupReplyPlanItem()
+                    .setPlanId(plan.getId())
+                    .setGroupKey("default")
+                    .setGroupName("群聊")
+                    .setGroupOrder(1)
+                    .setItemOrder(i + 1)
+                    .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                    .setActorId(characterIds.get(i))
+                    .setStatus(GroupChatConstant.STATUS_PENDING)
+                    .setCreatedAt(now)
+                    .setUpdatedAt(now));
+        }
+        conversation.setActiveReplyPlanId(plan.getId()).setUpdatedAt(now);
+        conversationMapper.updateById(conversation);
     }
 
     public GroupConversation requireActive(Long conversationId) {
@@ -119,6 +144,30 @@ public class GroupConversationService {
                 .orderByAsc(GroupChatMember::getId));
     }
 
+    public List<GroupConversationVO> list(Long userWorldId, String status) {
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
+        List<GroupConversation> conversations = conversationMapper.selectList(new LambdaQueryWrapper<GroupConversation>()
+                .eq(GroupConversation::getUserWorldId, userWorldId)
+                .eq(StringUtils.hasText(status), GroupConversation::getStatus, status)
+                .orderByDesc(GroupConversation::getId));
+        if (conversations.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, GroupChatMessage> latestMessages = messageMapper
+                .selectLatestCompletedByConversationIds(conversations.stream().map(GroupConversation::getId).toList())
+                .stream()
+                .collect(Collectors.toMap(GroupChatMessage::getConversationId, Function.identity()));
+        return conversations.stream().map(conversation -> toVO(conversation, latestMessages.get(conversation.getId())))
+                .toList();
+    }
+
+    public GroupConversationVO get(Long conversationId) {
+        GroupConversation conversation = requireAuthorized(conversationId);
+        List<GroupChatMessage> messages = messageMapper
+                .selectLatestCompletedByConversationIds(List.of(conversationId));
+        return toVO(conversation, messages.isEmpty() ? null : messages.getFirst());
+    }
+
     public void checkReplyMember(Long conversationId, String speakerType, Long speakerId, boolean force) {
         if (!GroupChatConstant.ACTOR_CHARACTER.equals(speakerType) || speakerId == null) {
             throw new UserRequestException("第一版仅支持指定角色回复");
@@ -136,34 +185,6 @@ public class GroupConversationService {
         }
     }
 
-    public GroupChatMessage appendSystemEvent(Long conversationId, String content, String messageKind) {
-        if (!StringUtils.hasText(content)) {
-            return null;
-        }
-        LocalDateTime now = LocalDateTime.now();
-        GroupChatMessage message = new GroupChatMessage()
-                .setConversationId(conversationId)
-                .setSpeakerType(GroupChatConstant.ACTOR_NARRATOR)
-                .setMessageKind(messageKind)
-                .setVisibility("public")
-                .setContent(content.trim())
-                .setSequenceNo(nextSequence(conversationId))
-                .setStatus(GroupChatConstant.STATUS_COMPLETED)
-                .setCreatedAt(now)
-                .setUpdatedAt(now);
-        messageMapper.insert(message);
-        return message;
-    }
-
-    public void close(Long conversationId) {
-        GroupConversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null) {
-            return;
-        }
-        conversation.setStatus(GroupChatConstant.STATUS_CLOSED).setUpdatedAt(LocalDateTime.now());
-        conversationMapper.updateById(conversation);
-    }
-
     public long nextSequence(Long conversationId) {
         GroupChatMessage latest = messageMapper.selectOne(new LambdaQueryWrapper<GroupChatMessage>()
                 .select(GroupChatMessage::getSequenceNo)
@@ -178,7 +199,16 @@ public class GroupConversationService {
                 .map(UserCharacterInfo::getCharacterId)
                 .toList());
         if (!existing.containsAll(characterIds)) {
-            throw new UserRequestException("群聊中存在未添加到当前用户世界的角色");
+            throw new UserRequestException("只有已创建的角色才能加入群聊");
         }
+    }
+
+    private GroupConversationVO toVO(GroupConversation conversation, GroupChatMessage latestMessage) {
+        GroupConversationVO result = GroupConversationVO.from(conversation);
+        if (latestMessage != null) {
+            result.setLastChatContent(latestMessage.getContent())
+                    .setLastChatTime(latestMessage.getCreatedAt());
+        }
+        return result;
     }
 }

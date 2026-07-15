@@ -10,7 +10,6 @@ import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserWorldPrefixMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.mapper.WorldEventLogMapper;
-import com.me.galchat.mapper.WorldStoryEventMapper;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
@@ -44,7 +43,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     private final StringRedisTemplate redisTemplate;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final WorldEventLogMapper worldEventLogMapper;
-    private final WorldStoryEventMapper worldStoryEventMapper;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
 
     @Override
@@ -103,7 +101,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
 
         Long userWorldId = userWorld.getId();
         checkNoCharacters(userWorldId);
-        worldStoryEventMapper.deleteByUserWorldIdWithCharacters(userWorldId);
         worldEventLogMapper.deleteByUserWorldId(userWorldId);
         vectorStoreCleanupMapper.deleteWorldEventByUserWorldId(userWorldId);
         int deleted = baseMapper.deleteByIdAndUserId(userWorldId, userId);
@@ -172,7 +169,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
         deleteKeysByPattern(RedisConstant.CHAT_KEY_PREFIX + worldFieldPrefix + "*");
         deleteKeysByPattern(RedisConstant.USER_CHARACTER_PROMPT_INFO_KEY_PREFIX + worldFieldPrefix + "*");
         deleteKeysByPattern(RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + worldFieldPrefix + "*");
-        deleteKeysByPattern(RedisConstant.STORY_ACTIVE_KEY_PREFIX + worldFieldPrefix + "*");
     }
 
     private void deleteHashFieldsByPattern(String hashKey, String pattern) {

@@ -1,18 +1,30 @@
--- 群聊第一版数据库迁移。当前项目未启用 Flyway，请在部署前手动执行一次。
+-- 群聊与跑团会话数据库迁移。当前项目未启用 Flyway，请在部署前手动执行一次。
 
 CREATE TABLE IF NOT EXISTS group_conversation (
     id BIGSERIAL PRIMARY KEY,
     user_world_id BIGINT NOT NULL,
     world_id BIGINT,
-    story_event_id BIGINT,
+    active_reply_plan_id BIGINT,
     mode VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    summary TEXT,
     status VARCHAR(50) NOT NULL,
     version INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_group_conversation_user_status
     ON group_conversation (user_world_id, status, id);
+
+ALTER TABLE group_conversation
+    ADD COLUMN IF NOT EXISTS active_reply_plan_id BIGINT,
+    ADD COLUMN IF NOT EXISTS title VARCHAR(255) NOT NULL DEFAULT '群聊',
+    ADD COLUMN IF NOT EXISTS summary TEXT,
+    ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP,
+    DROP COLUMN IF EXISTS opening,
+    DROP COLUMN IF EXISTS ended_at,
+    DROP COLUMN IF EXISTS story_event_id;
 
 CREATE TABLE IF NOT EXISTS group_chat_member (
     id BIGSERIAL PRIMARY KEY,
@@ -25,6 +37,34 @@ CREATE TABLE IF NOT EXISTS group_chat_member (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_member_actor
     ON group_chat_member (conversation_id, actor_type, actor_id);
+
+CREATE TABLE IF NOT EXISTS group_reply_plan (
+    id BIGSERIAL PRIMARY KEY,
+    conversation_id BIGINT NOT NULL,
+    source VARCHAR(20) NOT NULL,
+    context_id BIGINT,
+    resume_plan_id BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_group_reply_plan_conversation
+    ON group_reply_plan (conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS group_reply_plan_item (
+    id BIGSERIAL PRIMARY KEY,
+    plan_id BIGINT NOT NULL,
+    group_key VARCHAR(100) NOT NULL,
+    group_name VARCHAR(200) NOT NULL,
+    group_order INT NOT NULL,
+    item_order INT NOT NULL,
+    actor_type VARCHAR(50) NOT NULL,
+    actor_id BIGINT NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_group_reply_plan_item_order
+    ON group_reply_plan_item (plan_id, group_order, item_order, id);
 
 CREATE TABLE IF NOT EXISTS group_chat_turn (
     id BIGSERIAL PRIMARY KEY,
@@ -77,15 +117,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_message_sequence
 CREATE INDEX IF NOT EXISTS idx_group_chat_message_turn
     ON group_chat_message (turn_id, id);
 
-CREATE TABLE IF NOT EXISTS group_chat_thinking (
-    id BIGSERIAL PRIMARY KEY,
-    message_id BIGINT NOT NULL,
-    reasoning_content TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_thinking_message
-    ON group_chat_thinking (message_id);
-
 CREATE TABLE IF NOT EXISTS group_context_summary (
     id BIGSERIAL PRIMARY KEY,
     conversation_id BIGINT NOT NULL,
@@ -99,5 +130,13 @@ CREATE TABLE IF NOT EXISTS group_context_summary (
 CREATE INDEX IF NOT EXISTS idx_group_context_summary_conversation
     ON group_context_summary (conversation_id, end_sequence DESC);
 
-ALTER TABLE world_story_event
+DROP TABLE IF EXISTS group_chat_thinking;
+DROP TABLE IF EXISTS world_story_event_character;
+DROP TABLE IF EXISTS world_story_event;
+
+DROP INDEX IF EXISTS idx_world_event_log_story_event_id;
+ALTER TABLE world_event_log
+    DROP COLUMN IF EXISTS story_event_id,
     ADD COLUMN IF NOT EXISTS conversation_id BIGINT;
+CREATE INDEX IF NOT EXISTS idx_world_event_log_conversation_id
+    ON world_event_log (conversation_id);

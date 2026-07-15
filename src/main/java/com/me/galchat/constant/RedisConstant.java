@@ -13,8 +13,7 @@ public final class RedisConstant {
     public static final String USER_CHARACTER_PROMPT_INFO_KEY_PREFIX = "user:character:prompt:";
     public static final String CHAT_MEMORY_STEP_KEY_PREFIX = "chat:memory:step:";
     public static final String TOPIC_BOUNDARY_KEY_PREFIX = "chat:topic:boundary:";
-    public static final String STORY_ACTIVE_KEY_PREFIX = "chat:story:active:";
-    public static final String USER_CHARACTER_LOCK_PREFIX = "chat:user:character:lock:";
+    public static final String SINGLE_CHAT_LOCK_PREFIX = "chat:single:conversation:lock:";
     public static final String GROUP_CONVERSATION_LOCK_PREFIX = "chat:group:conversation:lock:";
     public static final String EMAIL_VERIFY_CODE_KEY_PREFIX = "user:email:verify:code:";
     public static final String EMAIL_VERIFY_COOLDOWN_KEY_PREFIX = "user:email:verify:cooldown:";

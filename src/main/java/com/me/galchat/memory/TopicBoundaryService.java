@@ -28,11 +28,6 @@ public class TopicBoundaryService {
     private final ChatHistoryVectorService chatHistoryVectorService;
 
     public TopicBoundary updateAfterUserMessage(ConversationInfo baseConversation, UserChatHistory userMessage) {
-        TopicBoundary storyBoundary = updateActiveStoryBoundary(baseConversation, userMessage.getId());
-        if (storyBoundary != null) {
-            return storyBoundary;
-        }
-
         TopicBoundary oldBoundary = getOrCreateBoundary(baseConversation, userMessage.getId());
         ConversationInfo topicConversation = new ConversationInfo(baseConversation.getUserWorldId(),
                 baseConversation.getCharacterId(), oldBoundary.windowStartId());
@@ -69,32 +64,6 @@ public class TopicBoundaryService {
         vectorizeClosedTopic(assistantMessage, oldBoundary);
     }
 
-    public void startStoryTopic(Long userWorldId, Long characterId, Long storyEventId, Long startMessageId) {
-        if (userWorldId == null || characterId == null || storyEventId == null || startMessageId == null) {
-            return;
-        }
-
-        ConversationInfo conversationInfo = new ConversationInfo(userWorldId, characterId, null);
-        TopicBoundary oldBoundary = getOrCreateBoundary(conversationInfo, startMessageId);
-        vectorizeChatHistory(userWorldId, characterId, oldBoundary.previousStartId(), oldBoundary.currentStartId());
-        vectorizeChatHistory(userWorldId, characterId, oldBoundary.currentStartId(), startMessageId);
-
-        TopicBoundary boundary = new TopicBoundary(null, startMessageId, startMessageId);
-        saveBoundary(conversationInfo, boundary);
-        redisTemplate.opsForValue().set(buildActiveStoryKey(conversationInfo), storyEventId + ":" + startMessageId);
-    }
-
-    public void endStoryTopic(Long userWorldId, Long characterId, Long endMessageId) {
-        if (userWorldId == null || characterId == null) {
-            return;
-        }
-
-        ConversationInfo conversationInfo = new ConversationInfo(userWorldId, characterId, null);
-        vectorizeClosedStoryTopic(conversationInfo, endMessageId);
-        redisTemplate.delete(buildActiveStoryKey(conversationInfo));
-        redisTemplate.delete(buildKey(conversationInfo));
-    }
-
     public void clearBoundaryIfReferences(Long userWorldId, Long characterId, Set<Long> messageIds) {
         if (userWorldId == null || characterId == null || messageIds == null || messageIds.isEmpty()) {
             return;
@@ -119,58 +88,12 @@ public class TopicBoundaryService {
         }
     }
 
-    private void vectorizeClosedStoryTopic(ConversationInfo conversationInfo, Long endMessageId) {
-        if (endMessageId == null) {
-            return;
-        }
-
-        Long startId = activeStoryStartId(conversationInfo);
-        if (startId == null) {
-            startId = getBoundary(conversationInfo).currentStartId();
-        }
-        Long endExclusiveId = endMessageId + 1;
-        if (startId == null || startId >= endExclusiveId) {
-            return;
-        }
-
-        chatHistoryVectorService.addChatHistory(conversationInfo.getUserWorldId(), conversationInfo.getCharacterId(),
-                startId, endExclusiveId);
-    }
-
     private void vectorizeChatHistory(Long userWorldId, Long characterId, Long startId, Long endId) {
         if (startId == null || endId == null || startId >= endId) {
             return;
         }
 
         chatHistoryVectorService.addChatHistory(userWorldId, characterId, startId, endId);
-    }
-
-    private TopicBoundary updateActiveStoryBoundary(ConversationInfo conversationInfo, Long userMessageId) {
-        Long storyStartId = activeStoryStartId(conversationInfo);
-        if (storyStartId == null) {
-            return null;
-        }
-
-        TopicBoundary boundary = new TopicBoundary(null, storyStartId, userMessageId);
-        saveBoundary(conversationInfo, boundary);
-        return boundary;
-    }
-
-    private Long activeStoryStartId(ConversationInfo conversationInfo) {
-        String value = redisTemplate.opsForValue().get(buildActiveStoryKey(conversationInfo));
-        if (!StringUtils.hasText(value)) {
-            return null;
-        }
-
-        String[] parts = value.split(":", -1);
-        if (parts.length != 2 || !StringUtils.hasText(parts[1])) {
-            return null;
-        }
-        try {
-            return Long.valueOf(parts[1]);
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 
     public TopicBoundary getBoundary(ConversationInfo conversationInfo) {
@@ -290,8 +213,4 @@ public class TopicBoundaryService {
                 + conversationInfo.getUserWorldId() + ":" + conversationInfo.getCharacterId();
     }
 
-    private String buildActiveStoryKey(ConversationInfo conversationInfo) {
-        return RedisConstant.STORY_ACTIVE_KEY_PREFIX
-                + conversationInfo.getUserWorldId() + ":" + conversationInfo.getCharacterId();
-    }
 }

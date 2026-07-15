@@ -5,19 +5,17 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
-import com.me.galchat.domain.po.GroupChatThinking;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupChatMessageVO;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.groupchat.order.GroupReplyOrderController;
-import com.me.galchat.groupchat.order.ReplyPlanItem;
+import com.me.galchat.groupchat.context.GroupContextStrategyRouter;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
-import com.me.galchat.mapper.GroupChatThinkingMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
-import com.me.galchat.model.DeepSeekChatModel;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -33,45 +31,40 @@ import reactor.core.publisher.SignalType;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class GroupChatService {
 
-    private final DeepSeekChatModel chatModel;
+    private final ChatClient chatClient;
     private final GroupConversationService conversationService;
     private final GroupConversationLockService lockService;
-    private final GroupReplyOrderController replyOrderController;
+    private final GroupReplyPlanService replyPlanService;
     private final GroupContextAssembler contextAssembler;
-    private final GroupContextCompactionService compactionService;
+    private final GroupContextStrategyRouter contextStrategyRouter;
     private final GroupChatMessageMapper messageMapper;
-    private final GroupChatThinkingMapper thinkingMapper;
     private final GroupChatTurnMapper turnMapper;
     private final GroupChatReplyStepMapper stepMapper;
     private final TransactionTemplate transactionTemplate;
 
-    public GroupChatService(@Qualifier("groupDeepSeekThinkingChatModel") DeepSeekChatModel chatModel,
+    public GroupChatService(@Qualifier("groupThinkingChatClient") ChatClient chatClient,
                             GroupConversationService conversationService,
                             GroupConversationLockService lockService,
-                            GroupReplyOrderController replyOrderController,
+                            GroupReplyPlanService replyPlanService,
                             GroupContextAssembler contextAssembler,
-                            GroupContextCompactionService compactionService,
+                            GroupContextStrategyRouter contextStrategyRouter,
                             GroupChatMessageMapper messageMapper,
-                            GroupChatThinkingMapper thinkingMapper,
                             GroupChatTurnMapper turnMapper,
                             GroupChatReplyStepMapper stepMapper,
                             TransactionTemplate transactionTemplate) {
-        this.chatModel = chatModel;
+        this.chatClient = chatClient;
         this.conversationService = conversationService;
         this.lockService = lockService;
-        this.replyOrderController = replyOrderController;
+        this.replyPlanService = replyPlanService;
         this.contextAssembler = contextAssembler;
-        this.compactionService = compactionService;
+        this.contextStrategyRouter = contextStrategyRouter;
         this.messageMapper = messageMapper;
-        this.thinkingMapper = thinkingMapper;
         this.turnMapper = turnMapper;
         this.stepMapper = stepMapper;
         this.transactionTemplate = transactionTemplate;
@@ -98,8 +91,8 @@ public class GroupChatService {
                         .messageId(prepared.userMessage().getId())
                         .sequence(prepared.userMessage().getSequenceNo())
                         .build());
-                Flux<GroupChatEvent> replies = Flux.fromIterable(prepared.steps())
-                        .concatMap(step -> executeStep(conversation, prepared.turn(), step));
+                Flux<GroupChatEvent> replies = Flux.fromIterable(prepared.replies())
+                        .concatMap(reply -> executeStep(conversation, prepared.turn(), reply));
                 Flux<GroupChatEvent> completed = Flux.defer(() -> {
                     completeTurn(prepared.turn());
                     return Flux.just(GroupChatEvent.builder()
@@ -145,16 +138,10 @@ public class GroupChatService {
             return List.of();
         }
 
-        List<Long> messageIds = messages.stream().map(GroupChatMessage::getId).toList();
-        Map<Long, String> thinkingByMessageId = new HashMap<>();
-        for (GroupChatThinking thinking : thinkingMapper.selectList(new LambdaQueryWrapper<GroupChatThinking>()
-                .in(GroupChatThinking::getMessageId, messageIds))) {
-            thinkingByMessageId.put(thinking.getMessageId(), thinking.getReasoningContent());
-        }
         return messages.stream().map(message -> new GroupChatMessageVO(
                 message.getId(), message.getConversationId(), message.getTurnId(), message.getReplyStepId(),
                 message.getSpeakerType(), message.getSpeakerId(), speakerName(conversation, message),
-                message.getMessageKind(), message.getContent(), thinkingByMessageId.get(message.getId()),
+                message.getMessageKind(), message.getContent(),
                 message.getSequenceNo(), message.getStatus(), message.getCreatedAt())).toList();
     }
 
@@ -168,11 +155,12 @@ public class GroupChatService {
             }
         }
 
-        GroupReplyOrderController.PlannedReplies planned = replyOrderController.plan(request,
-                conversationService.listMembers(conversation.getId()));
-        for (ReplyPlanItem item : planned.items()) {
-            conversationService.checkReplyMember(conversation.getId(), item.speakerType(), item.speakerId(),
-                    item.force());
+        List<GroupReplyPlanItem> plannedItems = replyPlanService.pendingItemsForExecution(conversation);
+        if (plannedItems.size() > GroupChatConstant.MAX_REPLY_STEPS) {
+            throw new UserRequestException("单次回复人物数量不能超过" + GroupChatConstant.MAX_REPLY_STEPS);
+        }
+        for (GroupReplyPlanItem item : plannedItems) {
+            conversationService.checkReplyMember(conversation.getId(), item.getActorType(), item.getActorId(), false);
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -180,7 +168,7 @@ public class GroupChatService {
                 .setConversationId(conversation.getId())
                 .setClientRequestId(StringUtils.hasText(request.getClientRequestId())
                         ? request.getClientRequestId().trim() : null)
-                .setPolicy(planned.policy())
+                .setPolicy(replyPlanService.activeSource(conversation).toLowerCase())
                 .setStatus(GroupChatConstant.STATUS_PENDING)
                 .setRevision(0)
                 .setCreatedAt(now)
@@ -202,27 +190,30 @@ public class GroupChatService {
         turn.setTriggerMessageId(userMessage.getId()).setStatus(GroupChatConstant.STATUS_RUNNING);
         turnMapper.updateById(turn);
 
-        List<GroupChatReplyStep> steps = new ArrayList<>();
-        for (int i = 0; i < planned.items().size(); i++) {
-            ReplyPlanItem item = planned.items().get(i);
+        List<PreparedReply> replies = new ArrayList<>();
+        for (int i = 0; i < plannedItems.size(); i++) {
+            GroupReplyPlanItem item = plannedItems.get(i);
             GroupChatReplyStep step = new GroupChatReplyStep()
                     .setTurnId(turn.getId())
                     .setStepNo(i + 1)
-                    .setSpeakerType(item.speakerType())
-                    .setSpeakerId(item.speakerId())
-                    .setForceReply(item.force())
+                    .setSpeakerType(item.getActorType())
+                    .setSpeakerId(item.getActorId())
+                    .setForceReply(false)
                     .setStatus(GroupChatConstant.STATUS_PENDING)
                     .setCreatedAt(now)
                     .setUpdatedAt(now);
             stepMapper.insert(step);
-            steps.add(step);
+            replies.add(new PreparedReply(item, step));
         }
-        return new PreparedTurn(turn, userMessage, steps);
+        return new PreparedTurn(turn, userMessage, replies);
     }
 
     private Flux<GroupChatEvent> executeStep(GroupConversation conversation, GroupChatTurn turn,
-                                             GroupChatReplyStep step) {
+                                             PreparedReply reply) {
         return Flux.defer(() -> {
+            GroupReplyPlanItem planItem = reply.planItem();
+            GroupChatReplyStep step = reply.step();
+            replyPlanService.markRunning(planItem);
             step.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
             stepMapper.updateById(step);
             GroupChatMessage outputMessage = createStreamingMessage(conversation, turn, step);
@@ -232,27 +223,28 @@ public class GroupChatService {
             GenerationAccumulator accumulator = new GenerationAccumulator();
             AtomicBoolean finalized = new AtomicBoolean(false);
 
-            compactionService.compactIfNeeded(conversation);
+            contextStrategyRouter.compactIfNeeded(conversation);
             Prompt prompt = new Prompt(contextAssembler.assemble(conversation, step.getSpeakerId()));
             Flux<GroupChatEvent> started = Flux.just(baseEvent(GroupChatConstant.EVENT_REPLY_STARTED,
                     conversation, turn, step, outputMessage, speaker).build());
-            Flux<GroupChatEvent> deltas = chatModel.stream(prompt)
+            Flux<GroupChatEvent> deltas = chatClient.prompt(prompt).stream().chatResponse()
                     .flatMapIterable(response -> toEvents(response, conversation, turn, step, outputMessage,
                             speaker, accumulator));
             Flux<GroupChatEvent> finished = Flux.defer(() -> {
-                finalizeCompletedStep(step, outputMessage, accumulator, finalized);
+                finalizeCompletedStep(planItem, step, outputMessage, accumulator, finalized);
                 return Flux.just(baseEvent(GroupChatConstant.EVENT_MESSAGE_COMPLETED,
                         conversation, turn, step, outputMessage, speaker)
                         .content(accumulator.content.toString())
                         .build());
             });
             return Flux.concat(started, deltas, finished)
-                    .doOnError(error -> finalizeFailedStep(step, outputMessage, accumulator, finalized, error))
+                    .doOnError(error -> finalizeFailedStep(planItem, step, outputMessage, accumulator, finalized, error))
                     .doFinally(signal -> {
                         if (signal == SignalType.CANCEL && finalized.compareAndSet(false, true)) {
                             transactionTemplate.executeWithoutResult(status -> {
                                 persistOutput(outputMessage, accumulator, GroupChatConstant.STATUS_CANCELLED);
                                 updateStepStatus(step, GroupChatConstant.STATUS_CANCELLED, "客户端取消生成");
+                                replyPlanService.resetPending(planItem);
                             });
                         }
                     });
@@ -309,7 +301,7 @@ public class GroupChatService {
         return events;
     }
 
-    private void finalizeCompletedStep(GroupChatReplyStep step, GroupChatMessage message,
+    private void finalizeCompletedStep(GroupReplyPlanItem planItem, GroupChatReplyStep step, GroupChatMessage message,
                                        GenerationAccumulator accumulator, AtomicBoolean finalized) {
         if (!finalized.compareAndSet(false, true)) {
             return;
@@ -317,10 +309,11 @@ public class GroupChatService {
         transactionTemplate.executeWithoutResult(status -> {
             persistOutput(message, accumulator, GroupChatConstant.STATUS_COMPLETED);
             updateStepStatus(step, GroupChatConstant.STATUS_COMPLETED, null);
+            replyPlanService.markCompleted(planItem);
         });
     }
 
-    private void finalizeFailedStep(GroupChatReplyStep step, GroupChatMessage message,
+    private void finalizeFailedStep(GroupReplyPlanItem planItem, GroupChatReplyStep step, GroupChatMessage message,
                                     GenerationAccumulator accumulator, AtomicBoolean finalized, Throwable error) {
         if (!finalized.compareAndSet(false, true)) {
             return;
@@ -328,6 +321,7 @@ public class GroupChatService {
         transactionTemplate.executeWithoutResult(status -> {
             persistOutput(message, accumulator, GroupChatConstant.STATUS_FAILED);
             updateStepStatus(step, GroupChatConstant.STATUS_FAILED, error == null ? "生成失败" : error.getMessage());
+            replyPlanService.resetPending(planItem);
         });
     }
 
@@ -336,12 +330,6 @@ public class GroupChatService {
                 .setStatus(status)
                 .setUpdatedAt(LocalDateTime.now());
         messageMapper.updateById(message);
-        if (!accumulator.reasoning.isEmpty()) {
-            thinkingMapper.insert(new GroupChatThinking()
-                    .setMessageId(message.getId())
-                    .setReasoningContent(accumulator.reasoning.toString())
-                    .setCreatedAt(LocalDateTime.now()));
-        }
     }
 
     private void updateStepStatus(GroupChatReplyStep step, String status, String error) {
@@ -398,7 +386,10 @@ public class GroupChatService {
     }
 
     private record PreparedTurn(GroupChatTurn turn, GroupChatMessage userMessage,
-                                List<GroupChatReplyStep> steps) {
+                                List<PreparedReply> replies) {
+    }
+
+    private record PreparedReply(GroupReplyPlanItem planItem, GroupChatReplyStep step) {
     }
 
     private static class GenerationAccumulator {

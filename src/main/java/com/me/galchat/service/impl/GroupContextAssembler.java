@@ -8,8 +8,8 @@ import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.mapper.GroupChatMessageMapper;
+import com.me.galchat.groupchat.context.GroupContextStrategyRouter;
 import com.me.galchat.service.IUserCharacterInfoService;
-import com.me.galchat.service.IUserWorldPrefixService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -29,13 +29,11 @@ public class GroupContextAssembler {
 
     private final GroupChatMessageMapper messageMapper;
     private final GroupConversationService conversationService;
-    private final GroupContextCompactionService compactionService;
-    private final IUserWorldPrefixService userWorldPrefixService;
+    private final GroupContextStrategyRouter contextStrategyRouter;
+    private final ChatServiceImpl chatService;
     private final IUserCharacterInfoService userCharacterInfoService;
 
-    /**
-     * 这里只读取 group_chat_message/group_context_summary。thinking 表刻意不作为依赖，避免未来误拼入 prompt。
-     */
+    /** 只读取群聊消息和当前模式对应的上下文概要。 */
     public List<Message> assemble(GroupConversation conversation, Long currentCharacterId) {
         Map<Long, UserCharacterInfo> characterById = characterById(conversation.getUserWorldId());
         UserCharacterInfo currentCharacter = characterById.get(currentCharacterId);
@@ -45,7 +43,7 @@ public class GroupContextAssembler {
         List<Message> prompt = new ArrayList<>();
         prompt.add(new SystemMessage(buildSystemPrompt(conversation, currentCharacterId, currentName, characterById)));
 
-        GroupContextSummary summary = compactionService.latestSummary(conversation.getId());
+        GroupContextSummary summary = contextStrategyRouter.latestSummary(conversation);
         long coveredSequence = summary == null ? 0L : summary.getEndSequence();
         if (summary != null && StringUtils.hasText(summary.getSummary())) {
             prompt.add(new UserMessage("<context-summary>\n" + summary.getSummary() + "\n</context-summary>"));
@@ -65,7 +63,7 @@ public class GroupContextAssembler {
             }
         }
         prompt.add(new UserMessage("现在轮到" + currentName + "回复。只生成" + currentName
-                + "本人的言语、动作和感受，不要代替用户或其他角色发言，不要输出发言者标签。"));
+                + "本人的言语、动作或感受，不要代替用户或其他角色发言，不要输出发言者标签。"));
         return prompt;
     }
 
@@ -77,13 +75,11 @@ public class GroupContextAssembler {
 
     private String buildSystemPrompt(GroupConversation conversation, Long currentCharacterId, String currentName,
                                      Map<Long, UserCharacterInfo> characterById) {
-        StringBuilder builder = new StringBuilder();
-        builder.append("你正在一个多人群聊故事中扮演").append(currentName).append("。\n")
-                .append("聊天记录中的 speaker 标记是真实发言者身份；其他角色的消息不是你的经历或台词。\n")
-                .append("不得输出隐藏思考过程。\n");
-        appendSection(builder, userWorldPrefixService.buildWorldPrompt(conversation.getWorldId()));
-        appendSection(builder, userCharacterInfoService.buildCharacterPrompt(conversation.getUserWorldId(),
-                currentCharacterId));
+        StringBuilder builder = new StringBuilder(chatService.buildSystemPrompt(conversation.getWorldId(),
+                conversation.getUserWorldId(), currentCharacterId));
+        appendSection(builder, "你正在一个多人群聊中扮演" + currentName + "。\n"
+                + "聊天记录中的 speaker 标记是真实发言者身份；其他角色的消息不是你的经历或台词。\n"
+                + "不得输出隐藏思考过程。");
         builder.append("\n群聊成员：");
         List<GroupChatMember> members = conversationService.listMembers(conversation.getId());
         for (GroupChatMember member : members) {

@@ -31,57 +31,6 @@ class TopicBoundaryServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void endStoryTopicVectorizesActiveStoryWindowBeforeClearingBoundary() {
-        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
-        ChatHistoryVectorService chatHistoryVectorService = mock(ChatHistoryVectorService.class);
-        TopicBoundaryService topicBoundaryService = new TopicBoundaryService(redisTemplate, mock(ChatClient.class),
-                mock(UserChatMemory.class), chatHistoryVectorService);
-
-        String activeStoryKey = RedisConstant.STORY_ACTIVE_KEY_PREFIX + "1:2";
-        String boundaryKey = RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + "1:2";
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get(activeStoryKey)).thenReturn("99:10");
-
-        topicBoundaryService.endStoryTopic(1L, 2L, 20L);
-
-        verify(chatHistoryVectorService).addChatHistory(1L, 2L, 10L, 21L);
-        verify(redisTemplate).delete(activeStoryKey);
-        verify(redisTemplate).delete(boundaryKey);
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void endStoryTopicFallsBackToSavedBoundaryWhenActiveStoryKeyIsMissing() {
-        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
-        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
-        ChatHistoryVectorService chatHistoryVectorService = mock(ChatHistoryVectorService.class);
-        TopicBoundaryService topicBoundaryService = new TopicBoundaryService(redisTemplate, mock(ChatClient.class),
-                mock(UserChatMemory.class), chatHistoryVectorService);
-
-        String activeStoryKey = RedisConstant.STORY_ACTIVE_KEY_PREFIX + "1:2";
-        String boundaryKey = RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + "1:2";
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(valueOperations.get(activeStoryKey)).thenReturn(null);
-        when(valueOperations.get(boundaryKey)).thenReturn("""
-                {
-                  "%s": null,
-                  "%s": 10,
-                  "%s": 18
-                }
-                """.formatted(ChatConstant.TOPIC_PREVIOUS_START_ID_KEY,
-                ChatConstant.TOPIC_CURRENT_START_ID_KEY,
-                ChatConstant.TOPIC_LAST_CHECKED_MESSAGE_ID_KEY));
-
-        topicBoundaryService.endStoryTopic(1L, 2L, 20L);
-
-        verify(chatHistoryVectorService).addChatHistory(1L, 2L, 10L, 21L);
-        verify(redisTemplate).delete(activeStoryKey);
-        verify(redisTemplate).delete(boundaryKey);
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
     void clearBoundaryIfReferencesRollsCurrentBoundaryBackWhenOnlyCurrentStartIsWithdrawn() {
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
         ValueOperations<String, String> valueOperations = mock(ValueOperations.class);

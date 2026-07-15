@@ -6,9 +6,8 @@ import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.mapper.GroupChatMessageMapper;
-import com.me.galchat.mapper.GroupChatThinkingMapper;
+import com.me.galchat.groupchat.context.GroupContextStrategyRouter;
 import com.me.galchat.service.IUserCharacterInfoService;
-import com.me.galchat.service.IUserWorldPrefixService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -21,6 +20,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GroupContextAssemblerTest {
@@ -29,18 +29,17 @@ class GroupContextAssemblerTest {
     void mapsOnlyCurrentCharactersHistoryToAssistantAndKeepsOtherSpeakerIdentity() {
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupConversationService conversationService = mock(GroupConversationService.class);
-        GroupContextCompactionService compactionService = mock(GroupContextCompactionService.class);
-        IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
+        GroupContextStrategyRouter contextStrategyRouter = mock(GroupContextStrategyRouter.class);
+        ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
         GroupContextAssembler assembler = new GroupContextAssembler(messageMapper, conversationService,
-                compactionService, worldService, characterService);
+                contextStrategyRouter, chatService, characterService);
 
         GroupConversation conversation = new GroupConversation().setId(8L).setUserWorldId(1L).setWorldId(2L);
         when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
                 new UserCharacterInfo().setCharacterId(11L).setCharacterName("Alice"),
                 new UserCharacterInfo().setCharacterId(12L).setCharacterName("Bob")));
-        when(characterService.buildCharacterPrompt(1L, 11L)).thenReturn("Alice角色卡");
-        when(worldService.buildWorldPrompt(2L)).thenReturn("世界设定");
+        when(chatService.buildSystemPrompt(2L, 1L, 11L)).thenReturn("包含用户信息的角色基础提示词");
         when(conversationService.listMembers(8L)).thenReturn(List.of(
                 new GroupChatMember().setActorId(11L), new GroupChatMember().setActorId(12L)));
         when(messageMapper.selectList(any())).thenReturn(List.of(
@@ -54,12 +53,14 @@ class GroupContextAssemblerTest {
                 .containsExactly("我打开手电");
         assertThat(prompt.stream().filter(UserMessage.class::isInstance).map(Message::getText))
                 .anyMatch(text -> text.contains("speaker=\"Bob\"") && text.contains("我检查门口"));
+        assertThat(prompt.getFirst().getText()).contains("包含用户信息的角色基础提示词", "多人群聊中扮演Alice");
+        verify(chatService).buildSystemPrompt(2L, 1L, 11L);
     }
 
     @Test
     void assemblerHasNoThinkingPersistenceDependency() {
-        assertThat(Arrays.stream(GroupContextAssembler.class.getDeclaredFields()).map(Field::getType))
-                .doesNotContain(GroupChatThinkingMapper.class);
+        assertThat(Arrays.stream(GroupContextAssembler.class.getDeclaredFields()).map(Field::getName))
+                .noneMatch(name -> name.toLowerCase().contains("thinking"));
     }
 
     private GroupChatMessage message(String speakerType, Long speakerId, String content) {

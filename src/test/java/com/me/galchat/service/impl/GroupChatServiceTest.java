@@ -4,20 +4,18 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
-import com.me.galchat.domain.po.GroupChatThinking;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.vo.GroupChatEvent;
-import com.me.galchat.groupchat.order.ExplicitReplyOrderPolicy;
-import com.me.galchat.groupchat.order.GroupReplyOrderController;
-import com.me.galchat.groupchat.order.ListReplyOrderPolicy;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
-import com.me.galchat.mapper.GroupChatThinkingMapper;
+import com.me.galchat.groupchat.context.GroupContextStrategyRouter;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.model.DeepSeekChatModel;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -41,21 +39,20 @@ import static org.mockito.Mockito.when;
 class GroupChatServiceTest {
 
     @Test
-    void savesThinkingButDoesNotDelegateContextToUserChatMemory() {
+    void streamsThinkingWithoutPersistingIt() {
         DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        ChatClient chatClient = ChatClient.builder(model).build();
         GroupConversationService conversationService = mock(GroupConversationService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
+        GroupReplyPlanService replyPlanService = mock(GroupReplyPlanService.class);
         GroupContextAssembler assembler = mock(GroupContextAssembler.class);
-        GroupContextCompactionService compactionService = mock(GroupContextCompactionService.class);
+        GroupContextStrategyRouter contextStrategyRouter = mock(GroupContextStrategyRouter.class);
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
-        GroupChatThinkingMapper thinkingMapper = mock(GroupChatThinkingMapper.class);
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
         GroupChatReplyStepMapper stepMapper = mock(GroupChatReplyStepMapper.class);
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
-        GroupReplyOrderController orderController = new GroupReplyOrderController(
-                new ExplicitReplyOrderPolicy(), new ListReplyOrderPolicy());
-        GroupChatService service = new GroupChatService(model, conversationService, lockService, orderController,
-                assembler, compactionService, messageMapper, thinkingMapper, turnMapper, stepMapper,
+        GroupChatService service = new GroupChatService(chatClient, conversationService, lockService, replyPlanService,
+                assembler, contextStrategyRouter, messageMapper, turnMapper, stepMapper,
                 transactionTemplate);
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
@@ -71,7 +68,13 @@ class GroupChatServiceTest {
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(1L).setWorldId(2L).setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireActive(7L)).thenReturn(conversation);
-        when(conversationService.listMembers(7L)).thenReturn(List.of());
+        GroupReplyPlanItem planItem = new GroupReplyPlanItem()
+                .setId(20L)
+                .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                .setActorId(9L)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(replyPlanService.pendingItemsForExecution(conversation)).thenReturn(List.of(planItem));
+        when(replyPlanService.activeSource(conversation)).thenReturn(GroupChatConstant.PLAN_SOURCE_USER);
         when(lockService.tryLock(7L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         AtomicLong sequence = new AtomicLong();
         when(conversationService.nextSequence(7L)).thenAnswer(invocation -> sequence.incrementAndGet());
@@ -102,9 +105,6 @@ class GroupChatServiceTest {
 
         GroupChatRequestDTO request = new GroupChatRequestDTO();
         request.setContent("你好");
-        GroupChatRequestDTO.ReplyTarget target = new GroupChatRequestDTO.ReplyTarget();
-        target.setSpeakerId(9L);
-        request.setReplyPlan(List.of(target));
 
         List<GroupChatEvent> events = service.chat(7L, request).collectList().block();
 
@@ -115,9 +115,10 @@ class GroupChatServiceTest {
                 GroupChatConstant.EVENT_MESSAGE_DELTA,
                 GroupChatConstant.EVENT_MESSAGE_COMPLETED,
                 GroupChatConstant.EVENT_TURN_COMPLETED);
-        var thinkingCaptor = org.mockito.ArgumentCaptor.forClass(GroupChatThinking.class);
-        verify(thinkingMapper).insert(thinkingCaptor.capture());
-        assertThat(thinkingCaptor.getValue().getReasoningContent()).isEqualTo("只供前端展示的思考");
+        assertThat(events).filteredOn(event -> GroupChatConstant.EVENT_REASONING_DELTA.equals(event.getEventType()))
+                .extracting(GroupChatEvent::getDelta)
+                .containsExactly("只供前端展示的思考");
         verify(assembler).assemble(conversation, 9L);
+        verify(replyPlanService).markCompleted(planItem);
     }
 }

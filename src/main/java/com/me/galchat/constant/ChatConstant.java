@@ -7,9 +7,6 @@ public final class ChatConstant {
     public static final String RESPONSE_TYPE = "reponse";
     public static final String AUTO_SEARCH_INFO_TYPE = "auto_search_info";
     public static final String WITHDRAWN_TYPE = "withdrawn";
-    public static final String STORY_START_TYPE = "story_start";
-    public static final String STORY_PROGRESS_TYPE = "story_progress";
-    public static final String STORY_END_TYPE = "story_end";
     public static final String SYSTEM_TYPE = "system";
     public static final String TOPIC_CONVERSATION_INFO_CONTEXT_KEY = "topic_conversation_info";
     public static final String TOPIC_USER_MESSAGE_ID_CONTEXT_KEY = "topic_user_message_id";

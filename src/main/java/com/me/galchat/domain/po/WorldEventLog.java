@@ -41,5 +41,5 @@ public class WorldEventLog implements Serializable {
 
     private String title;
 
-    private Long storyEventId;
+    private Long conversationId;
 }

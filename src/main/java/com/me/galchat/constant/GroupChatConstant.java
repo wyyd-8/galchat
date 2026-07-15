@@ -5,17 +5,19 @@ public final class GroupChatConstant {
     private GroupChatConstant() {
     }
 
-    public static final String MODE_STORY = "story";
+    public static final String MODE_CHAT = "chat";
     public static final String MODE_TRPG = "trpg";
+
+    public static final String PLAN_SOURCE_USER = "USER";
+    public static final String PLAN_SOURCE_SCENE = "SCENE";
+    public static final String PLAN_SOURCE_COMBAT = "COMBAT";
 
     public static final String ACTOR_USER = "user";
     public static final String ACTOR_CHARACTER = "character";
     public static final String ACTOR_NARRATOR = "narrator";
-    public static final String ACTOR_KP = "kp";
 
     public static final String MESSAGE_DIALOGUE = "dialogue";
     public static final String MESSAGE_NARRATION = "narration";
-    public static final String MESSAGE_SYSTEM_EVENT = "system_event";
 
     public static final String STATUS_ACTIVE = "active";
     public static final String STATUS_CLOSED = "closed";

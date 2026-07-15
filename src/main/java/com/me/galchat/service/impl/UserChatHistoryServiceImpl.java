@@ -56,7 +56,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
     private final UserCharacterFavorLogMapper userCharacterFavorLogMapper;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final TopicBoundaryService topicBoundaryService;
-    private final StoryOperationLockService storyOperationLockService;
+    private final SingleChatLockService singleChatLockService;
     private final StringRedisTemplate redisTemplate;
 
     @Override
@@ -86,15 +86,15 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
             throw new UserRequestException("角色id不能为空");
         }
 
-        RLock conversationLock = storyOperationLockService.tryLockUserCharacter(userWorldId, characterId);
+        RLock conversationLock = singleChatLockService.tryLock(userWorldId, characterId);
         if (conversationLock == null) {
-            throw new UserRequestException("故事切换或结束中，请稍后再撤回");
+            throw new UserRequestException("当前单聊正在处理中，请稍后再撤回");
         }
 
         try {
             doWithdrawLatestUserMessage(userWorldId, characterId);
         } finally {
-            storyOperationLockService.unlock(conversationLock);
+            singleChatLockService.unlock(conversationLock);
         }
     }
 
@@ -128,8 +128,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
                         .eq(UserChatHistory::getType, MessageType.USER.getValue())
-                        .or()
-                        .in(UserChatHistory::getType, storyMessageTypes())
                         .or(unlinkedAssistantWrapper -> unlinkedAssistantWrapper
                                 .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
                                 .isNull(UserChatHistory::getUserMessageId)))
@@ -409,10 +407,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     private String buildLastAssistantKey(Long userWorldId, Long characterId) {
         return RedisConstant.CHAT_KEY_PREFIX + userWorldId + ":" + characterId + RedisConstant.LAST_ASSISTANT_SUFFIX;
-    }
-
-    private List<String> storyMessageTypes() {
-        return List.of(ChatConstant.STORY_START_TYPE, ChatConstant.STORY_PROGRESS_TYPE, ChatConstant.STORY_END_TYPE);
     }
 
     private List<Integer> stepNos(Long userMessageId,

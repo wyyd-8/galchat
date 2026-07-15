@@ -8,5 +8,6 @@ import java.util.List;
 public class GroupConversationCreateDTO {
     private Long userWorldId;
     private String mode;
+    private String title;
     private List<Long> characterIds;
 }

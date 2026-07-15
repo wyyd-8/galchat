@@ -13,6 +13,7 @@ import com.me.galchat.domain.po.UserChatToolCall;
 import com.me.galchat.domain.po.UserEventLog;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.mapper.GroupChatMemberMapper;
 import com.me.galchat.mapper.UserCharacterFavorLogMapper;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
@@ -57,7 +58,8 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     private final UserChatThinkingHistoryMapper userChatThinkingHistoryMapper;
     private final UserChatToolCallMapper userChatToolCallMapper;
     private final UserEventLogMapper userEventLogMapper;
-    private final StoryOperationLockService storyOperationLockService;
+    private final GroupChatMemberMapper groupChatMemberMapper;
+    private final SingleChatLockService singleChatLockService;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
 
     @Override
@@ -86,15 +88,19 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     @Transactional(rollbackFor = Exception.class)
     public void deleteCharacter(Long userWorldId, Long characterId) {
         userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
-        RLock characterLock = storyOperationLockService.tryLockUserCharacter(userWorldId, characterId);
+        Long activeConversationCount = groupChatMemberMapper.countActiveConversations(userWorldId, characterId);
+        if (activeConversationCount != null && activeConversationCount > 0) {
+            throw new UserRequestException("角色仍在进行中的群聊中，请先关闭群聊");
+        }
+        RLock characterLock = singleChatLockService.tryLock(userWorldId, characterId);
         if (characterLock == null) {
-            throw new UserRequestException("角色正在聊天或故事操作中，请稍后再删除");
+            throw new UserRequestException("角色正在单聊中，请稍后再删除");
         }
 
         try {
             doDeleteCharacter(userWorldId, characterId);
         } finally {
-            storyOperationLockService.unlock(characterLock);
+            singleChatLockService.unlock(characterLock);
         }
     }
 
@@ -193,8 +199,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 conversationKey + RedisConstant.TYPING_SUFFIX,
                 conversationKey + RedisConstant.INPUT_SUFFIX,
                 conversationKey + RedisConstant.LAST_ASSISTANT_SUFFIX,
-                RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + userWorldId + ":" + characterId,
-                RedisConstant.STORY_ACTIVE_KEY_PREFIX + userWorldId + ":" + characterId
+                RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + userWorldId + ":" + characterId
         );
     }
 

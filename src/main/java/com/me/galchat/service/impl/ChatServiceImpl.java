@@ -59,7 +59,7 @@ public class ChatServiceImpl implements IChatService {
     private final IUserCharacterInfoService userCharacterInfoService;
     private final StringRedisTemplate redisTemplate;
     private final UserEventLogDetector userEventLogDetector;
-    private final StoryOperationLockService storyOperationLockService;
+    private final SingleChatLockService singleChatLockService;
 
     @Resource(name = "userEventLogTaskExecutor")
     private TaskExecutor userEventLogTaskExecutor;
@@ -68,10 +68,10 @@ public class ChatServiceImpl implements IChatService {
     public Flux<ChatFluxVO> chat(ChatMessageDTO chatMessageDTO) {
         return Flux.defer(() -> {
             checkChatRequest(chatMessageDTO);
-            StoryOperationLockService.OwnedLock conversationLock = storyOperationLockService
-                    .tryLockUserCharacterWithOwner(chatMessageDTO.getUserWorldId(), chatMessageDTO.getCharacterId());
+            SingleChatLockService.OwnedLock conversationLock = singleChatLockService
+                    .tryLockWithOwner(chatMessageDTO.getUserWorldId(), chatMessageDTO.getCharacterId());
             if (conversationLock == null) {
-                return Flux.error(new UserRequestException("故事切换或结束中，请稍后再对话"));
+                return Flux.error(new UserRequestException("当前单聊正在处理中，请稍后再对话"));
             }
 
             try {
@@ -102,9 +102,9 @@ public class ChatServiceImpl implements IChatService {
                         .doFinally(signalType -> toolFlux.tryEmitComplete());
 
                 return Flux.merge(toolFlux.asFlux(), responseFlux)
-                        .doFinally(signalType -> storyOperationLockService.unlock(conversationLock));
+                        .doFinally(signalType -> singleChatLockService.unlock(conversationLock));
             } catch (RuntimeException e) {
-                storyOperationLockService.unlock(conversationLock);
+                singleChatLockService.unlock(conversationLock);
                 return Flux.error(e);
             }
         });
@@ -117,10 +117,10 @@ public class ChatServiceImpl implements IChatService {
             log.warn("聊天回复任务缺少必要字段: {}", task);
             return null;
         }
-        RLock conversationLock = storyOperationLockService.tryLockUserCharacter(task.getUserWorldId(),
+        RLock conversationLock = singleChatLockService.tryLock(task.getUserWorldId(),
                 task.getCharacterId());
         if (conversationLock == null) {
-            log.info("故事切换或结束中，跳过聊天回复任务, userWorldId:{}, characterId:{}",
+            log.info("当前单聊正在处理中，跳过聊天回复任务, userWorldId:{}, characterId:{}",
                     task.getUserWorldId(), task.getCharacterId());
             return null;
         }
@@ -159,7 +159,7 @@ public class ChatServiceImpl implements IChatService {
             cacheLastAssistant(task.getUserWorldId(), task.getCharacterId(), assistantMessage.getContent());
             return assistantMessage;
         } finally {
-            storyOperationLockService.unlock(conversationLock);
+            singleChatLockService.unlock(conversationLock);
         }
     }
 
@@ -203,7 +203,8 @@ public class ChatServiceImpl implements IChatService {
         }
     }
 
-    private String buildSystemPrompt(Long worldId, Long userWorldId, Long characterId) {
+    /** 单聊与群聊共用的角色基础提示词，包含世界、角色、好感和长期用户信息。 */
+    public String buildSystemPrompt(Long worldId, Long userWorldId, Long characterId) {
         StringBuilder prompt = new StringBuilder();
         appendPrompt(prompt, ChatConstant.CHAT_SYSTEM_INSTRUCTIONS_TEMPLATE
                 .formatted(buildInteractionRequirements(userWorldId)));

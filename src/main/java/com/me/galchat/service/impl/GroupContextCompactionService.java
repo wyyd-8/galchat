@@ -5,10 +5,10 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.groupchat.context.GroupContextStrategy;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
-import com.me.galchat.model.DeepSeekChatModel;
-import lombok.RequiredArgsConstructor;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -20,20 +20,26 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
-public class GroupContextCompactionService {
+public class GroupContextCompactionService implements GroupContextStrategy {
 
     private final GroupChatMessageMapper messageMapper;
     private final GroupContextSummaryMapper summaryMapper;
-    private final DeepSeekChatModel summaryModel;
+    private final ChatClient summaryClient;
 
     public GroupContextCompactionService(GroupChatMessageMapper messageMapper,
                                          GroupContextSummaryMapper summaryMapper,
-                                         @Qualifier("groupDeepSeekNonThinkingChatModel") DeepSeekChatModel summaryModel) {
+                                         @Qualifier("groupNonThinkingChatClient") ChatClient summaryClient) {
         this.messageMapper = messageMapper;
         this.summaryMapper = summaryMapper;
-        this.summaryModel = summaryModel;
+        this.summaryClient = summaryClient;
     }
 
+    @Override
+    public boolean supports(String mode) {
+        return GroupChatConstant.MODE_CHAT.equals(mode);
+    }
+
+    @Override
     public void compactIfNeeded(GroupConversation conversation) {
         GroupContextSummary previous = latestSummary(conversation.getId());
         long coveredSequence = previous == null ? 0L : previous.getEndSequence();
@@ -51,7 +57,7 @@ public class GroupContextCompactionService {
         List<GroupChatMessage> compactedMessages = messages.subList(0, compactCount);
         GroupChatMessage lastCompacted = compactedMessages.getLast();
         String prompt = formatSummaryPrompt(previous, compactedMessages);
-        String summary = summaryModel.call(new Prompt(List.of(
+        String summary = summaryClient.prompt(new Prompt(List.of(
                         new SystemMessage("""
                                 你负责压缩多人角色扮演群聊的公开上下文。
                                 只保留已经发生且对后续有意义的事实、角色关系变化、未解决问题和场景状态。
@@ -59,9 +65,8 @@ public class GroupContextCompactionService {
                                 不要输出分析过程，只输出简洁的中文概要。
                                 """),
                         new UserMessage(prompt))))
-                .getResult()
-                .getOutput()
-                .getText();
+                .call()
+                .content();
         if (!StringUtils.hasText(summary)) {
             return;
         }
@@ -75,6 +80,7 @@ public class GroupContextCompactionService {
                 .setCreatedAt(LocalDateTime.now()));
     }
 
+    @Override
     public GroupContextSummary latestSummary(Long conversationId) {
         return summaryMapper.selectOne(new LambdaQueryWrapper<GroupContextSummary>()
                 .eq(GroupContextSummary::getConversationId, conversationId)

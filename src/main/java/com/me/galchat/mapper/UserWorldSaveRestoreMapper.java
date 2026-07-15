@@ -21,14 +21,6 @@ public interface UserWorldSaveRestoreMapper {
 
     int deleteWorldEventsAfter(@Param("userWorldId") Long userWorldId, @Param("maxWorldEventLogId") Long maxWorldEventLogId);
 
-    int deleteStoryEventCharactersAfter(@Param("userWorldId") Long userWorldId,
-                                        @Param("maxStoryEventCharacterId") Long maxStoryEventCharacterId);
-
-    int deleteStoryEventsAfter(@Param("userWorldId") Long userWorldId, @Param("maxStoryEventId") Long maxStoryEventId);
-
-    int deleteGroupThinkingAfter(@Param("userWorldId") Long userWorldId,
-                                 @Param("maxGroupThinkingId") Long maxGroupThinkingId);
-
     int deleteGroupMessagesAfter(@Param("userWorldId") Long userWorldId,
                                  @Param("maxGroupMessageId") Long maxGroupMessageId);
 
@@ -40,6 +32,12 @@ public interface UserWorldSaveRestoreMapper {
 
     int deleteGroupSummariesAfter(@Param("userWorldId") Long userWorldId,
                                   @Param("maxGroupContextSummaryId") Long maxGroupContextSummaryId);
+
+    int deleteReplyPlanItemsAfterConversation(@Param("userWorldId") Long userWorldId,
+                                              @Param("maxGroupConversationId") Long maxGroupConversationId);
+
+    int deleteReplyPlansAfterConversation(@Param("userWorldId") Long userWorldId,
+                                          @Param("maxGroupConversationId") Long maxGroupConversationId);
 
     int deleteGroupMembersAfterConversation(@Param("userWorldId") Long userWorldId,
                                             @Param("maxGroupConversationId") Long maxGroupConversationId);

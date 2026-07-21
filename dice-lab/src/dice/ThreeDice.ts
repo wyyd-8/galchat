@@ -1,6 +1,14 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
+import {
+  createIdleSpinLoop,
+  randomIdleQuaternion,
+  type IdleSpinTarget,
+} from './idleSpin'
+import { continuousRotationTarget, interpolateRotation } from './rollRotation'
+import { settleScaleFactor } from './settleScale'
+
 export interface DiceRollValue {
   sides: number
   value: number
@@ -51,6 +59,7 @@ interface RenderedDie {
 const FRONT = new THREE.Vector3(0, 0, 1)
 const SCREEN_UP = new THREE.Vector3(0, 1, 0)
 const GLYPH_UP = new THREE.Vector3(0, 0, -1)
+const Y_AXIS = new THREE.Vector3(0, 1, 0)
 const Z_AXIS = new THREE.Vector3(0, 0, 1)
 const loader = new GLTFLoader()
 const templatePromises = new Map<string, Promise<THREE.Group>>()
@@ -427,22 +436,6 @@ function uprightTarget(normal: THREE.Vector3, up: THREE.Vector3): THREE.Quaterni
   return new THREE.Quaternion().setFromAxisAngle(Z_AXIS, roll).multiply(faceToFront).normalize()
 }
 
-function continuousRotation(
-  target: THREE.Quaternion,
-  turnSeed: number,
-): { x: number; y: number; z: number } {
-  const targetAngles = new THREE.Euler().setFromQuaternion(target, 'XYZ')
-  const fullTurn = Math.PI * 2
-  const unwrap = (angle: number, turns: number): number => (
-    angle + fullTurn * Math.ceil(turns - angle / fullTurn)
-  )
-  return {
-    x: unwrap(targetAngles.x, 3 + turnSeed % 2),
-    y: unwrap(targetAngles.y, 4 + turnSeed % 2),
-    z: unwrap(targetAngles.z, 2),
-  }
-}
-
 function easeOutCubic(value: number): number {
   return 1 - (1 - value) ** 3
 }
@@ -461,7 +454,17 @@ async function animateDie(die: RenderedDie, delay: number): Promise<void> {
     .setFromAxisAngle(Z_AXIS, landingRoll)
     .multiply(finalTarget)
     .normalize()
-  const rotation = continuousRotation(reduceMotion ? finalTarget : landingTarget, die.turnSeed)
+  const startRotation = new THREE.Euler().setFromQuaternion(die.model.quaternion, 'XYZ')
+  const targetAngles = new THREE.Euler().setFromQuaternion(
+    reduceMotion ? finalTarget : landingTarget,
+    'XYZ',
+  )
+  const rotation = continuousRotationTarget(
+    startRotation,
+    targetAngles,
+    { x: 3 + die.turnSeed % 2, y: 4 + die.turnSeed % 2, z: 2 },
+  )
+  const initialScale = die.model.scale.clone()
   const rollEnd = 0.84
   const pauseEnd = 0.875
   const startedAt = performance.now()
@@ -471,10 +474,11 @@ async function animateDie(die: RenderedDie, delay: number): Promise<void> {
       const progress = Math.min((now - startedAt) / duration, 1)
       if (reduceMotion || progress < rollEnd) {
         const rotationProgress = easeOutCubic(reduceMotion ? progress : progress / rollEnd)
+        const currentRotation = interpolateRotation(startRotation, rotation, rotationProgress)
         die.model.rotation.set(
-          rotation.x * rotationProgress,
-          rotation.y * rotationProgress,
-          rotation.z * rotationProgress,
+          currentRotation.x,
+          currentRotation.y,
+          currentRotation.z,
           'XYZ',
         )
       } else if (progress < pauseEnd) {
@@ -482,6 +486,7 @@ async function animateDie(die: RenderedDie, delay: number): Promise<void> {
       } else {
         const uprightProgress = easeOutCubic((progress - pauseEnd) / (1 - pauseEnd))
         die.model.quaternion.slerpQuaternions(landingTarget, finalTarget, uprightProgress)
+        die.model.scale.copy(initialScale).multiplyScalar(settleScaleFactor(uprightProgress))
       }
       die.renderer.domElement.dataset.rotationX = die.model.rotation.x.toFixed(6)
       die.renderer.domElement.dataset.rotationY = die.model.rotation.y.toFixed(6)
@@ -494,6 +499,7 @@ async function animateDie(die: RenderedDie, delay: number): Promise<void> {
   })
 
   die.model.quaternion.copy(finalTarget)
+  if (!reduceMotion) die.model.scale.copy(initialScale).multiplyScalar(settleScaleFactor(1))
   die.renderer.render(die.scene, die.camera)
   const frontDot = die.faceNormal.clone().applyQuaternion(finalTarget).dot(FRONT)
   const upDot = die.faceUp.clone().applyQuaternion(finalTarget).dot(SCREEN_UP)
@@ -598,6 +604,12 @@ async function createModule(
 export class ThreeDiceBoard {
   private activeDice: RenderedDie[] = []
   private skin: DiceSkin = 'classic'
+  private preparationGeneration = 0
+  private preparedResult: DiceRollResult | undefined
+  private readonly idleSpin = createIdleSpinLoop({
+    request: (callback) => window.requestAnimationFrame(callback),
+    cancel: (handle) => window.cancelAnimationFrame(handle),
+  })
 
   constructor(private readonly diceTray: HTMLElement) {
     this.renderWaitingDice()
@@ -607,12 +619,52 @@ export class ThreeDiceBoard {
     this.skin = skin
   }
 
-  async playResult(result: DiceRollResult): Promise<void> {
+  async prepareResult(result: DiceRollResult): Promise<void> {
     if (!result.modules.length) throw new Error('后端掷骰结果不包含骰子模块')
-    this.activeDice.forEach((die) => die.dispose())
+    const generation = ++this.preparationGeneration
+    this.idleSpin.stop()
+    this.preparedResult = undefined
     const modules = await Promise.all(result.modules.map((module) => createModule(module, this.skin)))
-    this.activeDice = modules.flatMap((module) => module.dice)
+    const nextDice = modules.flatMap((module) => module.dice)
+    if (generation !== this.preparationGeneration) {
+      nextDice.forEach((die) => die.dispose())
+      return
+    }
+
+    this.activeDice.forEach((die) => die.dispose())
+    this.activeDice = nextDice
     this.diceTray.replaceChildren(...modules.map((module) => module.element))
+    for (const die of this.activeDice) {
+      const orientation = randomIdleQuaternion()
+      die.model.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w)
+      die.renderer.render(die.scene, die.camera)
+    }
+    this.preparedResult = result
+
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const targets: IdleSpinTarget[] = this.activeDice.map((die) => {
+        const spinStep = new THREE.Quaternion()
+        return {
+          rotateBy(angleRadians) {
+            spinStep.setFromAxisAngle(Y_AXIS, angleRadians)
+            die.model.quaternion.premultiply(spinStep)
+          },
+          render() {
+            die.renderer.render(die.scene, die.camera)
+          },
+        }
+      })
+      this.idleSpin.start(targets)
+    }
+  }
+
+  async playResult(result: DiceRollResult): Promise<void> {
+    if (this.preparedResult !== result || this.activeDice.length === 0) {
+      await this.prepareResult(result)
+    }
+    if (this.preparedResult !== result) return
+    this.idleSpin.stop()
+    this.preparedResult = undefined
     await Promise.all(this.activeDice.map((die, index) => animateDie(die, index * 90)))
     for (const die of this.activeDice) {
       const outcome = die.wrapper.dataset.percentileOutcome

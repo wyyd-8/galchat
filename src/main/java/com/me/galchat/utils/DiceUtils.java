@@ -22,28 +22,46 @@ public final class DiceUtils {
         return roll(formula, ThreadLocalRandom.current());
     }
 
+    /**
+     * Parses a dice formula into the same structure returned by {@link #roll(String)},
+     * without generating random values. The returned dice and modules have null
+     * result values and can be stored as a pending user-roll placeholder.
+     */
+    public static DiceRollResultVO prepare(String formula) {
+        validateFormula(formula);
+        Parser parser = new Parser(formula, null, false);
+        parser.parse();
+        return new DiceRollResultVO(formula, parser.modules(), null);
+    }
+
     static DiceRollResultVO roll(String formula, RandomGenerator random) {
+        validateFormula(formula);
+
+        Parser parser = new Parser(formula, random, true);
+        int result = Math.toIntExact(parser.parse());
+        return new DiceRollResultVO(formula, parser.modules(), result);
+    }
+
+    private static void validateFormula(String formula) {
         if (formula == null || formula.isBlank()) {
             throw new IllegalArgumentException("骰子公式不能为空");
         }
         if (formula.length() > MAX_FORMULA_LENGTH) {
             throw new IllegalArgumentException("骰子公式不能超过 " + MAX_FORMULA_LENGTH + " 个字符");
         }
-
-        Parser parser = new Parser(formula, random);
-        int result = Math.toIntExact(parser.parse());
-        return new DiceRollResultVO(formula, parser.modules(), result);
     }
 
     private static final class Parser {
         private final String input;
         private final RandomGenerator random;
+        private final boolean generateResults;
         private final List<DiceRollModuleVO> modules = new ArrayList<>();
         private int position;
 
-        private Parser(String input, RandomGenerator random) {
+        private Parser(String input, RandomGenerator random, boolean generateResults) {
             this.input = input;
             this.random = random;
+            this.generateResults = generateResults;
         }
 
         private long parse() {
@@ -63,9 +81,11 @@ public final class DiceUtils {
             long left = parseMultiplication();
             while (true) {
                 if (match("+")) {
-                    left = Math.addExact(left, parseMultiplication());
+                    long right = parseMultiplication();
+                    left = generateResults ? Math.addExact(left, right) : 1;
                 } else if (match("-")) {
-                    left = Math.subtractExact(left, parseMultiplication());
+                    long right = parseMultiplication();
+                    left = generateResults ? Math.subtractExact(left, right) : 1;
                 } else {
                     return left;
                 }
@@ -76,11 +96,14 @@ public final class DiceUtils {
             long left = parseUnary();
             while (true) {
                 if (match("*")) {
-                    left = Math.multiplyExact(left, parseUnary());
+                    long right = parseUnary();
+                    left = generateResults ? Math.multiplyExact(left, right) : 1;
                 } else if (match("/")) {
-                    left /= parseUnary();
+                    long right = parseUnary();
+                    left = generateResults ? left / right : 1;
                 } else if (match("%")) {
-                    left %= parseUnary();
+                    long right = parseUnary();
+                    left = generateResults ? left % right : 1;
                 } else {
                     return left;
                 }
@@ -92,7 +115,8 @@ public final class DiceUtils {
                 return parseUnary();
             }
             if (match("-")) {
-                return Math.negateExact(parseUnary());
+                long value = parseUnary();
+                return generateResults ? Math.negateExact(value) : 1;
             }
             return parsePrimary();
         }
@@ -129,6 +153,10 @@ public final class DiceUtils {
                 throw error("奖励骰或惩罚骰只能用于 1D100");
             }
 
+            if (!generateResults) {
+                return prepareDice(start, countValue, sidesValue, modifier);
+            }
+
             List<DiceRollValueVO> dice = new ArrayList<>();
             int selected;
             if (countValue == 1 && sidesValue == 100) {
@@ -153,6 +181,39 @@ public final class DiceUtils {
                     selected
             ));
             return selected;
+        }
+
+        private long prepareDice(int start, long countValue, long sidesValue, int modifier) {
+            List<DiceRollValueVO> dice = new ArrayList<>();
+            if (countValue == 1 && sidesValue == 100) {
+                dice.add(new DiceRollValueVO(10, null, "PERCENTILE_ONES", true));
+                for (int i = 0; i <= Math.abs(modifier); i++) {
+                    dice.add(new DiceRollValueVO(
+                            10,
+                            null,
+                            "PERCENTILE_TENS",
+                            modifier == 0
+                    ));
+                }
+            } else {
+                for (int i = 0; i < (int) countValue; i++) {
+                    dice.add(new DiceRollValueVO((int) sidesValue, null, "NORMAL", true));
+                }
+            }
+
+            String expression = input.substring(start, position).replaceAll("\\s+", "");
+            modules.add(new DiceRollModuleVO(
+                    expression,
+                    (int) countValue,
+                    (int) sidesValue,
+                    modifierName(modifier),
+                    dice,
+                    null
+            ));
+
+            // Parsing arithmetic still needs a temporary value. One per die is
+            // always within the valid range and is discarded from the response.
+            return countValue;
         }
 
         private int parsePercentileModifier() {

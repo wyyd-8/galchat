@@ -86,7 +86,31 @@ const DEMOS: Record<string, DiceRollResult> = {
   },
 }
 
+let prepareGeneration = 0
+
+function selectedResult(): DiceRollResult {
+  return DEMOS[demoSelect.value] ?? DEMOS.standard
+}
+
+async function prepare(result: DiceRollResult): Promise<void> {
+  const generation = ++prepareGeneration
+  rollButton.disabled = true
+  resultValues.textContent = result.formula
+  resultTotal.textContent = '等待掷骰'
+
+  try {
+    await diceBoard.prepareResult(result)
+  } catch (error) {
+    if (generation !== prepareGeneration) return
+    resultValues.textContent = '无法加载'
+    resultTotal.textContent = error instanceof Error ? error.message : '未知错误'
+  } finally {
+    if (generation === prepareGeneration) rollButton.disabled = false
+  }
+}
+
 async function play(result: DiceRollResult): Promise<void> {
+  prepareGeneration += 1
   rollButton.disabled = true
   skinButton.disabled = true
   demoSelect.disabled = true
@@ -107,11 +131,14 @@ async function play(result: DiceRollResult): Promise<void> {
   }
 }
 
-rollButton.addEventListener('click', () => play(DEMOS[demoSelect.value] ?? DEMOS.standard))
-skinButton.addEventListener('click', async () => {
+rollButton.addEventListener('click', () => play(selectedResult()))
+demoSelect.addEventListener('change', () => {
+  void prepare(selectedResult())
+})
+skinButton.addEventListener('click', () => {
   const currentIndex = SKIN_ORDER.indexOf(activeSkin)
   setSkin(SKIN_ORDER[(currentIndex + 1) % SKIN_ORDER.length])
-  await play(DEMOS[demoSelect.value] ?? DEMOS.standard)
+  void prepare(selectedResult())
 })
 
 // 正式接入时可直接调用 window.playDiceResult(await response.json())。
@@ -128,3 +155,4 @@ if (selectedDemo && DEMOS[selectedDemo]) {
 }
 const selectedSkin = new URLSearchParams(window.location.search).get('skin')
 setSkin(SKIN_ORDER.includes(selectedSkin as DiceSkin) ? selectedSkin as DiceSkin : 'classic')
+void prepare(selectedResult())

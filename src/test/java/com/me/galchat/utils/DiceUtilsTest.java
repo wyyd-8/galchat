@@ -6,9 +6,62 @@ import org.junit.jupiter.api.Test;
 import java.util.random.RandomGenerator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DiceUtilsTest {
+
+    @Test
+    void preparesEveryPhysicalDieWithoutGeneratingResults() {
+        DiceRollResultVO result = DiceUtils.prepare("2D6 + 1D100##");
+
+        assertEquals("2D6 + 1D100##", result.getFormula());
+        assertNull(result.getResult());
+        assertEquals(2, result.getModules().size());
+
+        var normal = result.getModules().get(0);
+        assertEquals("2D6", normal.getExpression());
+        assertNull(normal.getResult());
+        assertEquals(2, normal.getDice().size());
+        assertTrue(normal.getDice().stream().allMatch(die -> die.getValue() == null));
+        assertTrue(normal.getDice().stream().allMatch(die -> die.isSelected()));
+
+        var percentile = result.getModules().get(1);
+        assertEquals("1D100##", percentile.getExpression());
+        assertEquals("DOUBLE_ADVANTAGE", percentile.getModifier());
+        assertNull(percentile.getResult());
+        assertEquals(4, percentile.getDice().size());
+        assertEquals(java.util.List.of(
+                        "PERCENTILE_ONES",
+                        "PERCENTILE_TENS",
+                        "PERCENTILE_TENS",
+                        "PERCENTILE_TENS"
+                ),
+                percentile.getDice().stream().map(die -> die.getRole()).toList());
+        assertTrue(percentile.getDice().stream().allMatch(die -> die.getValue() == null));
+        assertTrue(percentile.getDice().getFirst().isSelected());
+        assertTrue(percentile.getDice().subList(1, 4).stream().noneMatch(die -> die.isSelected()));
+    }
+
+    @Test
+    void prepareValidatesFormulaWithoutRollingIt() {
+        DiceRollResultVO result = DiceUtils.prepare("3D6 * 5");
+
+        assertNull(result.getResult());
+        assertEquals(1, result.getModules().size());
+        assertEquals(3, result.getModules().getFirst().getDice().size());
+        assertThrows(IllegalArgumentException.class, () -> DiceUtils.prepare("1D20#"));
+    }
+
+    @Test
+    void prepareOnlyParsesAndDoesNotEvaluateArithmetic() {
+        DiceRollResultVO result = DiceUtils.prepare("1D6 / (1D6 - 1D6)");
+
+        assertNull(result.getResult());
+        assertEquals(3, result.getModules().size());
+        assertTrue(result.getModules().stream().allMatch(module -> module.getResult() == null));
+    }
 
     @Test
     void rollsEveryDieAndUsesArithmeticPrecedence() {

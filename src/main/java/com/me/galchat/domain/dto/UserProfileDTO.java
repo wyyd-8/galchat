@@ -9,4 +9,5 @@ public class UserProfileDTO {
     private String username;
     private String email;
     private LocalDate birthday;
+    private String diceSkin;
 }

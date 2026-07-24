@@ -7,6 +7,7 @@ CREATE TABLE user_info (
     email VARCHAR(255) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
     birthday DATE,
+    dice_skin VARCHAR(50) NOT NULL DEFAULT 'default',
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

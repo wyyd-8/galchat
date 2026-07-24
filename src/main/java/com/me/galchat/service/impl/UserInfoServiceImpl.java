@@ -49,7 +49,8 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
     @Override
     public UserInfo getInfoById(Integer id) {
         return lambdaQuery()
-                .select(UserInfo::getId, UserInfo::getUsername, UserInfo::getEmail, UserInfo::getBirthday, UserInfo::getCreateTime)
+                .select(UserInfo::getId, UserInfo::getUsername, UserInfo::getEmail, UserInfo::getBirthday,
+                        UserInfo::getDiceSkin, UserInfo::getCreateTime)
                 .eq(UserInfo::getId, id)
                 .one();
     }
@@ -87,6 +88,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
                 .setUsername(UserConstant.DEFAULT_USERNAME)
                 .setEmail(email)
                 .setPassword(encodePassword(userAuthDTO.getPassword()))
+                .setDiceSkin(UserConstant.DEFAULT_DICE_SKIN)
                 .setCreateTime(LocalDateTime.now());
         save(userInfo);
         redisTemplate.delete(buildEmailVerifyCodeKey(email, verificationCode));
@@ -168,10 +170,22 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
             throw new UserRequestException("请求参数不能为空");
         }
 
+        String diceSkin = userProfileDTO.getDiceSkin();
+        if (diceSkin != null) {
+            diceSkin = diceSkin.trim();
+            if (!StringUtils.hasText(diceSkin)) {
+                throw new UserRequestException("骰子皮肤不能为空");
+            }
+            if (diceSkin.length() > UserConstant.DICE_SKIN_MAX_LENGTH) {
+                throw new UserRequestException("骰子皮肤标识不能超过50个字符");
+            }
+        }
+
         UserInfo updateUserInfo = new UserInfo()
                 .setId(Long.valueOf(userId))
                 .setUsername(StringUtils.hasText(userProfileDTO.getUsername()) ? userProfileDTO.getUsername() : null)
-                .setBirthday(userProfileDTO.getBirthday());
+                .setBirthday(userProfileDTO.getBirthday())
+                .setDiceSkin(diceSkin);
         updateById(updateUserInfo);
     }
 

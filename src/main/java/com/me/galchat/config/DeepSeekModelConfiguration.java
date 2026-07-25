@@ -1,6 +1,8 @@
 package com.me.galchat.config;
 
 import com.me.galchat.interceptor.DeepSeekThinkingInterceptor;
+import com.me.galchat.groupchat.tool.GroupToolCallStore;
+import com.me.galchat.groupchat.tool.RecordingGroupToolCallingManager;
 import com.me.galchat.memory.UserChatMemory;
 import com.me.galchat.model.DeepSeekChatModel;
 import com.me.galchat.tool.RecordingToolCallingManager;
@@ -75,10 +77,7 @@ public class DeepSeekModelConfiguration {
                 observationConvention, toolExecutionEligibilityPredicate);
     }
 
-    /**
-     * 群聊模型不使用 RecordingToolCallingManager。即使调用方未来添加工具，工具执行也不会隐式写入
-     * UserChatMemory；群聊必须使用自己的 message/step 关联记录。
-     */
+    /** 群聊使用独立记录器，工具执行不会写入 UserChatMemory。 */
     @Bean
     public DeepSeekChatModel groupDeepSeekThinkingChatModel(
             DeepSeekConnectionProperties connectionProperties,
@@ -86,6 +85,7 @@ public class DeepSeekModelConfiguration {
             ObjectProvider<RestClient.Builder> restClientBuilderProvider,
             ObjectProvider<WebClient.Builder> webClientBuilderProvider,
             ToolCallingManager toolCallingManager,
+            GroupToolCallStore groupToolCallStore,
             ObjectProvider<RetryTemplate> retryTemplate,
             ObjectProvider<ResponseErrorHandler> responseErrorHandler,
             ObjectProvider<ObservationRegistry> observationRegistry,
@@ -94,7 +94,8 @@ public class DeepSeekModelConfiguration {
         return buildChatModel(connectionProperties, chatProperties,
                 restClientBuilderProvider.getIfAvailable(RestClient::builder),
                 webClientBuilderProvider.getIfAvailable(WebClient::builder),
-                toolCallingManager, retryTemplate, responseErrorHandler, observationRegistry,
+                new RecordingGroupToolCallingManager(toolCallingManager, groupToolCallStore),
+                retryTemplate, responseErrorHandler, observationRegistry,
                 observationConvention, toolExecutionEligibilityPredicate);
     }
 
@@ -105,6 +106,7 @@ public class DeepSeekModelConfiguration {
             ObjectProvider<RestClient.Builder> restClientBuilderProvider,
             ObjectProvider<WebClient.Builder> webClientBuilderProvider,
             ToolCallingManager toolCallingManager,
+            GroupToolCallStore groupToolCallStore,
             ObjectProvider<RetryTemplate> retryTemplate,
             ObjectProvider<ResponseErrorHandler> responseErrorHandler,
             ObjectProvider<ObservationRegistry> observationRegistry,
@@ -116,7 +118,8 @@ public class DeepSeekModelConfiguration {
                 .requestInterceptor(new DeepSeekThinkingInterceptor());
         return buildChatModel(connectionProperties, chatProperties, restClientBuilder,
                 webClientBuilderProvider.getIfAvailable(WebClient::builder),
-                toolCallingManager, retryTemplate, responseErrorHandler, observationRegistry,
+                new RecordingGroupToolCallingManager(toolCallingManager, groupToolCallStore),
+                retryTemplate, responseErrorHandler, observationRegistry,
                 observationConvention, toolExecutionEligibilityPredicate);
     }
 

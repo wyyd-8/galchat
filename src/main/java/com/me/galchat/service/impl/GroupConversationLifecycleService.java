@@ -8,6 +8,7 @@ import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.groupchat.context.GroupTopicService;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
@@ -38,6 +39,7 @@ public class GroupConversationLifecycleService {
     private final IWorldEventLogService worldEventLogService;
     private final WorldEventLogMapper worldEventLogMapper;
     private final WorldEventVectorService worldEventVectorService;
+    private final GroupTopicService topicService;
     private final ChatClient summaryClient;
     private final TransactionTemplate transactionTemplate;
 
@@ -50,6 +52,7 @@ public class GroupConversationLifecycleService {
                                              IWorldEventLogService worldEventLogService,
                                              WorldEventLogMapper worldEventLogMapper,
                                              WorldEventVectorService worldEventVectorService,
+                                             GroupTopicService topicService,
                                              @Qualifier("groupNonThinkingChatClient") ChatClient summaryClient,
                                              TransactionTemplate transactionTemplate) {
         this.conversationService = conversationService;
@@ -61,6 +64,7 @@ public class GroupConversationLifecycleService {
         this.worldEventLogService = worldEventLogService;
         this.worldEventLogMapper = worldEventLogMapper;
         this.worldEventVectorService = worldEventVectorService;
+        this.topicService = topicService;
         this.summaryClient = summaryClient;
         this.transactionTemplate = transactionTemplate;
     }
@@ -73,6 +77,9 @@ public class GroupConversationLifecycleService {
         }
         try {
             List<GroupChatMessage> messages = completedMessages(conversationId);
+            if (GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
+                topicService.flushOpenTopics(conversation);
+            }
             String summary = generateSummary(conversation, messages);
             GroupConversation result = transactionTemplate.execute(status ->
                     saveFinalSummary(conversation, messages, summary));

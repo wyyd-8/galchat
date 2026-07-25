@@ -6,6 +6,7 @@ import com.me.galchat.domain.dto.GroupConversationCreateDTO;
 import com.me.galchat.domain.dto.GroupReplyPlanDTO;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.service.impl.GroupChatService;
+import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
 import com.me.galchat.service.impl.GroupReplyPlanService;
@@ -30,6 +31,7 @@ public class GroupChatController {
     private final GroupConversationService conversationService;
     private final GroupConversationLifecycleService lifecycleService;
     private final GroupChatService groupChatService;
+    private final GroupChatWithdrawalService withdrawalService;
     private final GroupReplyPlanService replyPlanService;
 
     @PostMapping("/conversations")
@@ -65,6 +67,12 @@ public class GroupChatController {
                               @RequestParam(required = false) Long beforeId,
                               @RequestParam(required = false) Integer size) {
         return Result.success(groupChatService.listHistory(conversationId, beforeId, size));
+    }
+
+    @PostMapping("/conversations/{conversationId}/withdraw")
+    public Result withdrawLatestTurn(@PathVariable Long conversationId) {
+        withdrawalService.withdrawLatestTurn(conversationId);
+        return Result.success();
     }
 
     @GetMapping("/conversations/{conversationId}/reply-plan")

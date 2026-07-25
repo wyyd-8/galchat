@@ -33,6 +33,10 @@ import java.util.*;
 
 public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor {
 
+    private static final TopicWindowPolicy WINDOW_POLICY =
+            new TopicWindowPolicy(ChatConstant.CONTEXT_TOPIC_COUNT,
+                    ChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT);
+
     private final UserChatMemory chatMemory;
     private final TopicBoundaryService topicBoundaryService;
     private final MutiSearchService mutiSearchService;
@@ -66,7 +70,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
                 ? topicBoundaryService.updateAfterUserMessage(baseConversation, savedUserMessage)
                 : topicBoundaryService.getBoundary(baseConversation);
         ConversationInfo windowConversation = new ConversationInfo(baseConversation.getUserWorldId(),
-                baseConversation.getCharacterId(), boundary.windowStartId());
+                baseConversation.getCharacterId(), WINDOW_POLICY.contextStart(boundary.startIds()));
 
         List<UserChatHistory> windowHistories = chatMemory.listHistories(windowConversation);
         notifyUserMessageSaved(chatClientRequest.prompt().getOptions(), savedUserMessage.getId(),

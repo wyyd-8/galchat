@@ -95,6 +95,13 @@ public class ChatHistoryVectorService {
         return chatHistoryRetriever.retrieve(query);
     }
 
+    public void deleteChatHistory(Long userWorldId, Long characterId, Long start, Long end) {
+        if (userWorldId == null || characterId == null || start == null || end == null || start >= end) {
+            return;
+        }
+        chatHistoryVectorStore.delete(List.of(vectorDocumentId(userWorldId, characterId, start, end)));
+    }
+
     private Filter.Expression filterByConversation(Long userWorldId, Long characterId) {
         FilterExpressionBuilder builder = new FilterExpressionBuilder();
         return builder.and(

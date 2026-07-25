@@ -7,13 +7,12 @@ import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
+import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
-import com.me.galchat.groupchat.context.GroupContextStrategyRouter;
 import com.me.galchat.service.IUserCharacterInfoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -29,32 +28,37 @@ public class GroupContextAssembler {
 
     private final GroupChatMessageMapper messageMapper;
     private final GroupConversationService conversationService;
-    private final GroupContextStrategyRouter contextStrategyRouter;
     private final ChatServiceImpl chatService;
     private final IUserCharacterInfoService userCharacterInfoService;
+    private final GroupToolHistoryAssembler toolHistoryAssembler;
 
-    /** 只读取群聊消息和当前模式对应的上下文概要。 */
-    public List<Message> assemble(GroupConversation conversation, Long currentCharacterId) {
-        Map<Long, UserCharacterInfo> characterById = characterById(conversation.getUserWorldId());
-        UserCharacterInfo currentCharacter = characterById.get(currentCharacterId);
-        String currentName = currentCharacter == null || !StringUtils.hasText(currentCharacter.getCharacterName())
-                ? "角色" + currentCharacterId : currentCharacter.getCharacterName();
-
+    public List<Message> assembleContext(GroupConversation conversation, Long currentCharacterId,
+                                         GroupContextSummary summary) {
         List<Message> prompt = new ArrayList<>();
-        prompt.add(new SystemMessage(buildSystemPrompt(conversation, currentCharacterId, currentName, characterById)));
-
-        GroupContextSummary summary = contextStrategyRouter.latestSummary(conversation);
         long coveredSequence = summary == null ? 0L : summary.getEndSequence();
         if (summary != null && StringUtils.hasText(summary.getSummary())) {
             prompt.add(new UserMessage("<context-summary>\n" + summary.getSummary() + "\n</context-summary>"));
         }
+        prompt.addAll(assembleContextFrom(conversation, currentCharacterId, coveredSequence + 1));
+        return prompt;
+    }
 
+    public List<Message> assembleContextFrom(GroupConversation conversation, Long currentCharacterId,
+                                             long startSequence) {
+        Map<Long, UserCharacterInfo> characterById = characterById(conversation.getUserWorldId());
+        List<Message> prompt = new ArrayList<>();
         List<GroupChatMessage> messages = messageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
                 .eq(GroupChatMessage::getConversationId, conversation.getId())
-                .gt(GroupChatMessage::getSequenceNo, coveredSequence)
+                .ge(GroupChatMessage::getSequenceNo, startSequence)
                 .eq(GroupChatMessage::getStatus, GroupChatConstant.STATUS_COMPLETED)
+                .eq(GroupChatMessage::getVisibility, "public")
                 .orderByAsc(GroupChatMessage::getSequenceNo));
+        Map<Long, List<Message>> toolMessages =
+                toolHistoryAssembler.beforeMessages(messages, currentCharacterId);
         for (GroupChatMessage message : messages) {
+            if (message.getReplyStepId() != null) {
+                prompt.addAll(toolMessages.getOrDefault(message.getReplyStepId(), List.of()));
+            }
             if (GroupChatConstant.ACTOR_CHARACTER.equals(message.getSpeakerType())
                     && currentCharacterId.equals(message.getSpeakerId())) {
                 prompt.add(new AssistantMessage(message.getContent()));
@@ -62,32 +66,26 @@ public class GroupContextAssembler {
                 prompt.add(new UserMessage(formatOtherSpeakerMessage(message, characterById)));
             }
         }
-        prompt.add(new UserMessage("现在轮到" + currentName + "回复。只生成" + currentName
-                + "本人的言语、动作或感受，不要代替用户或其他角色发言，不要输出发言者标签。"));
         return prompt;
+    }
+
+    public String baseSystemPrompt(GroupConversation conversation, Long currentCharacterId) {
+        StringBuilder builder = new StringBuilder(chatService.buildSystemPrompt(conversation.getWorldId(),
+                conversation.getUserWorldId(), currentCharacterId));
+        builder.append("\n群聊成员：");
+        Map<Long, UserCharacterInfo> characterById = characterById(conversation.getUserWorldId());
+        for (GroupChatMember member : conversationService.listMembers(conversation.getId())) {
+            UserCharacterInfo character = characterById.get(member.getActorId());
+            String name = character == null ? "角色" + member.getActorId() : character.getCharacterName();
+            builder.append("\n- ").append(name).append(" (character:").append(member.getActorId()).append(')');
+        }
+        return builder.toString();
     }
 
     public String characterName(Long userWorldId, Long characterId) {
         UserCharacterInfo character = characterById(userWorldId).get(characterId);
         return character == null || !StringUtils.hasText(character.getCharacterName())
                 ? "角色" + characterId : character.getCharacterName();
-    }
-
-    private String buildSystemPrompt(GroupConversation conversation, Long currentCharacterId, String currentName,
-                                     Map<Long, UserCharacterInfo> characterById) {
-        StringBuilder builder = new StringBuilder(chatService.buildSystemPrompt(conversation.getWorldId(),
-                conversation.getUserWorldId(), currentCharacterId));
-        appendSection(builder, "你正在一个多人群聊中扮演" + currentName + "。\n"
-                + "聊天记录中的 speaker 标记是真实发言者身份；其他角色的消息不是你的经历或台词。\n"
-                + "不得输出隐藏思考过程。");
-        builder.append("\n群聊成员：");
-        List<GroupChatMember> members = conversationService.listMembers(conversation.getId());
-        for (GroupChatMember member : members) {
-            UserCharacterInfo character = characterById.get(member.getActorId());
-            String name = character == null ? "角色" + member.getActorId() : character.getCharacterName();
-            builder.append("\n- ").append(name).append(" (character:").append(member.getActorId()).append(')');
-        }
-        return builder.toString();
     }
 
     private String formatOtherSpeakerMessage(GroupChatMessage message,
@@ -114,9 +112,4 @@ public class GroupContextAssembler {
         return result;
     }
 
-    private void appendSection(StringBuilder builder, String content) {
-        if (StringUtils.hasText(content)) {
-            builder.append('\n').append(content.trim()).append('\n');
-        }
-    }
 }

@@ -1,18 +1,29 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.GroupChatEvent;
+import com.me.galchat.groupchat.runtime.GroupActionSpec;
+import com.me.galchat.groupchat.runtime.GroupAgentPolicy;
+import com.me.galchat.groupchat.runtime.GroupContextMaterial;
+import com.me.galchat.groupchat.runtime.GroupContextPolicy;
+import com.me.galchat.groupchat.runtime.GroupModeRuntime;
+import com.me.galchat.groupchat.runtime.GroupModelInvocation;
+import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
+import com.me.galchat.groupchat.runtime.GroupTurnPolicy;
+import com.me.galchat.groupchat.tool.GroupToolContextFactory;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
-import com.me.galchat.groupchat.context.GroupContextStrategyRouter;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.model.DeepSeekChatModel;
+import com.me.galchat.service.IUserWorldPrefixService;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
 import org.springframework.ai.chat.client.ChatClient;
@@ -21,6 +32,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -28,9 +40,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -45,15 +59,19 @@ class GroupChatServiceTest {
         GroupConversationService conversationService = mock(GroupConversationService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
         GroupReplyPlanService replyPlanService = mock(GroupReplyPlanService.class);
-        GroupContextAssembler assembler = mock(GroupContextAssembler.class);
-        GroupContextStrategyRouter contextStrategyRouter = mock(GroupContextStrategyRouter.class);
+        GroupRuntimeRegistry runtimeRegistry = mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupTurnPolicy turnPolicy = mock(GroupTurnPolicy.class);
+        GroupContextPolicy contextPolicy = mock(GroupContextPolicy.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
         GroupChatReplyStepMapper stepMapper = mock(GroupChatReplyStepMapper.class);
+        IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
-        GroupChatService service = new GroupChatService(chatClient, conversationService, lockService, replyPlanService,
-                assembler, contextStrategyRouter, messageMapper, turnMapper, stepMapper,
-                transactionTemplate);
+        GroupChatService service = new GroupChatService(conversationService, lockService, replyPlanService,
+                runtimeRegistry, messageMapper, turnMapper, stepMapper, new GroupToolContextFactory(),
+                userWorldPrefixService, transactionTemplate);
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -66,8 +84,11 @@ class GroupChatServiceTest {
         }).when(transactionTemplate).executeWithoutResult(any());
 
         GroupConversation conversation = new GroupConversation()
-                .setId(7L).setUserWorldId(1L).setWorldId(2L).setStatus(GroupChatConstant.STATUS_ACTIVE);
+                .setId(7L).setUserWorldId(1L).setWorldId(2L).setMode(GroupChatConstant.MODE_CHAT)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireActive(7L)).thenReturn(conversation);
+        when(userWorldPrefixService.getById(1L))
+                .thenReturn(new UserWorldPrefix().setFavorSystemStatus("NORMAL"));
         GroupReplyPlanItem planItem = new GroupReplyPlanItem()
                 .setId(20L)
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
@@ -75,12 +96,28 @@ class GroupChatServiceTest {
                 .setStatus(GroupChatConstant.STATUS_PENDING);
         when(replyPlanService.pendingItemsForExecution(conversation)).thenReturn(List.of(planItem));
         when(replyPlanService.activeSource(conversation)).thenReturn(GroupChatConstant.PLAN_SOURCE_USER);
+        GroupActionSpec action = new GroupActionSpec(
+                GroupChatConstant.ACTION_CHAT_REPLY,
+                GroupChatConstant.ACTOR_CHARACTER,
+                9L,
+                20L,
+                true);
+        when(runtimeRegistry.require(GroupChatConstant.MODE_CHAT)).thenReturn(runtime);
+        when(runtime.turnPolicy()).thenReturn(turnPolicy);
+        when(runtime.contextPolicy()).thenReturn(contextPolicy);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(turnPolicy.plan(conversation, GroupChatConstant.PLAN_SOURCE_USER, List.of(planItem)))
+                .thenReturn(List.of(action));
+        GroupContextMaterial context = new GroupContextMaterial(List.of(new UserMessage("用户消息")));
+        when(contextPolicy.load(conversation, action)).thenReturn(context);
+        when(agentPolicy.prepare(conversation, action, context)).thenReturn(new GroupModelInvocation(
+                chatClient,
+                new Prompt(List.of(new SystemMessage("群聊规则"), new UserMessage("用户消息"))),
+                List.of()));
+        when(agentPolicy.characterName(1L, 9L)).thenReturn("Alice");
         when(lockService.tryLock(7L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         AtomicLong sequence = new AtomicLong();
         when(conversationService.nextSequence(7L)).thenAnswer(invocation -> sequence.incrementAndGet());
-        when(assembler.characterName(1L, 9L)).thenReturn("Alice");
-        when(assembler.assemble(conversation, 9L)).thenReturn(List.of(
-                new SystemMessage("群聊规则"), new UserMessage("用户消息")));
 
         AtomicLong ids = new AtomicLong(100L);
         doAnswer(invocation -> {
@@ -100,8 +137,11 @@ class GroupChatServiceTest {
                 .reasoningContent("只供前端展示的思考")
                 .content("公开回复")
                 .build();
-        when(model.stream(any(Prompt.class))).thenReturn(reactor.core.publisher.Flux.just(
-                new ChatResponse(List.of(new Generation(output)))));
+        AtomicReference<Prompt> modelPrompt = new AtomicReference<>();
+        when(model.stream(any(Prompt.class))).thenAnswer(invocation -> {
+            modelPrompt.set(invocation.getArgument(0));
+            return reactor.core.publisher.Flux.just(new ChatResponse(List.of(new Generation(output))));
+        });
 
         GroupChatRequestDTO request = new GroupChatRequestDTO();
         request.setContent("你好");
@@ -118,7 +158,26 @@ class GroupChatServiceTest {
         assertThat(events).filteredOn(event -> GroupChatConstant.EVENT_REASONING_DELTA.equals(event.getEventType()))
                 .extracting(GroupChatEvent::getDelta)
                 .containsExactly("只供前端展示的思考");
-        verify(assembler).assemble(conversation, 9L);
+        assertThat(events).filteredOn(event -> event.getReplyStepId() != null)
+                .allSatisfy(event -> {
+                    assertThat(event.getActionType()).isEqualTo(GroupChatConstant.ACTION_CHAT_REPLY);
+                    assertThat(event.getPlanItemId()).isEqualTo(20L);
+                });
+        verify(contextPolicy).onTurnStarted(eq(conversation),
+                org.mockito.ArgumentMatchers.argThat(message -> "你好".equals(message.getContent())));
+        verify(contextPolicy).load(conversation, action);
+        verify(agentPolicy).prepare(conversation, action, context);
         verify(replyPlanService).markCompleted(planItem);
+        verify(stepMapper).insert(org.mockito.ArgumentMatchers.argThat((GroupChatReplyStep step) ->
+                GroupChatConstant.ACTION_CHAT_REPLY.equals(step.getActionType())
+                        && Long.valueOf(20L).equals(step.getPlanItemId())));
+        assertThat(modelPrompt.get().getOptions()).isInstanceOf(ToolCallingChatOptions.class);
+        assertThat(((ToolCallingChatOptions) modelPrompt.get().getOptions()).getToolContext())
+                .containsEntry(ChatToolContextConstant.WORLD_ID_KEY, 2L)
+                .containsEntry(ChatToolContextConstant.USER_WORLD_ID_KEY, 1L)
+                .containsEntry(ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY, 7L)
+                .containsEntry(ChatToolContextConstant.CHARACTER_ID_KEY, 9L)
+                .containsEntry(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 103L)
+                .containsEntry(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY, "NORMAL");
     }
 }

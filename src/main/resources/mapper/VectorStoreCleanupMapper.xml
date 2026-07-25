@@ -17,6 +17,29 @@
           AND (metadata::jsonb ->> 'endMessageId')::bigint &gt; #{thresholdEndMessageId}
     </delete>
 
+    <delete id="deleteGroupTopicsAfterId">
+        DELETE FROM public.group_topic_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"userWorldId":', #{userWorldId}, '}'
+        )::jsonb
+          AND (metadata::jsonb ->> 'groupTopicId')::bigint &gt; #{maxGroupTopicId}
+    </delete>
+
+    <delete id="deleteGroupTopicsByConversation">
+        DELETE FROM public.group_topic_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+    </delete>
+
+    <delete id="deleteGroupTopicsByConversationAfterEnd">
+        DELETE FROM public.group_topic_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+          AND (metadata::jsonb ->> 'endSequence')::bigint &gt; #{thresholdEndSequence}
+    </delete>
+
     <delete id="deleteWorldEventByUserWorldId">
         DELETE FROM public.world_event_vector_store
         WHERE metadata::jsonb @> CONCAT(

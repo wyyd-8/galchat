@@ -24,6 +24,9 @@ public interface UserWorldSaveRestoreMapper {
     int deleteGroupMessagesAfter(@Param("userWorldId") Long userWorldId,
                                  @Param("maxGroupMessageId") Long maxGroupMessageId);
 
+    int deleteGroupToolCallsAfter(@Param("userWorldId") Long userWorldId,
+                                  @Param("maxGroupReplyStepId") Long maxGroupReplyStepId);
+
     int deleteGroupReplyStepsAfter(@Param("userWorldId") Long userWorldId,
                                    @Param("maxGroupReplyStepId") Long maxGroupReplyStepId);
 
@@ -32,6 +35,9 @@ public interface UserWorldSaveRestoreMapper {
 
     int deleteGroupSummariesAfter(@Param("userWorldId") Long userWorldId,
                                   @Param("maxGroupContextSummaryId") Long maxGroupContextSummaryId);
+
+    int deleteGroupTopicsAfter(@Param("userWorldId") Long userWorldId,
+                               @Param("maxGroupTopicId") Long maxGroupTopicId);
 
     int deleteReplyPlanItemsAfterConversation(@Param("userWorldId") Long userWorldId,
                                               @Param("maxGroupConversationId") Long maxGroupConversationId);
@@ -51,9 +57,10 @@ public interface UserWorldSaveRestoreMapper {
 
     int deleteToolCallsByUserMessageId(@Param("userMessageId") Long userMessageId);
 
-    int deleteFavorLogsByBindingChat(@Param("userWorldId") Long userWorldId,
-                                     @Param("characterId") Long characterId,
-                                     @Param("bindingChat") Long bindingChat);
+    int deleteFavorLogsByBinding(@Param("userWorldId") Long userWorldId,
+                                 @Param("characterId") Long characterId,
+                                 @Param("bindingType") String bindingType,
+                                 @Param("bindingChat") Long bindingChat);
 
     int insertChatHistoryWithId(@Param("history") UserChatHistory history);
 

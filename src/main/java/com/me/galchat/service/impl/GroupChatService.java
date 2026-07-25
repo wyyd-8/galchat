@@ -8,20 +8,25 @@ import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupChatMessageVO;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.groupchat.context.GroupContextStrategyRouter;
+import com.me.galchat.groupchat.runtime.GroupActionSpec;
+import com.me.galchat.groupchat.runtime.GroupContextMaterial;
+import com.me.galchat.groupchat.runtime.GroupModeRuntime;
+import com.me.galchat.groupchat.runtime.GroupModelInvocation;
+import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
+import com.me.galchat.groupchat.tool.GroupToolContextFactory;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.service.IUserWorldPrefixService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
@@ -31,42 +36,44 @@ import reactor.core.publisher.SignalType;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class GroupChatService {
 
-    private final ChatClient chatClient;
     private final GroupConversationService conversationService;
     private final GroupConversationLockService lockService;
     private final GroupReplyPlanService replyPlanService;
-    private final GroupContextAssembler contextAssembler;
-    private final GroupContextStrategyRouter contextStrategyRouter;
+    private final GroupRuntimeRegistry runtimeRegistry;
     private final GroupChatMessageMapper messageMapper;
     private final GroupChatTurnMapper turnMapper;
     private final GroupChatReplyStepMapper stepMapper;
+    private final GroupToolContextFactory toolContextFactory;
+    private final IUserWorldPrefixService userWorldPrefixService;
     private final TransactionTemplate transactionTemplate;
 
-    public GroupChatService(@Qualifier("groupThinkingChatClient") ChatClient chatClient,
-                            GroupConversationService conversationService,
+    public GroupChatService(GroupConversationService conversationService,
                             GroupConversationLockService lockService,
                             GroupReplyPlanService replyPlanService,
-                            GroupContextAssembler contextAssembler,
-                            GroupContextStrategyRouter contextStrategyRouter,
+                            GroupRuntimeRegistry runtimeRegistry,
                             GroupChatMessageMapper messageMapper,
                             GroupChatTurnMapper turnMapper,
                             GroupChatReplyStepMapper stepMapper,
+                            GroupToolContextFactory toolContextFactory,
+                            IUserWorldPrefixService userWorldPrefixService,
                             TransactionTemplate transactionTemplate) {
-        this.chatClient = chatClient;
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.replyPlanService = replyPlanService;
-        this.contextAssembler = contextAssembler;
-        this.contextStrategyRouter = contextStrategyRouter;
+        this.runtimeRegistry = runtimeRegistry;
         this.messageMapper = messageMapper;
         this.turnMapper = turnMapper;
         this.stepMapper = stepMapper;
+        this.toolContextFactory = toolContextFactory;
+        this.userWorldPrefixService = userWorldPrefixService;
         this.transactionTemplate = transactionTemplate;
     }
 
@@ -80,9 +87,18 @@ public class GroupChatService {
             }
 
             try {
-                PreparedTurn prepared = transactionTemplate.execute(status -> prepareTurn(conversation, request));
+                GroupModeRuntime runtime = runtimeRegistry.require(conversation.getMode());
+                String planSource = replyPlanService.activeSource(conversation);
+                PreparedTurn prepared = transactionTemplate.execute(
+                        status -> prepareTurn(conversation, request, runtime, planSource));
                 if (prepared == null) {
                     throw new UserRequestException("创建群聊轮次失败");
+                }
+                try {
+                    runtime.contextPolicy().onTurnStarted(conversation, prepared.userMessage());
+                } catch (RuntimeException e) {
+                    failTurn(prepared.turn(), e);
+                    throw e;
                 }
                 Flux<GroupChatEvent> accepted = Flux.just(GroupChatEvent.builder()
                         .eventType(GroupChatConstant.EVENT_TURN_ACCEPTED)
@@ -91,8 +107,8 @@ public class GroupChatService {
                         .messageId(prepared.userMessage().getId())
                         .sequence(prepared.userMessage().getSequenceNo())
                         .build());
-                Flux<GroupChatEvent> replies = Flux.fromIterable(prepared.replies())
-                        .concatMap(reply -> executeStep(conversation, prepared.turn(), reply));
+                Flux<GroupChatEvent> replies = Flux.fromIterable(prepared.actions())
+                        .concatMap(action -> executeStep(runtime, conversation, prepared.turn(), action));
                 Flux<GroupChatEvent> completed = Flux.defer(() -> {
                     completeTurn(prepared.turn());
                     return Flux.just(GroupChatEvent.builder()
@@ -145,7 +161,8 @@ public class GroupChatService {
                 message.getSequenceNo(), message.getStatus(), message.getCreatedAt())).toList();
     }
 
-    private PreparedTurn prepareTurn(GroupConversation conversation, GroupChatRequestDTO request) {
+    private PreparedTurn prepareTurn(GroupConversation conversation, GroupChatRequestDTO request,
+                                     GroupModeRuntime runtime, String planSource) {
         if (StringUtils.hasText(request.getClientRequestId())) {
             Long duplicateCount = turnMapper.selectCount(new LambdaQueryWrapper<GroupChatTurn>()
                     .eq(GroupChatTurn::getConversationId, conversation.getId())
@@ -156,11 +173,20 @@ public class GroupChatService {
         }
 
         List<GroupReplyPlanItem> plannedItems = replyPlanService.pendingItemsForExecution(conversation);
-        if (plannedItems.size() > GroupChatConstant.MAX_REPLY_STEPS) {
+        List<GroupActionSpec> actions = runtime.turnPolicy().plan(conversation, planSource, plannedItems);
+        if (actions.size() > GroupChatConstant.MAX_REPLY_STEPS) {
             throw new UserRequestException("单次回复人物数量不能超过" + GroupChatConstant.MAX_REPLY_STEPS);
         }
+        Map<Long, GroupReplyPlanItem> planItemById = new HashMap<>();
         for (GroupReplyPlanItem item : plannedItems) {
-            conversationService.checkReplyMember(conversation.getId(), item.getActorType(), item.getActorId(), false);
+            planItemById.put(item.getId(), item);
+        }
+        for (GroupActionSpec action : actions) {
+            conversationService.checkReplyMember(
+                    conversation.getId(), action.actorType(), action.actorId(), false);
+            if (!planItemById.containsKey(action.planItemId())) {
+                throw new UserRequestException("行动步骤引用了不存在的回复计划项");
+            }
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -168,7 +194,7 @@ public class GroupChatService {
                 .setConversationId(conversation.getId())
                 .setClientRequestId(StringUtils.hasText(request.getClientRequestId())
                         ? request.getClientRequestId().trim() : null)
-                .setPolicy(replyPlanService.activeSource(conversation).toLowerCase())
+                .setPolicy(planSource.toLowerCase())
                 .setStatus(GroupChatConstant.STATUS_PENDING)
                 .setRevision(0)
                 .setCreatedAt(now)
@@ -190,48 +216,61 @@ public class GroupChatService {
         turn.setTriggerMessageId(userMessage.getId()).setStatus(GroupChatConstant.STATUS_RUNNING);
         turnMapper.updateById(turn);
 
-        List<PreparedReply> replies = new ArrayList<>();
-        for (int i = 0; i < plannedItems.size(); i++) {
-            GroupReplyPlanItem item = plannedItems.get(i);
+        List<PreparedAction> preparedActions = new ArrayList<>();
+        for (int i = 0; i < actions.size(); i++) {
+            GroupActionSpec action = actions.get(i);
+            GroupReplyPlanItem item = planItemById.get(action.planItemId());
             GroupChatReplyStep step = new GroupChatReplyStep()
                     .setTurnId(turn.getId())
+                    .setPlanItemId(action.planItemId())
                     .setStepNo(i + 1)
-                    .setSpeakerType(item.getActorType())
-                    .setSpeakerId(item.getActorId())
+                    .setActionType(action.actionType())
+                    .setSpeakerType(action.actorType())
+                    .setSpeakerId(action.actorId())
                     .setForceReply(false)
                     .setStatus(GroupChatConstant.STATUS_PENDING)
                     .setCreatedAt(now)
                     .setUpdatedAt(now);
             stepMapper.insert(step);
-            replies.add(new PreparedReply(item, step));
+            preparedActions.add(new PreparedAction(action, item, step));
         }
-        return new PreparedTurn(turn, userMessage, replies);
+        return new PreparedTurn(turn, userMessage, preparedActions);
     }
 
-    private Flux<GroupChatEvent> executeStep(GroupConversation conversation, GroupChatTurn turn,
-                                             PreparedReply reply) {
+    private Flux<GroupChatEvent> executeStep(GroupModeRuntime runtime, GroupConversation conversation,
+                                             GroupChatTurn turn, PreparedAction preparedAction) {
         return Flux.defer(() -> {
-            GroupReplyPlanItem planItem = reply.planItem();
-            GroupChatReplyStep step = reply.step();
+            GroupActionSpec action = preparedAction.action();
+            GroupReplyPlanItem planItem = preparedAction.planItem();
+            GroupChatReplyStep step = preparedAction.step();
             replyPlanService.markRunning(planItem);
             step.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
             stepMapper.updateById(step);
             GroupChatMessage outputMessage = createStreamingMessage(conversation, turn, step);
-            String speakerName = contextAssembler.characterName(conversation.getUserWorldId(), step.getSpeakerId());
+            String speakerName = runtime.agentPolicy()
+                    .characterName(conversation.getUserWorldId(), step.getSpeakerId());
             GroupChatEvent.Speaker speaker = GroupChatEvent.Speaker.builder()
                     .type(step.getSpeakerType()).id(step.getSpeakerId()).name(speakerName).build();
             GenerationAccumulator accumulator = new GenerationAccumulator();
             AtomicBoolean finalized = new AtomicBoolean(false);
 
-            contextStrategyRouter.compactIfNeeded(conversation);
-            Prompt prompt = new Prompt(contextAssembler.assemble(conversation, step.getSpeakerId()));
+            GroupContextMaterial context = runtime.contextPolicy().load(conversation, action);
+            GroupModelInvocation invocation = runtime.agentPolicy().prepare(conversation, action, context);
             Flux<GroupChatEvent> started = Flux.just(baseEvent(GroupChatConstant.EVENT_REPLY_STARTED,
                     conversation, turn, step, outputMessage, speaker).build());
-            Flux<GroupChatEvent> deltas = chatClient.prompt(prompt).stream().chatResponse()
+            UserWorldPrefix userWorld = userWorldPrefixService.getById(conversation.getUserWorldId());
+            String favorSystemStatus = userWorld == null ? null : userWorld.getFavorSystemStatus();
+            ChatClient.ChatClientRequestSpec requestSpec = invocation.chatClient().prompt(invocation.prompt())
+                    .toolContext(toolContextFactory.create(
+                            conversation, action, step.getId(), favorSystemStatus));
+            if (!invocation.tools().isEmpty()) {
+                requestSpec = requestSpec.tools(invocation.tools().toArray());
+            }
+            Flux<GroupChatEvent> deltas = requestSpec.stream().chatResponse()
                     .flatMapIterable(response -> toEvents(response, conversation, turn, step, outputMessage,
                             speaker, accumulator));
             Flux<GroupChatEvent> finished = Flux.defer(() -> {
-                finalizeCompletedStep(planItem, step, outputMessage, accumulator, finalized);
+                finalizeCompletedStep(action, planItem, step, outputMessage, accumulator, finalized);
                 return Flux.just(baseEvent(GroupChatConstant.EVENT_MESSAGE_COMPLETED,
                         conversation, turn, step, outputMessage, speaker)
                         .content(accumulator.content.toString())
@@ -301,7 +340,8 @@ public class GroupChatService {
         return events;
     }
 
-    private void finalizeCompletedStep(GroupReplyPlanItem planItem, GroupChatReplyStep step, GroupChatMessage message,
+    private void finalizeCompletedStep(GroupActionSpec action, GroupReplyPlanItem planItem,
+                                       GroupChatReplyStep step, GroupChatMessage message,
                                        GenerationAccumulator accumulator, AtomicBoolean finalized) {
         if (!finalized.compareAndSet(false, true)) {
             return;
@@ -309,7 +349,9 @@ public class GroupChatService {
         transactionTemplate.executeWithoutResult(status -> {
             persistOutput(message, accumulator, GroupChatConstant.STATUS_COMPLETED);
             updateStepStatus(step, GroupChatConstant.STATUS_COMPLETED, null);
-            replyPlanService.markCompleted(planItem);
+            if (action.completesPlanItem()) {
+                replyPlanService.markCompleted(planItem);
+            }
         });
     }
 
@@ -361,6 +403,8 @@ public class GroupChatService {
                 .conversationId(conversation.getId())
                 .turnId(turn.getId())
                 .replyStepId(step.getId())
+                .planItemId(step.getPlanItemId())
+                .actionType(step.getActionType())
                 .messageId(message.getId())
                 .sequence(message.getSequenceNo())
                 .speaker(speaker);
@@ -371,7 +415,8 @@ public class GroupChatService {
             return "用户";
         }
         if (GroupChatConstant.ACTOR_CHARACTER.equals(message.getSpeakerType())) {
-            return contextAssembler.characterName(conversation.getUserWorldId(), message.getSpeakerId());
+            return runtimeRegistry.require(conversation.getMode()).agentPolicy()
+                    .characterName(conversation.getUserWorldId(), message.getSpeakerId());
         }
         return "旁白";
     }
@@ -386,10 +431,10 @@ public class GroupChatService {
     }
 
     private record PreparedTurn(GroupChatTurn turn, GroupChatMessage userMessage,
-                                List<PreparedReply> replies) {
+                                List<PreparedAction> actions) {
     }
 
-    private record PreparedReply(GroupReplyPlanItem planItem, GroupChatReplyStep step) {
+    private record PreparedAction(GroupActionSpec action, GroupReplyPlanItem planItem, GroupChatReplyStep step) {
     }
 
     private static class GenerationAccumulator {

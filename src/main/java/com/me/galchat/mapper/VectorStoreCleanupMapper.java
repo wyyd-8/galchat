@@ -13,6 +13,14 @@ public interface VectorStoreCleanupMapper {
                                                 @Param("characterId") Long characterId,
                                                 @Param("thresholdEndMessageId") Long thresholdEndMessageId);
 
+    int deleteGroupTopicsAfterId(@Param("userWorldId") Long userWorldId,
+                                 @Param("maxGroupTopicId") Long maxGroupTopicId);
+
+    int deleteGroupTopicsByConversation(@Param("conversationId") Long conversationId);
+
+    int deleteGroupTopicsByConversationAfterEnd(@Param("conversationId") Long conversationId,
+                                                @Param("thresholdEndSequence") Long thresholdEndSequence);
+
     int deleteWorldEventByUserWorldId(@Param("userWorldId") Long userWorldId);
 
     int deleteWorldEventByUserWorldIdAfterLogId(@Param("userWorldId") Long userWorldId,

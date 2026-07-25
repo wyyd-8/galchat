@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.FavorBindingType;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.domain.po.UserCharacterInfo;
@@ -100,23 +101,30 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     private void doWithdrawLatestUserMessage(Long userWorldId, Long characterId) {
         WithdrawCandidate candidate = latestWithdrawCandidate(userWorldId, characterId);
-        if (candidate.userMessage() == null) {
-            throw new UserRequestException("没有可撤回的用户消息");
+        if (candidate.anchor() == null) {
+            throw new UserRequestException("没有可撤回的消息");
         }
         if (candidate.consecutiveWithdrawCount() >= ChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT) {
             throw new UserRequestException("最多只能连续撤回3条消息");
         }
 
-        Long userMessageId = candidate.userMessage().getId();
-        Set<Long> deletedMessageIds = linkedHistoryIds(userWorldId, characterId, userMessageId);
-        deletedMessageIds.add(userMessageId);
+        UserChatHistory anchor = candidate.anchor();
+        Long anchorId = anchor.getId();
+        boolean userRound = isUserMessage(anchor);
+        Set<Long> deletedMessageIds = userRound
+                ? linkedHistoryIds(userWorldId, characterId, anchorId)
+                : new HashSet<>();
+        deletedMessageIds.add(anchorId);
 
-        reverseFavorUpdates(userWorldId, characterId, userMessageId);
-        deleteLinkedMessages(userWorldId, characterId, userMessageId);
-        markUserMessageWithdrawn(userWorldId, characterId, userMessageId);
-        deleteAutoSearchInfoAfter(userWorldId, characterId, userMessageId);
-        deleteStepNoKey(userMessageId);
-        topicBoundaryService.clearBoundaryIfReferences(userWorldId, characterId, deletedMessageIds);
+        if (userRound) {
+            reverseFavorUpdates(userWorldId, characterId, anchorId);
+            deleteLinkedMessages(userWorldId, characterId, anchorId);
+            deleteAutoSearchInfoAfter(userWorldId, characterId, anchorId);
+            deleteStepNoKey(anchorId);
+        }
+        markAnchorWithdrawn(userWorldId, characterId, anchorId);
+        topicBoundaryService.rollbackAfterWithdraw(userWorldId, characterId, deletedMessageIds,
+                latestLogicalMessageId(userWorldId, characterId));
         refreshLatestChatInfo(userWorldId, characterId);
     }
 
@@ -140,20 +148,26 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     private WithdrawCandidate latestWithdrawCandidate(Long userWorldId, Long characterId) {
         List<UserChatHistory> recentUserMarkers = lambdaQuery()
-                .select(UserChatHistory::getId, UserChatHistory::getType)
+                .select(UserChatHistory::getId, UserChatHistory::getType, UserChatHistory::getUserMessageId)
                 .eq(UserChatHistory::getUserWorldId, userWorldId)
                 .eq(UserChatHistory::getCharacterId, characterId)
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
                         .eq(UserChatHistory::getType, MessageType.USER.getValue())
                         .or()
-                        .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE))
+                        .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE)
+                        .or(assistant -> assistant
+                                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                                .isNull(UserChatHistory::getUserMessageId)))
                 .orderByDesc(UserChatHistory::getId)
                 .last("limit " + (ChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT + 1))
                 .list();
+        return selectWithdrawCandidate(recentUserMarkers);
+    }
 
+    static WithdrawCandidate selectWithdrawCandidate(List<UserChatHistory> recentMarkers) {
         int consecutiveWithdrawCount = 0;
-        for (UserChatHistory message : recentUserMarkers) {
+        for (UserChatHistory message : recentMarkers) {
             if (isWithdrawnMessage(message)) {
                 consecutiveWithdrawCount++;
                 continue;
@@ -182,6 +196,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                         .select(UserCharacterFavorLog::getFavorUpdate)
                         .eq(UserCharacterFavorLog::getUserWorldId, userWorldId)
                         .eq(UserCharacterFavorLog::getCharacterId, characterId)
+                        .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.SINGLE_MESSAGE)
                         .eq(UserCharacterFavorLog::getBindingChat, userMessageId));
         if (favorLogs.isEmpty()) {
             return;
@@ -205,6 +220,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         userCharacterFavorLogMapper.delete(new LambdaUpdateWrapper<UserCharacterFavorLog>()
                 .eq(UserCharacterFavorLog::getUserWorldId, userWorldId)
                 .eq(UserCharacterFavorLog::getCharacterId, characterId)
+                .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.SINGLE_MESSAGE)
                 .eq(UserCharacterFavorLog::getBindingChat, userMessageId));
     }
 
@@ -219,19 +235,22 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                 .eq(UserChatHistory::getUserMessageId, userMessageId));
     }
 
-    private void markUserMessageWithdrawn(Long userWorldId, Long characterId, Long userMessageId) {
+    private void markAnchorWithdrawn(Long userWorldId, Long characterId, Long anchorId) {
         boolean updated = lambdaUpdate()
-                .eq(UserChatHistory::getId, userMessageId)
+                .eq(UserChatHistory::getId, anchorId)
                 .eq(UserChatHistory::getUserWorldId, userWorldId)
                 .eq(UserChatHistory::getCharacterId, characterId)
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
-                        .eq(UserChatHistory::getType, MessageType.USER.getValue()))
+                        .eq(UserChatHistory::getType, MessageType.USER.getValue())
+                        .or(assistant -> assistant
+                                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                                .isNull(UserChatHistory::getUserMessageId)))
                 .set(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE)
                 .set(UserChatHistory::getContent, null)
                 .update();
         if (!updated) {
-            throw new UserRequestException("没有可撤回的用户消息");
+            throw new UserRequestException("没有可撤回的消息");
         }
     }
 
@@ -255,7 +274,10 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                         .or()
                         .eq(UserChatHistory::getType, MessageType.USER.getValue())
                         .or()
-                        .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE))
+                        .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE)
+                        .or(assistant -> assistant
+                                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                                .isNull(UserChatHistory::getUserMessageId)))
                 .orderByAsc(UserChatHistory::getId)
                 .last("limit 1")
                 .one();
@@ -383,7 +405,24 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         return history.getType() == null || Objects.equals(MessageType.USER.getValue(), history.getType());
     }
 
-    private boolean isWithdrawnMessage(UserChatHistory history) {
+    private Long latestLogicalMessageId(Long userWorldId, Long characterId) {
+        UserChatHistory latest = lambdaQuery()
+                .select(UserChatHistory::getId)
+                .eq(UserChatHistory::getUserWorldId, userWorldId)
+                .eq(UserChatHistory::getCharacterId, characterId)
+                .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
+                        .or()
+                        .eq(UserChatHistory::getType, MessageType.USER.getValue())
+                        .or(assistant -> assistant
+                                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                                .isNull(UserChatHistory::getUserMessageId)))
+                .orderByDesc(UserChatHistory::getId)
+                .last("limit 1")
+                .one();
+        return latest == null ? null : latest.getId();
+    }
+
+    private static boolean isWithdrawnMessage(UserChatHistory history) {
         return history != null && Objects.equals(ChatConstant.WITHDRAWN_TYPE, history.getType());
     }
 
@@ -456,6 +495,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                 .forEach(toolCall -> messages.add(new UserChatHistory().setType(ChatConstant.TOOL_TYPE)));
     }
 
-    private record WithdrawCandidate(UserChatHistory userMessage, int consecutiveWithdrawCount) {
+    record WithdrawCandidate(UserChatHistory anchor, int consecutiveWithdrawCount) {
     }
 }

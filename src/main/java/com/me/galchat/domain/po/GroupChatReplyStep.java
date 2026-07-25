@@ -17,7 +17,9 @@ public class GroupChatReplyStep implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
     private Long turnId;
+    private Long planItemId;
     private Integer stepNo;
+    private String actionType;
     private String speakerType;
     private Long speakerId;
     private Boolean forceReply;

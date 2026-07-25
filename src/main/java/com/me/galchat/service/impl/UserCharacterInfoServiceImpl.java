@@ -213,7 +213,8 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat) {
+    public void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange,
+                                 String bindingType, Long bindingChat) {
         if (favorChange == null) {
             favorChange = 0;
         }
@@ -226,7 +227,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
                 buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
         evictPromptInfoCache(userWorldId, characterId);
-        insertFavorLog(userWorldId, characterId, favorValue - oldFavorValue, bindingChat);
+        insertFavorLog(userWorldId, characterId, favorValue - oldFavorValue, bindingType, bindingChat);
         return;
     }
 
@@ -339,11 +340,13 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         return userCharacterInfo;
     }
 
-    private void insertFavorLog(Long userWorldId, Long characterId, Integer favorUpdate, Long bindingChat) {
+    private void insertFavorLog(Long userWorldId, Long characterId, Integer favorUpdate,
+                                String bindingType, Long bindingChat) {
         userCharacterFavorLogMapper.insert(new UserCharacterFavorLog()
                 .setUserWorldId(userWorldId)
                 .setCharacterId(characterId)
                 .setFavorUpdate(favorUpdate)
+                .setBindingType(bindingType)
                 .setBindingChat(bindingChat));
     }
 

@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.WorldEventLog;
+import com.me.galchat.groupchat.context.GroupTopicService;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
@@ -46,17 +47,19 @@ class GroupConversationLifecycleServiceTest {
         IWorldEventLogService eventLogService = mock(IWorldEventLogService.class);
         WorldEventLogMapper eventLogMapper = mock(WorldEventLogMapper.class);
         WorldEventVectorService eventVectorService = mock(WorldEventVectorService.class);
+        GroupTopicService topicService = mock(GroupTopicService.class);
         DeepSeekChatModel summaryModel = mock(DeepSeekChatModel.class);
         ChatClient summaryClient = ChatClient.builder(summaryModel).build();
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         GroupConversationLifecycleService service = new GroupConversationLifecycleService(conversationService,
                 lockService, conversationMapper, replyPlanService, messageMapper, summaryMapper,
                 eventLogService, eventLogMapper,
-                eventVectorService, summaryClient, transactionTemplate);
+                eventVectorService, topicService, summaryClient, transactionTemplate);
 
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setUserWorldId(1L)
+                .setMode(GroupChatConstant.MODE_CHAT)
                 .setTitle("地下医院")
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
@@ -88,6 +91,7 @@ class GroupConversationLifecycleServiceTest {
         assertThat(eventCaptor.getValue().getConversationId()).isEqualTo(7L);
         verify(eventVectorService).addWorldEventLog(eventCaptor.getValue());
         verify(replyPlanService).clearConversationPlans(conversation);
+        verify(topicService).flushOpenTopics(conversation);
     }
 
     private GroupChatMessage message(Long sequence, String type, Long id, String content) {

@@ -54,6 +54,16 @@
           AND message.id &gt; #{maxGroupMessageId}
     </delete>
 
+    <delete id="deleteGroupToolCallsAfter">
+        DELETE FROM group_chat_tool_call tool_call
+        USING group_chat_reply_step step, group_chat_turn turn_row, group_conversation conversation
+        WHERE tool_call.reply_step_id = step.id
+          AND step.turn_id = turn_row.id
+          AND turn_row.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND step.id &gt; #{maxGroupReplyStepId}
+    </delete>
+
     <delete id="deleteGroupReplyStepsAfter">
         DELETE FROM group_chat_reply_step step
         USING group_chat_turn turn_row, group_conversation conversation
@@ -77,6 +87,14 @@
         WHERE summary.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
           AND summary.id &gt; #{maxGroupContextSummaryId}
+    </delete>
+
+    <delete id="deleteGroupTopicsAfter">
+        DELETE FROM group_chat_topic topic
+        USING group_conversation conversation
+        WHERE topic.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND topic.id &gt; #{maxGroupTopicId}
     </delete>
 
     <delete id="deleteReplyPlanItemsAfterConversation">
@@ -128,10 +146,11 @@
         WHERE user_message_id = #{userMessageId}
     </delete>
 
-    <delete id="deleteFavorLogsByBindingChat">
+    <delete id="deleteFavorLogsByBinding">
         DELETE FROM user_character_favor_log
         WHERE user_world_id = #{userWorldId}
           AND character_id = #{characterId}
+          AND binding_type = #{bindingType}
           AND binding_chat = #{bindingChat}
     </delete>
 
@@ -200,6 +219,7 @@
             user_world_id,
             character_id,
             favor_update,
+            binding_type,
             binding_chat,
             timestamp
         )
@@ -208,6 +228,7 @@
             #{favorLog.userWorldId},
             #{favorLog.characterId},
             #{favorLog.favorUpdate},
+            #{favorLog.bindingType},
             #{favorLog.bindingChat},
             #{favorLog.timestamp}
         )

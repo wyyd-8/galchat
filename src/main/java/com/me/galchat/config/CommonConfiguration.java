@@ -56,7 +56,15 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient groupThinkingChatClient(
+    public ChatClient chatGroupChatClient(
+            @Qualifier("groupDeepSeekThinkingChatModel") DeepSeekChatModel model) {
+        return ChatClient.builder(model)
+                .defaultAdvisors(new SimpleLoggerAdvisor())
+                .build();
+    }
+
+    @Bean
+    public ChatClient trpgGroupChatClient(
             @Qualifier("groupDeepSeekThinkingChatModel") DeepSeekChatModel model) {
         return ChatClient.builder(model)
                 .defaultAdvisors(new SimpleLoggerAdvisor())

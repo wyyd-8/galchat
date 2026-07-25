@@ -16,6 +16,8 @@ public class GroupChatEvent {
     private Long conversationId;
     private Long turnId;
     private Long replyStepId;
+    private Long planItemId;
+    private String actionType;
     private Long messageId;
     private Long sequence;
     private Speaker speaker;

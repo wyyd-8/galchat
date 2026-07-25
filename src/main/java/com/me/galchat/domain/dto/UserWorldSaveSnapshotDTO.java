@@ -5,6 +5,11 @@ import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
 import com.me.galchat.domain.po.WorldEventLog;
+import com.me.galchat.domain.po.GroupChatMessage;
+import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatToolCall;
+import com.me.galchat.domain.po.GroupChatTopic;
+import com.me.galchat.domain.po.GroupChatTurn;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.Data;
@@ -40,11 +45,15 @@ public class UserWorldSaveSnapshotDTO {
 
     private Long maxGroupContextSummaryId;
 
+    private Long maxGroupTopicId;
+
     private List<CharacterStateSnapshot> characterStates;
 
     private List<TopicBoundarySnapshot> topicBoundaries;
 
     private List<CharacterChatRoundsSnapshot> recentChatRoundsByCharacter;
+
+    private List<GroupConversationTurnsSnapshot> recentGroupTurnsByConversation;
 
     private WorldEventLog lastWorldEventLog;
 
@@ -64,8 +73,7 @@ public class UserWorldSaveSnapshotDTO {
     @Accessors(chain = true)
     public static class TopicBoundarySnapshot {
         private Long characterId;
-        private Long previousStartId;
-        private Long currentStartId;
+        private List<Long> startIds;
         private Long lastCheckedMessageId;
     }
 
@@ -79,10 +87,28 @@ public class UserWorldSaveSnapshotDTO {
     @Data
     @Accessors(chain = true)
     public static class ChatRoundSnapshot {
-        private Long userMessageId;
+        private Long anchorMessageId;
         private List<UserChatHistory> historyRows;
         private List<UserChatThinkingHistory> thinkingRows;
         private List<UserChatToolCall> toolCallRows;
+        private List<UserCharacterFavorLog> favorLogs;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class GroupConversationTurnsSnapshot {
+        private Long conversationId;
+        private List<GroupTurnSnapshot> turns;
+        private List<GroupChatTopic> topicRows;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class GroupTurnSnapshot {
+        private GroupChatTurn turn;
+        private List<GroupChatMessage> messages;
+        private List<GroupChatReplyStep> replySteps;
+        private List<GroupChatToolCall> toolCalls;
         private List<UserCharacterFavorLog> favorLogs;
     }
 

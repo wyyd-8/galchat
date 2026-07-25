@@ -26,6 +26,8 @@ public class MutiSearchService {
     private final ChatHistoryVectorService chatHistoryVectorService;
     private final WorldDetailVectorService worldDetailVectorService;
     private final WorldEventVectorService worldEventVectorService;
+    private final GroupTopicVectorService groupTopicVectorService;
+    private final RecentChatMemoryService recentChatMemoryService;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final DocumentReranker documentReranker;
 
@@ -96,14 +98,21 @@ public class MutiSearchService {
         CompletableFuture<List<Document>> chatHistoryFuture = CompletableFuture.supplyAsync(() ->
                 queryWithSource(() -> chatHistoryVectorService.queryChatHistory(userWorldId, characterId, query),
                         VectorConstant.CHAT_HISTORY_SOURCE));
+        CompletableFuture<List<Document>> groupTopicFuture = CompletableFuture.supplyAsync(() ->
+                queryWithSource(() -> groupTopicVectorService.queryGroupTopics(userWorldId, characterId, query),
+                        VectorConstant.GROUP_TOPIC_SOURCE));
         CompletableFuture<List<Document>> worldEventFuture = CompletableFuture.supplyAsync(() ->
                 queryWithSource(() -> worldEventVectorService.queryWorldEvent(userWorldId, characterId, query),
                         VectorConstant.WORLD_EVENT_SOURCE));
+        CompletableFuture<List<Document>> recentMemoryFuture = CompletableFuture.supplyAsync(() ->
+                recentChatMemoryService.queryRecentMemories(userWorldId, characterId));
 
         List<Document> documents = new ArrayList<>();
         documents.addAll(worldDetailFuture.join());
         documents.addAll(chatHistoryFuture.join());
+        documents.addAll(groupTopicFuture.join());
         documents.addAll(worldEventFuture.join());
+        documents.addAll(recentMemoryFuture.join());
 
         return documentReranker.rerank(query, documents, VectorConstant.RERANK_TOP_N).stream()
                 .filter(Document::isText)

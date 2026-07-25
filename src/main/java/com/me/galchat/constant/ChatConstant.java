@@ -10,8 +10,7 @@ public final class ChatConstant {
     public static final String SYSTEM_TYPE = "system";
     public static final String TOPIC_CONVERSATION_INFO_CONTEXT_KEY = "topic_conversation_info";
     public static final String TOPIC_USER_MESSAGE_ID_CONTEXT_KEY = "topic_user_message_id";
-    public static final String TOPIC_PREVIOUS_START_ID_KEY = "previousStartId";
-    public static final String TOPIC_CURRENT_START_ID_KEY = "currentStartId";
+    public static final String TOPIC_START_IDS_KEY = "startIds";
     public static final String TOPIC_LAST_CHECKED_MESSAGE_ID_KEY = "lastCheckedMessageId";
     public static final String DEEPSEEK_RAW_TOOL_CALLS_METADATA_KEY = "deepSeekRawToolCalls";
 
@@ -19,6 +18,7 @@ public final class ChatConstant {
     public static final int MAX_CONTEXT_LENGTH = 430000;
     public static final int MAX_TOPIC_CONVERSATION_LENGTH = 2000;
     public static final int MAX_CONSECUTIVE_WITHDRAW_COUNT = 3;
+    public static final int CONTEXT_TOPIC_COUNT = 3;
 
     public static final String SPECIAL_FIRST_MESSAGE_SUFFIX_PROMPT = """
             【角色沉浸要求】在你的思考过程（<think>标签内）中，请遵守以下规则：

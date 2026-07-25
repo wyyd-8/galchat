@@ -183,7 +183,9 @@ CREATE UNIQUE INDEX uk_group_chat_turn_request
 CREATE TABLE group_chat_reply_step (
     id BIGSERIAL PRIMARY KEY,
     turn_id BIGINT NOT NULL,
+    plan_item_id BIGINT,
     step_no INT NOT NULL,
+    action_type VARCHAR(50) NOT NULL,
     speaker_type VARCHAR(50) NOT NULL,
     speaker_id BIGINT,
     force_reply BOOLEAN DEFAULT FALSE,
@@ -196,6 +198,23 @@ CREATE TABLE group_chat_reply_step (
 
 CREATE UNIQUE INDEX uk_group_chat_reply_step_no
     ON group_chat_reply_step (turn_id, step_no);
+
+CREATE TABLE group_chat_tool_call (
+    id BIGSERIAL PRIMARY KEY,
+    reply_step_id BIGINT NOT NULL,
+    tool_step_no INT NOT NULL,
+    tool_call_id VARCHAR(255) NOT NULL,
+    tool_name VARCHAR(255) NOT NULL,
+    tool_arguments TEXT,
+    tool_result TEXT,
+    dice_roll_summary_id BIGINT
+);
+
+CREATE UNIQUE INDEX uk_group_chat_tool_call
+    ON group_chat_tool_call (reply_step_id, tool_call_id);
+
+CREATE INDEX idx_group_chat_tool_call_step
+    ON group_chat_tool_call (reply_step_id, tool_step_no, id);
 
 CREATE TABLE group_chat_message (
     id BIGSERIAL PRIMARY KEY,
@@ -219,6 +238,20 @@ CREATE UNIQUE INDEX uk_group_chat_message_sequence
 
 CREATE INDEX idx_group_chat_message_turn
     ON group_chat_message (turn_id, id);
+
+CREATE TABLE group_chat_topic (
+    id BIGSERIAL PRIMARY KEY,
+    conversation_id BIGINT NOT NULL,
+    start_sequence BIGINT NOT NULL,
+    boundary_reason VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX uk_group_chat_topic_start
+    ON group_chat_topic (conversation_id, start_sequence);
+
+CREATE INDEX idx_group_chat_topic_recent
+    ON group_chat_topic (conversation_id, start_sequence DESC, id DESC);
 
 CREATE TABLE group_context_summary (
     id BIGSERIAL PRIMARY KEY,
@@ -288,12 +321,14 @@ CREATE TABLE user_character_favor_log (
     user_world_id BIGINT NOT NULL,
     character_id BIGINT NOT NULL,
     favor_update INT,
+    binding_type VARCHAR(32) NOT NULL,
     binding_chat BIGINT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_user_character_favor_log_world_character
-    ON user_character_favor_log (user_world_id, character_id);
+CREATE INDEX idx_user_character_favor_log_binding
+    ON user_character_favor_log
+       (user_world_id, character_id, binding_type, binding_chat);
 
 CREATE TABLE world_event_log (
     id BIGSERIAL PRIMARY KEY,

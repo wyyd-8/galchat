@@ -59,6 +59,29 @@ public class VectorConfiguration {
                 .build();
     }
 
+    @Bean(name = "groupTopicVectorStore")
+    public VectorStore groupTopicVectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel embeddingModel) {
+        return PgVectorStore.builder(jdbcTemplate, embeddingModel)
+                .dimensions(1024)
+                .distanceType(COSINE_DISTANCE)
+                .indexType(HNSW)
+                .initializeSchema(true)
+                .schemaName("public")
+                .vectorTableName("group_topic_vector_store")
+                .maxDocumentBatchSize(10000)
+                .build();
+    }
+
+    @Bean(name = "groupTopicRetriever")
+    public DocumentRetriever groupTopicRetriever(
+            @org.springframework.beans.factory.annotation.Qualifier("groupTopicVectorStore") VectorStore vectorStore) {
+        return VectorStoreDocumentRetriever.builder()
+                .vectorStore(vectorStore)
+                .similarityThreshold(0.5)
+                .topK(5)
+                .build();
+    }
+
     @Bean(name = "worldEventVectorStore")
     public VectorStore worldEventVectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel embeddingModel) {
         return PgVectorStore.builder(jdbcTemplate, embeddingModel)

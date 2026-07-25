@@ -3,12 +3,18 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.ChatConstant;
+import com.me.galchat.constant.FavorBindingType;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.dto.UserWorldSaveCreateDTO;
 import com.me.galchat.domain.dto.UserWorldSaveSnapshotDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupChatMessage;
+import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatToolCall;
+import com.me.galchat.domain.po.GroupChatTopic;
+import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
@@ -23,7 +29,9 @@ import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CharacterTemplateMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
+import com.me.galchat.mapper.GroupChatTopicMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.UserCharacterFavorLogMapper;
@@ -39,6 +47,7 @@ import com.me.galchat.mapper.WorldEventLogMapper;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IUserWorldSaveService;
 import com.me.galchat.vector.WorldEventVectorService;
+import com.me.galchat.vector.GroupTopicVectorService;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -51,6 +60,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.redisson.api.RLock;
 import org.springframework.ai.chat.messages.MessageType;
@@ -65,7 +75,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
 
-    private static final int FORMAT_VERSION = 1;
+    private static final int FORMAT_VERSION = 3;
     private static final int RECENT_ROUND_COUNT = 3;
 
     private final IUserWorldPrefixService userWorldPrefixService;
@@ -83,13 +93,16 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private final GroupChatMessageMapper groupChatMessageMapper;
     private final GroupChatTurnMapper groupChatTurnMapper;
     private final GroupChatReplyStepMapper groupChatReplyStepMapper;
+    private final GroupChatToolCallMapper groupChatToolCallMapper;
     private final GroupContextSummaryMapper groupContextSummaryMapper;
+    private final GroupChatTopicMapper groupChatTopicMapper;
     private final GroupReplyPlanService groupReplyPlanService;
     private final SingleChatLockService singleChatLockService;
     private final GroupConversationLockService groupConversationLockService;
     private final StringRedisTemplate redisTemplate;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
     private final WorldEventVectorService worldEventVectorService;
+    private final GroupTopicVectorService groupTopicVectorService;
     private final TransactionTemplate transactionTemplate;
 
     @Override
@@ -170,6 +183,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         deleteAfterSnapshot(userWorldId, snapshot);
         groupReplyPlanService.resetWorldPlans(userWorldId);
         restoreRecentChatRounds(userWorldId, snapshot);
+        restoreRecentGroupTurns(snapshot);
         restoreWorldEventLog(snapshot.getLastWorldEventLog());
         restoreCharacterStates(userWorldId, snapshot.getCharacterStates());
         return deletedUserMessageIds;
@@ -191,9 +205,11 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .setMaxGroupTurnId(maxGroupTurnId(userWorldId))
                 .setMaxGroupReplyStepId(maxGroupReplyStepId(userWorldId))
                 .setMaxGroupContextSummaryId(maxGroupContextSummaryId(userWorldId))
+                .setMaxGroupTopicId(maxGroupTopicId(userWorldId))
                 .setCharacterStates(characterStates(characters))
                 .setTopicBoundaries(topicBoundaries(userWorldId, characters))
                 .setRecentChatRoundsByCharacter(recentChatRounds(userWorldId, characters))
+                .setRecentGroupTurnsByConversation(recentGroupTurns(userWorldId))
                 .setLastWorldEventLog(lastWorldEventLog(userWorldId));
     }
 
@@ -226,6 +242,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         userWorldSaveRestoreMapper.deleteUserEventsAfter(userWorldId, safeMax(snapshot.getMaxUserEventLogId()));
         userWorldSaveRestoreMapper.deleteWorldEventsAfter(userWorldId, safeMax(snapshot.getMaxWorldEventLogId()));
         if (snapshot.getMaxGroupConversationId() != null) {
+            userWorldSaveRestoreMapper.deleteGroupToolCallsAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupReplyStepId()));
             userWorldSaveRestoreMapper.deleteGroupReplyStepsAfter(userWorldId,
                     safeMax(snapshot.getMaxGroupReplyStepId()));
             userWorldSaveRestoreMapper.deleteGroupMessagesAfter(userWorldId,
@@ -234,6 +252,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                     safeMax(snapshot.getMaxGroupTurnId()));
             userWorldSaveRestoreMapper.deleteGroupSummariesAfter(userWorldId,
                     safeMax(snapshot.getMaxGroupContextSummaryId()));
+            userWorldSaveRestoreMapper.deleteGroupTopicsAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupTopicId()));
             userWorldSaveRestoreMapper.deleteReplyPlanItemsAfterConversation(userWorldId,
                     safeMax(snapshot.getMaxGroupConversationId()));
             userWorldSaveRestoreMapper.deleteReplyPlansAfterConversation(userWorldId,
@@ -296,8 +316,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     }
 
     private void restoreChatRound(Long userWorldId, Long characterId, UserWorldSaveSnapshotDTO.ChatRoundSnapshot round) {
-        Long userMessageId = round.getUserMessageId();
-        if (userMessageId == null) {
+        Long anchorMessageId = round.getAnchorMessageId();
+        if (anchorMessageId == null) {
             return;
         }
         List<Long> historyIds = emptyIfNull(round.getHistoryRows()).stream()
@@ -307,9 +327,10 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         if (!historyIds.isEmpty()) {
             userWorldSaveRestoreMapper.deleteChatHistoryByIds(historyIds);
         }
-        userWorldSaveRestoreMapper.deleteThinkingByUserMessageId(userMessageId);
-        userWorldSaveRestoreMapper.deleteToolCallsByUserMessageId(userMessageId);
-        userWorldSaveRestoreMapper.deleteFavorLogsByBindingChat(userWorldId, characterId, userMessageId);
+        userWorldSaveRestoreMapper.deleteThinkingByUserMessageId(anchorMessageId);
+        userWorldSaveRestoreMapper.deleteToolCallsByUserMessageId(anchorMessageId);
+        userWorldSaveRestoreMapper.deleteFavorLogsByBinding(
+                userWorldId, characterId, FavorBindingType.SINGLE_MESSAGE, anchorMessageId);
 
         for (UserChatHistory history : emptyIfNull(round.getHistoryRows())) {
             userWorldSaveRestoreMapper.insertChatHistoryWithId(history);
@@ -350,17 +371,21 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
 
     private void restoreDerivedData(Long userWorldId, UserWorldSaveSnapshotDTO snapshot) {
         restoreChatVectors(userWorldId, snapshot.getTopicBoundaries());
+        vectorStoreCleanupMapper.deleteGroupTopicsAfterId(userWorldId, safeMax(snapshot.getMaxGroupTopicId()));
+        restoreGroupTopicVectors(snapshot);
         restoreWorldEventVectors(userWorldId, snapshot);
     }
 
     private void restoreChatVectors(Long userWorldId, List<UserWorldSaveSnapshotDTO.TopicBoundarySnapshot> boundaries) {
         for (UserWorldSaveSnapshotDTO.TopicBoundarySnapshot boundary : emptyIfNull(boundaries)) {
-            if (boundary.getPreviousStartId() == null) {
+            List<Long> starts = emptyIfNull(boundary.getStartIds());
+            if (starts.size() <= ChatConstant.CONTEXT_TOPIC_COUNT) {
                 vectorStoreCleanupMapper.deleteChatHistoryByConversation(userWorldId, boundary.getCharacterId());
                 continue;
             }
+            Long hotStart = starts.get(starts.size() - ChatConstant.CONTEXT_TOPIC_COUNT);
             vectorStoreCleanupMapper.deleteChatHistoryByConversationAfterEnd(userWorldId, boundary.getCharacterId(),
-                    boundary.getPreviousStartId());
+                    hotStart);
         }
     }
 
@@ -373,6 +398,32 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         }
         vectorStoreCleanupMapper.deleteWorldEventByLogId(userWorldId, lastWorldEventLog.getId());
         worldEventVectorService.addWorldEventLog(lastWorldEventLog);
+    }
+
+    private void restoreGroupTopicVectors(UserWorldSaveSnapshotDTO snapshot) {
+        for (UserWorldSaveSnapshotDTO.GroupConversationTurnsSnapshot conversationSnapshot
+                : emptyIfNull(snapshot.getRecentGroupTurnsByConversation())) {
+            List<GroupChatTopic> topics = new ArrayList<>(emptyIfNull(conversationSnapshot.getTopicRows()));
+            topics.sort(Comparator.comparing(GroupChatTopic::getStartSequence)
+                    .thenComparing(GroupChatTopic::getId));
+            if (topics.size() <= GroupChatConstant.CONTEXT_TOPIC_COUNT) {
+                vectorStoreCleanupMapper.deleteGroupTopicsByConversation(conversationSnapshot.getConversationId());
+                continue;
+            }
+            Long hotStart = topics.get(topics.size() - GroupChatConstant.CONTEXT_TOPIC_COUNT).getStartSequence();
+            vectorStoreCleanupMapper.deleteGroupTopicsByConversationAfterEnd(
+                    conversationSnapshot.getConversationId(), hotStart);
+            GroupConversation conversation =
+                    groupConversationMapper.selectById(conversationSnapshot.getConversationId());
+            if (conversation == null) {
+                continue;
+            }
+            int hotStartIndex = topics.size() - GroupChatConstant.CONTEXT_TOPIC_COUNT;
+            for (int i = 0; i < hotStartIndex; i++) {
+                groupTopicVectorService.addTopic(conversation, topics.get(i),
+                        topics.get(i + 1).getStartSequence());
+            }
+        }
     }
 
     private List<UserWorldSaveSnapshotDTO.CharacterStateSnapshot> characterStates(List<UserCharacterInfo> characters) {
@@ -410,8 +461,14 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         String boundaryValue = redisTemplate.opsForValue().get(topicBoundaryKey(userWorldId, characterId));
         if (StringUtils.hasText(boundaryValue)) {
             JSONObject jsonObject = new JSONObject(boundaryValue);
-            snapshot.setPreviousStartId(readLong(jsonObject, ChatConstant.TOPIC_PREVIOUS_START_ID_KEY))
-                    .setCurrentStartId(readLong(jsonObject, ChatConstant.TOPIC_CURRENT_START_ID_KEY))
+            JSONArray array = jsonObject.optJSONArray(ChatConstant.TOPIC_START_IDS_KEY);
+            List<Long> starts = new ArrayList<>();
+            if (array != null) {
+                for (int i = 0; i < array.length(); i++) {
+                    starts.add(array.getLong(i));
+                }
+            }
+            snapshot.setStartIds(starts)
                     .setLastCheckedMessageId(readLong(jsonObject, ChatConstant.TOPIC_LAST_CHECKED_MESSAGE_ID_KEY));
         }
 
@@ -422,11 +479,12 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                                         List<UserWorldSaveSnapshotDTO.TopicBoundarySnapshot> topicBoundaries) {
         for (UserWorldSaveSnapshotDTO.TopicBoundarySnapshot boundary : emptyIfNull(topicBoundaries)) {
             Long characterId = boundary.getCharacterId();
-            if (boundary.getPreviousStartId() != null || boundary.getCurrentStartId() != null
+            if (!emptyIfNull(boundary.getStartIds()).isEmpty()
                     || boundary.getLastCheckedMessageId() != null) {
                 JSONObject jsonObject = new JSONObject();
-                jsonObject.put(ChatConstant.TOPIC_PREVIOUS_START_ID_KEY, boundary.getPreviousStartId());
-                jsonObject.put(ChatConstant.TOPIC_CURRENT_START_ID_KEY, boundary.getCurrentStartId());
+                JSONArray starts = new JSONArray();
+                emptyIfNull(boundary.getStartIds()).forEach(starts::put);
+                jsonObject.put(ChatConstant.TOPIC_START_IDS_KEY, starts);
                 jsonObject.put(ChatConstant.TOPIC_LAST_CHECKED_MESSAGE_ID_KEY, boundary.getLastCheckedMessageId());
                 redisTemplate.opsForValue().set(topicBoundaryKey(userWorldId, characterId), jsonObject.toString());
             }
@@ -450,7 +508,12 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .eq(UserChatHistory::getCharacterId, characterId)
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
-                        .eq(UserChatHistory::getType, MessageType.USER.getValue()))
+                        .eq(UserChatHistory::getType, MessageType.USER.getValue())
+                        .or()
+                        .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE)
+                        .or(assistant -> assistant
+                                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                                .isNull(UserChatHistory::getUserMessageId)))
                 .orderByDesc(UserChatHistory::getId)
                 .last("limit " + RECENT_ROUND_COUNT));
         userMessages.sort(Comparator.comparing(UserChatHistory::getId));
@@ -473,10 +536,11 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 new LambdaQueryWrapper<UserCharacterFavorLog>()
                         .eq(UserCharacterFavorLog::getUserWorldId, userWorldId)
                         .eq(UserCharacterFavorLog::getCharacterId, characterId)
+                        .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.SINGLE_MESSAGE)
                         .eq(UserCharacterFavorLog::getBindingChat, userMessageId)
                         .orderByAsc(UserCharacterFavorLog::getId));
         return new UserWorldSaveSnapshotDTO.ChatRoundSnapshot()
-                .setUserMessageId(userMessageId)
+                .setAnchorMessageId(userMessageId)
                 .setHistoryRows(histories)
                 .setThinkingRows(thinkingRows)
                 .setToolCallRows(toolCallRows)
@@ -508,10 +572,118 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                         .or()
                         .eq(UserChatHistory::getType, MessageType.USER.getValue())
                         .or()
-                        .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE))
+                        .eq(UserChatHistory::getType, ChatConstant.WITHDRAWN_TYPE)
+                        .or(assistant -> assistant
+                                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                                .isNull(UserChatHistory::getUserMessageId)))
                 .orderByAsc(UserChatHistory::getId)
                 .last("limit 1"));
         return nextUserMessage == null ? null : nextUserMessage.getId();
+    }
+
+    private List<UserWorldSaveSnapshotDTO.GroupConversationTurnsSnapshot> recentGroupTurns(Long userWorldId) {
+        List<GroupConversation> conversations = groupConversationMapper.selectList(
+                new LambdaQueryWrapper<GroupConversation>()
+                        .eq(GroupConversation::getUserWorldId, userWorldId)
+                        .eq(GroupConversation::getStatus, GroupChatConstant.STATUS_ACTIVE)
+                        .eq(GroupConversation::getMode, GroupChatConstant.MODE_CHAT)
+                        .orderByAsc(GroupConversation::getId));
+        return conversations.stream().map(this::recentGroupTurns).toList();
+    }
+
+    private UserWorldSaveSnapshotDTO.GroupConversationTurnsSnapshot recentGroupTurns(
+            GroupConversation conversation) {
+        List<GroupChatTurn> turns = groupChatTurnMapper.selectList(new LambdaQueryWrapper<GroupChatTurn>()
+                .eq(GroupChatTurn::getConversationId, conversation.getId())
+                .orderByDesc(GroupChatTurn::getId)
+                .last("limit " + RECENT_ROUND_COUNT));
+        turns.sort(Comparator.comparing(GroupChatTurn::getId));
+        List<UserWorldSaveSnapshotDTO.GroupTurnSnapshot> turnSnapshots =
+                turns.stream().map(this::groupTurnSnapshot).toList();
+        List<GroupChatTopic> topics = groupChatTopicMapper.selectList(new LambdaQueryWrapper<GroupChatTopic>()
+                .eq(GroupChatTopic::getConversationId, conversation.getId())
+                .orderByDesc(GroupChatTopic::getStartSequence)
+                .orderByDesc(GroupChatTopic::getId)
+                .last("limit " + (GroupChatConstant.CONTEXT_TOPIC_COUNT
+                        + GroupChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT)));
+        topics.sort(Comparator.comparing(GroupChatTopic::getStartSequence)
+                .thenComparing(GroupChatTopic::getId));
+        return new UserWorldSaveSnapshotDTO.GroupConversationTurnsSnapshot()
+                .setConversationId(conversation.getId())
+                .setTurns(turnSnapshots)
+                .setTopicRows(topics);
+    }
+
+    private UserWorldSaveSnapshotDTO.GroupTurnSnapshot groupTurnSnapshot(GroupChatTurn turn) {
+        List<GroupChatMessage> messages = groupChatMessageMapper.selectList(
+                new LambdaQueryWrapper<GroupChatMessage>()
+                        .eq(GroupChatMessage::getTurnId, turn.getId())
+                        .orderByAsc(GroupChatMessage::getId));
+        List<GroupChatReplyStep> steps = groupChatReplyStepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turn.getId())
+                        .orderByAsc(GroupChatReplyStep::getId));
+        List<Long> stepIds = steps.stream().map(GroupChatReplyStep::getId).toList();
+        List<GroupChatToolCall> toolCalls = stepIds.isEmpty() ? List.of()
+                : groupChatToolCallMapper.selectList(new LambdaQueryWrapper<GroupChatToolCall>()
+                        .in(GroupChatToolCall::getReplyStepId, stepIds)
+                        .orderByAsc(GroupChatToolCall::getId));
+        List<UserCharacterFavorLog> favorLogs = stepIds.isEmpty() ? List.of()
+                : userCharacterFavorLogMapper.selectList(new LambdaQueryWrapper<UserCharacterFavorLog>()
+                        .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.GROUP_REPLY_STEP)
+                        .in(UserCharacterFavorLog::getBindingChat, stepIds)
+                        .orderByAsc(UserCharacterFavorLog::getId));
+        return new UserWorldSaveSnapshotDTO.GroupTurnSnapshot()
+                .setTurn(turn)
+                .setMessages(messages)
+                .setReplySteps(steps)
+                .setToolCalls(toolCalls)
+                .setFavorLogs(favorLogs);
+    }
+
+    private void restoreRecentGroupTurns(UserWorldSaveSnapshotDTO snapshot) {
+        for (UserWorldSaveSnapshotDTO.GroupConversationTurnsSnapshot conversationSnapshot
+                : emptyIfNull(snapshot.getRecentGroupTurnsByConversation())) {
+            for (UserWorldSaveSnapshotDTO.GroupTurnSnapshot turnSnapshot
+                    : emptyIfNull(conversationSnapshot.getTurns())) {
+                restoreGroupTurn(turnSnapshot);
+            }
+            for (GroupChatTopic topic : emptyIfNull(conversationSnapshot.getTopicRows())) {
+                groupChatTopicMapper.delete(new LambdaQueryWrapper<GroupChatTopic>()
+                        .eq(GroupChatTopic::getConversationId, topic.getConversationId())
+                        .eq(GroupChatTopic::getStartSequence, topic.getStartSequence()));
+                groupChatTopicMapper.insert(topic);
+            }
+        }
+    }
+
+    private void restoreGroupTurn(UserWorldSaveSnapshotDTO.GroupTurnSnapshot snapshot) {
+        GroupChatTurn turn = snapshot.getTurn();
+        if (turn == null || turn.getId() == null) {
+            return;
+        }
+        List<Long> stepIds = emptyIfNull(snapshot.getReplySteps()).stream()
+                .map(GroupChatReplyStep::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (!stepIds.isEmpty()) {
+            groupChatToolCallMapper.delete(new LambdaQueryWrapper<GroupChatToolCall>()
+                    .in(GroupChatToolCall::getReplyStepId, stepIds));
+            userCharacterFavorLogMapper.delete(new LambdaQueryWrapper<UserCharacterFavorLog>()
+                    .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.GROUP_REPLY_STEP)
+                    .in(UserCharacterFavorLog::getBindingChat, stepIds));
+        }
+        groupChatMessageMapper.delete(new LambdaQueryWrapper<GroupChatMessage>()
+                .eq(GroupChatMessage::getTurnId, turn.getId()));
+        groupChatReplyStepMapper.delete(new LambdaQueryWrapper<GroupChatReplyStep>()
+                .eq(GroupChatReplyStep::getTurnId, turn.getId()));
+        groupChatTurnMapper.deleteById(turn.getId());
+
+        groupChatTurnMapper.insert(turn);
+        emptyIfNull(snapshot.getReplySteps()).forEach(groupChatReplyStepMapper::insert);
+        emptyIfNull(snapshot.getMessages()).forEach(groupChatMessageMapper::insert);
+        emptyIfNull(snapshot.getToolCalls()).forEach(groupChatToolCallMapper::insert);
+        emptyIfNull(snapshot.getFavorLogs()).forEach(userCharacterFavorLogMapper::insert);
     }
 
     private WorldEventLog lastWorldEventLog(Long userWorldId) {
@@ -531,7 +703,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         Set<Long> userMessageIds = new HashSet<>(deletedUserMessageIds);
         emptyIfNull(snapshot.getRecentChatRoundsByCharacter()).forEach(characterRound ->
                 emptyIfNull(characterRound.getRounds()).stream()
-                        .map(UserWorldSaveSnapshotDTO.ChatRoundSnapshot::getUserMessageId)
+                        .map(UserWorldSaveSnapshotDTO.ChatRoundSnapshot::getAnchorMessageId)
                         .filter(Objects::nonNull)
                         .forEach(userMessageIds::add));
         if (!userMessageIds.isEmpty()) {
@@ -624,6 +796,10 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
 
     private Long maxGroupContextSummaryId(Long userWorldId) {
         return Objects.requireNonNullElse(groupContextSummaryMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
+    }
+
+    private Long maxGroupTopicId(Long userWorldId) {
+        return Objects.requireNonNullElse(groupChatTopicMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
     }
 
     private List<GroupConversationLockService.OwnedLock> lockActiveGroupConversations(Long userWorldId) {

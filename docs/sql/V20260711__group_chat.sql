@@ -83,7 +83,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_turn_request
 CREATE TABLE IF NOT EXISTS group_chat_reply_step (
     id BIGSERIAL PRIMARY KEY,
     turn_id BIGINT NOT NULL,
+    plan_item_id BIGINT,
     step_no INT NOT NULL,
+    action_type VARCHAR(50) NOT NULL,
     speaker_type VARCHAR(50) NOT NULL,
     speaker_id BIGINT,
     force_reply BOOLEAN DEFAULT FALSE,
@@ -95,6 +97,25 @@ CREATE TABLE IF NOT EXISTS group_chat_reply_step (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_reply_step_no
     ON group_chat_reply_step (turn_id, step_no);
+
+ALTER TABLE group_chat_reply_step
+    ADD COLUMN IF NOT EXISTS plan_item_id BIGINT,
+    ADD COLUMN IF NOT EXISTS action_type VARCHAR(50) NOT NULL DEFAULT 'chat_reply';
+
+CREATE TABLE IF NOT EXISTS group_chat_tool_call (
+    id BIGSERIAL PRIMARY KEY,
+    reply_step_id BIGINT NOT NULL,
+    tool_step_no INT NOT NULL,
+    tool_call_id VARCHAR(255) NOT NULL,
+    tool_name VARCHAR(255) NOT NULL,
+    tool_arguments TEXT,
+    tool_result TEXT,
+    dice_roll_summary_id BIGINT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_tool_call
+    ON group_chat_tool_call (reply_step_id, tool_call_id);
+CREATE INDEX IF NOT EXISTS idx_group_chat_tool_call_step
+    ON group_chat_tool_call (reply_step_id, tool_step_no, id);
 
 CREATE TABLE IF NOT EXISTS group_chat_message (
     id BIGSERIAL PRIMARY KEY,
@@ -116,6 +137,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_message_sequence
     ON group_chat_message (conversation_id, sequence_no);
 CREATE INDEX IF NOT EXISTS idx_group_chat_message_turn
     ON group_chat_message (turn_id, id);
+
+CREATE TABLE IF NOT EXISTS group_chat_topic (
+    id BIGSERIAL PRIMARY KEY,
+    conversation_id BIGINT NOT NULL,
+    start_sequence BIGINT NOT NULL,
+    boundary_reason VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_topic_start
+    ON group_chat_topic (conversation_id, start_sequence);
+CREATE INDEX IF NOT EXISTS idx_group_chat_topic_recent
+    ON group_chat_topic (conversation_id, start_sequence DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS group_context_summary (
     id BIGSERIAL PRIMARY KEY,

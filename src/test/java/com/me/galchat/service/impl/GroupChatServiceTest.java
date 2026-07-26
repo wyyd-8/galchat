@@ -70,10 +70,11 @@ class GroupChatServiceTest {
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
         GroupChatReplyStepMapper stepMapper = mock(GroupChatReplyStepMapper.class);
+        GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         GroupChatService service = new GroupChatService(conversationService, lockService, replyPlanService,
-                runtimeRegistry, messageMapper, turnMapper, stepMapper, new GroupToolContextFactory(),
+                runtimeRegistry, messageMapper, turnMapper, stepMapper, recoveryService, new GroupToolContextFactory(),
                 userWorldPrefixService, transactionTemplate);
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
@@ -213,5 +214,110 @@ class GroupChatServiceTest {
                 .containsEntry(ChatToolContextConstant.CHARACTER_ID_KEY, 9L)
                 .containsEntry(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 107L)
                 .containsEntry(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY, "NORMAL");
+    }
+
+    @Test
+    void contextPreparationFailureFailsCurrentStepAndCancelsLaterStepsWithoutStreamingMessage() {
+        GroupConversationService conversationService = mock(GroupConversationService.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
+        GroupReplyPlanService replyPlanService = mock(GroupReplyPlanService.class);
+        GroupRuntimeRegistry runtimeRegistry = mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupTurnPolicy turnPolicy = mock(GroupTurnPolicy.class);
+        GroupContextPolicy contextPolicy = mock(GroupContextPolicy.class);
+        GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper = mock(GroupChatReplyStepMapper.class);
+        GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
+        TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
+        GroupChatService service = new GroupChatService(
+                conversationService, lockService, replyPlanService, runtimeRegistry,
+                messageMapper, turnMapper, stepMapper, recoveryService, new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class), transactionTemplate);
+
+        when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        doAnswer(invocation -> {
+            java.util.function.Consumer<TransactionStatus> callback = invocation.getArgument(0);
+            callback.accept(mock(TransactionStatus.class));
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(1L).setWorldId(2L)
+                .setMode(GroupChatConstant.MODE_CHAT)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        when(conversationService.requireActive(7L)).thenReturn(conversation);
+        when(lockService.tryLock(7L))
+                .thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        when(runtimeRegistry.require(GroupChatConstant.MODE_CHAT)).thenReturn(runtime);
+        when(runtime.turnPolicy()).thenReturn(turnPolicy);
+        when(runtime.contextPolicy()).thenReturn(contextPolicy);
+        when(runtime.agentPolicy()).thenReturn(mock(GroupAgentPolicy.class));
+        GroupReplyPlanItem first = planItem(20L, 9L, 1);
+        GroupReplyPlanItem second = planItem(21L, 8L, 2);
+        GroupReplyPlanSelection selection = new GroupReplyPlanSelection(
+                GroupChatConstant.PLAN_SOURCE_USER, null,
+                "default", "群聊", 1, List.of(first, second));
+        when(replyPlanService.currentGroupForExecution(conversation)).thenReturn(selection);
+        GroupActionSpec firstAction = action(9L, 1);
+        GroupActionSpec secondAction = action(8L, 2);
+        when(turnPolicy.plan(conversation, selection)).thenReturn(List.of(firstAction, secondAction));
+        when(contextPolicy.load(conversation, firstAction))
+                .thenThrow(new IllegalStateException("context failed"));
+        when(conversationService.nextSequence(7L)).thenReturn(1L);
+
+        AtomicLong ids = new AtomicLong(200L);
+        doAnswer(invocation -> {
+            ((GroupChatTurn) invocation.getArgument(0)).setId(ids.incrementAndGet());
+            return 1;
+        }).when(turnMapper).insert(any(GroupChatTurn.class));
+        doAnswer(invocation -> {
+            ((GroupChatMessage) invocation.getArgument(0)).setId(ids.incrementAndGet());
+            return 1;
+        }).when(messageMapper).insert(any(GroupChatMessage.class));
+        doAnswer(invocation -> {
+            ((GroupChatReplyStep) invocation.getArgument(0)).setId(ids.incrementAndGet());
+            return 1;
+        }).when(stepMapper).insert(any(GroupChatReplyStep.class));
+
+        GroupChatRequestDTO request = new GroupChatRequestDTO();
+        request.setContent("开始");
+
+        List<GroupChatEvent> events = service.chat(7L, request).collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType).containsExactly(
+                GroupChatConstant.EVENT_TURN_ACCEPTED,
+                GroupChatConstant.EVENT_REPLY_FAILED);
+        verify(stepMapper).updateById(org.mockito.ArgumentMatchers.argThat((GroupChatReplyStep step) ->
+                GroupChatConstant.STATUS_FAILED.equals(step.getStatus())));
+        verify(messageMapper, never()).insert(org.mockito.ArgumentMatchers.argThat((GroupChatMessage message) ->
+                GroupChatConstant.STATUS_STREAMING.equals(message.getStatus())));
+        verify(recoveryService).cancelPendingSteps(201L, "context failed");
+        verify(contextPolicy, never()).load(conversation, secondAction);
+    }
+
+    private GroupReplyPlanItem planItem(Long id, Long actorId, int order) {
+        return new GroupReplyPlanItem()
+                .setId(id)
+                .setGroupKey("default")
+                .setGroupName("群聊")
+                .setGroupOrder(1)
+                .setItemOrder(order)
+                .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                .setActorId(actorId);
+    }
+
+    private GroupActionSpec action(Long actorId, int order) {
+        return new GroupActionSpec(
+                GroupChatConstant.ACTION_CHAT_REPLY,
+                GroupChatConstant.ACTOR_CHARACTER,
+                actorId,
+                "default",
+                "群聊",
+                1,
+                order);
     }
 }

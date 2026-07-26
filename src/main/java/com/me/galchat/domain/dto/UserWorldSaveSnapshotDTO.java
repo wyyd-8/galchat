@@ -55,6 +55,8 @@ public class UserWorldSaveSnapshotDTO {
 
     private List<GroupConversationTurnsSnapshot> recentGroupTurnsByConversation;
 
+    private List<GroupConversationPlanSnapshot> conversationPlans;
+
     private WorldEventLog lastWorldEventLog;
 
     @Data
@@ -112,4 +114,36 @@ public class UserWorldSaveSnapshotDTO {
         private List<UserCharacterFavorLog> favorLogs;
     }
 
+    @Data
+    @Accessors(chain = true)
+    public static class GroupConversationPlanSnapshot {
+        private Long conversationId;
+        private ReplyPlanSnapshot activePlan;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class ReplyPlanSnapshot {
+        private String source;
+        private Long contextId;
+        private List<ReplyPlanGroupSnapshot> groups;
+        private ReplyPlanSnapshot resumePlan;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class ReplyPlanGroupSnapshot {
+        private String key;
+        private String name;
+        private Integer order;
+        private List<ReplyPlanItemSnapshot> items;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class ReplyPlanItemSnapshot {
+        private Integer order;
+        private String actorType;
+        private Long actorId;
+    }
 }

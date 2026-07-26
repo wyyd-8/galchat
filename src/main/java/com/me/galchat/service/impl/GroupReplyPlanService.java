@@ -114,34 +114,6 @@ public class GroupReplyPlanService {
                 current);
     }
 
-    /** 计划不进入世界存档；读档后按当前群聊成员重建。调用方必须持有相关会话锁。 */
-    public void resetWorldPlans(Long userWorldId) {
-        List<GroupConversation> conversations = conversationMapper.selectList(
-                new LambdaQueryWrapper<GroupConversation>()
-                        .eq(GroupConversation::getUserWorldId, userWorldId));
-        if (conversations.isEmpty()) {
-            return;
-        }
-        List<Long> conversationIds = conversations.stream().map(GroupConversation::getId).toList();
-        List<Long> planIds = planMapper.selectList(new LambdaQueryWrapper<GroupReplyPlan>()
-                        .select(GroupReplyPlan::getId)
-                        .in(GroupReplyPlan::getConversationId, conversationIds))
-                .stream().map(GroupReplyPlan::getId).toList();
-        if (!planIds.isEmpty()) {
-            itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
-                    .in(GroupReplyPlanItem::getPlanId, planIds));
-            planMapper.delete(new LambdaQueryWrapper<GroupReplyPlan>()
-                    .in(GroupReplyPlan::getId, planIds));
-        }
-        for (GroupConversation conversation : conversations) {
-            conversation.setActiveReplyPlanId(null).setUpdatedAt(LocalDateTime.now());
-            conversationMapper.updateById(conversation);
-            if (GroupChatConstant.STATUS_ACTIVE.equals(conversation.getStatus())) {
-                createDefaultPlan(conversation);
-            }
-        }
-    }
-
     /** Caller must hold the conversation lock. */
     public void clearConversationPlans(GroupConversation conversation) {
         List<Long> planIds = planMapper.selectList(new LambdaQueryWrapper<GroupReplyPlan>()

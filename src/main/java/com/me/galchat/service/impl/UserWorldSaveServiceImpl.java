@@ -75,7 +75,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
 
-    private static final int FORMAT_VERSION = 3;
+    private static final int FORMAT_VERSION = 4;
     private static final int RECENT_ROUND_COUNT = 3;
 
     private final IUserWorldPrefixService userWorldPrefixService;
@@ -96,7 +96,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private final GroupChatToolCallMapper groupChatToolCallMapper;
     private final GroupContextSummaryMapper groupContextSummaryMapper;
     private final GroupChatTopicMapper groupChatTopicMapper;
-    private final GroupReplyPlanService groupReplyPlanService;
+    private final GroupReplyPlanSnapshotService groupReplyPlanSnapshotService;
+    private final GroupTurnRecoveryService groupTurnRecoveryService;
     private final SingleChatLockService singleChatLockService;
     private final GroupConversationLockService groupConversationLockService;
     private final StringRedisTemplate redisTemplate;
@@ -122,7 +123,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         List<RLock> locks = singleChatLockService.lockConversations(userWorldId, characterIds(characters));
         List<GroupConversationLockService.OwnedLock> groupLocks = List.of();
         try {
-            groupLocks = lockActiveGroupConversations(userWorldId);
+            groupLocks = lockGroupConversations(userWorldId, List.of());
+            groupTurnRecoveryService.assertNoNonTerminalTurns(userWorldId);
             UserWorldSave saved = transactionTemplate.execute(status -> doSaveWorld(userId, userWorld, createDTO));
             return toOverview(saved);
         } finally {
@@ -142,7 +144,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         List<RLock> locks = singleChatLockService.lockConversations(userWorldId, characterIds(characters));
         List<GroupConversationLockService.OwnedLock> groupLocks = List.of();
         try {
-            groupLocks = lockActiveGroupConversations(userWorldId);
+            groupLocks = lockGroupConversations(userWorldId, snapshotConversationIds(snapshot));
+            groupTurnRecoveryService.assertNoNonTerminalTurns(userWorldId);
             List<Long> deletedUserMessageIds = transactionTemplate.execute(status -> doLoadWorld(userWorldId, snapshot));
             evictRedisData(userWorldId, emptyIfNull(deletedUserMessageIds), snapshot);
             restoreTopicBoundaries(userWorldId, snapshot.getTopicBoundaries());
@@ -181,7 +184,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     protected List<Long> doLoadWorld(Long userWorldId, UserWorldSaveSnapshotDTO snapshot) {
         List<Long> deletedUserMessageIds = listUserMessageIdsAfter(userWorldId, snapshot.getMaxChatHistoryId());
         deleteAfterSnapshot(userWorldId, snapshot);
-        groupReplyPlanService.resetWorldPlans(userWorldId);
+        groupReplyPlanSnapshotService.restore(userWorldId, snapshot.getConversationPlans());
         restoreRecentChatRounds(userWorldId, snapshot);
         restoreRecentGroupTurns(snapshot);
         restoreWorldEventLog(snapshot.getLastWorldEventLog());
@@ -210,6 +213,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .setTopicBoundaries(topicBoundaries(userWorldId, characters))
                 .setRecentChatRoundsByCharacter(recentChatRounds(userWorldId, characters))
                 .setRecentGroupTurnsByConversation(recentGroupTurns(userWorldId))
+                .setConversationPlans(groupReplyPlanSnapshotService.capture(userWorldId))
                 .setLastWorldEventLog(lastWorldEventLog(userWorldId));
     }
 
@@ -802,8 +806,9 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         return Objects.requireNonNullElse(groupChatTopicMapper.selectMaxIdByUserWorldId(userWorldId), 0L);
     }
 
-    private List<GroupConversationLockService.OwnedLock> lockActiveGroupConversations(Long userWorldId) {
-        List<Long> conversationIds = groupConversationMapper.selectList(
+    private List<GroupConversationLockService.OwnedLock> lockGroupConversations(
+            Long userWorldId, Collection<Long> extraConversationIds) {
+        Set<Long> conversationIdSet = new HashSet<>(groupConversationMapper.selectList(
                         new LambdaQueryWrapper<GroupConversation>()
                                 .select(GroupConversation::getId)
                                 .eq(GroupConversation::getUserWorldId, userWorldId)
@@ -811,7 +816,13 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                                 .orderByAsc(GroupConversation::getId))
                 .stream()
                 .map(GroupConversation::getId)
-                .toList();
+                .toList());
+        if (extraConversationIds != null) {
+            extraConversationIds.stream()
+                    .filter(Objects::nonNull)
+                    .forEach(conversationIdSet::add);
+        }
+        List<Long> conversationIds = conversationIdSet.stream().sorted().toList();
         List<GroupConversationLockService.OwnedLock> locks = new ArrayList<>();
         try {
             for (Long conversationId : conversationIds) {
@@ -826,6 +837,16 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
             unlockGroupConversations(locks);
             throw e;
         }
+    }
+
+    private List<Long> snapshotConversationIds(UserWorldSaveSnapshotDTO snapshot) {
+        return emptyIfNull(snapshot.getConversationPlans()).stream()
+                .filter(Objects::nonNull)
+                .map(UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot::getConversationId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .toList();
     }
 
     private void unlockGroupConversations(List<GroupConversationLockService.OwnedLock> locks) {

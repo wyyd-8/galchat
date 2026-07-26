@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
@@ -90,44 +91,59 @@ class GroupReplyPlanServiceTest {
         var result = fixture.service.finishActive(7L);
 
         assertThat(result.getId()).isEqualTo(10L);
-        assertThat(result.getGroups().getFirst().getItems().getFirst().getStatus())
-                .isEqualTo(GroupChatConstant.STATUS_PENDING);
+        assertThat(result.getGroups().getFirst().getItems().getFirst())
+                .extracting(
+                        com.me.galchat.domain.vo.GroupReplyPlanVO.Item::getId,
+                        com.me.galchat.domain.vo.GroupReplyPlanVO.Item::getOrder,
+                        com.me.galchat.domain.vo.GroupReplyPlanVO.Item::getActorType,
+                        com.me.galchat.domain.vo.GroupReplyPlanVO.Item::getActorId)
+                .containsExactly(11L, 2, GroupChatConstant.ACTOR_CHARACTER, 9L);
         assertThat(conversation.getActiveReplyPlanId()).isEqualTo(10L);
         verify(fixture.planMapper).deleteById(20L);
     }
 
     @Test
-    void updatingCombatOrderKeepsCompletedItemsCompleted() {
+    void currentGroupIsReusableAndDoesNotSelectFutureGroups() {
         Fixture fixture = new Fixture();
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE)
-                .setActiveReplyPlanId(20L);
-        GroupReplyPlan combat = new GroupReplyPlan()
-                .setId(20L)
+                .setActiveReplyPlanId(10L);
+        GroupReplyPlan scene = new GroupReplyPlan()
+                .setId(10L)
                 .setConversationId(7L)
-                .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
-                .setContextId(200L)
-                .setResumePlanId(10L);
-        GroupReplyPlanItem completed = new GroupReplyPlanItem()
-                .setId(21L)
-                .setPlanId(20L)
-                .setGroupKey("round:1")
-                .setGroupName("第1轮")
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setContextId(100L);
+        GroupReplyPlanItem current = new GroupReplyPlanItem()
+                .setId(11L)
+                .setPlanId(10L)
+                .setGroupKey("scene:1")
+                .setGroupName("地下室")
                 .setGroupOrder(1)
                 .setItemOrder(1)
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
-                .setActorId(9L)
-                .setStatus(GroupChatConstant.STATUS_COMPLETED);
-        when(fixture.conversationService.requireActive(7L)).thenReturn(conversation);
-        when(fixture.planMapper.selectById(20L)).thenReturn(combat);
-        when(fixture.itemMapper.selectList(any())).thenReturn(List.of(completed));
-        var itemCaptor = org.mockito.ArgumentCaptor.forClass(GroupReplyPlanItem.class);
+                .setActorId(9L);
+        GroupReplyPlanItem future = new GroupReplyPlanItem()
+                .setId(12L)
+                .setPlanId(10L)
+                .setGroupKey("scene:2")
+                .setGroupName("阁楼")
+                .setGroupOrder(2)
+                .setItemOrder(1)
+                .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                .setActorId(8L);
+        when(fixture.planMapper.selectById(10L)).thenReturn(scene);
+        when(fixture.itemMapper.selectList(any())).thenReturn(List.of(current, future));
 
-        fixture.service.replace(7L, combatRequest());
+        GroupReplyPlanSelection first = fixture.service.currentGroupForExecution(conversation);
+        GroupReplyPlanSelection second = fixture.service.currentGroupForExecution(conversation);
 
-        verify(fixture.itemMapper).insert(itemCaptor.capture());
-        assertThat(itemCaptor.getValue().getStatus()).isEqualTo(GroupChatConstant.STATUS_COMPLETED);
+        assertThat(first.items()).extracting(GroupReplyPlanItem::getId).containsExactly(11L);
+        assertThat(second.items()).extracting(GroupReplyPlanItem::getId).containsExactly(11L);
+        assertThat(first.source()).isEqualTo(GroupChatConstant.PLAN_SOURCE_SCENE);
+        assertThat(first.contextId()).isEqualTo(100L);
+        assertThat(first.groupKey()).isEqualTo("scene:1");
+        verify(fixture.itemMapper, never()).updateById(any(GroupReplyPlanItem.class));
     }
 
     @Test

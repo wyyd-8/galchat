@@ -9,6 +9,7 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.vo.GroupReplyPlanVO;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
@@ -20,7 +21,6 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -104,6 +104,29 @@ public class GroupReplyPlanService {
         return plan == null ? GroupChatConstant.PLAN_SOURCE_USER : plan.getSource();
     }
 
+    /** Caller must hold the conversation lock. */
+    public GroupReplyPlanSelection currentGroupForExecution(GroupConversation conversation) {
+        GroupReplyPlan plan = activePlan(conversation);
+        if (plan == null) {
+            throw new UserRequestException("当前群聊没有可执行的回复计划");
+        }
+        List<GroupReplyPlanItem> ordered = orderedItems(plan.getId());
+        if (ordered.isEmpty()) {
+            throw new UserRequestException("当前回复计划没有可执行分组");
+        }
+        GroupReplyPlanItem first = ordered.getFirst();
+        List<GroupReplyPlanItem> current = ordered.stream()
+                .filter(item -> first.getGroupKey().equals(item.getGroupKey()))
+                .toList();
+        return new GroupReplyPlanSelection(
+                plan.getSource(),
+                plan.getContextId(),
+                first.getGroupKey(),
+                first.getGroupName(),
+                first.getGroupOrder(),
+                current);
+    }
+
     public void markRunning(GroupReplyPlanItem item) {
         updateStatus(item, GroupChatConstant.STATUS_RUNNING);
     }
@@ -180,11 +203,9 @@ public class GroupReplyPlanService {
 
         LocalDateTime now = LocalDateTime.now();
         GroupReplyPlan plan;
-        Map<String, String> existingStatuses = Map.of();
         if (replacesActive) {
             plan = active.setUpdatedAt(now);
             planMapper.updateById(plan);
-            existingStatuses = existingStatuses(plan.getId());
             itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
                     .eq(GroupReplyPlanItem::getPlanId, plan.getId()));
         } else {
@@ -204,12 +225,11 @@ public class GroupReplyPlanService {
             conversation.setActiveReplyPlanId(plan.getId()).setUpdatedAt(now);
             conversationMapper.updateById(conversation);
         }
-        insertItems(plan.getId(), request.getGroups(), existingStatuses, now);
+        insertItems(plan.getId(), request.getGroups(), now);
         return toVO(plan);
     }
 
-    private void insertItems(Long planId, List<GroupReplyPlanDTO.Group> groups,
-                             Map<String, String> existingStatuses, LocalDateTime now) {
+    private void insertItems(Long planId, List<GroupReplyPlanDTO.Group> groups, LocalDateTime now) {
         for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
             GroupReplyPlanDTO.Group group = groups.get(groupIndex);
             int groupOrder = group.getOrder() == null ? groupIndex + 1 : group.getOrder();
@@ -227,8 +247,7 @@ public class GroupReplyPlanService {
                         .setItemOrder(item.getOrder() == null ? itemIndex + 1 : item.getOrder())
                         .setActorType(actorType)
                         .setActorId(item.getActorId())
-                        .setStatus(existingStatuses.getOrDefault(itemKey(group.getKey(), actorType, item.getActorId()),
-                                GroupChatConstant.STATUS_PENDING))
+                        .setStatus(GroupChatConstant.STATUS_PENDING)
                         .setCreatedAt(now)
                         .setUpdatedAt(now));
             }
@@ -265,19 +284,6 @@ public class GroupReplyPlanService {
         return plan;
     }
 
-    private Map<String, String> existingStatuses(Long planId) {
-        Map<String, String> statuses = new HashMap<>();
-        for (GroupReplyPlanItem item : itemMapper.selectList(new LambdaQueryWrapper<GroupReplyPlanItem>()
-                .eq(GroupReplyPlanItem::getPlanId, planId))) {
-            statuses.put(itemKey(item.getGroupKey(), item.getActorType(), item.getActorId()), item.getStatus());
-        }
-        return statuses;
-    }
-
-    private String itemKey(String groupKey, String actorType, Long actorId) {
-        return groupKey.trim() + "\n" + actorType + "\n" + actorId;
-    }
-
     private GroupReplyPlan activePlan(GroupConversation conversation) {
         return conversation.getActiveReplyPlanId() == null
                 ? null : planMapper.selectById(conversation.getActiveReplyPlanId());
@@ -287,11 +293,7 @@ public class GroupReplyPlanService {
         if (plan == null) {
             return null;
         }
-        List<GroupReplyPlanItem> items = itemMapper.selectList(new LambdaQueryWrapper<GroupReplyPlanItem>()
-                .eq(GroupReplyPlanItem::getPlanId, plan.getId())
-                .orderByAsc(GroupReplyPlanItem::getGroupOrder)
-                .orderByAsc(GroupReplyPlanItem::getItemOrder)
-                .orderByAsc(GroupReplyPlanItem::getId));
+        List<GroupReplyPlanItem> items = orderedItems(plan.getId());
         Map<String, List<GroupReplyPlanItem>> grouped = new LinkedHashMap<>();
         for (GroupReplyPlanItem item : items) {
             grouped.computeIfAbsent(item.getGroupKey(), ignored -> new ArrayList<>()).add(item);
@@ -300,13 +302,21 @@ public class GroupReplyPlanService {
             GroupReplyPlanItem first = groupItems.getFirst();
             List<GroupReplyPlanVO.Item> voItems = groupItems.stream()
                     .map(item -> new GroupReplyPlanVO.Item(item.getId(), item.getItemOrder(), item.getActorType(),
-                            item.getActorId(), item.getStatus()))
+                            item.getActorId()))
                     .toList();
             return new GroupReplyPlanVO.Group(first.getGroupKey(), first.getGroupName(),
                     first.getGroupOrder(), voItems);
         }).toList();
         return new GroupReplyPlanVO(plan.getId(), plan.getSource(), plan.getContextId(),
                 plan.getResumePlanId(), groups);
+    }
+
+    private List<GroupReplyPlanItem> orderedItems(Long planId) {
+        return itemMapper.selectList(new LambdaQueryWrapper<GroupReplyPlanItem>()
+                .eq(GroupReplyPlanItem::getPlanId, planId)
+                .orderByAsc(GroupReplyPlanItem::getGroupOrder)
+                .orderByAsc(GroupReplyPlanItem::getItemOrder)
+                .orderByAsc(GroupReplyPlanItem::getId));
     }
 
     private void updateStatus(GroupReplyPlanItem item, String status) {

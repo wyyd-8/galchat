@@ -30,6 +30,5 @@ public class GroupReplyPlanVO {
         private Integer order;
         private String actorType;
         private Long actorId;
-        private String status;
     }
 }

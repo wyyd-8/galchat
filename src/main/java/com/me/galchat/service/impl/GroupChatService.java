@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
@@ -37,7 +38,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
@@ -82,13 +82,13 @@ public class GroupChatService {
     public Flux<GroupChatEvent> chat(Long conversationId, GroupChatRequestDTO request) {
         return Flux.defer(() -> {
             validateRequest(request);
-            GroupConversation conversation = conversationService.requireActive(conversationId);
             GroupConversationLockService.OwnedLock lock = lockService.tryLock(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException("当前群聊正在生成回复，请稍后再试"));
             }
 
             try {
+                GroupConversation conversation = conversationService.requireActive(conversationId);
                 recoveryService.recoverInterrupted(conversationId);
                 GroupModeRuntime runtime = runtimeRegistry.require(conversation.getMode());
                 PreparedTurn prepared = transactionTemplate.execute(
@@ -99,10 +99,7 @@ public class GroupChatService {
                 try {
                     runtime.contextPolicy().onTurnStarted(conversation, prepared.userMessage());
                 } catch (RuntimeException e) {
-                    transactionTemplate.executeWithoutResult(status -> {
-                        recoveryService.cancelPendingSteps(prepared.turn().getId(), errorMessage(e));
-                        failTurn(prepared.turn(), e);
-                    });
+                    recoveryService.recoverInterrupted(conversationId);
                     return Flux.just(failureEvent(conversationId, prepared.turn().getId(), e))
                             .doFinally(signal -> lockService.unlock(lock));
                 }
@@ -124,9 +121,7 @@ public class GroupChatService {
                             .build());
                 });
                 return Flux.concat(accepted, replies, completed)
-                        .doOnError(error -> {
-                            failTurn(prepared.turn(), error);
-                        })
+                        .doOnError(error -> recoveryService.recoverInterrupted(conversationId))
                         .onErrorResume(error -> Flux.just(
                                 failureEvent(conversationId, prepared.turn().getId(), error)))
                         .doFinally(signal -> {
@@ -246,7 +241,7 @@ public class GroupChatService {
         GroupActionSpec action = preparedAction.action();
         GroupChatReplyStep step = preparedAction.step();
         GenerationAccumulator accumulator = new GenerationAccumulator();
-        AtomicBoolean finalized = new AtomicBoolean(false);
+        FinalizationGuard finalizationGuard = new FinalizationGuard();
         AtomicReference<GroupChatMessage> outputRef = new AtomicReference<>();
         return Flux.defer(() -> {
             GroupContextMaterial context = runtime.contextPolicy().load(conversation, action);
@@ -278,7 +273,7 @@ public class GroupChatService {
                     .flatMapIterable(response -> toEvents(response, conversation, turn, step, outputMessage,
                             speaker, accumulator));
             Flux<GroupChatEvent> finished = Flux.defer(() -> {
-                finalizeCompletedStep(step, outputMessage, accumulator, finalized);
+                finalizeCompletedStep(step, outputMessage, accumulator, finalizationGuard);
                 return Flux.just(baseEvent(GroupChatConstant.EVENT_MESSAGE_COMPLETED,
                         conversation, turn, step, outputMessage, speaker)
                         .content(accumulator.content.toString())
@@ -286,10 +281,10 @@ public class GroupChatService {
             });
             return Flux.concat(started, deltas, finished);
         }).doOnError(error -> finalizeFailedStep(
-                turn, step, outputRef.get(), accumulator, finalized, error))
+                turn, step, outputRef.get(), accumulator, finalizationGuard, error))
                 .doFinally(signal -> {
                     if (signal == SignalType.CANCEL) {
-                        finalizeCancelledStep(turn, step, outputRef.get(), accumulator, finalized);
+                        finalizeCancelledStep(turn, step, outputRef.get(), accumulator, finalizationGuard);
                     }
                 });
     }
@@ -345,43 +340,37 @@ public class GroupChatService {
     }
 
     private void finalizeCompletedStep(GroupChatReplyStep step, GroupChatMessage message,
-                                       GenerationAccumulator accumulator, AtomicBoolean finalized) {
-        if (!finalized.compareAndSet(false, true)) {
-            return;
-        }
-        transactionTemplate.executeWithoutResult(status -> {
-            persistOutput(message, accumulator, GroupChatConstant.STATUS_COMPLETED);
-            updateStepStatus(step, GroupChatConstant.STATUS_COMPLETED, null);
-        });
+                                       GenerationAccumulator accumulator, FinalizationGuard guard) {
+        guard.run(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    persistOutput(message, accumulator, GroupChatConstant.STATUS_COMPLETED);
+                    updateStepStatus(step, GroupChatConstant.STATUS_COMPLETED, null);
+                }));
     }
 
     private void finalizeFailedStep(GroupChatTurn turn, GroupChatReplyStep step, GroupChatMessage message,
-                                    GenerationAccumulator accumulator, AtomicBoolean finalized, Throwable error) {
-        if (!finalized.compareAndSet(false, true)) {
-            return;
-        }
-        transactionTemplate.executeWithoutResult(status -> {
-            if (message != null) {
-                persistOutput(message, accumulator, GroupChatConstant.STATUS_FAILED);
-            }
-            String reason = errorMessage(error);
-            updateStepStatus(step, GroupChatConstant.STATUS_FAILED, reason);
-            recoveryService.cancelPendingSteps(turn.getId(), reason);
-        });
+                                    GenerationAccumulator accumulator, FinalizationGuard guard, Throwable error) {
+        guard.run(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    if (message != null) {
+                        persistOutput(message, accumulator, GroupChatConstant.STATUS_FAILED);
+                    }
+                    String reason = errorMessage(error);
+                    updateStepStatus(step, GroupChatConstant.STATUS_FAILED, reason);
+                    recoveryService.cancelPendingSteps(turn.getId(), reason);
+                }));
     }
 
     private void finalizeCancelledStep(GroupChatTurn turn, GroupChatReplyStep step, GroupChatMessage message,
-                                       GenerationAccumulator accumulator, AtomicBoolean finalized) {
-        if (!finalized.compareAndSet(false, true)) {
-            return;
-        }
-        transactionTemplate.executeWithoutResult(status -> {
-            if (message != null) {
-                persistOutput(message, accumulator, GroupChatConstant.STATUS_CANCELLED);
-            }
-            updateStepStatus(step, GroupChatConstant.STATUS_CANCELLED, "客户端取消生成");
-            recoveryService.cancelPendingSteps(turn.getId(), "客户端取消生成");
-        });
+                                       GenerationAccumulator accumulator, FinalizationGuard guard) {
+        guard.run(() ->
+                transactionTemplate.executeWithoutResult(status -> {
+                    if (message != null) {
+                        persistOutput(message, accumulator, GroupChatConstant.STATUS_CANCELLED);
+                    }
+                    updateStepStatus(step, GroupChatConstant.STATUS_CANCELLED, "客户端取消生成");
+                    recoveryService.cancelPendingSteps(turn.getId(), "客户端取消生成");
+                }));
     }
 
     private void persistOutput(GroupChatMessage message, GenerationAccumulator accumulator, String status) {
@@ -396,19 +385,34 @@ public class GroupChatService {
         stepMapper.updateById(step);
     }
 
-    private void completeTurn(GroupChatTurn turn) {
-        turn.setStatus(GroupChatConstant.STATUS_COMPLETED).setUpdatedAt(LocalDateTime.now());
-        turnMapper.updateById(turn);
+    void completeTurn(GroupChatTurn turn) {
+        transitionTurn(turn, GroupChatConstant.STATUS_COMPLETED);
     }
 
-    private void failTurn(GroupChatTurn turn, Throwable error) {
-        turn.setStatus(GroupChatConstant.STATUS_FAILED).setUpdatedAt(LocalDateTime.now());
-        turnMapper.updateById(turn);
+    void cancelTurn(GroupChatTurn turn) {
+        transitionTurn(turn, GroupChatConstant.STATUS_CANCELLED);
     }
 
-    private void cancelTurn(GroupChatTurn turn) {
-        turn.setStatus(GroupChatConstant.STATUS_CANCELLED).setUpdatedAt(LocalDateTime.now());
-        turnMapper.updateById(turn);
+    private void transitionTurn(GroupChatTurn turn, String targetStatus) {
+        if (turn == null || turn.getId() == null || isTerminal(turn.getStatus())) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        int updated = turnMapper.update(
+                new GroupChatTurn().setStatus(targetStatus).setUpdatedAt(now),
+                new LambdaUpdateWrapper<GroupChatTurn>()
+                        .eq(GroupChatTurn::getId, turn.getId())
+                        .in(GroupChatTurn::getStatus,
+                                GroupChatConstant.STATUS_PENDING,
+                                GroupChatConstant.STATUS_RUNNING));
+        if (updated > 0) {
+            turn.setStatus(targetStatus).setUpdatedAt(now);
+        }
+    }
+
+    private boolean isTerminal(String status) {
+        return !GroupChatConstant.STATUS_PENDING.equals(status)
+                && !GroupChatConstant.STATUS_RUNNING.equals(status);
     }
 
     private GroupChatEvent failureEvent(Long conversationId, Long turnId, Throwable error) {
@@ -474,5 +478,17 @@ public class GroupChatService {
     private static class GenerationAccumulator {
         private final StringBuilder content = new StringBuilder();
         private final StringBuilder reasoning = new StringBuilder();
+    }
+
+    static final class FinalizationGuard {
+        private boolean finalized;
+
+        synchronized void run(Runnable action) {
+            if (finalized) {
+                return;
+            }
+            action.run();
+            finalized = true;
+        }
     }
 }

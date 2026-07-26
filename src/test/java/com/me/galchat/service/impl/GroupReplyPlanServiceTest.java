@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -298,6 +299,22 @@ class GroupReplyPlanServiceTest {
         assertThatThrownBy(() -> fixture.service.replace(7L, userRequest()))
                 .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
                 .hasMessageContaining("未完成");
+        verify(fixture.planMapper, never()).insert(any(GroupReplyPlan.class));
+    }
+
+    @Test
+    void replaceReadsConversationStateAfterAcquiringLock() {
+        Fixture fixture = new Fixture();
+        when(fixture.conversationService.requireActive(7L))
+                .thenThrow(new com.me.galchat.exception.UserRequestException("群聊会话已结束"));
+
+        assertThatThrownBy(() -> fixture.service.replace(7L, userRequest()))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessageContaining("已结束");
+
+        var ordered = inOrder(fixture.lockService, fixture.conversationService);
+        ordered.verify(fixture.lockService).tryLock(7L);
+        ordered.verify(fixture.conversationService).requireActive(7L);
         verify(fixture.planMapper, never()).insert(any(GroupReplyPlan.class));
     }
 

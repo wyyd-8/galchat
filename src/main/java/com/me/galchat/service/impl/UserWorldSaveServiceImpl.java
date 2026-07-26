@@ -121,14 +121,17 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(userId, userWorldId, true);
         List<UserCharacterInfo> characters = listCharacters(userWorldId);
         List<RLock> locks = singleChatLockService.lockConversations(userWorldId, characterIds(characters));
+        GroupConversationLockService.OwnedLock worldLock = null;
         List<GroupConversationLockService.OwnedLock> groupLocks = List.of();
         try {
+            worldLock = requireGroupWorldLock(userWorldId);
             groupLocks = lockGroupConversations(userWorldId, List.of());
             groupTurnRecoveryService.assertNoNonTerminalTurns(userWorldId);
             UserWorldSave saved = transactionTemplate.execute(status -> doSaveWorld(userId, userWorld, createDTO));
             return toOverview(saved);
         } finally {
             unlockGroupConversations(groupLocks);
+            groupConversationLockService.unlock(worldLock);
             singleChatLockService.unlockAll(locks);
         }
     }
@@ -142,8 +145,10 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
 
         List<UserCharacterInfo> characters = listCharacters(userWorldId);
         List<RLock> locks = singleChatLockService.lockConversations(userWorldId, characterIds(characters));
+        GroupConversationLockService.OwnedLock worldLock = null;
         List<GroupConversationLockService.OwnedLock> groupLocks = List.of();
         try {
+            worldLock = requireGroupWorldLock(userWorldId);
             groupLocks = lockGroupConversations(userWorldId, snapshotConversationIds(snapshot));
             groupTurnRecoveryService.assertNoNonTerminalTurns(userWorldId);
             List<Long> deletedUserMessageIds = transactionTemplate.execute(status -> doLoadWorld(userWorldId, snapshot));
@@ -152,6 +157,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
             restoreDerivedData(userWorldId, snapshot);
         } finally {
             unlockGroupConversations(groupLocks);
+            groupConversationLockService.unlock(worldLock);
             singleChatLockService.unlockAll(locks);
         }
     }
@@ -837,6 +843,14 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
             unlockGroupConversations(locks);
             throw e;
         }
+    }
+
+    private GroupConversationLockService.OwnedLock requireGroupWorldLock(Long userWorldId) {
+        GroupConversationLockService.OwnedLock lock = groupConversationLockService.tryWorldLock(userWorldId);
+        if (lock == null) {
+            throw new UserRequestException("当前世界正在创建群聊，请稍后再存档或读档");
+        }
+        return lock;
     }
 
     private List<Long> snapshotConversationIds(UserWorldSaveSnapshotDTO snapshot) {

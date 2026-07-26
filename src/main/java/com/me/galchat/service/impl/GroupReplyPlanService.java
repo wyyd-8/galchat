@@ -51,10 +51,10 @@ public class GroupReplyPlanService {
     }
 
     public GroupReplyPlanVO replace(Long conversationId, GroupReplyPlanDTO request) {
-        GroupConversation conversation = conversationService.requireActive(conversationId);
-        validate(conversation, request);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
+            GroupConversation conversation = conversationService.requireActive(conversationId);
+            validateStructure(conversation, request);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> replaceLocked(conversation, request));
         } finally {
@@ -63,9 +63,9 @@ public class GroupReplyPlanService {
     }
 
     public GroupReplyPlanVO finishActive(Long conversationId) {
-        GroupConversation conversation = conversationService.requireActive(conversationId);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
+            GroupConversation conversation = conversationService.requireActive(conversationId);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> {
                 GroupReplyPlan active = activePlan(conversation);
@@ -81,9 +81,9 @@ public class GroupReplyPlanService {
     }
 
     public GroupReplyPlanVO advanceGroup(Long conversationId) {
-        GroupConversation conversation = conversationService.requireActive(conversationId);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
+            GroupConversation conversation = conversationService.requireActive(conversationId);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> advanceLocked(conversation));
         } finally {
@@ -196,6 +196,8 @@ public class GroupReplyPlanService {
                 .filter(item -> !currentGroupKey.equals(item.getGroupKey()))
                 .toList();
         if (!remaining.isEmpty()) {
+            active.setUpdatedAt(LocalDateTime.now());
+            planMapper.updateById(active);
             return toVO(active, remaining);
         }
         return finishLocked(conversation, active);
@@ -310,7 +312,7 @@ public class GroupReplyPlanService {
                 .orderByAsc(GroupReplyPlanItem::getId));
     }
 
-    private void validate(GroupConversation conversation, GroupReplyPlanDTO request) {
+    void validateStructure(GroupConversation conversation, GroupReplyPlanDTO request) {
         if (request == null || !StringUtils.hasText(request.getSource())) {
             throw new UserRequestException("回复计划来源不能为空");
         }

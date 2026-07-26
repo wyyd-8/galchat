@@ -80,8 +80,12 @@ public class GroupChatWithdrawalService {
             throw new UserRequestException("当前群聊正在生成回复，请稍后再撤回");
         }
         try {
+            GroupConversation lockedConversation = conversationService.requireActive(conversationId);
+            if (!GroupChatConstant.MODE_CHAT.equals(lockedConversation.getMode())) {
+                throw new UserRequestException("跑团群聊不支持撤回");
+            }
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
-            transactionTemplate.executeWithoutResult(status -> withdrawLocked(conversation));
+            transactionTemplate.executeWithoutResult(status -> withdrawLocked(lockedConversation));
         } finally {
             lockService.unlock(lock);
         }

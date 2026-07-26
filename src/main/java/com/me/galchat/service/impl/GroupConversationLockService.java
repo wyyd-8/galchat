@@ -25,7 +25,18 @@ public class GroupConversationLockService {
         if (conversationId == null) {
             throw new UserRequestException("群聊会话id不能为空");
         }
-        RLock lock = redissonClient.getLock(RedisConstant.GROUP_CONVERSATION_LOCK_PREFIX + conversationId);
+        return tryLock(RedisConstant.GROUP_CONVERSATION_LOCK_PREFIX + conversationId);
+    }
+
+    public OwnedLock tryWorldLock(Long userWorldId) {
+        if (userWorldId == null) {
+            throw new UserRequestException("用户世界id不能为空");
+        }
+        return tryLock(RedisConstant.GROUP_WORLD_MUTATION_LOCK_PREFIX + userWorldId);
+    }
+
+    private OwnedLock tryLock(String lockKey) {
+        RLock lock = redissonClient.getLock(lockKey);
         long ownerThreadId = Thread.currentThread().threadId();
         try {
             return lock.tryLock(0, TimeUnit.MILLISECONDS) ? new OwnedLock(lock, ownerThreadId) : null;

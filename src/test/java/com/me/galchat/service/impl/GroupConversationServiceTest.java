@@ -17,6 +17,7 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.RLock;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -39,6 +40,7 @@ class GroupConversationServiceTest {
         GroupReplyPlanItemMapper itemMapper = mock(GroupReplyPlanItemMapper.class);
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
         IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
         GroupConversationService service = new GroupConversationService(
                 conversationMapper,
                 memberMapper,
@@ -46,11 +48,14 @@ class GroupConversationServiceTest {
                 planMapper,
                 itemMapper,
                 worldService,
-                characterService);
+                characterService,
+                lockService);
         when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
                 new UserWorldPrefix().setId(1L).setWorldId(10L));
         when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
                 new UserCharacterInfo().setCharacterId(11L)));
+        when(lockService.tryWorldLock(1L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         org.mockito.Mockito.doAnswer(invocation -> {
             ((GroupConversation) invocation.getArgument(0)).setId(7L);
             return 1;
@@ -65,6 +70,31 @@ class GroupConversationServiceTest {
         assertThat(result.getActiveReplyPlanId()).isNull();
         verify(planMapper, never()).insert(any(GroupReplyPlan.class));
         verify(itemMapper, never()).insert(any(GroupReplyPlanItem.class));
+        verify(lockService).unlock(any(GroupConversationLockService.OwnedLock.class));
+    }
+
+    @Test
+    void createRejectsWhileWorldSaveOrLoadOwnsWorldLock() {
+        GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
+        GroupConversationService service = new GroupConversationService(
+                conversationMapper,
+                mock(GroupChatMemberMapper.class),
+                mock(GroupChatMessageMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                mock(IUserWorldPrefixService.class),
+                mock(IUserCharacterInfoService.class),
+                lockService);
+        GroupConversationCreateDTO request = new GroupConversationCreateDTO();
+        request.setUserWorldId(1L);
+        request.setCharacterIds(List.of(11L));
+        when(lockService.tryWorldLock(1L)).thenReturn(null);
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("存档或读档");
+        verify(conversationMapper, never()).insert(any(GroupConversation.class));
     }
 
     @Test
@@ -72,10 +102,13 @@ class GroupConversationServiceTest {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
         IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
         GroupConversationService service = new GroupConversationService(conversationMapper,
                 mock(GroupChatMemberMapper.class), mock(GroupChatMessageMapper.class),
                 mock(GroupReplyPlanMapper.class), mock(GroupReplyPlanItemMapper.class),
-                worldService, characterService);
+                worldService, characterService, lockService);
+        when(lockService.tryWorldLock(1L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
                 new UserWorldPrefix().setId(1L).setWorldId(10L));
         when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
@@ -96,7 +129,8 @@ class GroupConversationServiceTest {
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
         GroupConversationService service = new GroupConversationService(conversationMapper,
                 mock(GroupChatMemberMapper.class), messageMapper, mock(GroupReplyPlanMapper.class),
-                mock(GroupReplyPlanItemMapper.class), worldService, mock(IUserCharacterInfoService.class));
+                mock(GroupReplyPlanItemMapper.class), worldService, mock(IUserCharacterInfoService.class),
+                mock(GroupConversationLockService.class));
         LocalDateTime messageTime = LocalDateTime.of(2026, 7, 14, 10, 30);
         GroupConversation first = new GroupConversation().setId(2L).setUserWorldId(1L).setTitle("调查");
         GroupConversation second = new GroupConversation().setId(1L).setUserWorldId(1L).setTitle("闲聊");

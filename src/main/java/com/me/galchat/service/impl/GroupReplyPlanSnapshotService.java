@@ -2,6 +2,7 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.GroupReplyPlanDTO;
 import com.me.galchat.domain.dto.UserWorldSaveSnapshotDTO;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
@@ -13,13 +14,17 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +33,7 @@ public class GroupReplyPlanSnapshotService {
     private final GroupConversationMapper conversationMapper;
     private final GroupReplyPlanMapper planMapper;
     private final GroupReplyPlanItemMapper itemMapper;
+    private final GroupReplyPlanService replyPlanService;
 
     public List<UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot> capture(Long userWorldId) {
         List<GroupConversation> conversations = conversationMapper.selectList(
@@ -48,23 +54,36 @@ public class GroupReplyPlanSnapshotService {
     public void restore(
             Long userWorldId,
             List<UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot> snapshots) {
+        List<ValidatedSnapshot> validatedSnapshots = new ArrayList<>();
+        Set<Long> conversationIds = new HashSet<>();
         for (UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot snapshot : safe(snapshots)) {
             if (snapshot == null || snapshot.getConversationId() == null) {
                 throw new UserRequestException("群聊回复计划存档缺少conversationId");
+            }
+            if (!conversationIds.add(snapshot.getConversationId())) {
+                throw new UserRequestException("群聊回复计划存档包含重复conversationId");
             }
             GroupConversation conversation = conversationMapper.selectById(snapshot.getConversationId());
             if (conversation == null || !Objects.equals(conversation.getUserWorldId(), userWorldId)) {
                 throw new UserRequestException("群聊回复计划存档不属于当前用户世界");
             }
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot activeSnapshot = snapshot.getActivePlan();
+            if (activeSnapshot != null) {
+                replyPlanService.validateStructure(conversation, toPlanDTO(activeSnapshot));
+                UserWorldSaveSnapshotDTO.ReplyPlanSnapshot resumeSnapshot = activeSnapshot.getResumePlan();
+                validateResume(conversation, activeSnapshot, resumeSnapshot);
+            }
+            validatedSnapshots.add(new ValidatedSnapshot(conversation, activeSnapshot));
+        }
+
+        for (ValidatedSnapshot validated : validatedSnapshots) {
+            GroupConversation conversation = validated.conversation();
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot activeSnapshot = validated.activeSnapshot();
             clearCurrentPlans(conversation.getId());
 
-            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot activeSnapshot = snapshot.getActivePlan();
             Long activePlanId = null;
             if (activeSnapshot != null) {
                 UserWorldSaveSnapshotDTO.ReplyPlanSnapshot resumeSnapshot = activeSnapshot.getResumePlan();
-                if (resumeSnapshot != null && resumeSnapshot.getResumePlan() != null) {
-                    throw new UserRequestException("第一版不支持嵌套战斗回复计划存档");
-                }
                 Long resumePlanId = resumeSnapshot == null
                         ? null : insertPlan(conversation.getId(), resumeSnapshot, null);
                 activePlanId = insertPlan(conversation.getId(), activeSnapshot, resumePlanId);
@@ -76,6 +95,52 @@ public class GroupReplyPlanSnapshotService {
                     .setUpdatedAt(LocalDateTime.now());
             conversationMapper.updateById(conversation);
         }
+    }
+
+    private void validateResume(
+            GroupConversation conversation,
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot activeSnapshot,
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot resumeSnapshot) {
+        if (resumeSnapshot == null) {
+            return;
+        }
+        if (resumeSnapshot.getResumePlan() != null) {
+            throw new UserRequestException("第一版不支持嵌套战斗回复计划存档");
+        }
+        if (!GroupChatConstant.PLAN_SOURCE_COMBAT.equalsIgnoreCase(activeSnapshot.getSource())) {
+            throw new UserRequestException("只有战斗回复计划可以携带恢复计划");
+        }
+        if (!GroupChatConstant.PLAN_SOURCE_SCENE.equalsIgnoreCase(resumeSnapshot.getSource())) {
+            throw new UserRequestException("战斗回复计划只能恢复探索回复计划");
+        }
+        replyPlanService.validateStructure(conversation, toPlanDTO(resumeSnapshot));
+    }
+
+    private GroupReplyPlanDTO toPlanDTO(UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot) {
+        GroupReplyPlanDTO dto = new GroupReplyPlanDTO();
+        dto.setSource(snapshot.getSource());
+        dto.setContextId(snapshot.getContextId());
+        dto.setGroups(safe(snapshot.getGroups()).stream().map(groupSnapshot -> {
+            if (groupSnapshot == null) {
+                return (GroupReplyPlanDTO.Group) null;
+            }
+            GroupReplyPlanDTO.Group group = new GroupReplyPlanDTO.Group();
+            group.setKey(groupSnapshot.getKey());
+            group.setName(groupSnapshot.getName());
+            group.setOrder(groupSnapshot.getOrder());
+            group.setItems(safe(groupSnapshot.getItems()).stream().map(itemSnapshot -> {
+                if (itemSnapshot == null) {
+                    return (GroupReplyPlanDTO.Item) null;
+                }
+                GroupReplyPlanDTO.Item item = new GroupReplyPlanDTO.Item();
+                item.setOrder(itemSnapshot.getOrder());
+                item.setActorType(itemSnapshot.getActorType());
+                item.setActorId(itemSnapshot.getActorId());
+                return item;
+            }).toList());
+            return group;
+        }).toList());
+        return dto;
     }
 
     private UserWorldSaveSnapshotDTO.ReplyPlanSnapshot captureActivePlan(GroupConversation conversation) {
@@ -151,21 +216,28 @@ public class GroupReplyPlanSnapshotService {
         LocalDateTime now = LocalDateTime.now();
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setConversationId(conversationId)
-                .setSource(snapshot.getSource())
+                .setSource(snapshot.getSource().trim().toUpperCase(Locale.ROOT))
                 .setContextId(snapshot.getContextId())
                 .setResumePlanId(resumePlanId)
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         planMapper.insert(plan);
-        for (UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot group : safe(snapshot.getGroups())) {
-            for (UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot item : safe(group.getItems())) {
+        List<UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot> groups = safe(snapshot.getGroups());
+        for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
+            UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot group = groups.get(groupIndex);
+            String groupKey = group.getKey().trim();
+            List<UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot> items = safe(group.getItems());
+            for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
+                UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot item = items.get(itemIndex);
                 itemMapper.insert(new GroupReplyPlanItem()
                         .setPlanId(plan.getId())
-                        .setGroupKey(group.getKey())
-                        .setGroupName(group.getName())
-                        .setGroupOrder(group.getOrder())
-                        .setItemOrder(item.getOrder())
-                        .setActorType(item.getActorType())
+                        .setGroupKey(groupKey)
+                        .setGroupName(StringUtils.hasText(group.getName()) ? group.getName().trim() : groupKey)
+                        .setGroupOrder(group.getOrder() == null ? groupIndex + 1 : group.getOrder())
+                        .setItemOrder(item.getOrder() == null ? itemIndex + 1 : item.getOrder())
+                        .setActorType(StringUtils.hasText(item.getActorType())
+                                ? item.getActorType().trim().toLowerCase(Locale.ROOT)
+                                : GroupChatConstant.ACTOR_CHARACTER)
                         .setActorId(item.getActorId())
                         .setCreatedAt(now)
                         .setUpdatedAt(now));
@@ -184,5 +256,10 @@ public class GroupReplyPlanSnapshotService {
 
     private <T> List<T> safe(List<T> values) {
         return values == null ? List.of() : values;
+    }
+
+    private record ValidatedSnapshot(
+            GroupConversation conversation,
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot activeSnapshot) {
     }
 }

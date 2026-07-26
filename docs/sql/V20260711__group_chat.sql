@@ -1,4 +1,6 @@
 -- 群聊与跑团会话数据库迁移。当前项目未启用 Flyway，请在部署前手动执行一次。
+-- 注意：回复计划快照改造不兼容旧群聊数据。已有环境必须先重建本文件涉及的群聊表；
+-- 下方 CREATE TABLE IF NOT EXISTS 只描述当前结构，不会把旧表自动升级为新结构。
 
 CREATE TABLE IF NOT EXISTS group_conversation (
     id BIGSERIAL PRIMARY KEY,

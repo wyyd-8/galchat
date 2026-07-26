@@ -68,6 +68,7 @@ class GroupConversationLifecycleServiceTest {
                 .setTitle("地下医院")
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
+        when(conversationService.requireActive(7L)).thenReturn(conversation);
         when(conversationService.listMembers(7L)).thenReturn(List.of(
                 new GroupChatMember().setActorId(11L), new GroupChatMember().setActorId(12L)));
         when(lockService.tryLock(7L)).thenReturn(
@@ -119,8 +120,10 @@ class GroupConversationLifecycleServiceTest {
                 recoveryService,
                 summaryClient,
                 mock(TransactionTemplate.class));
-        when(conversationService.requireAuthorized(7L)).thenReturn(
-                new GroupConversation().setId(7L).setStatus(GroupChatConstant.STATUS_ACTIVE));
+        GroupConversation conversation =
+                new GroupConversation().setId(7L).setStatus(GroupChatConstant.STATUS_ACTIVE);
+        when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
+        when(conversationService.requireActive(7L)).thenReturn(conversation);
         when(lockService.tryLock(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         doThrow(new UserRequestException("存在未完成的群聊轮次"))

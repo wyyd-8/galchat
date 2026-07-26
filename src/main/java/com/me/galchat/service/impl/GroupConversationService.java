@@ -22,6 +22,8 @@ import com.me.galchat.service.IUserWorldPrefixService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -44,6 +46,7 @@ public class GroupConversationService {
     private final GroupReplyPlanItemMapper replyPlanItemMapper;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IUserCharacterInfoService userCharacterInfoService;
+    private final GroupConversationLockService lockService;
 
     @Transactional(rollbackFor = Exception.class)
     public GroupConversation create(GroupConversationCreateDTO dto) {
@@ -55,7 +58,31 @@ public class GroupConversationService {
         if (!GroupChatConstant.MODE_CHAT.equals(mode) && !GroupChatConstant.MODE_TRPG.equals(mode)) {
             throw new UserRequestException("群聊模式仅支持chat或trpg");
         }
-        return createConversation(dto.getUserWorldId(), mode, dto.getTitle(), dto.getCharacterIds());
+        GroupConversationLockService.OwnedLock worldLock = lockService.tryWorldLock(dto.getUserWorldId());
+        if (worldLock == null) {
+            throw new UserRequestException("当前世界正在存档或读档，请稍后再创建群聊");
+        }
+        boolean unlockAfterTransaction = registerUnlockAfterTransaction(worldLock);
+        try {
+            return createConversation(dto.getUserWorldId(), mode, dto.getTitle(), dto.getCharacterIds());
+        } finally {
+            if (!unlockAfterTransaction) {
+                lockService.unlock(worldLock);
+            }
+        }
+    }
+
+    private boolean registerUnlockAfterTransaction(GroupConversationLockService.OwnedLock worldLock) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return false;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                lockService.unlock(worldLock);
+            }
+        });
+        return true;
     }
 
     private GroupConversation createConversation(Long userWorldId, String mode, String title,

@@ -73,20 +73,21 @@ public class GroupConversationLifecycleService {
     }
 
     public GroupConversation close(Long conversationId) {
-        GroupConversation conversation = conversationService.requireAuthorized(conversationId);
+        conversationService.requireAuthorized(conversationId);
         GroupConversationLockService.OwnedLock lock = lockService.tryLock(conversationId);
         if (lock == null) {
             throw new UserRequestException("群聊正在生成回复，请稍后再结束");
         }
         try {
+            GroupConversation lockedConversation = conversationService.requireActive(conversationId);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             List<GroupChatMessage> messages = completedMessages(conversationId);
-            if (GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
-                topicService.flushOpenTopics(conversation);
+            if (GroupChatConstant.MODE_CHAT.equals(lockedConversation.getMode())) {
+                topicService.flushOpenTopics(lockedConversation);
             }
-            String summary = generateSummary(conversation, messages);
+            String summary = generateSummary(lockedConversation, messages);
             GroupConversation result = transactionTemplate.execute(status ->
-                    saveFinalSummary(conversation, messages, summary));
+                    saveFinalSummary(lockedConversation, messages, summary));
             saveWorldEvent(result, summary);
             return result;
         } finally {

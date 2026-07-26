@@ -21,6 +21,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GroupReplyPlanSnapshotServiceTest {
@@ -31,7 +33,8 @@ class GroupReplyPlanSnapshotServiceTest {
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         GroupReplyPlanItemMapper itemMapper = mock(GroupReplyPlanItemMapper.class);
         GroupReplyPlanSnapshotService service =
-                new GroupReplyPlanSnapshotService(conversationMapper, planMapper, itemMapper);
+                new GroupReplyPlanSnapshotService(conversationMapper, planMapper, itemMapper,
+                        mock(GroupReplyPlanService.class));
         GroupConversation conversation = activeConversation(20L);
         GroupReplyPlan combat = plan(20L, GroupChatConstant.PLAN_SOURCE_COMBAT, 200L, 10L);
         GroupReplyPlan scene = plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, 100L, null);
@@ -64,9 +67,12 @@ class GroupReplyPlanSnapshotServiceTest {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         GroupReplyPlanItemMapper itemMapper = mock(GroupReplyPlanItemMapper.class);
+        GroupReplyPlanService replyPlanService = mock(GroupReplyPlanService.class);
         GroupReplyPlanSnapshotService service =
-                new GroupReplyPlanSnapshotService(conversationMapper, planMapper, itemMapper);
+                new GroupReplyPlanSnapshotService(conversationMapper, planMapper, itemMapper,
+                        replyPlanService);
         GroupConversation conversation = activeConversation(99L)
+                .setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_CLOSED)
                 .setClosedAt(LocalDateTime.now());
         when(conversationMapper.selectById(7L)).thenReturn(conversation);
@@ -104,7 +110,8 @@ class GroupReplyPlanSnapshotServiceTest {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         GroupReplyPlanSnapshotService service = new GroupReplyPlanSnapshotService(
-                conversationMapper, planMapper, mock(GroupReplyPlanItemMapper.class));
+                conversationMapper, planMapper, mock(GroupReplyPlanItemMapper.class),
+                mock(GroupReplyPlanService.class));
         when(conversationMapper.selectList(any())).thenReturn(List.of(activeConversation(30L)));
         when(planMapper.selectById(30L))
                 .thenReturn(plan(30L, GroupChatConstant.PLAN_SOURCE_COMBAT, 300L, 20L));
@@ -114,6 +121,31 @@ class GroupReplyPlanSnapshotServiceTest {
         assertThatThrownBy(() -> service.capture(1L))
                 .isInstanceOf(UserRequestException.class)
                 .hasMessageContaining("嵌套");
+    }
+
+    @Test
+    void restoreValidatesEntireSnapshotBeforeDeletingCurrentPlans() {
+        GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper = mock(GroupReplyPlanItemMapper.class);
+        GroupReplyPlanService replyPlanService = mock(GroupReplyPlanService.class);
+        GroupReplyPlanSnapshotService service = new GroupReplyPlanSnapshotService(
+                conversationMapper, planMapper, itemMapper, replyPlanService);
+        GroupConversation conversation = activeConversation(99L).setMode(GroupChatConstant.MODE_TRPG);
+        when(conversationMapper.selectById(7L)).thenReturn(conversation);
+        UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot snapshot =
+                new UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot()
+                        .setConversationId(7L)
+                        .setActivePlan(planSnapshot(
+                                GroupChatConstant.PLAN_SOURCE_USER, null, "default", "群聊", 9L));
+        org.mockito.Mockito.doThrow(new UserRequestException("TRPG群聊不支持USER回复计划"))
+                .when(replyPlanService).validateStructure(any(GroupConversation.class), any());
+
+        assertThatThrownBy(() -> service.restore(1L, List.of(snapshot)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("USER");
+        verify(planMapper, never()).delete(any());
+        verify(itemMapper, never()).delete(any());
     }
 
     private GroupConversation activeConversation(Long activePlanId) {

@@ -42,6 +42,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -296,6 +297,48 @@ class GroupChatServiceTest {
                 GroupChatConstant.STATUS_STREAMING.equals(message.getStatus())));
         verify(recoveryService).cancelPendingSteps(201L, "context failed");
         verify(contextPolicy, never()).load(conversation, secondAction);
+    }
+
+    @Test
+    void completedTurnCannotBeRegressedToCancelled() {
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatService service = new GroupChatService(
+                mock(GroupConversationService.class),
+                mock(GroupConversationLockService.class),
+                mock(GroupReplyPlanService.class),
+                mock(GroupRuntimeRegistry.class),
+                mock(GroupChatMessageMapper.class),
+                turnMapper,
+                mock(GroupChatReplyStepMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                mock(TransactionTemplate.class));
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(7L)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        when(turnMapper.update(any(GroupChatTurn.class), any())).thenReturn(1);
+
+        service.completeTurn(turn);
+        service.cancelTurn(turn);
+
+        assertThat(turn.getStatus()).isEqualTo(GroupChatConstant.STATUS_COMPLETED);
+        verify(turnMapper).update(any(GroupChatTurn.class), any());
+    }
+
+    @Test
+    void failedFinalizationCanBeRetried() {
+        GroupChatService.FinalizationGuard guard = new GroupChatService.FinalizationGuard();
+        AtomicInteger attempts = new AtomicInteger();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> guard.run(() -> {
+            attempts.incrementAndGet();
+            throw new IllegalStateException("database failed");
+        })).isInstanceOf(IllegalStateException.class);
+        guard.run(attempts::incrementAndGet);
+        guard.run(attempts::incrementAndGet);
+
+        assertThat(attempts.get()).isEqualTo(2);
     }
 
     private GroupReplyPlanItem planItem(Long id, Long actorId, int order) {

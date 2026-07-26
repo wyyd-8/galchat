@@ -90,4 +90,9 @@ public class GroupChatController {
     public Result finishReplyPlan(@PathVariable Long conversationId) {
         return Result.success(replyPlanService.finishActive(conversationId));
     }
+
+    @PostMapping("/conversations/{conversationId}/reply-plan/advance")
+    public Result advanceReplyPlan(@PathVariable Long conversationId) {
+        return Result.success(replyPlanService.advanceGroup(conversationId));
+    }
 }

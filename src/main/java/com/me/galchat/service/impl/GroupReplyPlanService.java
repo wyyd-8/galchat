@@ -51,7 +51,7 @@ public class GroupReplyPlanService {
 
     public GroupReplyPlanVO replace(Long conversationId, GroupReplyPlanDTO request) {
         GroupConversation conversation = conversationService.requireActive(conversationId);
-        validate(request);
+        validate(conversation, request);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
             return transactionTemplate.execute(status -> replaceLocked(conversation, request));
@@ -67,19 +67,21 @@ public class GroupReplyPlanService {
             return transactionTemplate.execute(status -> {
                 GroupReplyPlan active = activePlan(conversation);
                 if (active == null) {
-                    return toVO(createDefaultPlan(conversation));
+                    return GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
+                            ? toVO(createDefaultPlan(conversation)) : null;
                 }
-                Long resumePlanId = active.getResumePlanId();
-                itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
-                        .eq(GroupReplyPlanItem::getPlanId, active.getId()));
-                planMapper.deleteById(active.getId());
-                if (resumePlanId != null) {
-                    conversation.setActiveReplyPlanId(resumePlanId).setUpdatedAt(LocalDateTime.now());
-                    conversationMapper.updateById(conversation);
-                    return toVO(planMapper.selectById(resumePlanId));
-                }
-                return toVO(createDefaultPlan(conversation));
+                return finishLocked(conversation, active);
             });
+        } finally {
+            lockService.unlock(lock);
+        }
+    }
+
+    public GroupReplyPlanVO advanceGroup(Long conversationId) {
+        GroupConversation conversation = conversationService.requireActive(conversationId);
+        GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
+        try {
+            return transactionTemplate.execute(status -> advanceLocked(conversation));
         } finally {
             lockService.unlock(lock);
         }
@@ -229,6 +231,49 @@ public class GroupReplyPlanService {
         return toVO(plan);
     }
 
+    private GroupReplyPlanVO advanceLocked(GroupConversation conversation) {
+        GroupReplyPlan active = activePlan(conversation);
+        if (active == null) {
+            throw new UserRequestException("当前群聊没有可推进的回复计划");
+        }
+        if (GroupChatConstant.PLAN_SOURCE_USER.equals(active.getSource())) {
+            throw new UserRequestException("USER回复计划不支持推进分组");
+        }
+        List<GroupReplyPlanItem> ordered = orderedItems(active.getId());
+        if (ordered.isEmpty()) {
+            return finishLocked(conversation, active);
+        }
+        String currentGroupKey = ordered.getFirst().getGroupKey();
+        itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
+                .eq(GroupReplyPlanItem::getPlanId, active.getId())
+                .eq(GroupReplyPlanItem::getGroupKey, currentGroupKey));
+        List<GroupReplyPlanItem> remaining = ordered.stream()
+                .filter(item -> !currentGroupKey.equals(item.getGroupKey()))
+                .toList();
+        if (!remaining.isEmpty()) {
+            return toVO(active, remaining);
+        }
+        return finishLocked(conversation, active);
+    }
+
+    private GroupReplyPlanVO finishLocked(GroupConversation conversation, GroupReplyPlan active) {
+        itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
+                .eq(GroupReplyPlanItem::getPlanId, active.getId()));
+        planMapper.deleteById(active.getId());
+        if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())) {
+            Long resumePlanId = active.getResumePlanId();
+            conversation.setActiveReplyPlanId(resumePlanId).setUpdatedAt(LocalDateTime.now());
+            conversationMapper.updateById(conversation);
+            return resumePlanId == null ? null : toVO(planMapper.selectById(resumePlanId));
+        }
+        if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(active.getSource())) {
+            conversation.setActiveReplyPlanId(null).setUpdatedAt(LocalDateTime.now());
+            conversationMapper.updateById(conversation);
+            return null;
+        }
+        return toVO(createDefaultPlan(conversation));
+    }
+
     private void insertItems(Long planId, List<GroupReplyPlanDTO.Group> groups, LocalDateTime now) {
         for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
             GroupReplyPlanDTO.Group group = groups.get(groupIndex);
@@ -293,7 +338,10 @@ public class GroupReplyPlanService {
         if (plan == null) {
             return null;
         }
-        List<GroupReplyPlanItem> items = orderedItems(plan.getId());
+        return toVO(plan, orderedItems(plan.getId()));
+    }
+
+    private GroupReplyPlanVO toVO(GroupReplyPlan plan, List<GroupReplyPlanItem> items) {
         Map<String, List<GroupReplyPlanItem>> grouped = new LinkedHashMap<>();
         for (GroupReplyPlanItem item : items) {
             grouped.computeIfAbsent(item.getGroupKey(), ignored -> new ArrayList<>()).add(item);
@@ -324,13 +372,24 @@ public class GroupReplyPlanService {
         itemMapper.updateById(item);
     }
 
-    private void validate(GroupReplyPlanDTO request) {
+    private void validate(GroupConversation conversation, GroupReplyPlanDTO request) {
         if (request == null || !StringUtils.hasText(request.getSource())) {
             throw new UserRequestException("回复计划来源不能为空");
         }
         String source = request.getSource().trim().toUpperCase(Locale.ROOT);
         if (!SOURCES.contains(source)) {
             throw new UserRequestException("回复计划来源仅支持USER、SCENE或COMBAT");
+        }
+        if (GroupChatConstant.MODE_TRPG.equals(conversation.getMode())
+                && GroupChatConstant.PLAN_SOURCE_USER.equals(source)) {
+            throw new UserRequestException("TRPG群聊不支持USER回复计划");
+        }
+        if (GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
+                && !GroupChatConstant.PLAN_SOURCE_USER.equals(source)) {
+            throw new UserRequestException("普通群聊不支持SCENE或COMBAT回复计划");
+        }
+        if (!GroupChatConstant.PLAN_SOURCE_USER.equals(source) && request.getContextId() == null) {
+            throw new UserRequestException("SCENE或COMBAT回复计划的contextId不能为空");
         }
         if (CollectionUtils.isEmpty(request.getGroups())) {
             throw new UserRequestException("回复计划分组不能为空");
@@ -344,6 +403,10 @@ public class GroupReplyPlanService {
             if (!groupKeys.add(group.getKey().trim())) {
                 throw new UserRequestException("回复计划分组key不能重复");
             }
+            if (group.getItems().size() > GroupChatConstant.MAX_REPLY_STEPS) {
+                throw new UserRequestException("单个回复计划分组人物数量不能超过"
+                        + GroupChatConstant.MAX_REPLY_STEPS);
+            }
             count += group.getItems().size();
             Set<String> actors = new HashSet<>();
             for (GroupReplyPlanDTO.Item item : group.getItems()) {
@@ -356,6 +419,8 @@ public class GroupReplyPlanService {
                 if (!actors.add(actorType + "\n" + item.getActorId())) {
                     throw new UserRequestException("同一分组中不能重复安排同一人物");
                 }
+                conversationService.checkReplyMember(
+                        conversation.getId(), actorType, item.getActorId(), false);
             }
         }
         if (count > 200) {

@@ -58,6 +58,10 @@ Turn；Turn 完成不会自动推进分组。只有场景或战斗控制器明�
 进入战斗时创建 Combat Plan，并将当前探索 Plan 记录为 `resumePlan`。探索 Plan
 及其尚未推进的当前分组保持不变，战斗结束后可以准确恢复。
 
+推进最后一个 Scene 分组后，清除 Active Plan，后续发送消息会被拒绝，直到场景控制器
+设置新的 Scene Plan。推进最后一个 Combat 分组后，结束 Combat Plan 并恢复 Resume
+Plan。USER Plan 不支持 `advanceGroup`。
+
 ### GroupChatTurn
 
 `GroupChatTurn` 同时作为一次用户轮和该轮计划快照的头部。现有 `policy` 字段重命名为
@@ -195,6 +199,7 @@ conversationPlans[]
 存档 JSON 不保存 Plan、PlanItem 的数据库主键、时间戳或执行状态。
 分组数组只保存存档时仍在 Plan 中的当前分组和后续分组；已经通过 `advanceGroup`
 移除的分组不会恢复。
+未结束但正处于场景间隙的群聊允许 `activePlan` 为空，仍需在存档中保留该群聊条目。
 
 存档时：
 
@@ -209,13 +214,14 @@ conversationPlans[]
 
 读档时：
 
-1. 获取相关群聊锁并确认没有非终态 Turn。
+1. 获取“当前未结束群聊”和“存档所含群聊”的并集锁，并确认没有非终态 Turn。
 2. 按现有规则回滚存档点之后的消息、Turn、ReplyStep 和派生数据。
 3. 清除这些群聊当前的 Plan 和 PlanItem。
 4. 对每个 Plan 快照先重建 Resume Plan，再重建 Active Plan。
 5. 使用新生成的数据库主键连接 `resumePlanId`。
 6. 更新 `group_conversation.activeReplyPlanId`。
-7. 对存档时未结束、之后被关闭的群聊，恢复为 `ACTIVE` 并清除 `closedAt`。
+7. 对存档时未结束、之后被关闭的群聊，恢复为 `ACTIVE` 并清除 `closedAt`；即使
+   `activePlan` 为空也同样恢复。
 
 由此可得到以下行为：
 
@@ -238,7 +244,8 @@ Plan 和 PlanItem，不读取 Turn 状态，也不会由 Turn 完成自动触发
 分组、顺序和角色信息。前端展示的 `pending/running/completed` 来自本轮 ReplyStep，
 而不是 PlanItem。
 
-删除普通或 Scene Plan 后恢复默认 USER Plan；删除 Combat Plan 后恢复 Resume Plan。
+删除普通群聊的 USER Plan 后恢复默认 USER Plan；删除 Scene Plan 后保持无 Plan，
+等待场景控制器设置下一份 Scene Plan；删除 Combat Plan 后恢复 Resume Plan。
 这些操作只影响下一次发送消息。
 
 ## 约束与校验

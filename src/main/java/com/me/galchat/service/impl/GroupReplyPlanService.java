@@ -42,6 +42,7 @@ public class GroupReplyPlanService {
     private final GroupConversationMapper conversationMapper;
     private final GroupReplyPlanMapper planMapper;
     private final GroupReplyPlanItemMapper itemMapper;
+    private final GroupTurnRecoveryService recoveryService;
     private final TransactionTemplate transactionTemplate;
 
     public GroupReplyPlanVO getActive(Long conversationId) {
@@ -54,6 +55,7 @@ public class GroupReplyPlanService {
         validate(conversation, request);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
+            recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> replaceLocked(conversation, request));
         } finally {
             lockService.unlock(lock);
@@ -64,6 +66,7 @@ public class GroupReplyPlanService {
         GroupConversation conversation = conversationService.requireActive(conversationId);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
+            recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> {
                 GroupReplyPlan active = activePlan(conversation);
                 if (active == null) {
@@ -81,29 +84,11 @@ public class GroupReplyPlanService {
         GroupConversation conversation = conversationService.requireActive(conversationId);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
+            recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> advanceLocked(conversation));
         } finally {
             lockService.unlock(lock);
         }
-    }
-
-    /** Caller must hold the conversation lock. */
-    public List<GroupReplyPlanItem> pendingItemsForExecution(GroupConversation conversation) {
-        GroupReplyPlan plan = activePlan(conversation);
-        if (plan == null) {
-            return List.of();
-        }
-        return itemMapper.selectList(new LambdaQueryWrapper<GroupReplyPlanItem>()
-                .eq(GroupReplyPlanItem::getPlanId, plan.getId())
-                .eq(GroupReplyPlanItem::getStatus, GroupChatConstant.STATUS_PENDING)
-                .orderByAsc(GroupReplyPlanItem::getGroupOrder)
-                .orderByAsc(GroupReplyPlanItem::getItemOrder)
-                .orderByAsc(GroupReplyPlanItem::getId));
-    }
-
-    public String activeSource(GroupConversation conversation) {
-        GroupReplyPlan plan = activePlan(conversation);
-        return plan == null ? GroupChatConstant.PLAN_SOURCE_USER : plan.getSource();
     }
 
     /** Caller must hold the conversation lock. */
@@ -127,18 +112,6 @@ public class GroupReplyPlanService {
                 first.getGroupName(),
                 first.getGroupOrder(),
                 current);
-    }
-
-    public void markRunning(GroupReplyPlanItem item) {
-        updateStatus(item, GroupChatConstant.STATUS_RUNNING);
-    }
-
-    public void markCompleted(GroupReplyPlanItem item) {
-        updateStatus(item, GroupChatConstant.STATUS_COMPLETED);
-    }
-
-    public void resetPending(GroupReplyPlanItem item) {
-        updateStatus(item, GroupChatConstant.STATUS_PENDING);
     }
 
     /** 计划不进入世界存档；读档后按当前群聊成员重建。调用方必须持有相关会话锁。 */
@@ -292,7 +265,6 @@ public class GroupReplyPlanService {
                         .setItemOrder(item.getOrder() == null ? itemIndex + 1 : item.getOrder())
                         .setActorType(actorType)
                         .setActorId(item.getActorId())
-                        .setStatus(GroupChatConstant.STATUS_PENDING)
                         .setCreatedAt(now)
                         .setUpdatedAt(now));
             }
@@ -320,7 +292,6 @@ public class GroupReplyPlanService {
                     .setItemOrder(order++)
                     .setActorType(member.getActorType())
                     .setActorId(member.getActorId())
-                    .setStatus(GroupChatConstant.STATUS_PENDING)
                     .setCreatedAt(now)
                     .setUpdatedAt(now));
         }
@@ -365,11 +336,6 @@ public class GroupReplyPlanService {
                 .orderByAsc(GroupReplyPlanItem::getGroupOrder)
                 .orderByAsc(GroupReplyPlanItem::getItemOrder)
                 .orderByAsc(GroupReplyPlanItem::getId));
-    }
-
-    private void updateStatus(GroupReplyPlanItem item, String status) {
-        item.setStatus(status).setUpdatedAt(LocalDateTime.now());
-        itemMapper.updateById(item);
     }
 
     private void validate(GroupConversation conversation, GroupReplyPlanDTO request) {

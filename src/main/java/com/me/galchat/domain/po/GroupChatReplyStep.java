@@ -17,10 +17,6 @@ public class GroupChatReplyStep implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
     private Long turnId;
-    /**
-     * Temporary migration bridge for withdrawal code. New Turns never persist this field.
-     */
-    private Long planItemId;
     private String groupKey;
     private String groupName;
     private Integer groupOrder;

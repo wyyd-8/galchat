@@ -23,7 +23,6 @@ public class GroupReplyPlanItem implements Serializable {
     private Integer itemOrder;
     private String actorType;
     private Long actorId;
-    private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

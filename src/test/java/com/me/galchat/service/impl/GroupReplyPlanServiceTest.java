@@ -89,8 +89,7 @@ class GroupReplyPlanServiceTest {
                 .setGroupOrder(1)
                 .setItemOrder(2)
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
-                .setActorId(9L)
-                .setStatus(GroupChatConstant.STATUS_PENDING)));
+                .setActorId(9L)));
 
         var result = fixture.service.finishActive(7L);
 
@@ -289,6 +288,20 @@ class GroupReplyPlanServiceTest {
     }
 
     @Test
+    void replaceRejectsNonTerminalTurnBeforeMutatingPlan() {
+        Fixture fixture = new Fixture();
+        when(fixture.conversationService.requireActive(7L))
+                .thenReturn(activeConversation(GroupChatConstant.MODE_CHAT, null));
+        org.mockito.Mockito.doThrow(new com.me.galchat.exception.UserRequestException("存在未完成的群聊轮次"))
+                .when(fixture.recoveryService).assertConversationHasNoNonTerminalTurns(7L);
+
+        assertThatThrownBy(() -> fixture.service.replace(7L, userRequest()))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessageContaining("未完成");
+        verify(fixture.planMapper, never()).insert(any(GroupReplyPlan.class));
+    }
+
+    @Test
     void finishingNormalPlanRestoresEnabledMemberOrder() {
         Fixture fixture = new Fixture();
         GroupConversation conversation = new GroupConversation()
@@ -369,8 +382,7 @@ class GroupReplyPlanServiceTest {
                 .setGroupOrder(groupOrder)
                 .setItemOrder(1)
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
-                .setActorId(actorId)
-                .setStatus(GroupChatConstant.STATUS_PENDING);
+                .setActorId(actorId);
     }
 
     private GroupChatMember member(Long actorId, boolean enabled) {
@@ -386,9 +398,10 @@ class GroupReplyPlanServiceTest {
         private final GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         private final GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         private final GroupReplyPlanItemMapper itemMapper = mock(GroupReplyPlanItemMapper.class);
+        private final GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         private final GroupReplyPlanService service = new GroupReplyPlanService(conversationService, lockService,
-                conversationMapper, planMapper, itemMapper, transactionTemplate);
+                conversationMapper, planMapper, itemMapper, recoveryService, transactionTemplate);
 
         private Fixture() {
             when(lockService.tryLock(7L)).thenReturn(

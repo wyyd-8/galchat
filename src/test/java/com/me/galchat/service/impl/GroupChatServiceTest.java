@@ -49,6 +49,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -188,9 +189,7 @@ class GroupChatServiceTest {
         verify(contextPolicy, times(2)).load(conversation, action);
         verify(agentPolicy, times(2)).prepare(conversation, action, context);
         verify(replyPlanService, times(2)).currentGroupForExecution(conversation);
-        verify(replyPlanService, never()).markRunning(any());
-        verify(replyPlanService, never()).markCompleted(any());
-        verify(replyPlanService, never()).resetPending(any());
+        verifyNoMoreInteractions(replyPlanService);
         var turnCaptor = org.mockito.ArgumentCaptor.forClass(GroupChatTurn.class);
         verify(turnMapper, times(2)).insert(turnCaptor.capture());
         assertThat(turnCaptor.getAllValues()).allSatisfy(turn -> assertThat(turn)

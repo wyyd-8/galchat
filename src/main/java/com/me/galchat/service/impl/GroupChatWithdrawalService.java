@@ -9,7 +9,6 @@ import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
-import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.context.GroupTopicService;
@@ -17,7 +16,6 @@ import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
-import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.UserCharacterFavorLogMapper;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -39,8 +37,7 @@ public class GroupChatWithdrawalService {
     private final GroupChatMessageMapper messageMapper;
     private final GroupChatReplyStepMapper stepMapper;
     private final GroupChatToolCallMapper toolCallMapper;
-    private final GroupReplyPlanItemMapper planItemMapper;
-    private final GroupReplyPlanService replyPlanService;
+    private final GroupTurnRecoveryService recoveryService;
     private final UserCharacterFavorLogMapper favorLogMapper;
     private final UserCharacterInfoMapper characterInfoMapper;
     private final StringRedisTemplate redisTemplate;
@@ -53,8 +50,7 @@ public class GroupChatWithdrawalService {
                                       GroupChatMessageMapper messageMapper,
                                       GroupChatReplyStepMapper stepMapper,
                                       GroupChatToolCallMapper toolCallMapper,
-                                      GroupReplyPlanItemMapper planItemMapper,
-                                      GroupReplyPlanService replyPlanService,
+                                      GroupTurnRecoveryService recoveryService,
                                       UserCharacterFavorLogMapper favorLogMapper,
                                       UserCharacterInfoMapper characterInfoMapper,
                                       StringRedisTemplate redisTemplate,
@@ -66,8 +62,7 @@ public class GroupChatWithdrawalService {
         this.messageMapper = messageMapper;
         this.stepMapper = stepMapper;
         this.toolCallMapper = toolCallMapper;
-        this.planItemMapper = planItemMapper;
-        this.replyPlanService = replyPlanService;
+        this.recoveryService = recoveryService;
         this.favorLogMapper = favorLogMapper;
         this.characterInfoMapper = characterInfoMapper;
         this.redisTemplate = redisTemplate;
@@ -85,6 +80,7 @@ public class GroupChatWithdrawalService {
             throw new UserRequestException("当前群聊正在生成回复，请稍后再撤回");
         }
         try {
+            recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             transactionTemplate.executeWithoutResult(status -> withdrawLocked(conversation));
         } finally {
             lockService.unlock(lock);
@@ -121,7 +117,6 @@ public class GroupChatWithdrawalService {
                 .eq(GroupChatMessage::getTurnId, turn.getId()));
         stepMapper.delete(new LambdaQueryWrapper<GroupChatReplyStep>()
                 .eq(GroupChatReplyStep::getTurnId, turn.getId()));
-        resetPlanItems(steps);
 
         if (trigger != null) {
             topicService.rollbackTurnBoundary(conversation, trigger.getSequenceNo());
@@ -159,16 +154,6 @@ public class GroupChatWithdrawalService {
                 .eq(UserCharacterFavorLog::getUserWorldId, userWorldId)
                 .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.GROUP_REPLY_STEP)
                 .in(UserCharacterFavorLog::getBindingChat, stepIds));
-    }
-
-    private void resetPlanItems(List<GroupChatReplyStep> steps) {
-        steps.stream()
-                .map(GroupChatReplyStep::getPlanItemId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .map(planItemMapper::selectById)
-                .filter(Objects::nonNull)
-                .forEach(replyPlanService::resetPending);
     }
 
     static WithdrawCandidate selectWithdrawCandidate(List<GroupChatTurn> recentTurns) {

@@ -14,6 +14,7 @@ import com.me.galchat.mapper.WorldEventLogMapper;
 import com.me.galchat.model.DeepSeekChatModel;
 import com.me.galchat.service.IWorldEventLogService;
 import com.me.galchat.vector.WorldEventVectorService;
+import com.me.galchat.exception.UserRequestException;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
 import org.springframework.ai.chat.client.ChatClient;
@@ -28,9 +29,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,13 +52,14 @@ class GroupConversationLifecycleServiceTest {
         WorldEventLogMapper eventLogMapper = mock(WorldEventLogMapper.class);
         WorldEventVectorService eventVectorService = mock(WorldEventVectorService.class);
         GroupTopicService topicService = mock(GroupTopicService.class);
+        GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         DeepSeekChatModel summaryModel = mock(DeepSeekChatModel.class);
         ChatClient summaryClient = ChatClient.builder(summaryModel).build();
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         GroupConversationLifecycleService service = new GroupConversationLifecycleService(conversationService,
                 lockService, conversationMapper, replyPlanService, messageMapper, summaryMapper,
                 eventLogService, eventLogMapper,
-                eventVectorService, topicService, summaryClient, transactionTemplate);
+                eventVectorService, topicService, recoveryService, summaryClient, transactionTemplate);
 
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
@@ -92,6 +97,39 @@ class GroupConversationLifecycleServiceTest {
         verify(eventVectorService).addWorldEventLog(eventCaptor.getValue());
         verify(replyPlanService).clearConversationPlans(conversation);
         verify(topicService).flushOpenTopics(conversation);
+    }
+
+    @Test
+    void closeRejectsNonTerminalTurnBeforeGeneratingSummary() {
+        GroupConversationService conversationService = mock(GroupConversationService.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
+        GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
+        ChatClient summaryClient = mock(ChatClient.class);
+        GroupConversationLifecycleService service = new GroupConversationLifecycleService(
+                conversationService,
+                lockService,
+                mock(GroupConversationMapper.class),
+                mock(GroupReplyPlanService.class),
+                mock(GroupChatMessageMapper.class),
+                mock(GroupContextSummaryMapper.class),
+                mock(IWorldEventLogService.class),
+                mock(WorldEventLogMapper.class),
+                mock(WorldEventVectorService.class),
+                mock(GroupTopicService.class),
+                recoveryService,
+                summaryClient,
+                mock(TransactionTemplate.class));
+        when(conversationService.requireAuthorized(7L)).thenReturn(
+                new GroupConversation().setId(7L).setStatus(GroupChatConstant.STATUS_ACTIVE));
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        doThrow(new UserRequestException("存在未完成的群聊轮次"))
+                .when(recoveryService).assertConversationHasNoNonTerminalTurns(7L);
+
+        assertThatThrownBy(() -> service.close(7L))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("未完成");
+        verify(summaryClient, never()).prompt(any(Prompt.class));
     }
 
     private GroupChatMessage message(Long sequence, String type, Long id, String content) {

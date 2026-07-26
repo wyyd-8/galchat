@@ -59,7 +59,6 @@ CREATE TABLE IF NOT EXISTS group_reply_plan_item (
     item_order INT NOT NULL,
     actor_type VARCHAR(50) NOT NULL,
     actor_id BIGINT NOT NULL,
-    status VARCHAR(20) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -84,7 +83,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_turn_request
 CREATE TABLE IF NOT EXISTS group_chat_reply_step (
     id BIGSERIAL PRIMARY KEY,
     turn_id BIGINT NOT NULL,
-    plan_item_id BIGINT,
     group_key VARCHAR(100) NOT NULL,
     group_name VARCHAR(200) NOT NULL,
     group_order INT NOT NULL,

@@ -40,6 +40,7 @@ public class GroupConversationLifecycleService {
     private final WorldEventLogMapper worldEventLogMapper;
     private final WorldEventVectorService worldEventVectorService;
     private final GroupTopicService topicService;
+    private final GroupTurnRecoveryService recoveryService;
     private final ChatClient summaryClient;
     private final TransactionTemplate transactionTemplate;
 
@@ -53,6 +54,7 @@ public class GroupConversationLifecycleService {
                                              WorldEventLogMapper worldEventLogMapper,
                                              WorldEventVectorService worldEventVectorService,
                                              GroupTopicService topicService,
+                                             GroupTurnRecoveryService recoveryService,
                                              @Qualifier("groupNonThinkingChatClient") ChatClient summaryClient,
                                              TransactionTemplate transactionTemplate) {
         this.conversationService = conversationService;
@@ -65,6 +67,7 @@ public class GroupConversationLifecycleService {
         this.worldEventLogMapper = worldEventLogMapper;
         this.worldEventVectorService = worldEventVectorService;
         this.topicService = topicService;
+        this.recoveryService = recoveryService;
         this.summaryClient = summaryClient;
         this.transactionTemplate = transactionTemplate;
     }
@@ -76,6 +79,7 @@ public class GroupConversationLifecycleService {
             throw new UserRequestException("群聊正在生成回复，请稍后再结束");
         }
         try {
+            recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             List<GroupChatMessage> messages = completedMessages(conversationId);
             if (GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
                 topicService.flushOpenTopics(conversation);

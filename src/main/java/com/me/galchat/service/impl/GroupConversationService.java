@@ -112,7 +112,6 @@ public class GroupConversationService {
                     .setItemOrder(i + 1)
                     .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                     .setActorId(characterIds.get(i))
-                    .setStatus(GroupChatConstant.STATUS_PENDING)
                     .setCreatedAt(now)
                     .setUpdatedAt(now));
         }

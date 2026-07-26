@@ -58,13 +58,14 @@ public class GroupConversationService {
         if (!GroupChatConstant.MODE_CHAT.equals(mode) && !GroupChatConstant.MODE_TRPG.equals(mode)) {
             throw new UserRequestException("群聊模式仅支持chat或trpg");
         }
+        UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(dto.getUserWorldId(), true);
         GroupConversationLockService.OwnedLock worldLock = lockService.tryWorldLock(dto.getUserWorldId());
         if (worldLock == null) {
             throw new UserRequestException("当前世界正在存档或读档，请稍后再创建群聊");
         }
         boolean unlockAfterTransaction = registerUnlockAfterTransaction(worldLock);
         try {
-            return createConversation(dto.getUserWorldId(), mode, dto.getTitle(), dto.getCharacterIds());
+            return createConversation(userWorld, mode, dto.getTitle(), dto.getCharacterIds());
         } finally {
             if (!unlockAfterTransaction) {
                 lockService.unlock(worldLock);
@@ -85,9 +86,9 @@ public class GroupConversationService {
         return true;
     }
 
-    private GroupConversation createConversation(Long userWorldId, String mode, String title,
+    private GroupConversation createConversation(UserWorldPrefix userWorld, String mode, String title,
                                                  List<Long> characterIds) {
-        UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(userWorldId, true);
+        Long userWorldId = userWorld.getId();
         List<Long> distinctCharacterIds = characterIds == null ? List.of() : characterIds.stream()
                 .filter(id -> id != null)
                 .distinct()

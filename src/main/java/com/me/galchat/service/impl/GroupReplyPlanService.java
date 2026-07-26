@@ -51,6 +51,7 @@ public class GroupReplyPlanService {
     }
 
     public GroupReplyPlanVO replace(Long conversationId, GroupReplyPlanDTO request) {
+        conversationService.requireAuthorized(conversationId);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
             GroupConversation conversation = conversationService.requireActive(conversationId);
@@ -63,6 +64,7 @@ public class GroupReplyPlanService {
     }
 
     public GroupReplyPlanVO finishActive(Long conversationId) {
+        conversationService.requireAuthorized(conversationId);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
             GroupConversation conversation = conversationService.requireActive(conversationId);
@@ -81,6 +83,7 @@ public class GroupReplyPlanService {
     }
 
     public GroupReplyPlanVO advanceGroup(Long conversationId) {
+        conversationService.requireAuthorized(conversationId);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
             GroupConversation conversation = conversationService.requireActive(conversationId);

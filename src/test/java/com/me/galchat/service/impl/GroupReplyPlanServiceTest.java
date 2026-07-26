@@ -313,6 +313,7 @@ class GroupReplyPlanServiceTest {
                 .hasMessageContaining("已结束");
 
         var ordered = inOrder(fixture.lockService, fixture.conversationService);
+        ordered.verify(fixture.conversationService).requireAuthorized(7L);
         ordered.verify(fixture.lockService).tryLock(7L);
         ordered.verify(fixture.conversationService).requireActive(7L);
         verify(fixture.planMapper, never()).insert(any(GroupReplyPlan.class));

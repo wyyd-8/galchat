@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -95,6 +96,31 @@ class GroupConversationServiceTest {
                 .isInstanceOf(UserRequestException.class)
                 .hasMessageContaining("存档或读档");
         verify(conversationMapper, never()).insert(any(GroupConversation.class));
+    }
+
+    @Test
+    void createAuthorizesWorldBeforeAcquiringWorldLock() {
+        IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
+        GroupConversationService service = new GroupConversationService(
+                mock(GroupConversationMapper.class),
+                mock(GroupChatMemberMapper.class),
+                mock(GroupChatMessageMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                worldService,
+                mock(IUserCharacterInfoService.class),
+                lockService);
+        GroupConversationCreateDTO request = new GroupConversationCreateDTO();
+        request.setUserWorldId(1L);
+        request.setCharacterIds(List.of(11L));
+        doThrow(new UserRequestException("无权访问该用户世界"))
+                .when(worldService).checkUserWorldAuth(1L, true);
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("无权");
+        verify(lockService, never()).tryWorldLock(1L);
     }
 
     @Test

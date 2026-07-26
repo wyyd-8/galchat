@@ -82,6 +82,7 @@ public class GroupChatService {
     public Flux<GroupChatEvent> chat(Long conversationId, GroupChatRequestDTO request) {
         return Flux.defer(() -> {
             validateRequest(request);
+            conversationService.requireAuthorized(conversationId);
             GroupConversationLockService.OwnedLock lock = lockService.tryLock(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException("当前群聊正在生成回复，请稍后再试"));

@@ -91,7 +91,9 @@ public class GroupConversationService {
                     .setEnabled(true)
                     .setTalkativeness(0.5));
         }
-        createDefaultReplyPlan(conversation, distinctCharacterIds, now);
+        if (GroupChatConstant.MODE_CHAT.equals(mode)) {
+            createDefaultReplyPlan(conversation, distinctCharacterIds, now);
+        }
         return conversation;
     }
 

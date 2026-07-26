@@ -23,8 +23,10 @@ class GroupToolContextFactoryTest {
                 GroupChatConstant.ACTION_CHAT_REPLY,
                 GroupChatConstant.ACTOR_CHARACTER,
                 11L,
-                21L,
-                true);
+                "default",
+                "群聊",
+                1,
+                1);
 
         Map<String, Object> context = factory.create(conversation, action, 41L, "NORMAL");
 

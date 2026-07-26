@@ -51,7 +51,8 @@ class GroupModeRuntimeTest {
         GroupConversation trpg = new GroupConversation().setId(2L).setMode(GroupChatConstant.MODE_TRPG);
         GroupChatMessage userMessage = new GroupChatMessage().setSequenceNo(20L).setContent("继续调查仓库");
         GroupActionSpec action = new GroupActionSpec(
-                GroupChatConstant.ACTION_CHAT_REPLY, GroupChatConstant.ACTOR_CHARACTER, 11L, 10L, true);
+                GroupChatConstant.ACTION_CHAT_REPLY, GroupChatConstant.ACTOR_CHARACTER, 11L,
+                "default", "群聊", 1, 1);
         when(topicService.windowStartSequence(chat)).thenReturn(10L);
         when(assembler.assembleContextFrom(chat, 11L, 10L))
                 .thenReturn(List.of(new UserMessage("上一话题"), new UserMessage("继续调查仓库")));
@@ -90,12 +91,12 @@ class GroupModeRuntimeTest {
                 client, assembler, vectorTools, favorTools).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_CHAT_REPLY,
-                        GroupChatConstant.ACTOR_CHARACTER, 11L, 10L, true),
+                        GroupChatConstant.ACTOR_CHARACTER, 11L, "default", "群聊", 1, 1),
                 context);
         GroupModelInvocation trpg = new TrpgGroupAgentPolicy(client, assembler).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_TRPG_COMBAT,
-                        GroupChatConstant.ACTOR_CHARACTER, 11L, 10L, true),
+                        GroupChatConstant.ACTOR_CHARACTER, 11L, "round:1", "第1轮", 1, 1),
                 context);
 
         assertThat(chat.prompt().getInstructions().getFirst().getText()).contains("多人群聊");

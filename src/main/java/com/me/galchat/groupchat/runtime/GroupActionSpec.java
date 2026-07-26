@@ -4,7 +4,9 @@ public record GroupActionSpec(
         String actionType,
         String actorType,
         Long actorId,
-        Long planItemId,
-        boolean completesPlanItem
+        String groupKey,
+        String groupName,
+        Integer groupOrder,
+        Integer itemOrder
 ) {
 }

@@ -20,13 +20,12 @@ class GroupTurnPolicyTest {
 
         List<GroupActionSpec> actions = new ChatGroupTurnPolicy().plan(
                 new GroupConversation().setMode(GroupChatConstant.MODE_CHAT),
-                GroupChatConstant.PLAN_SOURCE_USER,
-                List.of(alice, bob));
+                selection(GroupChatConstant.PLAN_SOURCE_USER, List.of(alice, bob)));
 
         assertThat(actions).extracting(GroupActionSpec::actionType)
                 .containsExactly(GroupChatConstant.ACTION_CHAT_REPLY, GroupChatConstant.ACTION_CHAT_REPLY);
-        assertThat(actions).extracting(GroupActionSpec::planItemId).containsExactly(10L, 20L);
-        assertThat(actions).allMatch(GroupActionSpec::completesPlanItem);
+        assertThat(actions).extracting(GroupActionSpec::actorId).containsExactly(11L, 12L);
+        assertThat(actions).extracting(GroupActionSpec::groupKey).containsExactly("default", "default");
     }
 
     @Test
@@ -35,17 +34,25 @@ class GroupTurnPolicyTest {
         GroupConversation conversation = new GroupConversation().setMode(GroupChatConstant.MODE_TRPG);
         List<GroupReplyPlanItem> ordered = List.of(item(10L, 11L));
 
-        assertThat(policy.plan(conversation, GroupChatConstant.PLAN_SOURCE_SCENE, ordered))
+        assertThat(policy.plan(conversation, selection(GroupChatConstant.PLAN_SOURCE_SCENE, ordered)))
                 .extracting(GroupActionSpec::actionType)
                 .containsExactly(GroupChatConstant.ACTION_TRPG_SCENE);
-        assertThat(policy.plan(conversation, GroupChatConstant.PLAN_SOURCE_COMBAT, ordered))
+        assertThat(policy.plan(conversation, selection(GroupChatConstant.PLAN_SOURCE_COMBAT, ordered)))
                 .extracting(GroupActionSpec::actionType)
                 .containsExactly(GroupChatConstant.ACTION_TRPG_COMBAT);
+    }
+
+    private GroupReplyPlanSelection selection(String source, List<GroupReplyPlanItem> items) {
+        return new GroupReplyPlanSelection(source, 100L, "default", "群聊", 1, items);
     }
 
     private GroupReplyPlanItem item(Long id, Long actorId) {
         return new GroupReplyPlanItem()
                 .setId(id)
+                .setGroupKey("default")
+                .setGroupName("群聊")
+                .setGroupOrder(1)
+                .setItemOrder(id.intValue())
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                 .setActorId(actorId);
     }

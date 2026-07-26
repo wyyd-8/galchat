@@ -17,6 +17,7 @@ import com.me.galchat.groupchat.runtime.GroupContextPolicy;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
 import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
+import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.groupchat.runtime.GroupTurnPolicy;
 import com.me.galchat.groupchat.tool.GroupToolContextFactory;
 import com.me.galchat.mapper.GroupChatMessageMapper;
@@ -47,6 +48,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -91,22 +94,33 @@ class GroupChatServiceTest {
                 .thenReturn(new UserWorldPrefix().setFavorSystemStatus("NORMAL"));
         GroupReplyPlanItem planItem = new GroupReplyPlanItem()
                 .setId(20L)
+                .setGroupKey("scene:100")
+                .setGroupName("地下室")
+                .setGroupOrder(1)
+                .setItemOrder(2)
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
-                .setActorId(9L)
-                .setStatus(GroupChatConstant.STATUS_PENDING);
-        when(replyPlanService.pendingItemsForExecution(conversation)).thenReturn(List.of(planItem));
-        when(replyPlanService.activeSource(conversation)).thenReturn(GroupChatConstant.PLAN_SOURCE_USER);
+                .setActorId(9L);
+        GroupReplyPlanSelection selection = new GroupReplyPlanSelection(
+                GroupChatConstant.PLAN_SOURCE_SCENE,
+                100L,
+                "scene:100",
+                "地下室",
+                1,
+                List.of(planItem));
+        when(replyPlanService.currentGroupForExecution(conversation)).thenReturn(selection);
         GroupActionSpec action = new GroupActionSpec(
                 GroupChatConstant.ACTION_CHAT_REPLY,
                 GroupChatConstant.ACTOR_CHARACTER,
                 9L,
-                20L,
-                true);
+                "scene:100",
+                "地下室",
+                1,
+                2);
         when(runtimeRegistry.require(GroupChatConstant.MODE_CHAT)).thenReturn(runtime);
         when(runtime.turnPolicy()).thenReturn(turnPolicy);
         when(runtime.contextPolicy()).thenReturn(contextPolicy);
         when(runtime.agentPolicy()).thenReturn(agentPolicy);
-        when(turnPolicy.plan(conversation, GroupChatConstant.PLAN_SOURCE_USER, List.of(planItem)))
+        when(turnPolicy.plan(conversation, selection))
                 .thenReturn(List.of(action));
         GroupContextMaterial context = new GroupContextMaterial(List.of(new UserMessage("用户消息")));
         when(contextPolicy.load(conversation, action)).thenReturn(context);
@@ -147,6 +161,7 @@ class GroupChatServiceTest {
         request.setContent("你好");
 
         List<GroupChatEvent> events = service.chat(7L, request).collectList().block();
+        List<GroupChatEvent> secondEvents = service.chat(7L, request).collectList().block();
 
         assertThat(events).extracting(GroupChatEvent::getEventType).containsExactly(
                 GroupChatConstant.EVENT_TURN_ACCEPTED,
@@ -161,23 +176,42 @@ class GroupChatServiceTest {
         assertThat(events).filteredOn(event -> event.getReplyStepId() != null)
                 .allSatisfy(event -> {
                     assertThat(event.getActionType()).isEqualTo(GroupChatConstant.ACTION_CHAT_REPLY);
-                    assertThat(event.getPlanItemId()).isEqualTo(20L);
+                    assertThat(event.getGroupKey()).isEqualTo("scene:100");
+                    assertThat(event.getGroupOrder()).isEqualTo(1);
+                    assertThat(event.getItemOrder()).isEqualTo(2);
                 });
-        verify(contextPolicy).onTurnStarted(eq(conversation),
+        assertThat(secondEvents).extracting(GroupChatEvent::getEventType)
+                .containsExactlyElementsOf(events.stream().map(GroupChatEvent::getEventType).toList());
+        verify(contextPolicy, times(2)).onTurnStarted(eq(conversation),
                 org.mockito.ArgumentMatchers.argThat(message -> "你好".equals(message.getContent())));
-        verify(contextPolicy).load(conversation, action);
-        verify(agentPolicy).prepare(conversation, action, context);
-        verify(replyPlanService).markCompleted(planItem);
-        verify(stepMapper).insert(org.mockito.ArgumentMatchers.argThat((GroupChatReplyStep step) ->
-                GroupChatConstant.ACTION_CHAT_REPLY.equals(step.getActionType())
-                        && Long.valueOf(20L).equals(step.getPlanItemId())));
+        verify(contextPolicy, times(2)).load(conversation, action);
+        verify(agentPolicy, times(2)).prepare(conversation, action, context);
+        verify(replyPlanService, times(2)).currentGroupForExecution(conversation);
+        verify(replyPlanService, never()).markRunning(any());
+        verify(replyPlanService, never()).markCompleted(any());
+        verify(replyPlanService, never()).resetPending(any());
+        var turnCaptor = org.mockito.ArgumentCaptor.forClass(GroupChatTurn.class);
+        verify(turnMapper, times(2)).insert(turnCaptor.capture());
+        assertThat(turnCaptor.getAllValues()).allSatisfy(turn -> assertThat(turn)
+                .extracting(GroupChatTurn::getPlanSource, GroupChatTurn::getPlanContextId)
+                .containsExactly(GroupChatConstant.PLAN_SOURCE_SCENE, 100L));
+        var stepCaptor = org.mockito.ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(stepMapper, times(2)).insert(stepCaptor.capture());
+        assertThat(stepCaptor.getAllValues()).allSatisfy(step -> assertThat(step)
+                .extracting(
+                        GroupChatReplyStep::getGroupKey,
+                        GroupChatReplyStep::getGroupName,
+                        GroupChatReplyStep::getGroupOrder,
+                        GroupChatReplyStep::getItemOrder,
+                        GroupChatReplyStep::getSpeakerId)
+                .containsExactly("scene:100", "地下室", 1, 2, 9L));
         assertThat(modelPrompt.get().getOptions()).isInstanceOf(ToolCallingChatOptions.class);
         assertThat(((ToolCallingChatOptions) modelPrompt.get().getOptions()).getToolContext())
                 .containsEntry(ChatToolContextConstant.WORLD_ID_KEY, 2L)
                 .containsEntry(ChatToolContextConstant.USER_WORLD_ID_KEY, 1L)
                 .containsEntry(ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY, 7L)
                 .containsEntry(ChatToolContextConstant.CHARACTER_ID_KEY, 9L)
-                .containsEntry(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 103L)
+                .containsEntry(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 107L)
                 .containsEntry(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY, "NORMAL");
     }
 }

@@ -101,10 +101,6 @@ CREATE TABLE IF NOT EXISTS group_chat_reply_step (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_reply_step_no
     ON group_chat_reply_step (turn_id, step_no);
 
-ALTER TABLE group_chat_reply_step
-    ADD COLUMN IF NOT EXISTS plan_item_id BIGINT,
-    ADD COLUMN IF NOT EXISTS action_type VARCHAR(50) NOT NULL DEFAULT 'chat_reply';
-
 CREATE TABLE IF NOT EXISTS group_chat_tool_call (
     id BIGSERIAL PRIMARY KEY,
     reply_step_id BIGINT NOT NULL,

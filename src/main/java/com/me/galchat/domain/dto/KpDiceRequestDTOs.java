@@ -3,6 +3,7 @@ package com.me.galchat.domain.dto;
 import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocPercentileModifier;
 import com.me.galchat.constant.DamageSourceMode;
+import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.util.List;
 
@@ -12,48 +13,78 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Check(
+            @ToolParam(description = "本次检定的原因，会作为掷骰概要和前端展示文本")
             String reason,
+            @ToolParam(
+                    description = "检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
+                    required = false)
             CocCheckDifficulty difficulty,
+            @ToolParam(description = "参与检定的角色及其检定项；单人和群体检定均使用此列表")
             List<CheckTarget> targets) {
     }
 
     public record CheckTarget(
+            @ToolParam(description = "参与检定的角色名，必须与当前跑团中的角色卡名称一致")
             String characterName,
+            @ToolParam(description = "角色卡上的属性或技能名称，例如力量、侦查、手枪")
             String checkName,
+            @ToolParam(
+                    description = "百分骰修正：NORMAL无修正，BONUS_1/BONUS_2奖励骰，PENALTY_1/PENALTY_2惩罚骰；省略时为NORMAL",
+                    required = false)
             CocPercentileModifier modifier) {
     }
 
     public record Opposed(
+            @ToolParam(description = "本次对抗检定的原因，会作为掷骰概要和前端展示文本")
             String reason,
+            @ToolParam(description = "参与对抗的角色及其检定项，至少包含两个不同角色")
             List<CheckTarget> targets,
+            @ToolParam(
+                    description = "规则明确平局时由谁获胜则填写该角色名；没有明确胜者时省略，结果将保持平局",
+                    required = false)
             String tieWinnerCharacterName) {
     }
 
     public record Pushed(
+            @ToolParam(description = "发起孤注一掷的原因或玩家采取的新行动")
             String reason,
+            @ToolParam(description = "需要对最近一次失败检定进行孤注一掷的角色名列表")
             List<String> characterNames) {
     }
 
     public record SanCheck(
+            @ToolParam(description = "触发理智检定的原因，会作为掷骰概要和前端展示文本")
             String reason,
+            @ToolParam(description = "需要按当前SAN值进行理智检定的角色名列表")
             List<String> characterNames) {
     }
 
     public record SanLoss(
+            @ToolParam(description = "造成理智损失的原因，会作为新增掷骰轮的展示文本")
             String reason,
+            @ToolParam(description = "上一轮理智检定成功时使用的SAN损失表达式，例如0或1")
             String successFormula,
+            @ToolParam(description = "上一轮理智检定失败时使用的SAN损失表达式，例如1D6")
             String failureFormula) {
     }
 
     public record Damage(
+            @ToolParam(description = "造成伤害的原因，会作为掷骰概要或新增掷骰轮的展示文本")
             String reason,
+            @ToolParam(description = "伤害来源模式：STANDALONE独立伤害，FOLLOW_UP前置检定成功后的伤害")
             DamageSourceMode sourceMode,
+            @ToolParam(description = "本轮各受伤角色、可选前置来源角色及对应伤害表达式")
             List<DamageTarget> targets) {
     }
 
     public record DamageTarget(
+            @ToolParam(description = "承受伤害的角色名，必须与当前跑团中的角色卡名称一致")
             String targetCharacterName,
+            @ToolParam(
+                    description = "FOLLOW_UP时必填，填写完成前置攻击或检定的角色名；STANDALONE时必须省略",
+                    required = false)
             String sourceCharacterName,
+            @ToolParam(description = "对该目标执行的伤害表达式，例如1D6或1D8+2")
             String formula) {
     }
 }

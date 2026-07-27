@@ -20,5 +20,8 @@ public interface ICocDiceOrchestrationService {
     KpDiceToolResult rollSanLoss(
             Long conversationId, Long runId, KpDiceRequestDTOs.SanLoss request);
 
+    KpDiceToolResult rollDamage(
+            Long conversationId, Long runId, KpDiceRequestDTOs.Damage request);
+
     DiceRollProgressVO rollPlayerResult(Long resultId);
 }

@@ -3,6 +3,7 @@ package com.me.galchat.service.impl;
 import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocCheckOutcome;
 import com.me.galchat.constant.CocPercentileModifier;
+import com.me.galchat.constant.DamageSourceMode;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
@@ -285,6 +286,89 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public KpDiceToolResult rollDamage(
+            Long conversationId, Long runId, KpDiceRequestDTOs.Damage request) {
+        requireContext(conversationId, runId);
+        requireRequest(request, request == null ? null : request.reason());
+        DamageSourceMode sourceMode = Objects.requireNonNull(
+                request.sourceMode(), "伤害来源模式不能为空");
+        List<KpDiceRequestDTOs.DamageTarget> targets =
+                requireDamageTargets(request.targets(), sourceMode);
+
+        DiceRollSummary summary;
+        List<DiceRollResult> existing;
+        if (sourceMode == DamageSourceMode.FOLLOW_UP) {
+            Long summaryId = followUpLocator.requireLatestSummaryId(
+                    conversationId,
+                    Set.of(
+                            DiceRollConstant.TOOL_REQUEST_CHECK,
+                            DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK,
+                            DiceRollConstant.TOOL_REQUEST_OPPOSED_CHECK));
+            summary = internalService.requireSummaryForUpdate(summaryId);
+            requireConversation(summary, conversationId);
+            if (!DiceRollConstant.STATUS_COMPLETED.equals(summary.getStatus())) {
+                throw new UserRequestException("前置检定尚未完成");
+            }
+            existing = safeResults(internalService.listResultEntities(summaryId));
+            validateDamageSources(existing, targets);
+        } else {
+            summary = null;
+            existing = List.of();
+        }
+
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>(targets.size());
+        for (int index = 0; index < targets.size(); index++) {
+            KpDiceRequestDTOs.DamageTarget target = targets.get(index);
+            requireFormula(target.formula(), "伤害公式不能为空");
+            CocDiceCharacterVO card = characterCardService.requireDiceCharacter(
+                    runId, target.targetCharacterName().trim());
+            if (card.con() == null || card.con() < 1 || card.con() > 100) {
+                throw new UserRequestException(
+                        "角色“" + card.name() + "”的CON值无效");
+            }
+            Map<String, Object> rule = new LinkedHashMap<>();
+            rule.put("runId", runId);
+            rule.put("cardId", card.cardId());
+            rule.put("characterName", card.name());
+            rule.put("sourceCharacterName", trimToNull(
+                    target.sourceCharacterName()));
+            rule.put("conValue", card.con());
+
+            DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+            draft.setCharacterId(card.participantId());
+            draft.setDisplayOrder(index + 1);
+            draft.setDisplayType(DiceRollConstant.TYPE_DAMAGE);
+            draft.setReason(request.reason().trim());
+            draft.setFormula(target.formula().trim());
+            draft.setResolutionData(DiceResolutionDataVO.pending(
+                    DiceRollConstant.TYPE_DAMAGE, null, rule));
+            drafts.add(draft);
+        }
+
+        List<DiceRollResult> damageResults;
+        if (sourceMode == DamageSourceMode.STANDALONE) {
+            DiceRollAggregate aggregate = internalService.createDiceRoll(
+                    conversationId, request.reason().trim(), drafts);
+            summary = aggregate.summary();
+            damageResults = aggregate.results();
+        } else {
+            int fallbackRound = summary.getRoundCount() + 1;
+            damageResults = internalService.appendDiceRollRound(
+                    conversationId, summary.getId(), drafts);
+            updateRoundCountFromCreated(summary, damageResults, fallbackRound);
+        }
+        settleAlreadyRolled(damageResults);
+        List<DiceRollResult> allResults = mergeResults(existing, damageResults);
+        refreshSummary(summary, allResults);
+        List<DiceRollResult> conResults =
+                appendMajorWoundConRoundIfNeeded(summary, allResults);
+        List<DiceRollResult> returned = new ArrayList<>(damageResults);
+        returned.addAll(conResults);
+        return toolResult(summary, returned);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public DiceRollProgressVO rollPlayerResult(Long resultId) {
         DiceRollResult initial = internalService.requireResult(resultId);
         DiceRollSummary summary = internalService.requireSummaryForUpdate(initial.getSummaryId());
@@ -319,8 +403,13 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 internalService.listResultEntities(summary.getId()), List.of(result));
         settleCompletedInsanityPairs(allResults);
         refreshSummary(summary, allResults);
-        List<DiceRollResult> created =
-                appendTemporaryInsanityRoundIfNeeded(summary, allResults);
+        List<DiceRollResult> created = new ArrayList<>(
+                appendTemporaryInsanityRoundIfNeeded(summary, allResults));
+        List<DiceRollResult> currentResults = created.isEmpty()
+                ? allResults
+                : mergeResults(allResults, created);
+        created.addAll(appendMajorWoundConRoundIfNeeded(
+                summary, currentResults));
         return new DiceRollProgressVO(
                 DiceRollSummaryVO.from(summary),
                 DiceRollDetailVO.from(result),
@@ -340,12 +429,26 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
     }
 
     private void settleAlreadyRolled(List<DiceRollResult> results) {
-        for (DiceRollResult result : safeResults(results)) {
-            if (result.getResolvedAt() == null
-                    && result.getResultData() != null
-                    && result.getResultData().getResult() != null) {
-                settleResult(result);
+        List<DiceRollResult> rolled = safeResults(results).stream()
+                .filter(result -> result.getResolvedAt() == null)
+                .filter(result -> result.getResultData() != null
+                        && result.getResultData().getResult() != null)
+                .toList();
+        List<DiceRollResult> damage = rolled.stream()
+                .filter(result -> DiceRollConstant.TYPE_DAMAGE.equals(
+                        resolution(result).getType()))
+                .sorted(Comparator.comparing(result ->
+                        longValue(resolution(result).getRule(), "cardId")))
+                .toList();
+        for (DiceRollResult result : damage) {
+            settleResult(result);
+        }
+        for (DiceRollResult result : rolled) {
+            if (DiceRollConstant.TYPE_DAMAGE.equals(
+                    resolution(result).getType())) {
+                continue;
             }
+            settleResult(result);
         }
     }
 
@@ -361,6 +464,10 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         } else if (DiceRollConstant.TYPE_TEMPORARY_INSANITY_TYPE.equals(type)
                 || DiceRollConstant.TYPE_TEMPORARY_INSANITY_DURATION.equals(type)) {
             settleInsanityDie(result, resolution);
+        } else if (DiceRollConstant.TYPE_DAMAGE.equals(type)) {
+            settleDamageResult(result, resolution);
+        } else if (DiceRollConstant.TYPE_MAJOR_WOUND_CON.equals(type)) {
+            settleMajorWoundConResult(result, resolution);
         } else {
             throw new UserRequestException("暂不支持该掷骰结算类型：" + type);
         }
@@ -431,6 +538,80 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             outcome.put("durationHours", roll);
         }
         resolution.setOutcome(outcome);
+    }
+
+    private void settleDamageResult(
+            DiceRollResult result, DiceResolutionDataVO resolution) {
+        int rawDamage = requireRoll(result);
+        if (rawDamage < 0) {
+            throw new UserRequestException("伤害不能为负数");
+        }
+        Map<String, Object> rule = resolution.getRule();
+        CocCharacter card = characterCardService.lockDiceCharacter(
+                longValue(rule, "runId"), longValue(rule, "cardId"));
+        if (card == null || Boolean.TRUE.equals(card.getDead())) {
+            throw new UserRequestException("死亡角色不能再受到伤害");
+        }
+        if (card.getHpCurrent() == null || card.getHpMax() == null) {
+            throw new UserRequestException("角色卡生命值不存在");
+        }
+        CocDiceRules.DamageResolution damage = CocDiceRules.resolveDamage(
+                rawDamage, card.getHpCurrent(), card.getHpMax());
+        boolean majorBefore = Boolean.TRUE.equals(card.getMajorWound());
+        boolean unconsciousBefore = Boolean.TRUE.equals(card.getUnconscious());
+        boolean majorAfter = majorBefore || damage.majorWound();
+        boolean unconsciousAfter = unconsciousBefore || damage.hpAfter() == 0;
+        card.setHpCurrent(damage.hpAfter())
+                .setMajorWound(majorAfter)
+                .setUnconscious(unconsciousAfter)
+                .setUpdatedAt(LocalDateTime.now());
+        characterCardService.updateDiceCharacter(card);
+
+        String characterName = stringValue(rule, "characterName");
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("characterName", characterName);
+        outcome.put("rawDamage", rawDamage);
+        outcome.put("majorWound", majorAfter);
+        resolution.setOutcome(outcome);
+        Map<String, Object> effect = new LinkedHashMap<>();
+        effect.put("hpBefore", damage.hpBefore());
+        effect.put("hpAfter", damage.hpAfter());
+        effect.put("hpLoss", damage.hpBefore() - damage.hpAfter());
+        effect.put("majorWoundBefore", majorBefore);
+        effect.put("majorWound", majorAfter);
+        effect.put("majorWoundChanged", !majorBefore && majorAfter);
+        effect.put("unconsciousBefore", unconsciousBefore);
+        effect.put("unconscious", unconsciousAfter);
+        resolution.setEffect(effect);
+    }
+
+    private void settleMajorWoundConResult(
+            DiceRollResult result, DiceResolutionDataVO resolution) {
+        Map<String, Object> rule = resolution.getRule();
+        CocDiceRules.CheckResolution check = CocDiceRules.resolveCheck(
+                requireRoll(result),
+                intValue(rule, "targetValue"),
+                CocCheckDifficulty.REGULAR);
+        CocCharacter card = characterCardService.lockDiceCharacter(
+                longValue(rule, "runId"), longValue(rule, "cardId"));
+        if (card == null || Boolean.TRUE.equals(card.getDead())) {
+            throw new UserRequestException("角色卡无法进行重伤CON检定");
+        }
+        boolean unconsciousBefore = Boolean.TRUE.equals(card.getUnconscious());
+        boolean failed = check.outcome() == CocCheckOutcome.FAILURE
+                || check.outcome() == CocCheckOutcome.FUMBLE;
+        boolean unconsciousAfter = unconsciousBefore || failed;
+        card.setUnconscious(unconsciousAfter).setUpdatedAt(LocalDateTime.now());
+        characterCardService.updateDiceCharacter(card);
+
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("characterName", stringValue(rule, "characterName"));
+        outcome.put("category", check.outcome().name());
+        resolution.setOutcome(outcome);
+        Map<String, Object> effect = new LinkedHashMap<>();
+        effect.put("unconsciousBefore", unconsciousBefore);
+        effect.put("unconscious", unconsciousAfter);
+        resolution.setEffect(effect);
     }
 
     private List<DiceRollResult> appendTemporaryInsanityRoundIfNeeded(
@@ -515,6 +696,73 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         draft.setResolutionData(DiceResolutionDataVO.pending(
                 type, sanLoss.getId(), baseRule));
         return draft;
+    }
+
+    private List<DiceRollResult> appendMajorWoundConRoundIfNeeded(
+            DiceRollSummary summary, List<DiceRollResult> allResults) {
+        int sourceRound = summary.getRoundCount();
+        List<DiceRollResult> currentRound = safeResults(allResults).stream()
+                .filter(result -> Objects.equals(sourceRound, result.getRoundNo()))
+                .toList();
+        if (currentRound.isEmpty()
+                || currentRound.stream().anyMatch(result -> result.getResolvedAt() == null)
+                || currentRound.stream().noneMatch(result ->
+                        DiceRollConstant.TYPE_DAMAGE.equals(
+                                resolution(result).getType()))) {
+            return List.of();
+        }
+
+        Set<Long> existingSources = safeResults(allResults).stream()
+                .filter(result -> DiceRollConstant.TYPE_MAJOR_WOUND_CON.equals(
+                        resolution(result).getType()))
+                .map(result -> resolution(result).getSourceResultId())
+                .filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        List<DiceRollResult> qualified = currentRound.stream()
+                .filter(result -> DiceRollConstant.TYPE_DAMAGE.equals(
+                        resolution(result).getType()))
+                .filter(result -> effectBoolean(result, "majorWoundChanged"))
+                .filter(result -> !effectBoolean(result, "unconscious"))
+                .filter(result -> result.getId() != null
+                        && !existingSources.contains(result.getId()))
+                .toList();
+        if (qualified.isEmpty()) {
+            return List.of();
+        }
+
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>(qualified.size());
+        for (int index = 0; index < qualified.size(); index++) {
+            DiceRollResult damage = qualified.get(index);
+            DiceResolutionDataVO damageResolution = resolution(damage);
+            Map<String, Object> damageRule = damageResolution.getRule();
+            Map<String, Object> rule = new LinkedHashMap<>();
+            rule.put("runId", longValue(damageRule, "runId"));
+            rule.put("cardId", longValue(damageRule, "cardId"));
+            rule.put("characterName", stringValue(
+                    damageRule, "characterName"));
+            rule.put("targetValue", intValue(damageRule, "conValue"));
+            rule.put("hpLoss", effectInt(damage, "hpLoss"));
+
+            DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+            draft.setCharacterId(damage.getCharacterId());
+            draft.setDisplayOrder(index + 1);
+            draft.setDisplayType(DiceRollConstant.TYPE_MAJOR_WOUND_CON);
+            draft.setReason(stringValue(rule, "characterName") + "重伤CON检定");
+            draft.setFormula(CocPercentileModifier.NORMAL.formula());
+            draft.setResolutionData(DiceResolutionDataVO.pending(
+                    DiceRollConstant.TYPE_MAJOR_WOUND_CON,
+                    damage.getId(),
+                    rule));
+            drafts.add(draft);
+        }
+
+        List<DiceRollResult> created = internalService.appendDiceRollRound(
+                summary.getConversationId(), summary.getId(), drafts);
+        updateRoundCountFromCreated(summary, created, sourceRound + 1);
+        settleAlreadyRolled(created);
+        List<DiceRollResult> combined = mergeResults(allResults, created);
+        refreshSummary(summary, combined);
+        return created;
     }
 
     private void settleCompletedInsanityPairs(List<DiceRollResult> allResults) {
@@ -725,6 +973,96 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         return List.copyOf(targets);
     }
 
+    private List<KpDiceRequestDTOs.DamageTarget> requireDamageTargets(
+            List<KpDiceRequestDTOs.DamageTarget> targets,
+            DamageSourceMode sourceMode) {
+        if (targets == null || targets.isEmpty()) {
+            throw new UserRequestException("伤害目标不能为空");
+        }
+        Set<String> targetNames = new HashSet<>();
+        for (KpDiceRequestDTOs.DamageTarget target : targets) {
+            if (target == null
+                    || !StringUtils.hasText(target.targetCharacterName())
+                    || !StringUtils.hasText(target.formula())) {
+                throw new UserRequestException("伤害目标和公式不能为空");
+            }
+            if (!targetNames.add(target.targetCharacterName().trim())) {
+                throw new UserRequestException("同一轮不能重复选择伤害目标");
+            }
+            boolean hasSource = StringUtils.hasText(target.sourceCharacterName());
+            if (sourceMode == DamageSourceMode.STANDALONE && hasSource) {
+                throw new UserRequestException("独立伤害不能指定前置来源角色");
+            }
+            if (sourceMode == DamageSourceMode.FOLLOW_UP && !hasSource) {
+                throw new UserRequestException("后续伤害必须指定前置来源角色");
+            }
+        }
+        return List.copyOf(targets);
+    }
+
+    private void validateDamageSources(
+            List<DiceRollResult> existing,
+            List<KpDiceRequestDTOs.DamageTarget> targets) {
+        for (KpDiceRequestDTOs.DamageTarget target : targets) {
+            String sourceName = target.sourceCharacterName().trim();
+            DiceRollResult source = safeResults(existing).stream()
+                    .filter(result -> {
+                        String type = resolution(result).getType();
+                        return DiceRollConstant.TYPE_CHECK.equals(type)
+                                || DiceRollConstant.TYPE_OPPOSED_CHECK.equals(type);
+                    })
+                    .filter(result -> sourceName.equals(
+                            ruleString(result, "characterName")))
+                    .max(Comparator.comparing(
+                            DiceRollResult::getRoundNo,
+                            Comparator.nullsFirst(Integer::compareTo)))
+                    .orElseThrow(() -> new UserRequestException(
+                            "找不到来源角色“" + sourceName + "”的前置检定"));
+            String checkName = ruleString(source, "checkName");
+            if ("闪避".equals(checkName.trim())
+                    || "DODGE".equalsIgnoreCase(checkName.trim())) {
+                throw new UserRequestException("闪避检定不能作为伤害来源");
+            }
+            if (DiceRollConstant.TYPE_CHECK.equals(
+                    resolution(source).getType())) {
+                String category = outcomeString(source, "category");
+                if (!CocCheckOutcome.CRITICAL_SUCCESS.name().equals(category)
+                        && !CocCheckOutcome.SUCCESS.name().equals(category)) {
+                    throw new UserRequestException("前置检定未成功，不能结算伤害");
+                }
+                continue;
+            }
+            List<DiceRollResult> opposedRound = safeResults(existing).stream()
+                    .filter(result -> Objects.equals(
+                            source.getRoundNo(), result.getRoundNo()))
+                    .filter(result -> DiceRollConstant.TYPE_OPPOSED_CHECK.equals(
+                            resolution(result).getType()))
+                    .toList();
+            if (!sourceName.equals(resolveOpposedWinner(opposedRound))) {
+                throw new UserRequestException("前置检定未成功，不能结算伤害");
+            }
+        }
+    }
+
+    private String resolveOpposedWinner(List<DiceRollResult> opposedRound) {
+        if (opposedRound.size() < 2) {
+            throw new UserRequestException("前置对抗检定数据不完整");
+        }
+        List<CocDiceRules.OpposedCandidate> candidates = opposedRound.stream()
+                .map(result -> new CocDiceRules.OpposedCandidate(
+                        ruleString(result, "characterName"),
+                        intValue(resolution(result).getRule(), "targetValue"),
+                        requireRoll(result)))
+                .toList();
+        String tieWinner = trimToNull(Objects.toString(
+                resolution(opposedRound.getFirst()).getRule()
+                        .get("tieWinnerCharacterName"),
+                null));
+        CocDiceRules.OpposedResolution resolution =
+                CocDiceRules.resolveOpposed(candidates, tieWinner);
+        return resolution.draw() ? null : resolution.winner();
+    }
+
     private List<String> requireCharacterNames(List<String> characterNames) {
         if (characterNames == null || characterNames.isEmpty()) {
             throw new UserRequestException("角色名不能为空");
@@ -847,6 +1185,14 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         Map<String, Object> effect = resolution(result).getEffect();
         if (effect != null && effect.get(key) instanceof Number number) {
             return number.intValue();
+        }
+        throw new UserRequestException("掷骰影响字段无效：" + key);
+    }
+
+    private boolean effectBoolean(DiceRollResult result, String key) {
+        Map<String, Object> effect = resolution(result).getEffect();
+        if (effect != null && effect.get(key) instanceof Boolean value) {
+            return value;
         }
         throw new UserRequestException("掷骰影响字段无效：" + key);
     }

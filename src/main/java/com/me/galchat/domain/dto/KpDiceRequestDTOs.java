@@ -2,6 +2,7 @@ package com.me.galchat.domain.dto;
 
 import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocPercentileModifier;
+import com.me.galchat.constant.DamageSourceMode;
 
 import java.util.List;
 
@@ -42,5 +43,17 @@ public final class KpDiceRequestDTOs {
             String reason,
             String successFormula,
             String failureFormula) {
+    }
+
+    public record Damage(
+            String reason,
+            DamageSourceMode sourceMode,
+            List<DamageTarget> targets) {
+    }
+
+    public record DamageTarget(
+            String targetCharacterName,
+            String sourceCharacterName,
+            String formula) {
     }
 }

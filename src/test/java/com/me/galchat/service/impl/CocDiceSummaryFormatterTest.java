@@ -102,6 +102,60 @@ class CocDiceSummaryFormatterTest {
                 .isEqualTo("林恩理智-6；进入临时疯狂：恐惧症（昆虫恐惧症：害怕昆虫），持续4小时");
     }
 
+    @Test
+    void completedMajorWoundConReplacesDamageWithCombinedText() {
+        DiceRollResult damage = new DiceRollResult()
+                .setId(51L)
+                .setRoundNo(1)
+                .setDisplayOrder(1)
+                .setResultData(new DiceRollResultVO("1D6", List.of(), 6))
+                .setResolutionData(DiceResolutionDataVO.pending(
+                        "DAMAGE",
+                        null,
+                        Map.of(
+                                "runId", 5L,
+                                "cardId", 101L,
+                                "characterName", "林恩"))
+                        .setOutcome(Map.of(
+                                "characterName", "林恩",
+                                "rawDamage", 6,
+                                "majorWound", true))
+                        .setEffect(Map.of(
+                                "hpBefore", 10,
+                                "hpAfter", 4,
+                                "hpLoss", 6,
+                                "majorWoundBefore", false,
+                                "majorWound", true,
+                                "majorWoundChanged", true,
+                                "unconsciousBefore", false,
+                                "unconscious", false)))
+                .setResolvedAt(LocalDateTime.now());
+        DiceRollResult con = new DiceRollResult()
+                .setId(61L)
+                .setRoundNo(2)
+                .setDisplayOrder(1)
+                .setResultData(new DiceRollResultVO("1D100", List.of(), 80))
+                .setResolutionData(DiceResolutionDataVO.pending(
+                        "MAJOR_WOUND_CON",
+                        51L,
+                        Map.of(
+                                "runId", 5L,
+                                "cardId", 101L,
+                                "characterName", "林恩",
+                                "targetValue", 50,
+                                "hpLoss", 6))
+                        .setOutcome(Map.of(
+                                "characterName", "林恩",
+                                "category", "FAILURE"))
+                        .setEffect(Map.of(
+                                "unconsciousBefore", false,
+                                "unconscious", true)))
+                .setResolvedAt(LocalDateTime.now());
+
+        assertThat(formatter.rebuildTotalResult(List.of(damage, con)))
+                .isEqualTo("林恩生命-6；受到重伤；CON检定失败，陷入昏迷");
+    }
+
     private DiceRollResult check(
             Long id, int round, int order, String name, String category, Integer roll) {
         Map<String, Object> rule = new LinkedHashMap<>();

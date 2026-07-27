@@ -2,6 +2,7 @@ package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocPercentileModifier;
+import com.me.galchat.constant.DamageSourceMode;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -471,6 +473,199 @@ class CocDiceOrchestrationServiceTest {
         verify(randomSource).d100();
     }
 
+    @Test
+    void standaloneDamageCreatesFirstRoundAndAppliesHp() {
+        CocDiceCharacterVO targetCard = card(12L, 88L, "陈默", 45);
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(targetCard);
+        when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
+            List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+            DiceRollResultCreateDTO draft = drafts.getFirst();
+            DiceRollResult result = new DiceRollResult()
+                    .setId(501L)
+                    .setSummaryId(111L)
+                    .setCharacterId(draft.getCharacterId())
+                    .setRoundNo(1)
+                    .setDisplayOrder(1)
+                    .setResultData(new DiceRollResultVO("3", List.of(), 3))
+                    .setResolutionData(draft.getResolutionData());
+            return new DiceRollAggregate(
+                    new DiceRollSummary()
+                            .setId(111L)
+                            .setConversationId(7L)
+                            .setRoundCount(1)
+                            .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                    List.of(result));
+        });
+        CocCharacter locked = new CocCharacter()
+                .setId(12L)
+                .setRunId(5L)
+                .setName("陈默")
+                .setHpCurrent(10)
+                .setHpMax(10)
+                .setCon(50)
+                .setMajorWound(false)
+                .setUnconscious(false)
+                .setDead(false);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        KpDiceToolResult result = service.rollDamage(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Damage(
+                        "坠入坑中",
+                        DamageSourceMode.STANDALONE,
+                        List.of(new KpDiceRequestDTOs.DamageTarget(
+                                "陈默", null, "3"))));
+
+        assertThat(result.summary().getRoundCount()).isEqualTo(1);
+        assertThat(locked.getHpCurrent()).isEqualTo(7);
+        assertThat(result.semanticResult()).contains("陈默生命-3");
+    }
+
+    @Test
+    void followUpDamageRequiresAWinningOrSuccessfulSource() {
+        when(followUps.requireLatestSummaryId(
+                eq(7L), any())).thenReturn(101L);
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(
+                resolvedCheck(201L, 101L, 1, "林恩", 11L, 70, "FAILURE")));
+
+        assertThatThrownBy(() -> service.rollDamage(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Damage(
+                        "攻击邪教徒",
+                        DamageSourceMode.FOLLOW_UP,
+                        List.of(new KpDiceRequestDTOs.DamageTarget(
+                                "邪教徒", "林恩", "1D6")))))
+                .hasMessageContaining("前置检定未成功");
+    }
+
+    @Test
+    void playerDamageDefersMajorWoundConUntilDamageRoundCompletes() {
+        CocDiceCharacterVO playerTarget = card(11L, null, "林恩", 70);
+        CocDiceCharacterVO agentTarget = card(12L, 88L, "陈默", 45);
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(playerTarget);
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(agentTarget);
+        AtomicReference<List<DiceRollResult>> damageRows = new AtomicReference<>();
+        when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
+            List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+            List<DiceRollResult> rows = materialize(111L, 1, drafts);
+            rows.get(0).setId(501L).setResultData(DiceUtils.prepare("1D1*6"));
+            rows.get(1)
+                    .setId(502L)
+                    .setResultData(new DiceRollResultVO("6", List.of(), 6));
+            damageRows.set(rows);
+            return new DiceRollAggregate(
+                    new DiceRollSummary()
+                            .setId(111L)
+                            .setConversationId(7L)
+                            .setRoundCount(1)
+                            .setStatus(DiceRollConstant.STATUS_PENDING),
+                    rows);
+        });
+        CocCharacter playerCard = damageCard(11L, "林恩");
+        CocCharacter agentCard = damageCard(12L, "陈默");
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(playerCard);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(agentCard);
+
+        KpDiceToolResult created = service.rollDamage(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Damage(
+                        "爆炸冲击",
+                        DamageSourceMode.STANDALONE,
+                        List.of(
+                                new KpDiceRequestDTOs.DamageTarget(
+                                        "林恩", null, "1D1*6"),
+                                new KpDiceRequestDTOs.DamageTarget(
+                                        "陈默", null, "6"))));
+
+        assertThat(created.summary().getStatus())
+                .isEqualTo(DiceRollConstant.STATUS_PENDING);
+        assertThat(created.summary().getRoundCount()).isEqualTo(1);
+        verify(internal, never()).appendDiceRollRound(eq(7L), eq(111L), any());
+
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(111L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        when(internal.requireResult(501L)).thenAnswer(
+                ignored -> damageRows.get().getFirst());
+        when(internal.requireSummaryForUpdate(111L)).thenReturn(summary);
+        when(internal.listResultEntities(111L)).thenAnswer(
+                ignored -> damageRows.get());
+        when(internal.appendDiceRollRound(eq(7L), eq(111L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+                    List<DiceRollResult> conRows = materialize(111L, 2, drafts);
+                    for (DiceRollResult con : conRows) {
+                        if (con.getCharacterId() != null) {
+                            con.setResultData(
+                                    new DiceRollResultVO("1D100", List.of(), 35));
+                        }
+                    }
+                    return conRows;
+                });
+
+        var progress = service.rollPlayerResult(501L);
+
+        assertThat(progress.createdResults()).hasSize(2);
+        assertThat(progress.createdResults())
+                .extracting(result -> result.getResolution().getType())
+                .containsOnly("MAJOR_WOUND_CON");
+        assertThat(progress.createdResults())
+                .extracting(com.me.galchat.domain.vo.DiceRollDetailVO::getRoundNo)
+                .containsOnly(2);
+    }
+
+    @Test
+    void failedMajorWoundConMakesCharacterUnconscious() {
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(111L)
+                .setConversationId(7L)
+                .setRoundCount(2)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        var resolution = com.me.galchat.domain.vo.DiceResolutionDataVO.pending(
+                "MAJOR_WOUND_CON",
+                501L,
+                Map.of(
+                        "runId", 5L,
+                        "cardId", 11L,
+                        "characterName", "林恩",
+                        "targetValue", 50,
+                        "hpLoss", 6));
+        DiceRollResult pending = new DiceRollResult()
+                .setId(601L)
+                .setSummaryId(111L)
+                .setCharacterId(null)
+                .setRoundNo(2)
+                .setDisplayOrder(1)
+                .setResultData(DiceUtils.prepare("1D1*100"))
+                .setResolutionData(resolution);
+        when(internal.requireResult(601L)).thenReturn(pending);
+        when(internal.requireSummaryForUpdate(111L)).thenReturn(summary);
+        when(internal.listResultEntities(111L)).thenReturn(List.of(pending));
+        CocCharacter card = damageCard(11L, "林恩")
+                .setHpCurrent(4)
+                .setMajorWound(true);
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(card);
+
+        var progress = service.rollPlayerResult(601L);
+
+        assertThat(progress.rolledResult().getResolution().getOutcome())
+                .containsEntry("category", "FUMBLE");
+        assertThat(card.getUnconscious()).isTrue();
+        assertThat(progress.summary().getTotalResult())
+                .isEqualTo("林恩生命-6；受到重伤；CON检定失败，陷入昏迷");
+    }
+
     private void stubCreate(Long conversationId) {
         when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
             String reason = invocation.getArgument(1);
@@ -617,6 +812,19 @@ class CocDiceOrchestrationServiceTest {
                 .setResultData(resultData)
                 .setResolutionData(resolution)
                 .setResolvedAt(resolved ? LocalDateTime.now() : null);
+    }
+
+    private CocCharacter damageCard(Long id, String name) {
+        return new CocCharacter()
+                .setId(id)
+                .setRunId(5L)
+                .setName(name)
+                .setHpCurrent(10)
+                .setHpMax(10)
+                .setCon(50)
+                .setMajorWound(false)
+                .setUnconscious(false)
+                .setDead(false);
     }
 
     private KpDiceRequestDTOs.CheckTarget target(String characterName, String checkName) {

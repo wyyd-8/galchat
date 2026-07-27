@@ -29,6 +29,7 @@ public class CocDiceSummaryFormatter {
             rounds.computeIfAbsent(result.getRoundNo(), ignored -> new ArrayList<>()).add(result);
         }
         Set<Long> combinedSanLossSources = completedInsanitySourceIds(results);
+        Set<Long> combinedDamageSources = completedMajorWoundSourceIds(results);
         List<String> completed = new ArrayList<>();
         for (List<DiceRollResult> round : rounds.values()) {
             if (round.stream().anyMatch(result -> result.getResolvedAt() == null)) {
@@ -39,6 +40,10 @@ public class CocDiceSummaryFormatter {
                             requireResolution(result).getType())
                             || result.getId() == null
                             || !combinedSanLossSources.contains(result.getId()))
+                    .filter(result -> !DiceRollConstant.TYPE_DAMAGE.equals(
+                            requireResolution(result).getType())
+                            || result.getId() == null
+                            || !combinedDamageSources.contains(result.getId()))
                     .toList();
             if (visibleRound.isEmpty()) {
                 continue;
@@ -71,6 +76,11 @@ public class CocDiceSummaryFormatter {
         }
         if (ordered.stream().allMatch(this::isInsanityResult)) {
             return formatInsanityRound(ordered);
+        }
+        if (ordered.stream().allMatch(result ->
+                DiceRollConstant.TYPE_MAJOR_WOUND_CON.equals(
+                        requireResolution(result).getType()))) {
+            return formatMajorWoundRound(ordered);
         }
         return ordered.stream()
                 .map(this::formatIndividual)
@@ -122,7 +132,43 @@ public class CocDiceSummaryFormatter {
             return stringValue(resolution.getRule(), "characterName")
                     + "理智-" + intValue(effect, "sanLoss");
         }
+        if (DiceRollConstant.TYPE_DAMAGE.equals(resolution.getType())) {
+            Map<String, Object> effect = resolution.getEffect();
+            if (effect == null) {
+                return "";
+            }
+            StringBuilder text = new StringBuilder()
+                    .append(stringValue(resolution.getRule(), "characterName"))
+                    .append("生命-")
+                    .append(intValue(effect, "hpLoss"));
+            if (booleanValue(effect, "majorWoundChanged")) {
+                text.append("；受到重伤");
+            }
+            if (booleanValue(effect, "unconscious")) {
+                text.append("；陷入昏迷");
+            }
+            return text.toString();
+        }
         return "";
+    }
+
+    private String formatMajorWoundRound(List<DiceRollResult> results) {
+        return results.stream().map(result -> {
+            DiceResolutionDataVO resolution = requireResolution(result);
+            Map<String, Object> outcome = resolution.getOutcome();
+            Map<String, Object> effect = resolution.getEffect();
+            if (outcome == null || effect == null) {
+                throw new UserRequestException("重伤CON检定尚未完成结算");
+            }
+            CocCheckOutcome category = CocCheckOutcome.valueOf(
+                    stringValue(outcome, "category"));
+            boolean success = category == CocCheckOutcome.CRITICAL_SUCCESS
+                    || category == CocCheckOutcome.SUCCESS;
+            return stringValue(resolution.getRule(), "characterName")
+                    + "生命-" + intValue(resolution.getRule(), "hpLoss")
+                    + "；受到重伤；CON检定"
+                    + (success ? "成功，保持清醒" : "失败，陷入昏迷");
+        }).collect(Collectors.joining("；"));
     }
 
     private String formatInsanityRound(List<DiceRollResult> results) {
@@ -192,6 +238,17 @@ public class CocDiceSummaryFormatter {
                 .collect(Collectors.toSet());
     }
 
+    private Set<Long> completedMajorWoundSourceIds(List<DiceRollResult> results) {
+        return results.stream()
+                .filter(result -> DiceRollConstant.TYPE_MAJOR_WOUND_CON.equals(
+                        requireResolution(result).getType()))
+                .filter(result -> result.getResolvedAt() != null)
+                .filter(result -> requireResolution(result).getEffect() != null)
+                .map(result -> requireResolution(result).getSourceResultId())
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+    }
+
     private boolean isInsanityResult(DiceRollResult result) {
         String type = requireResolution(result).getType();
         return DiceRollConstant.TYPE_TEMPORARY_INSANITY_TYPE.equals(type)
@@ -216,6 +273,14 @@ public class CocDiceSummaryFormatter {
         Object value = values.get(key);
         if (value instanceof Number number) {
             return number.intValue();
+        }
+        throw new UserRequestException("掷骰规则字段无效：" + key);
+    }
+
+    private boolean booleanValue(Map<String, Object> values, String key) {
+        Object value = values.get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
         }
         throw new UserRequestException("掷骰规则字段无效：" + key);
     }

@@ -20,7 +20,7 @@ import static org.mockito.Mockito.when;
 class DiceRollServiceImplTest {
 
     @Test
-    void summaryQueryAuthorizesThroughItsConversation() {
+    void queryUsesSummaryConversationAuthorization() {
         IDiceRollInternalService internal = mock(IDiceRollInternalService.class);
         GroupConversationService conversationService = mock(GroupConversationService.class);
         ICocDiceOrchestrationService orchestration = mock(ICocDiceOrchestrationService.class);

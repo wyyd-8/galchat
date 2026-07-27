@@ -68,7 +68,7 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
-    void groupCheckCreatesPlayerPlaceholderAndResolvesAgentSemantics() {
+    void agentResultIsVisibleWhilePlayerResultIsPending() {
         when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(player("林恩", 70));
         when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(agent(12L, "陈默", 45));
         stubCreate(7L);
@@ -90,6 +90,9 @@ class CocDiceOrchestrationServiceTest {
                 .containsKey("category");
         assertThat(result.results().get(1).getResolution().getOutcome())
                 .doesNotContainKey("rank");
+        assertThat(result.summary().getStatus())
+                .isEqualTo(DiceRollConstant.STATUS_PENDING);
+        assertThat(result.semanticResult()).isEqualTo("陈默成功");
     }
 
     @Test
@@ -212,16 +215,22 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
-    void repeatedPlayerRollReturnsSavedResultWithoutRollingOrApplyingAgain() {
+    void retryDoesNotRerollOrReapplySanLoss() {
         DiceRollSummary summary = new DiceRollSummary()
                 .setId(101L)
                 .setConversationId(7L)
                 .setRoundCount(1)
                 .setStatus(DiceRollConstant.STATUS_COMPLETED)
-                .setTotalResult("林恩成功");
-        DiceRollResult resolved = resolvedCheck(
-                201L, 101L, 1, "林恩", 11L, 70, "SUCCESS")
-                .setCharacterId(null)
+                .setTotalResult("林恩理智-6");
+        DiceRollResult resolved = sanLoss(
+                201L,
+                101L,
+                "林恩",
+                11L,
+                null,
+                new DiceRollResultVO("1D6", List.of(), 6),
+                6)
+                .setRoundNo(1)
                 .setResolvedAt(LocalDateTime.now());
         when(internal.requireResult(201L)).thenReturn(resolved);
         when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
@@ -229,8 +238,10 @@ class CocDiceOrchestrationServiceTest {
         var result = service.rollPlayerResult(201L);
 
         assertThat(result.rolledResult().getId()).isEqualTo(201L);
-        assertThat(result.summary().getTotalResult()).isEqualTo("林恩成功");
+        assertThat(result.summary().getTotalResult()).isEqualTo("林恩理智-6");
         verify(internal, never()).saveResult(any());
+        verify(internal, never()).saveSummary(any());
+        verify(cards, never()).lockDiceCharacter(any(), any());
         verify(cards, never()).updateDiceCharacter(any());
     }
 
@@ -263,6 +274,42 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
+    void completedRoundOnlyIsIncludedInTotalResult() {
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(2)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        DiceRollResult completed = resolvedCheck(
+                200L, 101L, 1, "陈默", 12L, 45, "SUCCESS")
+                .setCharacterId(88L);
+        DiceRollResult rolling = resolvedCheck(
+                201L, 101L, 2, "林恩", 11L, 70, "FAILURE")
+                .setCharacterId(null)
+                .setResultData(DiceUtils.prepare("1D1"))
+                .setResolvedAt(null);
+        rolling.getResolutionData().setOutcome(null);
+        DiceRollResult stillPending = resolvedCheck(
+                202L, 101L, 2, "周晴", 13L, 60, "FAILURE")
+                .setCharacterId(null)
+                .setResultData(DiceUtils.prepare("1D100"))
+                .setResolvedAt(null);
+        stillPending.getResolutionData().setOutcome(null);
+        when(internal.requireResult(201L)).thenReturn(rolling);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L))
+                .thenReturn(List.of(completed, rolling, stillPending));
+
+        var progress = service.rollPlayerResult(201L);
+
+        assertThat(progress.summary().getStatus())
+                .isEqualTo(DiceRollConstant.STATUS_PENDING);
+        assertThat(progress.summary().getTotalResult()).isEqualTo("陈默成功");
+        verify(internal).saveSummary(summary);
+        verify(internal, never()).appendDiceRollRound(any(), any(), any());
+    }
+
+    @Test
     void playerCannotUseRollEndpointForAgentResult() {
         DiceRollSummary summary = new DiceRollSummary()
                 .setId(101L)
@@ -277,6 +324,32 @@ class CocDiceOrchestrationServiceTest {
 
         assertThatThrownBy(() -> service.rollPlayerResult(201L))
                 .hasMessageContaining("不是玩家");
+        verify(internal, never()).saveResult(any());
+        verify(cards, never()).updateDiceCharacter(any());
+    }
+
+    @Test
+    void oldRoundPendingResultCannotBeRolledAfterRoundAdvance() {
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(2)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        DiceRollResult stale = resolvedCheck(
+                201L, 101L, 1, "林恩", 11L, 70, "FAILURE")
+                .setCharacterId(null)
+                .setResultData(DiceUtils.prepare("1D100"))
+                .setResolvedAt(null);
+        stale.getResolutionData().setOutcome(null);
+        when(internal.requireResult(201L)).thenReturn(stale);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+
+        assertThatThrownBy(() -> service.rollPlayerResult(201L))
+                .hasMessageContaining("当前掷骰轮次");
+
+        verify(internal, never()).saveResult(any());
+        verify(internal, never()).saveSummary(any());
+        verify(cards, never()).updateDiceCharacter(any());
     }
 
     @Test
@@ -328,7 +401,52 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
-    void finishingPlayerSanLossCreatesOneMadnessRoundForEveryQualifiedCard() {
+    void sanConstantZeroDoesNotCreateClickablePlaceholder() {
+        when(followUps.requireLatestSummaryId(7L, Set.of("requestSanCheck")))
+                .thenReturn(101L);
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        DiceRollResult playerCheck = resolvedSanCheck(
+                201L, 101L, "林恩", 11L, null, "SUCCESS");
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(playerCheck));
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+                    List<DiceRollResult> created = materialize(101L, 2, drafts);
+                    created.getFirst().setResultData(
+                            new DiceRollResultVO("0", List.of(), 0));
+                    return created;
+                });
+        CocCharacter card = new CocCharacter()
+                .setId(11L)
+                .setRunId(5L)
+                .setName("林恩")
+                .setSanCurrent(60);
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(card);
+
+        KpDiceToolResult result = service.rollSanLoss(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.SanLoss("看到尸体", "0", "1D6"));
+
+        assertThat(result.results()).singleElement().satisfies(detail -> {
+            assertThat(detail.getResultData().getFormula()).isEqualTo("0");
+            assertThat(detail.getResultData().getModules()).isEmpty();
+            assertThat(detail.getResultData().getResult()).isZero();
+        });
+        assertThat(result.summary().getStatus())
+                .isEqualTo(DiceRollConstant.STATUS_COMPLETED);
+        assertThat(result.semanticResult()).isEqualTo("林恩理智-0");
+        verify(internal, times(1))
+                .appendDiceRollRound(eq(7L), eq(101L), any());
+    }
+
+    @Test
+    void madnessRoundIsCreatedOnceUnderSummaryLock() {
         DiceRollSummary summary = new DiceRollSummary()
                 .setId(101L)
                 .setConversationId(7L)
@@ -373,11 +491,16 @@ class CocDiceOrchestrationServiceTest {
         when(cards.lockDiceCharacter(5L, 12L)).thenReturn(agentCard);
 
         var progress = service.rollPlayerResult(301L);
+        var retry = service.rollPlayerResult(301L);
 
         assertThat(progress.createdResults()).hasSize(4);
         assertThat(progress.createdResults())
                 .extracting(com.me.galchat.domain.vo.DiceRollDetailVO::getRoundNo)
                 .containsOnly(3);
+        assertThat(retry.createdResults()).isEmpty();
+        verify(internal, times(2)).requireSummaryForUpdate(101L);
+        verify(internal, times(1))
+                .appendDiceRollRound(eq(7L), eq(101L), any());
     }
 
     @Test
@@ -547,7 +670,34 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
-    void playerDamageDefersMajorWoundConUntilDamageRoundCompletes() {
+    void followUpLookupCannotCrossConversation() {
+        when(followUps.requireLatestSummaryId(eq(7L), any()))
+                .thenReturn(101L);
+        when(internal.requireSummaryForUpdate(101L))
+                .thenReturn(new DiceRollSummary()
+                        .setId(101L)
+                        .setConversationId(8L)
+                        .setRoundCount(1)
+                        .setStatus(DiceRollConstant.STATUS_COMPLETED));
+
+        assertThatThrownBy(() -> service.rollDamage(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Damage(
+                        "攻击邪教徒",
+                        DamageSourceMode.FOLLOW_UP,
+                        List.of(new KpDiceRequestDTOs.DamageTarget(
+                                "邪教徒", "林恩", "1D6")))))
+                .hasMessageContaining("不属于当前群聊");
+
+        verify(internal, never()).listResultEntities(any());
+        verify(internal, never()).appendDiceRollRound(any(), any(), any());
+        verify(cards, never()).requireDiceCharacter(any(), any());
+        verify(cards, never()).updateDiceCharacter(any());
+    }
+
+    @Test
+    void majorWoundConRoundIsCreatedOnceUnderSummaryLock() {
         CocDiceCharacterVO playerTarget = card(11L, null, "林恩", 70);
         CocDiceCharacterVO agentTarget = card(12L, 88L, "陈默", 45);
         when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(playerTarget);
@@ -615,6 +765,7 @@ class CocDiceOrchestrationServiceTest {
                 });
 
         var progress = service.rollPlayerResult(501L);
+        var retry = service.rollPlayerResult(501L);
 
         assertThat(progress.createdResults()).hasSize(2);
         assertThat(progress.createdResults())
@@ -623,6 +774,10 @@ class CocDiceOrchestrationServiceTest {
         assertThat(progress.createdResults())
                 .extracting(com.me.galchat.domain.vo.DiceRollDetailVO::getRoundNo)
                 .containsOnly(2);
+        assertThat(retry.createdResults()).isEmpty();
+        verify(internal, times(2)).requireSummaryForUpdate(111L);
+        verify(internal, times(1))
+                .appendDiceRollRound(eq(7L), eq(111L), any());
     }
 
     @Test

@@ -42,7 +42,7 @@ public class ChatGroupContextPolicy implements GroupContextPolicy {
     public GroupContextMaterial load(GroupConversation conversation, GroupActionSpec action) {
         long windowStart = topicService.windowStartSequence(conversation);
         List<Message> context = contextAssembler.assembleContextFrom(
-                conversation, action.actorId(), windowStart);
+                conversation, action.actor(), windowStart);
         String memory = vectorService.search(conversation.getId(), windowStart, retrievalQuery(context));
         if (!StringUtils.hasText(memory)) {
             return new GroupContextMaterial(context);

@@ -198,8 +198,18 @@ public class GroupConversationService {
     }
 
     public void checkReplyMember(Long conversationId, String speakerType, Long speakerId, boolean force) {
+        if (GroupChatConstant.ACTOR_KP.equals(speakerType)) {
+            if (speakerId != null) {
+                throw new UserRequestException("KP的actorId必须为空");
+            }
+            GroupConversation conversation = conversationMapper.selectById(conversationId);
+            if (conversation == null || !GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) {
+                throw new UserRequestException("KP只能用于TRPG群聊");
+            }
+            return;
+        }
         if (!GroupChatConstant.ACTOR_CHARACTER.equals(speakerType) || speakerId == null) {
-            throw new UserRequestException("第一版仅支持指定角色回复");
+            throw new UserRequestException("仅支持指定角色或KP回复");
         }
         GroupChatMember member = memberMapper.selectOne(new LambdaQueryWrapper<GroupChatMember>()
                 .eq(GroupChatMember::getConversationId, conversationId)

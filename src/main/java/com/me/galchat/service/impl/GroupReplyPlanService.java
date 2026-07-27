@@ -353,8 +353,8 @@ public class GroupReplyPlanService {
             count += group.getItems().size();
             Set<String> actors = new HashSet<>();
             for (GroupReplyPlanDTO.Item item : group.getItems()) {
-                if (item == null || item.getActorId() == null) {
-                    throw new UserRequestException("回复人物id不能为空");
+                if (item == null) {
+                    throw new UserRequestException("回复人物不能为空");
                 }
                 String actorType = StringUtils.hasText(item.getActorType())
                         ? item.getActorType().trim().toLowerCase(Locale.ROOT)
@@ -362,8 +362,22 @@ public class GroupReplyPlanService {
                 if (!actors.add(actorType + "\n" + item.getActorId())) {
                     throw new UserRequestException("同一分组中不能重复安排同一人物");
                 }
-                conversationService.checkReplyMember(
-                        conversation.getId(), actorType, item.getActorId(), false);
+                if (GroupChatConstant.ACTOR_KP.equals(actorType)) {
+                    if (!GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) {
+                        throw new UserRequestException("KP只能用于TRPG群聊");
+                    }
+                    if (item.getActorId() != null) {
+                        throw new UserRequestException("KP的actorId必须为空");
+                    }
+                } else if (GroupChatConstant.ACTOR_CHARACTER.equals(actorType)) {
+                    if (item.getActorId() == null) {
+                        throw new UserRequestException("回复人物id不能为空");
+                    }
+                    conversationService.checkReplyMember(
+                            conversation.getId(), actorType, item.getActorId(), false);
+                } else {
+                    throw new UserRequestException("回复人物类型仅支持character或kp");
+                }
             }
         }
         if (count > 200) {

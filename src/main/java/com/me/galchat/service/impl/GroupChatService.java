@@ -13,6 +13,7 @@ import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupChatMessageVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
+import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
 import com.me.galchat.groupchat.runtime.GroupModelInvocation;
@@ -248,7 +249,8 @@ public class GroupChatService {
             GroupContextMaterial context = runtime.contextPolicy().load(conversation, action);
             GroupModelInvocation invocation = runtime.agentPolicy().prepare(conversation, action, context);
             String speakerName = runtime.agentPolicy()
-                    .characterName(conversation.getUserWorldId(), step.getSpeakerId());
+                    .actorName(conversation.getUserWorldId(),
+                            new GroupActorRef(step.getSpeakerType(), step.getSpeakerId()));
             GroupChatEvent.Speaker speaker = GroupChatEvent.Speaker.builder()
                     .type(step.getSpeakerType()).id(step.getSpeakerId()).name(speakerName).build();
             UserWorldPrefix userWorld = userWorldPrefixService.getById(conversation.getUserWorldId());
@@ -453,9 +455,11 @@ public class GroupChatService {
         if (GroupChatConstant.ACTOR_USER.equals(message.getSpeakerType())) {
             return "用户";
         }
-        if (GroupChatConstant.ACTOR_CHARACTER.equals(message.getSpeakerType())) {
+        if (GroupChatConstant.ACTOR_CHARACTER.equals(message.getSpeakerType())
+                || GroupChatConstant.ACTOR_KP.equals(message.getSpeakerType())) {
             return runtimeRegistry.require(conversation.getMode()).agentPolicy()
-                    .characterName(conversation.getUserWorldId(), message.getSpeakerId());
+                    .actorName(conversation.getUserWorldId(),
+                            new GroupActorRef(message.getSpeakerType(), message.getSpeakerId()));
         }
         return "旁白";
     }

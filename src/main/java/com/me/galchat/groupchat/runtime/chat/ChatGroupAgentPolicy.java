@@ -2,6 +2,7 @@ package com.me.galchat.groupchat.runtime.chat;
 
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
+import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupAgentPolicy;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupModelInvocation;
@@ -40,9 +41,9 @@ public class ChatGroupAgentPolicy implements GroupAgentPolicy {
     @Override
     public GroupModelInvocation prepare(GroupConversation conversation, GroupActionSpec action,
                                         GroupContextMaterial context) {
-        String name = characterName(conversation.getUserWorldId(), action.actorId());
+        String name = actorName(conversation.getUserWorldId(), action.actor());
         List<Message> messages = new ArrayList<>();
-        messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, action.actorId()) + """
+        messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, action.actor()) + """
 
                 你正在一个多人群聊中扮演%s。
                 聊天记录中的 speaker 标记是真实发言者身份；其他角色的消息不是你的经历或台词。
@@ -55,7 +56,7 @@ public class ChatGroupAgentPolicy implements GroupAgentPolicy {
     }
 
     @Override
-    public String characterName(Long userWorldId, Long characterId) {
-        return contextAssembler.characterName(userWorldId, characterId);
+    public String actorName(Long userWorldId, GroupActorRef actor) {
+        return contextAssembler.actorName(userWorldId, actor);
     }
 }

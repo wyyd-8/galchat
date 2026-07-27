@@ -205,11 +205,17 @@ public class ChatServiceImpl implements IChatService {
 
     /** 单聊与群聊共用的角色基础提示词，包含世界、角色、好感和长期用户信息。 */
     public String buildSystemPrompt(Long worldId, Long userWorldId, Long characterId) {
+        StringBuilder prompt = new StringBuilder(buildWorldSystemPrompt(worldId, userWorldId));
+        appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(userWorldId, characterId));
+        return prompt.toString();
+    }
+
+    /** 群聊隐式系统角色共用的世界提示词，不包含任何具体角色身份。 */
+    public String buildWorldSystemPrompt(Long worldId, Long userWorldId) {
         StringBuilder prompt = new StringBuilder();
         appendPrompt(prompt, ChatConstant.CHAT_SYSTEM_INSTRUCTIONS_TEMPLATE
                 .formatted(buildInteractionRequirements(userWorldId)));
         appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(worldId));
-        appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(userWorldId, characterId));
         return prompt.toString();
     }
 

@@ -25,6 +25,6 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
     @Override
     public GroupContextMaterial load(GroupConversation conversation, GroupActionSpec action) {
         return new GroupContextMaterial(
-                contextAssembler.assembleContext(conversation, action.actorId(), null));
+                contextAssembler.assembleContext(conversation, action.actor(), null));
     }
 }

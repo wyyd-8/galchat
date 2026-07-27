@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.vo.DiceRollResultVO;
+import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.DiceRollResultMapper;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
@@ -40,11 +41,13 @@ public class GroupToolHistoryAssembler {
         this.diceResultMapper = diceResultMapper;
     }
 
-    public Map<Long, List<Message>> beforeMessages(List<GroupChatMessage> messages, Long currentCharacterId) {
-        Map<Long, Long> ownerByStep = new LinkedHashMap<>();
+    public Map<Long, List<Message>> beforeMessages(
+            List<GroupChatMessage> messages, GroupActorRef currentActor) {
+        Map<Long, GroupActorRef> ownerByStep = new LinkedHashMap<>();
         for (GroupChatMessage message : messages) {
             if (message.getReplyStepId() != null) {
-                ownerByStep.putIfAbsent(message.getReplyStepId(), message.getSpeakerId());
+                ownerByStep.putIfAbsent(message.getReplyStepId(),
+                        new GroupActorRef(message.getSpeakerType(), message.getSpeakerId()));
             }
         }
         if (ownerByStep.isEmpty()) {
@@ -66,7 +69,7 @@ public class GroupToolHistoryAssembler {
                         Collectors.toList()));
 
         Map<Long, List<Message>> assembled = new LinkedHashMap<>();
-        for (Map.Entry<Long, Long> entry : ownerByStep.entrySet()) {
+        for (Map.Entry<Long, GroupActorRef> entry : ownerByStep.entrySet()) {
             Long replyStepId = entry.getKey();
             List<Message> before = new ArrayList<>();
             Map<Integer, List<GroupChatToolCall>> callsByModelStep =
@@ -76,7 +79,7 @@ public class GroupToolHistoryAssembler {
                                     LinkedHashMap::new,
                                     Collectors.toList()));
             for (List<GroupChatToolCall> modelStepCalls : callsByModelStep.values()) {
-                if (Objects.equals(entry.getValue(), currentCharacterId)) {
+                if (entry.getValue().matches(currentActor.type(), currentActor.id())) {
                     appendPrivateToolMessages(before, modelStepCalls);
                 }
                 for (GroupChatToolCall call : modelStepCalls) {

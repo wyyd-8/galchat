@@ -9,4 +9,7 @@ public record GroupActionSpec(
         Integer groupOrder,
         Integer itemOrder
 ) {
+    public GroupActorRef actor() {
+        return new GroupActorRef(actorType, actorId);
+    }
 }

@@ -28,6 +28,30 @@ import static org.mockito.Mockito.when;
 class GroupReplyPlanSnapshotServiceTest {
 
     @Test
+    void replyPlanSnapshotCapturesKpWithNullActorId() {
+        GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper = mock(GroupReplyPlanItemMapper.class);
+        GroupReplyPlanSnapshotService service = new GroupReplyPlanSnapshotService(
+                conversationMapper, planMapper, itemMapper, mock(GroupReplyPlanService.class));
+        when(conversationMapper.selectList(any())).thenReturn(List.of(
+                new GroupConversation().setId(7L).setUserWorldId(1L).setActiveReplyPlanId(10L)));
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L).setConversationId(7L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_SCENE).setContextId(100L));
+        when(itemMapper.selectList(any())).thenReturn(List.of(
+                new GroupReplyPlanItem().setPlanId(10L).setGroupKey("scene:1")
+                        .setGroupName("地下室").setGroupOrder(1).setItemOrder(1)
+                        .setActorType(GroupChatConstant.ACTOR_KP).setActorId(null)));
+
+        var captured = service.capture(1L).getFirst().getActivePlan()
+                .getGroups().getFirst().getItems().getFirst();
+
+        assertThat(captured.getActorType()).isEqualTo(GroupChatConstant.ACTOR_KP);
+        assertThat(captured.getActorId()).isNull();
+    }
+
+    @Test
     void captureKeepsActiveCombatAndOneResumeSceneStructurally() {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);

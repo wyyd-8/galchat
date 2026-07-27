@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.vo.DiceRollResultVO;
+import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.DiceRollResultMapper;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
@@ -38,8 +39,10 @@ class GroupToolHistoryAssemblerTest {
                 .setToolArguments("{\"query\":\"旧宅\"}")
                 .setToolResult("旧宅位于河边")));
 
-        Map<Long, List<Message>> ownerHistory = assembler.beforeMessages(List.of(message), 11L);
-        Map<Long, List<Message>> otherHistory = assembler.beforeMessages(List.of(message), 12L);
+        Map<Long, List<Message>> ownerHistory = assembler.beforeMessages(
+                List.of(message), new GroupActorRef("character", 11L));
+        Map<Long, List<Message>> otherHistory = assembler.beforeMessages(
+                List.of(message), new GroupActorRef("character", 12L));
 
         assertThat(ownerHistory.get(41L))
                 .hasSize(2)
@@ -74,8 +77,10 @@ class GroupToolHistoryAssemblerTest {
                 .setReason("斗殴检定")
                 .setResultData(new DiceRollResultVO("1D100", List.of(), 34))));
 
-        List<Message> kpHistory = assembler.beforeMessages(List.of(message), 99L).get(41L);
-        List<Message> investigatorHistory = assembler.beforeMessages(List.of(message), 11L).get(41L);
+        List<Message> kpHistory = assembler.beforeMessages(
+                List.of(message), new GroupActorRef("character", 99L)).get(41L);
+        List<Message> investigatorHistory = assembler.beforeMessages(
+                List.of(message), new GroupActorRef("character", 11L)).get(41L);
 
         assertThat(kpHistory).singleElement().isInstanceOf(UserMessage.class);
         assertThat(investigatorHistory).singleElement().isInstanceOf(UserMessage.class);
@@ -84,6 +89,28 @@ class GroupToolHistoryAssemblerTest {
                 .contains("哈维攻击邪教徒", "斗殴检定", "1D100", "34")
                 .doesNotContain("call-dice", "createDiceRoll");
         assertThat(investigatorHistory.getFirst().getText()).isEqualTo(kpHistory.getFirst().getText());
+    }
+
+    @Test
+    void kpOwnsItsPrivateToolHistoryEvenThoughItsIdIsNull() {
+        GroupChatToolCallMapper toolCallMapper = mock(GroupChatToolCallMapper.class);
+        GroupToolHistoryAssembler assembler = assembler(toolCallMapper);
+        GroupChatMessage kpMessage = message(41L, null).setSpeakerType("kp");
+        when(toolCallMapper.selectList(any())).thenReturn(List.of(new GroupChatToolCall()
+                .setReplyStepId(41L)
+                .setToolStepNo(1)
+                .setToolCallId("call-1")
+                .setToolName("searchInfo")
+                .setToolArguments("{\"query\":\"旧宅\"}")
+                .setToolResult("旧宅位于河边")));
+
+        Map<Long, List<Message>> own = assembler.beforeMessages(
+                List.of(kpMessage), new GroupActorRef("kp", null));
+        Map<Long, List<Message>> other = assembler.beforeMessages(
+                List.of(kpMessage), new GroupActorRef("character", null));
+
+        assertThat(own.get(41L)).hasSize(2);
+        assertThat(other.get(41L)).isEmpty();
     }
 
     private GroupToolHistoryAssembler assembler(GroupChatToolCallMapper toolCallMapper) {
@@ -96,6 +123,7 @@ class GroupToolHistoryAssemblerTest {
     private GroupChatMessage message(Long replyStepId, Long speakerId) {
         return new GroupChatMessage()
                 .setReplyStepId(replyStepId)
+                .setSpeakerType("character")
                 .setSpeakerId(speakerId);
     }
 }

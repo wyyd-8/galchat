@@ -14,6 +14,7 @@ public final class GroupChatConstant {
 
     public static final String ACTOR_USER = "user";
     public static final String ACTOR_CHARACTER = "character";
+    public static final String ACTOR_KP = "kp";
     public static final String ACTOR_NARRATOR = "narrator";
 
     public static final String MESSAGE_DIALOGUE = "dialogue";

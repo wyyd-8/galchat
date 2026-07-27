@@ -7,6 +7,7 @@ import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
+import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.service.IUserCharacterInfoService;
@@ -32,18 +33,18 @@ public class GroupContextAssembler {
     private final IUserCharacterInfoService userCharacterInfoService;
     private final GroupToolHistoryAssembler toolHistoryAssembler;
 
-    public List<Message> assembleContext(GroupConversation conversation, Long currentCharacterId,
+    public List<Message> assembleContext(GroupConversation conversation, GroupActorRef currentActor,
                                          GroupContextSummary summary) {
         List<Message> prompt = new ArrayList<>();
         long coveredSequence = summary == null ? 0L : summary.getEndSequence();
         if (summary != null && StringUtils.hasText(summary.getSummary())) {
             prompt.add(new UserMessage("<context-summary>\n" + summary.getSummary() + "\n</context-summary>"));
         }
-        prompt.addAll(assembleContextFrom(conversation, currentCharacterId, coveredSequence + 1));
+        prompt.addAll(assembleContextFrom(conversation, currentActor, coveredSequence + 1));
         return prompt;
     }
 
-    public List<Message> assembleContextFrom(GroupConversation conversation, Long currentCharacterId,
+    public List<Message> assembleContextFrom(GroupConversation conversation, GroupActorRef currentActor,
                                              long startSequence) {
         Map<Long, UserCharacterInfo> characterById = characterById(conversation.getUserWorldId());
         List<Message> prompt = new ArrayList<>();
@@ -54,13 +55,12 @@ public class GroupContextAssembler {
                 .eq(GroupChatMessage::getVisibility, "public")
                 .orderByAsc(GroupChatMessage::getSequenceNo));
         Map<Long, List<Message>> toolMessages =
-                toolHistoryAssembler.beforeMessages(messages, currentCharacterId);
+                toolHistoryAssembler.beforeMessages(messages, currentActor);
         for (GroupChatMessage message : messages) {
             if (message.getReplyStepId() != null) {
                 prompt.addAll(toolMessages.getOrDefault(message.getReplyStepId(), List.of()));
             }
-            if (GroupChatConstant.ACTOR_CHARACTER.equals(message.getSpeakerType())
-                    && currentCharacterId.equals(message.getSpeakerId())) {
+            if (currentActor.matches(message.getSpeakerType(), message.getSpeakerId())) {
                 prompt.add(new AssistantMessage(message.getContent()));
             } else {
                 prompt.add(new UserMessage(formatOtherSpeakerMessage(message, characterById)));
@@ -69,9 +69,13 @@ public class GroupContextAssembler {
         return prompt;
     }
 
-    public String baseSystemPrompt(GroupConversation conversation, Long currentCharacterId) {
-        StringBuilder builder = new StringBuilder(chatService.buildSystemPrompt(conversation.getWorldId(),
-                conversation.getUserWorldId(), currentCharacterId));
+    public String baseSystemPrompt(GroupConversation conversation, GroupActorRef currentActor) {
+        String actorPrompt = GroupChatConstant.ACTOR_KP.equals(currentActor.type())
+                ? chatService.buildWorldSystemPrompt(
+                        conversation.getWorldId(), conversation.getUserWorldId())
+                : chatService.buildSystemPrompt(
+                        conversation.getWorldId(), conversation.getUserWorldId(), currentActor.id());
+        StringBuilder builder = new StringBuilder(actorPrompt);
         builder.append("\n群聊成员：");
         Map<Long, UserCharacterInfo> characterById = characterById(conversation.getUserWorldId());
         for (GroupChatMember member : conversationService.listMembers(conversation.getId())) {
@@ -88,11 +92,23 @@ public class GroupContextAssembler {
                 ? "角色" + characterId : character.getCharacterName();
     }
 
+    public String actorName(Long userWorldId, GroupActorRef actor) {
+        if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
+            return "KP";
+        }
+        if (GroupChatConstant.ACTOR_CHARACTER.equals(actor.type())) {
+            return characterName(userWorldId, actor.id());
+        }
+        return "旁白";
+    }
+
     private String formatOtherSpeakerMessage(GroupChatMessage message,
                                              Map<Long, UserCharacterInfo> characterById) {
         String name;
         if (GroupChatConstant.ACTOR_USER.equals(message.getSpeakerType())) {
             name = "用户";
+        } else if (GroupChatConstant.ACTOR_KP.equals(message.getSpeakerType())) {
+            name = "KP";
         } else if (GroupChatConstant.ACTOR_CHARACTER.equals(message.getSpeakerType())) {
             UserCharacterInfo character = characterById.get(message.getSpeakerId());
             name = character == null ? "角色" + message.getSpeakerId() : character.getCharacterName();

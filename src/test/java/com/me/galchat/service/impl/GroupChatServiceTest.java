@@ -11,6 +11,7 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
+import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupAgentPolicy;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupContextPolicy;
@@ -131,7 +132,8 @@ class GroupChatServiceTest {
                 chatClient,
                 new Prompt(List.of(new SystemMessage("群聊规则"), new UserMessage("用户消息"))),
                 List.of()));
-        when(agentPolicy.characterName(1L, 9L)).thenReturn("Alice");
+        when(agentPolicy.actorName(
+                1L, new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 9L))).thenReturn("Alice");
         when(lockService.tryLock(7L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         AtomicLong sequence = new AtomicLong();
         when(conversationService.nextSequence(7L)).thenAnswer(invocation -> sequence.incrementAndGet());

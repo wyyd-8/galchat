@@ -5,6 +5,7 @@ import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
+import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.service.IUserCharacterInfoService;
@@ -47,10 +48,11 @@ class GroupContextAssemblerTest {
                 message(GroupChatConstant.ACTOR_USER, null, "进入房间"),
                 message(GroupChatConstant.ACTOR_CHARACTER, 12L, "我检查门口"),
                 message(GroupChatConstant.ACTOR_CHARACTER, 11L, "我打开手电").setReplyStepId(41L)));
-        when(toolHistoryAssembler.beforeMessages(any(), org.mockito.ArgumentMatchers.eq(11L)))
+        GroupActorRef alice = new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 11L);
+        when(toolHistoryAssembler.beforeMessages(any(), org.mockito.ArgumentMatchers.eq(alice)))
                 .thenReturn(Map.of(41L, List.of(new UserMessage("<dice-roll summary-id=\"501\" />"))));
 
-        List<Message> prompt = assembler.assembleContextFrom(conversation, 11L, 1L);
+        List<Message> prompt = assembler.assembleContextFrom(conversation, alice, 1L);
 
         assertThat(prompt.stream().filter(AssistantMessage.class::isInstance).map(Message::getText))
                 .containsExactly("我打开手电");
@@ -58,9 +60,39 @@ class GroupContextAssemblerTest {
                 .anyMatch(text -> text.contains("speaker=\"Bob\"") && text.contains("我检查门口"));
         assertThat(prompt).extracting(Message::getText)
                 .endsWith("<dice-roll summary-id=\"501\" />", "我打开手电");
-        assertThat(assembler.baseSystemPrompt(conversation, 11L))
+        assertThat(assembler.baseSystemPrompt(conversation, alice))
                 .contains("包含用户信息的角色基础提示词", "Alice", "Bob");
         verify(chatService).buildSystemPrompt(2L, 1L, 11L);
+    }
+
+    @Test
+    void kpAuthoredMessageIsAssistantOnlyForKpAndUsesWorldOnlyPrompt() {
+        GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
+        GroupConversationService conversationService = mock(GroupConversationService.class);
+        ChatServiceImpl chatService = mock(ChatServiceImpl.class);
+        IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
+        GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
+        GroupContextAssembler assembler = new GroupContextAssembler(messageMapper, conversationService,
+                chatService, characterService, toolHistoryAssembler);
+        GroupConversation conversation = new GroupConversation()
+                .setId(8L).setUserWorldId(1L).setWorldId(2L);
+        GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
+        GroupActorRef investigator = new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 11L);
+        when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
+                new UserCharacterInfo().setCharacterId(11L).setCharacterName("Alice")));
+        when(messageMapper.selectList(any())).thenReturn(List.of(
+                message(GroupChatConstant.ACTOR_KP, null, "进行侦查检定").setReplyStepId(41L)));
+        when(toolHistoryAssembler.beforeMessages(
+                any(), org.mockito.ArgumentMatchers.eq(kp))).thenReturn(Map.of(41L, List.of()));
+        when(toolHistoryAssembler.beforeMessages(
+                any(), org.mockito.ArgumentMatchers.eq(investigator))).thenReturn(Map.of(41L, List.of()));
+        when(chatService.buildWorldSystemPrompt(2L, 1L)).thenReturn("仅世界提示词");
+
+        assertThat(assembler.assembleContextFrom(conversation, kp, 1L).getFirst())
+                .isInstanceOf(AssistantMessage.class);
+        assertThat(assembler.assembleContextFrom(conversation, investigator, 1L).getFirst())
+                .isInstanceOf(UserMessage.class);
+        assertThat(assembler.baseSystemPrompt(conversation, kp)).contains("仅世界提示词");
     }
 
     @Test

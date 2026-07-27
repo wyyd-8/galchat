@@ -7,5 +7,5 @@ public interface GroupAgentPolicy {
     GroupModelInvocation prepare(GroupConversation conversation, GroupActionSpec action,
                                  GroupContextMaterial context);
 
-    String characterName(Long userWorldId, Long characterId);
+    String actorName(Long userWorldId, GroupActorRef actor);
 }

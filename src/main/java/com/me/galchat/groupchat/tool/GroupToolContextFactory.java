@@ -17,7 +17,10 @@ public class GroupToolContextFactory {
         context.put(ChatToolContextConstant.WORLD_ID_KEY, conversation.getWorldId());
         context.put(ChatToolContextConstant.USER_WORLD_ID_KEY, conversation.getUserWorldId());
         context.put(ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY, conversation.getId());
-        context.put(ChatToolContextConstant.CHARACTER_ID_KEY, action.actorId());
+        context.put(ChatToolContextConstant.ACTOR_TYPE_KEY, action.actorType());
+        if (action.actorId() != null) {
+            context.put(ChatToolContextConstant.CHARACTER_ID_KEY, action.actorId());
+        }
         context.put(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, replyStepId);
         if (favorSystemStatus != null) {
             context.put(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY, favorSystemStatus);

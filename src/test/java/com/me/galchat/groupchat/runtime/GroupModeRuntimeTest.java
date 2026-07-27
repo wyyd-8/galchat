@@ -11,6 +11,8 @@ import com.me.galchat.groupchat.runtime.trpg.TrpgGroupAgentPolicy;
 import com.me.galchat.groupchat.runtime.trpg.TrpgGroupContextPolicy;
 import com.me.galchat.groupchat.runtime.trpg.TrpgGroupRuntime;
 import com.me.galchat.service.impl.GroupContextAssembler;
+import com.me.galchat.service.ICharacterCardService;
+import com.me.galchat.service.impl.CharacterCardContextFormatter;
 import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
@@ -53,12 +55,13 @@ class GroupModeRuntimeTest {
         GroupActionSpec action = new GroupActionSpec(
                 GroupChatConstant.ACTION_CHAT_REPLY, GroupChatConstant.ACTOR_CHARACTER, 11L,
                 "default", "群聊", 1, 1);
+        GroupActorRef actor = action.actor();
         when(topicService.windowStartSequence(chat)).thenReturn(10L);
-        when(assembler.assembleContextFrom(chat, 11L, 10L))
+        when(assembler.assembleContextFrom(chat, actor, 10L))
                 .thenReturn(List.of(new UserMessage("上一话题"), new UserMessage("继续调查仓库")));
         when(vectorService.search(1L, 10L, "上一话题\n继续调查仓库"))
                 .thenReturn("更早话题的相关记忆");
-        when(assembler.assembleContext(trpg, 11L, null))
+        when(assembler.assembleContext(trpg, actor, null))
                 .thenReturn(List.of(new UserMessage("跑团上下文")));
 
         ChatGroupContextPolicy chatPolicy = new ChatGroupContextPolicy(topicService, vectorService, assembler);
@@ -84,8 +87,11 @@ class GroupModeRuntimeTest {
         UserCharacterInfoTools infoTools = mock(UserCharacterInfoTools.class);
         GroupConversation conversation = new GroupConversation().setId(1L);
         GroupContextMaterial context = new GroupContextMaterial(List.of(new UserMessage("共享上下文")));
-        when(assembler.baseSystemPrompt(conversation, 11L)).thenReturn("角色基础提示词");
-        when(assembler.characterName(conversation.getUserWorldId(), 11L)).thenReturn("Alice");
+        GroupActorRef alice = new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 11L);
+        when(assembler.baseSystemPrompt(conversation, alice)).thenReturn("角色基础提示词");
+        when(assembler.actorName(conversation.getUserWorldId(), alice)).thenReturn("Alice");
+        ICharacterCardService cardService = mock(ICharacterCardService.class);
+        when(cardService.listDiceCharacters(conversation.getUserWorldId())).thenReturn(List.of());
 
         GroupModelInvocation chat = new ChatGroupAgentPolicy(
                 client, assembler, vectorTools, favorTools).prepare(
@@ -93,7 +99,8 @@ class GroupModeRuntimeTest {
                 new GroupActionSpec(GroupChatConstant.ACTION_CHAT_REPLY,
                         GroupChatConstant.ACTOR_CHARACTER, 11L, "default", "群聊", 1, 1),
                 context);
-        GroupModelInvocation trpg = new TrpgGroupAgentPolicy(client, assembler).prepare(
+        GroupModelInvocation trpg = new TrpgGroupAgentPolicy(
+                client, assembler, cardService, new CharacterCardContextFormatter()).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_TRPG_COMBAT,
                         GroupChatConstant.ACTOR_CHARACTER, 11L, "round:1", "第1轮", 1, 1),

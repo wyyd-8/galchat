@@ -32,6 +32,36 @@ import static org.mockito.Mockito.when;
 class GroupReplyPlanServiceTest {
 
     @Test
+    void trpgPlanAcceptsOneImplicitKpIdentityWithNullActorId() {
+        Fixture fixture = new Fixture();
+        when(fixture.conversationService.requireActive(7L))
+                .thenReturn(activeConversation(GroupChatConstant.MODE_TRPG, null));
+
+        fixture.service.replace(7L, sceneRequest(planActor(GroupChatConstant.ACTOR_KP, null)));
+
+        verify(fixture.itemMapper).insert(org.mockito.ArgumentMatchers.argThat((GroupReplyPlanItem item) ->
+                GroupChatConstant.ACTOR_KP.equals(item.getActorType())
+                        && item.getActorId() == null));
+    }
+
+    @Test
+    void normalChatAndNonNullKpIdsAreRejected() {
+        Fixture fixture = new Fixture();
+        when(fixture.conversationService.requireActive(7L))
+                .thenReturn(activeConversation(GroupChatConstant.MODE_CHAT, null));
+
+        assertThatThrownBy(() -> fixture.service.replace(
+                7L, userRequest(planActor(GroupChatConstant.ACTOR_KP, null))))
+                .hasMessageContaining("TRPG");
+
+        when(fixture.conversationService.requireActive(7L))
+                .thenReturn(activeConversation(GroupChatConstant.MODE_TRPG, null));
+        assertThatThrownBy(() -> fixture.service.replace(
+                7L, sceneRequest(planActor(GroupChatConstant.ACTOR_KP, 9L))))
+                .hasMessageContaining("KP");
+    }
+
+    @Test
     void combatPlanRemembersExplorationPlan() {
         Fixture fixture = new Fixture();
         GroupConversation conversation = new GroupConversation()
@@ -372,6 +402,29 @@ class GroupReplyPlanServiceTest {
         request.getGroups().getFirst().setKey("default");
         request.getGroups().getFirst().setName("群聊");
         return request;
+    }
+
+    private GroupReplyPlanDTO userRequest(GroupReplyPlanDTO.Item item) {
+        GroupReplyPlanDTO request = userRequest();
+        request.getGroups().getFirst().setItems(List.of(item));
+        return request;
+    }
+
+    private GroupReplyPlanDTO sceneRequest(GroupReplyPlanDTO.Item item) {
+        GroupReplyPlanDTO request = combatRequest();
+        request.setSource(GroupChatConstant.PLAN_SOURCE_SCENE);
+        request.setContextId(100L);
+        request.getGroups().getFirst().setKey("scene:1");
+        request.getGroups().getFirst().setName("地下室");
+        request.getGroups().getFirst().setItems(List.of(item));
+        return request;
+    }
+
+    private GroupReplyPlanDTO.Item planActor(String actorType, Long actorId) {
+        GroupReplyPlanDTO.Item item = new GroupReplyPlanDTO.Item();
+        item.setActorType(actorType);
+        item.setActorId(actorId);
+        return item;
     }
 
     private GroupConversation activeConversation(String mode, Long activePlanId) {

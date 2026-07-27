@@ -44,4 +44,15 @@ class ChatServiceImplTest {
         assertThat(prompt).doesNotContain("用户来自角色世界之外的现实世界");
     }
 
+    @Test
+    void worldSystemPromptDoesNotLeakAnyCharacterIdentity() {
+        when(userWorldPrefixService.getById(1L)).thenReturn(new UserWorldPrefix());
+        when(userWorldPrefixService.buildWorldPrompt(10L)).thenReturn("世界背景");
+        when(userCharacterInfoService.buildCharacterPrompt(1L, 2L)).thenReturn("Alice角色信息");
+
+        String prompt = chatService.buildWorldSystemPrompt(10L, 1L);
+
+        assertThat(prompt).contains("世界背景").doesNotContain("Alice角色信息");
+    }
+
 }

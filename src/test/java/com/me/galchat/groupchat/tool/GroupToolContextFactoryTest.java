@@ -38,4 +38,27 @@ class GroupToolContextFactoryTest {
                 .containsEntry(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L)
                 .containsEntry(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY, "NORMAL");
     }
+
+    @Test
+    void kpToolContextContainsActorTypeButNoCharacterId() {
+        GroupToolContextFactory factory = new GroupToolContextFactory();
+        GroupConversation conversation = new GroupConversation()
+                .setId(8L)
+                .setWorldId(2L)
+                .setUserWorldId(1L);
+        GroupActionSpec action = new GroupActionSpec(
+                GroupChatConstant.ACTION_TRPG_SCENE,
+                GroupChatConstant.ACTOR_KP,
+                null,
+                "scene:1",
+                "地下室",
+                1,
+                1);
+
+        Map<String, Object> context = factory.create(conversation, action, 41L, "NORMAL");
+
+        assertThat(context)
+                .containsEntry(ChatToolContextConstant.ACTOR_TYPE_KEY, GroupChatConstant.ACTOR_KP)
+                .doesNotContainKey(ChatToolContextConstant.CHARACTER_ID_KEY);
+    }
 }

@@ -11,6 +11,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -68,5 +69,18 @@ class GroupToolCallStoreTest {
         store.bindDiceSummary(41L, "call-1", 501L);
 
         verify(mapper).bindDiceSummary(41L, "call-1", 501L);
+    }
+
+    @Test
+    void locatesFollowUpOnlyWithinRequestedConversation() {
+        GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
+        GroupToolCallStore store = new GroupToolCallStore(mapper);
+        when(mapper.findLatestDiceSummaryId(7L, Set.of("requestCheck")))
+                .thenReturn(501L);
+
+        assertThat(store.requireLatestSummaryId(
+                7L, Set.of("requestCheck"))).isEqualTo(501L);
+
+        verify(mapper).findLatestDiceSummaryId(7L, Set.of("requestCheck"));
     }
 }

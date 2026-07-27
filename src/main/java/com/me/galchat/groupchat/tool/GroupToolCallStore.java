@@ -1,7 +1,9 @@
 package com.me.galchat.groupchat.tool;
 
 import com.me.galchat.domain.po.GroupChatToolCall;
+import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
+import com.me.galchat.service.DiceFollowUpLocator;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -14,9 +16,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Component
-public class GroupToolCallStore {
+public class GroupToolCallStore implements DiceFollowUpLocator {
 
     private final GroupChatToolCallMapper mapper;
 
@@ -56,6 +59,21 @@ public class GroupToolCallStore {
 
     public void bindDiceSummary(Long replyStepId, String toolCallId, Long diceRollSummaryId) {
         mapper.bindDiceSummary(replyStepId, toolCallId, diceRollSummaryId);
+    }
+
+    @Override
+    public Long requireLatestSummaryId(
+            Long conversationId, Set<String> compatibleToolNames) {
+        if (conversationId == null || compatibleToolNames == null
+                || compatibleToolNames.isEmpty()) {
+            throw new UserRequestException("后续掷骰定位条件不能为空");
+        }
+        Long summaryId = mapper.findLatestDiceSummaryId(
+                conversationId, compatibleToolNames);
+        if (summaryId == null) {
+            throw new UserRequestException("找不到当前群聊中兼容的前一次掷骰");
+        }
+        return summaryId;
     }
 
     private void saveResponses(Map<String, GroupChatToolCall> insertedByCallId, List<Message> history) {

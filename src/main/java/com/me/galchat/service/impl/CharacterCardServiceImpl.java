@@ -11,6 +11,7 @@ import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.UserInfo;
 import com.me.galchat.domain.vo.CharacterCardVO;
+import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.domain.vo.DiceRollResultVO;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
@@ -28,8 +29,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -141,6 +145,64 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         return result;
     }
 
+    @Override
+    public CocDiceCharacterVO requireDiceCharacter(Long runId, String characterName) {
+        requireRunId(runId);
+        if (characterName == null || characterName.isBlank()) {
+            throw new UserRequestException("人物卡名称不能为空");
+        }
+        String normalizedName = characterName.trim();
+        List<CocCharacter> matches = characterMapper.selectList(
+                new LambdaQueryWrapper<CocCharacter>()
+                        .eq(CocCharacter::getRunId, runId)
+                        .eq(CocCharacter::getName, normalizedName))
+                .stream()
+                .filter(character -> normalizedName.equals(character.getName()))
+                .toList();
+        if (matches.isEmpty()) {
+            throw new UserRequestException("人物卡不存在");
+        }
+        if (matches.size() > 1) {
+            throw new UserRequestException("人物卡名称不唯一");
+        }
+        return buildDiceCharacter(matches.getFirst());
+    }
+
+    @Override
+    public List<CocDiceCharacterVO> listDiceCharacters(Long runId) {
+        requireRunId(runId);
+        List<CocDiceCharacterVO> result = new ArrayList<>();
+        for (CocCharacter character : characterMapper.selectList(
+                new LambdaQueryWrapper<CocCharacter>()
+                        .eq(CocCharacter::getRunId, runId)
+                        .orderByAsc(CocCharacter::getId))) {
+            result.add(buildDiceCharacter(character));
+        }
+        return List.copyOf(result);
+    }
+
+    @Override
+    public CocCharacter lockDiceCharacter(Long runId, Long cardId) {
+        requireRunId(runId);
+        requireId(cardId);
+        CocCharacter character = characterMapper.selectByIdAndRunIdForUpdate(runId, cardId);
+        if (character == null) {
+            throw new UserRequestException("人物卡不存在");
+        }
+        return character;
+    }
+
+    @Override
+    public void updateDiceCharacter(CocCharacter character) {
+        if (character == null) {
+            throw new UserRequestException("人物卡不能为空");
+        }
+        requireId(character.getId());
+        if (characterMapper.updateById(character) == 0) {
+            throw new UserRequestException("人物卡不存在");
+        }
+    }
+
     private CharacterCardVO requireById(Long id) {
         CocCharacter character = characterMapper.selectById(id);
         if (character == null) {
@@ -162,9 +224,64 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         return new CharacterCardVO(character, skills, weapons, profile);
     }
 
+    private CocDiceCharacterVO buildDiceCharacter(CocCharacter character) {
+        Map<String, Integer> checkValues = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        putAliases(checkValues, character.getStr(), "STR", "力量");
+        putAliases(checkValues, character.getCon(), "CON", "体质");
+        putAliases(checkValues, character.getSiz(), "SIZ", "体型");
+        putAliases(checkValues, character.getDex(), "DEX", "敏捷");
+        putAliases(checkValues, character.getApp(), "APP", "外貌");
+        putAliases(checkValues, character.getIntValue(), "INT", "智力");
+        putAliases(checkValues, character.getPow(), "POW", "意志");
+        putAliases(checkValues, character.getEdu(), "EDU", "教育");
+        putAliases(checkValues, character.getSanCurrent(), "SAN", "理智");
+        putAliases(checkValues, character.getLuckCurrent(), "LUCK", "幸运");
+        for (CocCharacterSkill skill : skillMapper.selectList(
+                new LambdaQueryWrapper<CocCharacterSkill>()
+                        .eq(CocCharacterSkill::getCharacterId, character.getId())
+                        .orderByAsc(CocCharacterSkill::getId))) {
+            if (skill.getDisplayName() != null && !skill.getDisplayName().isBlank()
+                    && skill.getValue() != null) {
+                checkValues.put(skill.getDisplayName().trim(), skill.getValue());
+            }
+        }
+        return new CocDiceCharacterVO(
+                character.getId(),
+                character.getParticipantId(),
+                character.getName(),
+                Collections.unmodifiableMap(checkValues),
+                character.getHpCurrent(),
+                character.getHpMax(),
+                character.getSanCurrent(),
+                character.getSanMax(),
+                character.getCon(),
+                character.getArmor(),
+                character.getMajorWound(),
+                character.getUnconscious(),
+                character.getDying(),
+                character.getDead(),
+                character.getTemporaryInsanity(),
+                character.getTemporaryInsanityPhase(),
+                character.getTemporaryInsanityRemainingHours());
+    }
+
+    private void putAliases(
+            Map<String, Integer> checkValues, Integer value, String english, String chinese) {
+        if (value != null) {
+            checkValues.put(english, value);
+            checkValues.put(chinese, value);
+        }
+    }
+
     private void requireId(Long id) {
         if (id == null) {
             throw new UserRequestException("人物卡id不能为空");
+        }
+    }
+
+    private void requireRunId(Long runId) {
+        if (runId == null) {
+            throw new UserRequestException("runId不能为空");
         }
     }
 

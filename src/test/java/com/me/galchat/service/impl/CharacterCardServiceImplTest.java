@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.UserInfo;
+import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
@@ -32,6 +33,7 @@ import java.util.List;
 class CharacterCardServiceImplTest {
 
     private CocCharacterMapper characterMapper;
+    private CocCharacterSkillMapper skillMapper;
     private CocSkillDefMapper skillDefMapper;
     private CharacterTemplateMapper characterTemplateMapper;
     private UserInfoMapper userInfoMapper;
@@ -40,10 +42,11 @@ class CharacterCardServiceImplTest {
     @BeforeEach
     void setUp() {
         characterMapper = mock(CocCharacterMapper.class);
+        skillMapper = mock(CocCharacterSkillMapper.class);
         skillDefMapper = mock(CocSkillDefMapper.class);
         characterTemplateMapper = mock(CharacterTemplateMapper.class);
         userInfoMapper = mock(UserInfoMapper.class);
-        service = new CharacterCardServiceImpl(characterMapper, mock(CocCharacterSkillMapper.class),
+        service = new CharacterCardServiceImpl(characterMapper, skillMapper,
                 mock(CocCharacterWeaponMapper.class), mock(CocCharacterProfileMapper.class), skillDefMapper,
                 characterTemplateMapper, userInfoMapper);
     }
@@ -144,6 +147,44 @@ class CharacterCardServiceImplTest {
         assertThatThrownBy(() -> service.fillPlayerAndImage(new CocCharacter(), null))
                 .isInstanceOf(UserAuthException.class)
                 .hasMessage("用户未登录");
+    }
+
+    @Test
+    void resolvesAttributeAndSkillChecksByRunAndUniqueCardName() {
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(5L).setParticipantId(null)
+                .setName("林恩").setCon(55).setSanCurrent(63);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(skillMapper.selectList(any())).thenReturn(List.of(
+                new CocCharacterSkill().setCharacterId(71L).setDisplayName("侦查").setValue(70)));
+
+        CocDiceCharacterVO resolved = service.requireDiceCharacter(5L, " 林恩 ");
+
+        assertThat(resolved.checkValues())
+                .containsEntry("CON", 55)
+                .containsEntry("con", 55)
+                .containsEntry("体质", 55)
+                .containsEntry("SAN", 63)
+                .containsEntry("理智", 63)
+                .containsEntry("侦查", 70);
+    }
+
+    @Test
+    void rejectsMissingCardNamesInsideOneRun() {
+        when(characterMapper.selectList(any())).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.requireDiceCharacter(5L, "林恩"))
+                .hasMessage("人物卡不存在");
+    }
+
+    @Test
+    void rejectsAmbiguousCardNamesInsideOneRun() {
+        when(characterMapper.selectList(any())).thenReturn(List.of(
+                new CocCharacter().setId(71L).setRunId(5L).setName("林恩"),
+                new CocCharacter().setId(72L).setRunId(5L).setName("林恩")));
+
+        assertThatThrownBy(() -> service.requireDiceCharacter(5L, "林恩"))
+                .hasMessage("人物卡名称不唯一");
     }
 
     private CocCharacter characterWithAllAttributes(int value) {

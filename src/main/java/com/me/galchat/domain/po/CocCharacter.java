@@ -1,6 +1,7 @@
 package com.me.galchat.domain.po;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -53,7 +54,8 @@ public class CocCharacter {
     private Boolean dead;
     private Boolean temporaryInsanity;
     private String temporaryInsanityPhase;
-    private Integer temporaryInsanityRemainingRounds;
+    @TableField("temporary_insanity_remaining_rounds")
+    private Integer temporaryInsanityRemainingHours;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

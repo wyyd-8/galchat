@@ -60,6 +60,9 @@ public class GroupContextAssembler {
             if (message.getReplyStepId() != null) {
                 prompt.addAll(toolMessages.getOrDefault(message.getReplyStepId(), List.of()));
             }
+            if (GroupChatConstant.MESSAGE_DICE_ROLL.equals(message.getMessageKind())) {
+                continue;
+            }
             if (currentActor.matches(message.getSpeakerType(), message.getSpeakerId())) {
                 prompt.add(new AssistantMessage(message.getContent()));
             } else {

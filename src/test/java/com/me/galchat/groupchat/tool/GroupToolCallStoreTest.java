@@ -12,6 +12,7 @@ import org.springframework.ai.model.tool.ToolExecutionResult;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -125,5 +126,25 @@ class GroupToolCallStoreTest {
                 (GroupChatToolCall call) ->
                         Long.valueOf(501L).equals(call.getDiceRollSummaryId())
                                 && call.getToolResult().contains("生命-4")));
+    }
+
+    @Test
+    void mapsDiceSummariesByReplyStepForHistoryReload() {
+        GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
+        GroupToolCallStore store = new GroupToolCallStore(
+                mapper, JsonMapper.builder().build());
+        when(mapper.selectList(any())).thenReturn(List.of(
+                new GroupChatToolCall()
+                        .setReplyStepId(41L)
+                        .setDiceRollSummaryId(501L),
+                new GroupChatToolCall()
+                        .setReplyStepId(42L)
+                        .setDiceRollSummaryId(502L)));
+
+        Map<Long, Long> ids = store.diceSummaryIdsByReplyStepIds(
+                Set.of(41L, 42L));
+
+        assertThat(ids).containsExactlyInAnyOrderEntriesOf(
+                Map.of(41L, 501L, 42L, 502L));
     }
 }

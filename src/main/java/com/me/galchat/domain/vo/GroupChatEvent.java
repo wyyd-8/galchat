@@ -26,6 +26,7 @@ public class GroupChatEvent {
     private Speaker speaker;
     private String delta;
     private String content;
+    private KpDiceToolResult diceRoll;
     private String error;
 
     @Data

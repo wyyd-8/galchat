@@ -3,6 +3,7 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
@@ -11,6 +12,7 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupChatMessageVO;
+import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
@@ -20,6 +22,7 @@ import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
 import com.me.galchat.groupchat.tool.GroupToolContextFactory;
+import com.me.galchat.groupchat.tool.GroupToolCallStore;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
@@ -29,16 +32,22 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
+import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
@@ -55,6 +64,8 @@ public class GroupChatService {
     private final GroupToolContextFactory toolContextFactory;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final TransactionTemplate transactionTemplate;
+    private final GroupToolCallStore toolCallStore;
+    private final ObjectMapper objectMapper;
 
     public GroupChatService(GroupConversationService conversationService,
                             GroupConversationLockService lockService,
@@ -66,7 +77,9 @@ public class GroupChatService {
                             GroupTurnRecoveryService recoveryService,
                             GroupToolContextFactory toolContextFactory,
                             IUserWorldPrefixService userWorldPrefixService,
-                            TransactionTemplate transactionTemplate) {
+                            TransactionTemplate transactionTemplate,
+                            GroupToolCallStore toolCallStore,
+                            ObjectMapper objectMapper) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.replyPlanService = replyPlanService;
@@ -78,6 +91,8 @@ public class GroupChatService {
         this.toolContextFactory = toolContextFactory;
         this.userWorldPrefixService = userWorldPrefixService;
         this.transactionTemplate = transactionTemplate;
+        this.toolCallStore = toolCallStore;
+        this.objectMapper = objectMapper;
     }
 
     public Flux<GroupChatEvent> chat(Long conversationId, GroupChatRequestDTO request) {
@@ -159,10 +174,20 @@ public class GroupChatService {
             return List.of();
         }
 
+        Set<Long> diceReplyStepIds = new LinkedHashSet<>();
+        for (GroupChatMessage message : messages) {
+            if (GroupChatConstant.MESSAGE_DICE_ROLL.equals(message.getMessageKind())
+                    && message.getReplyStepId() != null) {
+                diceReplyStepIds.add(message.getReplyStepId());
+            }
+        }
+        Map<Long, Long> diceSummaryIds =
+                toolCallStore.diceSummaryIdsByReplyStepIds(diceReplyStepIds);
         return messages.stream().map(message -> new GroupChatMessageVO(
                 message.getId(), message.getConversationId(), message.getTurnId(), message.getReplyStepId(),
                 message.getSpeakerType(), message.getSpeakerId(), speakerName(conversation, message),
                 message.getMessageKind(), message.getContent(),
+                diceSummaryIds.get(message.getReplyStepId()),
                 message.getSequenceNo(), message.getStatus(), message.getCreatedAt())).toList();
     }
 
@@ -279,7 +304,8 @@ public class GroupChatService {
                 finalizeCompletedStep(step, outputMessage, accumulator, finalizationGuard);
                 return Flux.just(baseEvent(GroupChatConstant.EVENT_MESSAGE_COMPLETED,
                         conversation, turn, step, outputMessage, speaker)
-                        .content(accumulator.content.toString())
+                        .content(accumulator.diceRoll == null
+                                ? accumulator.content.toString() : null)
                         .build());
             });
             return Flux.concat(started, deltas, finished);
@@ -324,6 +350,17 @@ public class GroupChatService {
         List<GroupChatEvent> events = new ArrayList<>();
         for (Generation generation : response.getResults()) {
             AssistantMessage output = generation.getOutput();
+            if (isDirectDiceGeneration(generation)) {
+                if (accumulator.diceRoll != null) {
+                    throw new IllegalStateException("同一回复步骤不能返回多个直接掷骰结果");
+                }
+                accumulator.diceRoll = readDirectDiceResult(output.getText());
+                events.add(baseEvent(GroupChatConstant.EVENT_DICE_ROLL_CREATED,
+                        conversation, turn, step, message, speaker)
+                        .diceRoll(accumulator.diceRoll)
+                        .build());
+                continue;
+            }
             if (output instanceof DeepSeekAssistantMessage deepSeek) {
                 String reasoning = deepSeek.getReasoningContent();
                 if (StringUtils.hasText(reasoning)) {
@@ -340,6 +377,34 @@ public class GroupChatService {
             }
         }
         return events;
+    }
+
+    private boolean isDirectDiceGeneration(Generation generation) {
+        if (generation == null || generation.getMetadata() == null
+                || !ToolExecutionResult.FINISH_REASON.equals(
+                generation.getMetadata().getFinishReason())) {
+            return false;
+        }
+        String toolName = generation.getMetadata().get(
+                ToolExecutionResult.METADATA_TOOL_NAME);
+        return DiceRollConstant.KP_STATE_TOOL_NAMES.contains(toolName);
+    }
+
+    private KpDiceToolResult readDirectDiceResult(String content) {
+        if (!StringUtils.hasText(content)) {
+            throw new IllegalStateException("直接掷骰工具未返回结构化结果");
+        }
+        try {
+            KpDiceToolResult result =
+                    objectMapper.readValue(content, KpDiceToolResult.class);
+            if (result == null || result.summary() == null
+                    || result.summary().getId() == null) {
+                throw new IllegalStateException("直接掷骰工具结果缺少概要id");
+            }
+            return result;
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("直接掷骰工具返回结果无法解析", exception);
+        }
     }
 
     private void finalizeCompletedStep(GroupChatReplyStep step, GroupChatMessage message,
@@ -377,7 +442,14 @@ public class GroupChatService {
     }
 
     private void persistOutput(GroupChatMessage message, GenerationAccumulator accumulator, String status) {
-        message.setContent(accumulator.content.toString())
+        if (accumulator.diceRoll != null) {
+            message.setMessageKind(GroupChatConstant.MESSAGE_DICE_ROLL)
+                    .setContent(null);
+        } else {
+            message.setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
+                    .setContent(accumulator.content.toString());
+        }
+        message
                 .setStatus(status)
                 .setUpdatedAt(LocalDateTime.now());
         messageMapper.updateById(message);
@@ -483,6 +555,7 @@ public class GroupChatService {
     private static class GenerationAccumulator {
         private final StringBuilder content = new StringBuilder();
         private final StringBuilder reasoning = new StringBuilder();
+        private KpDiceToolResult diceRoll;
     }
 
     static final class FinalizationGuard {

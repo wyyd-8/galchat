@@ -19,6 +19,7 @@ public final class GroupChatConstant {
 
     public static final String MESSAGE_DIALOGUE = "dialogue";
     public static final String MESSAGE_NARRATION = "narration";
+    public static final String MESSAGE_DICE_ROLL = "dice_roll";
 
     public static final String ACTION_CHAT_REPLY = "chat_reply";
     public static final String ACTION_TRPG_SCENE = "trpg_scene_action";
@@ -41,6 +42,7 @@ public final class GroupChatConstant {
     public static final String EVENT_REPLY_STARTED = "reply.started";
     public static final String EVENT_REASONING_DELTA = "reasoning.delta";
     public static final String EVENT_MESSAGE_DELTA = "message.delta";
+    public static final String EVENT_DICE_ROLL_CREATED = "dice_roll.created";
     public static final String EVENT_MESSAGE_COMPLETED = "message.completed";
     public static final String EVENT_REPLY_FAILED = "reply.failed";
     public static final String EVENT_TURN_COMPLETED = "turn.completed";

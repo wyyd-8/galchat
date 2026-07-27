@@ -101,6 +101,37 @@ class GroupContextAssemblerTest {
                 .noneMatch(name -> name.toLowerCase().contains("thinking"));
     }
 
+    @Test
+    void contextUsesSyntheticDiceHistoryAndSkipsNullDiceMessageBody() {
+        GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
+        GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
+        IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
+        GroupContextAssembler assembler = new GroupContextAssembler(
+                messageMapper,
+                mock(GroupConversationService.class),
+                mock(ChatServiceImpl.class),
+                characterService,
+                toolHistoryAssembler);
+        GroupConversation conversation = new GroupConversation()
+                .setId(8L).setUserWorldId(1L).setWorldId(2L);
+        GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
+        GroupChatMessage diceMessage = message(
+                GroupChatConstant.ACTOR_KP, null, null)
+                .setReplyStepId(41L)
+                .setMessageKind(GroupChatConstant.MESSAGE_DICE_ROLL);
+        when(characterService.listByUserWorldId(1L)).thenReturn(List.of());
+        when(messageMapper.selectList(any())).thenReturn(List.of(diceMessage));
+        when(toolHistoryAssembler.beforeMessages(any(), org.mockito.ArgumentMatchers.eq(kp)))
+                .thenReturn(Map.of(41L, List.of(
+                        new UserMessage("<dice-roll summary-id=\"501\" />"))));
+
+        List<Message> context = assembler.assembleContextFrom(conversation, kp, 1L);
+
+        assertThat(context).extracting(Message::getText)
+                .containsExactly("<dice-roll summary-id=\"501\" />")
+                .doesNotContainNull();
+    }
+
     private GroupChatMessage message(String speakerType, Long speakerId, String content) {
         return new GroupChatMessage()
                 .setSpeakerType(speakerType)

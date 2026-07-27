@@ -1,5 +1,6 @@
 package com.me.galchat.groupchat.tool;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.vo.KpDiceToolResult;
@@ -17,7 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -66,6 +69,24 @@ public class GroupToolCallStore implements DiceFollowUpLocator {
 
     public void bindDiceSummary(Long replyStepId, String toolCallId, Long diceRollSummaryId) {
         mapper.bindDiceSummary(replyStepId, toolCallId, diceRollSummaryId);
+    }
+
+    public Map<Long, Long> diceSummaryIdsByReplyStepIds(
+            Collection<Long> replyStepIds) {
+        if (replyStepIds == null || replyStepIds.isEmpty()) {
+            return Map.of();
+        }
+        List<GroupChatToolCall> calls = mapper.selectList(
+                new LambdaQueryWrapper<GroupChatToolCall>()
+                        .in(GroupChatToolCall::getReplyStepId, replyStepIds)
+                        .isNotNull(GroupChatToolCall::getDiceRollSummaryId)
+                        .orderByDesc(GroupChatToolCall::getId));
+        Map<Long, Long> summaryIds = new LinkedHashMap<>();
+        for (GroupChatToolCall call : calls) {
+            summaryIds.putIfAbsent(
+                    call.getReplyStepId(), call.getDiceRollSummaryId());
+        }
+        return Map.copyOf(summaryIds);
     }
 
     @Override

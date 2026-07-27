@@ -17,6 +17,8 @@ public class DiceRollDetailVO {
     private String displayType;
     private String reason;
     private DiceRollResultVO resultData;
+    private DiceResolutionVO resolution;
+    private LocalDateTime resolvedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -30,6 +32,10 @@ public class DiceRollDetailVO {
                 .setDisplayType(result.getDisplayType())
                 .setReason(result.getReason())
                 .setResultData(result.getResultData())
+                .setResolution(result.getResolutionData() == null
+                        ? null
+                        : result.getResolutionData().publicView())
+                .setResolvedAt(result.getResolvedAt())
                 .setCreatedAt(result.getCreatedAt())
                 .setUpdatedAt(result.getUpdatedAt());
     }

@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS dice_roll_result (
     display_type VARCHAR(20),
     reason TEXT NOT NULL,
     result_data JSONB NOT NULL,
+    resolution_data JSONB NOT NULL
+        DEFAULT '{"version":1,"type":"LEGACY","rule":{},"outcome":null,"effect":null}'::jsonb,
+    resolved_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (round_no >= 1),

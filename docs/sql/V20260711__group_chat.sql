@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS group_reply_plan_item (
     group_order INT NOT NULL,
     item_order INT NOT NULL,
     actor_type VARCHAR(50) NOT NULL,
-    actor_id BIGINT NOT NULL,
+    actor_id BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.me.galchat.domain.vo.DiceResolutionDataVO;
 import com.me.galchat.domain.vo.DiceRollResultVO;
 import com.me.galchat.typehandler.JsonbTypeHandler;
 import lombok.Data;
@@ -29,6 +30,10 @@ public class DiceRollResult implements Serializable {
     @TableField(typeHandler = JsonbTypeHandler.class)
     private DiceRollResultVO resultData;
 
+    @TableField(typeHandler = JsonbTypeHandler.class)
+    private DiceResolutionDataVO resolutionData;
+
+    private LocalDateTime resolvedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -157,7 +157,7 @@ CREATE TABLE group_reply_plan_item (
     group_order INT NOT NULL,
     item_order INT NOT NULL,
     actor_type VARCHAR(50) NOT NULL,
-    actor_id BIGINT NOT NULL,
+    actor_id BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -295,6 +295,9 @@ CREATE TABLE dice_roll_result (
     display_type VARCHAR(20),
     reason TEXT NOT NULL,
     result_data JSONB NOT NULL,
+    resolution_data JSONB NOT NULL
+        DEFAULT '{"version":1,"type":"LEGACY","rule":{},"outcome":null,"effect":null}'::jsonb,
+    resolved_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (round_no >= 1),

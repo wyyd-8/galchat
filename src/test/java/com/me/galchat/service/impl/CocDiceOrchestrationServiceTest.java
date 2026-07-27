@@ -7,12 +7,14 @@ import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.domain.po.DiceRollResult;
 import com.me.galchat.domain.po.DiceRollSummary;
+import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.domain.vo.DiceRollAggregate;
 import com.me.galchat.domain.vo.DiceRollResultVO;
 import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.service.DiceFollowUpLocator;
+import com.me.galchat.service.DiceRandomSource;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.IDiceRollInternalService;
 import com.me.galchat.utils.DiceUtils;
@@ -29,8 +31,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +44,7 @@ class CocDiceOrchestrationServiceTest {
     private ICharacterCardService cards;
     private GroupConversationService conversations;
     private DiceFollowUpLocator followUps;
+    private DiceRandomSource randomSource;
     private CocDiceOrchestrationService service;
 
     @BeforeEach
@@ -48,8 +53,14 @@ class CocDiceOrchestrationServiceTest {
         cards = mock(ICharacterCardService.class);
         conversations = mock(GroupConversationService.class);
         followUps = mock(DiceFollowUpLocator.class);
+        randomSource = mock(DiceRandomSource.class);
         service = new CocDiceOrchestrationService(
-                internal, cards, conversations, followUps, new CocDiceSummaryFormatter());
+                internal,
+                cards,
+                conversations,
+                followUps,
+                new CocDiceSummaryFormatter(),
+                randomSource);
         when(conversations.requireActive(7L))
                 .thenReturn(new GroupConversation().setId(7L).setStatus("active"));
     }
@@ -266,6 +277,200 @@ class CocDiceOrchestrationServiceTest {
                 .hasMessageContaining("不是玩家");
     }
 
+    @Test
+    void sanLossUsesActualBranchAndDefersMadnessWhilePlayerDiceIsPending() {
+        when(followUps.requireLatestSummaryId(7L, Set.of("requestSanCheck")))
+                .thenReturn(101L);
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        DiceRollResult playerCheck = resolvedSanCheck(
+                201L, 101L, "林恩", 11L, null, "FAILURE");
+        DiceRollResult agentCheck = resolvedSanCheck(
+                202L, 101L, "陈默", 12L, 88L, "FAILURE");
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L))
+                .thenReturn(List.of(playerCheck, agentCheck));
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+                    List<DiceRollResult> created = materialize(101L, 2, drafts);
+                    created.get(1).setResultData(
+                            new DiceRollResultVO("1D6", List.of(), 6));
+                    return created;
+                });
+        CocCharacter agentCard = new CocCharacter()
+                .setId(12L)
+                .setRunId(5L)
+                .setName("陈默")
+                .setSanCurrent(60);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(agentCard);
+
+        KpDiceToolResult created = service.rollSanLoss(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.SanLoss("目睹怪物", "0", "1D6"));
+
+        assertThat(created.summary().getRoundCount()).isEqualTo(2);
+        assertThat(created.results())
+                .filteredOn(result -> result.getCharacterId() == null)
+                .singleElement()
+                .satisfies(result -> {
+                    assertThat(result.getResultData().getFormula()).isEqualTo("1D6");
+                    assertThat(result.getResultData().getResult()).isNull();
+                });
+        verify(internal, times(1))
+                .appendDiceRollRound(eq(7L), eq(101L), any());
+    }
+
+    @Test
+    void finishingPlayerSanLossCreatesOneMadnessRoundForEveryQualifiedCard() {
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(2)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        DiceRollResult playerLoss = sanLoss(
+                301L, 101L, "林恩", 11L, null, DiceUtils.prepare("1D1*6"), null);
+        DiceRollResult agentLoss = sanLoss(
+                302L,
+                101L,
+                "陈默",
+                12L,
+                88L,
+                new DiceRollResultVO("1D6", List.of(), 5),
+                5);
+        when(internal.requireResult(301L)).thenReturn(playerLoss);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L))
+                .thenReturn(List.of(playerLoss, agentLoss));
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+                    List<DiceRollResult> created = materialize(101L, 3, drafts);
+                    for (DiceRollResult result : created) {
+                        if (result.getCharacterId() != null) {
+                            result.setResultData(new DiceRollResultVO("1D10", List.of(), 4));
+                        }
+                    }
+                    return created;
+                });
+        CocCharacter playerCard = new CocCharacter()
+                .setId(11L)
+                .setRunId(5L)
+                .setName("林恩")
+                .setSanCurrent(60);
+        CocCharacter agentCard = new CocCharacter()
+                .setId(12L)
+                .setRunId(5L)
+                .setName("陈默")
+                .setSanCurrent(55);
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(playerCard);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(agentCard);
+
+        var progress = service.rollPlayerResult(301L);
+
+        assertThat(progress.createdResults()).hasSize(4);
+        assertThat(progress.createdResults())
+                .extracting(com.me.galchat.domain.vo.DiceRollDetailVO::getRoundNo)
+                .containsOnly(3);
+    }
+
+    @Test
+    void agentOnlySanLossCreatesAndSettlesMadnessRoundImmediately() {
+        when(followUps.requireLatestSummaryId(7L, Set.of("requestSanCheck")))
+                .thenReturn(101L);
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        DiceRollResult agentCheck = resolvedSanCheck(
+                201L, 101L, "陈默", 12L, 88L, "FAILURE");
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(agentCheck));
+        AtomicLong appendCount = new AtomicLong();
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+                    int round = appendCount.incrementAndGet() == 1 ? 2 : 3;
+                    List<DiceRollResult> created = materialize(101L, round, drafts);
+                    for (DiceRollResult result : created) {
+                        String type = result.getResolutionData().getType();
+                        int value = switch (type) {
+                            case "SAN_LOSS" -> 6;
+                            case "TEMPORARY_INSANITY_TYPE" -> 9;
+                            default -> 4;
+                        };
+                        result.setResultData(new DiceRollResultVO(
+                                result.getResultData().getFormula(), List.of(), value));
+                    }
+                    return created;
+                });
+        when(randomSource.d100()).thenReturn(37);
+        CocCharacter card = new CocCharacter()
+                .setId(12L)
+                .setRunId(5L)
+                .setName("陈默")
+                .setSanCurrent(60);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(card);
+
+        KpDiceToolResult result = service.rollSanLoss(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.SanLoss("目睹怪物", "0", "1D6"));
+
+        assertThat(result.summary().getRoundCount()).isEqualTo(3);
+        assertThat(result.results()).hasSize(3);
+        assertThat(result.semanticResult())
+                .contains("陈默理智-6；进入临时疯狂：恐惧症（昆虫恐惧症：害怕昆虫），持续4小时");
+        assertThat(card.getSanCurrent()).isEqualTo(54);
+        assertThat(card.getTemporaryInsanityPhase()).isEqualTo("9:037");
+        verify(internal, times(2))
+                .appendDiceRollRound(eq(7L), eq(101L), any());
+    }
+
+    @Test
+    void typeNineStoresRandomCatalogNumberWithoutCreatingD100Result() {
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(3)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        DiceRollResult type = insanityResult(
+                401L,
+                "TEMPORARY_INSANITY_TYPE",
+                new DiceRollResultVO("1D10", List.of(), 9),
+                true);
+        type.getResolutionData().setOutcome(Map.of(
+                "characterName", "林恩", "typeRoll", 9));
+        DiceRollResult duration = insanityResult(
+                402L,
+                "TEMPORARY_INSANITY_DURATION",
+                DiceUtils.prepare("1D1*4"),
+                false);
+        when(internal.requireResult(402L)).thenReturn(duration);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(type, duration));
+        when(randomSource.d100()).thenReturn(37);
+        CocCharacter card = new CocCharacter()
+                .setId(11L)
+                .setRunId(5L)
+                .setName("林恩")
+                .setSanCurrent(54);
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(card);
+
+        service.rollPlayerResult(402L);
+
+        assertThat(List.of(type, duration))
+                .noneMatch(result -> "1D100".equals(result.getResultData().getFormula()));
+        assertThat(card.getTemporaryInsanityPhase()).isEqualTo("9:037");
+        assertThat(card.getTemporaryInsanityRemainingHours()).isEqualTo(4);
+        verify(randomSource).d100();
+    }
+
     private void stubCreate(Long conversationId) {
         when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
             String reason = invocation.getArgument(1);
@@ -340,6 +545,78 @@ class CocDiceOrchestrationServiceTest {
                 .setResultData(new DiceRollResultVO("1D100", List.of(), 75))
                 .setResolutionData(resolution)
                 .setResolvedAt(LocalDateTime.now());
+    }
+
+    private DiceRollResult resolvedSanCheck(
+            Long id,
+            Long summaryId,
+            String name,
+            Long cardId,
+            Long characterId,
+            String category) {
+        DiceRollResult result = resolvedCheck(
+                id, summaryId, 1, name, cardId, 60, category);
+        result.setCharacterId(characterId);
+        result.getResolutionData().setType("SAN_CHECK");
+        result.getResolutionData().getRule().put("checkName", "理智");
+        return result;
+    }
+
+    private DiceRollResult sanLoss(
+            Long id,
+            Long summaryId,
+            String name,
+            Long cardId,
+            Long characterId,
+            DiceRollResultVO resultData,
+            Integer settledLoss) {
+        var resolution = com.me.galchat.domain.vo.DiceResolutionDataVO.pending(
+                "SAN_LOSS",
+                id - 100,
+                Map.of(
+                        "runId", 5L,
+                        "cardId", cardId,
+                        "characterName", name,
+                        "sanCheckOutcome", "FAILURE"));
+        DiceRollResult result = new DiceRollResult()
+                .setId(id)
+                .setSummaryId(summaryId)
+                .setCharacterId(characterId)
+                .setRoundNo(2)
+                .setDisplayOrder(id.intValue() - 300)
+                .setResultData(resultData)
+                .setResolutionData(resolution);
+        if (settledLoss != null) {
+            resolution
+                    .setOutcome(Map.of("characterName", name, "sanLoss", settledLoss))
+                    .setEffect(Map.of(
+                            "sanBefore", 60,
+                            "sanAfter", 60 - settledLoss,
+                            "sanLoss", settledLoss));
+            result.setResolvedAt(LocalDateTime.now());
+        }
+        return result;
+    }
+
+    private DiceRollResult insanityResult(
+            Long id, String type, DiceRollResultVO resultData, boolean resolved) {
+        var resolution = com.me.galchat.domain.vo.DiceResolutionDataVO.pending(
+                type,
+                301L,
+                Map.of(
+                        "runId", 5L,
+                        "cardId", 11L,
+                        "characterName", "林恩",
+                        "sanLoss", 6));
+        return new DiceRollResult()
+                .setId(id)
+                .setSummaryId(101L)
+                .setCharacterId(null)
+                .setRoundNo(3)
+                .setDisplayOrder(id.intValue() - 400)
+                .setResultData(resultData)
+                .setResolutionData(resolution)
+                .setResolvedAt(resolved ? LocalDateTime.now() : null);
     }
 
     private KpDiceRequestDTOs.CheckTarget target(String characterName, String checkName) {

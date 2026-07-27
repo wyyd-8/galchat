@@ -44,6 +44,64 @@ class CocDiceSummaryFormatterTest {
         assertThat(formatter.formatRound(List.of(lynn, chen))).isEqualTo("平局");
     }
 
+    @Test
+    void completedInsanityPairReplacesItsStandaloneSanLossWithCombinedText() {
+        DiceRollResult sanLoss = new DiceRollResult()
+                .setId(21L)
+                .setRoundNo(2)
+                .setDisplayOrder(1)
+                .setResultData(new DiceRollResultVO("1D6", List.of(), 6))
+                .setResolutionData(DiceResolutionDataVO.pending(
+                        "SAN_LOSS",
+                        11L,
+                        Map.of("characterName", "林恩", "cardId", 101L, "runId", 5L))
+                        .setOutcome(Map.of("characterName", "林恩", "sanLoss", 6))
+                        .setEffect(Map.of("sanBefore", 60, "sanAfter", 54, "sanLoss", 6)))
+                .setResolvedAt(LocalDateTime.now());
+        DiceRollResult type = new DiceRollResult()
+                .setId(31L)
+                .setRoundNo(3)
+                .setDisplayOrder(1)
+                .setResultData(new DiceRollResultVO("1D10", List.of(), 9))
+                .setResolutionData(DiceResolutionDataVO.pending(
+                        "TEMPORARY_INSANITY_TYPE",
+                        21L,
+                        Map.of(
+                                "characterName", "林恩",
+                                "cardId", 101L,
+                                "runId", 5L,
+                                "sanLoss", 6))
+                        .setOutcome(Map.of(
+                                "characterName", "林恩",
+                                "typeRoll", 9,
+                                "detailRoll", 37,
+                                "code", "9:037",
+                                "display", "恐惧症（昆虫恐惧症：害怕昆虫）")))
+                .setResolvedAt(LocalDateTime.now());
+        DiceRollResult duration = new DiceRollResult()
+                .setId(32L)
+                .setRoundNo(3)
+                .setDisplayOrder(2)
+                .setResultData(new DiceRollResultVO("1D10", List.of(), 4))
+                .setResolutionData(DiceResolutionDataVO.pending(
+                        "TEMPORARY_INSANITY_DURATION",
+                        21L,
+                        Map.of(
+                                "characterName", "林恩",
+                                "cardId", 101L,
+                                "runId", 5L,
+                                "sanLoss", 6))
+                        .setOutcome(Map.of("characterName", "林恩", "durationHours", 4))
+                        .setEffect(Map.of(
+                                "temporaryInsanity", true,
+                                "phase", "9:037",
+                                "durationHours", 4)))
+                .setResolvedAt(LocalDateTime.now());
+
+        assertThat(formatter.rebuildTotalResult(List.of(sanLoss, type, duration)))
+                .isEqualTo("林恩理智-6；进入临时疯狂：恐惧症（昆虫恐惧症：害怕昆虫），持续4小时");
+    }
+
     private DiceRollResult check(
             Long id, int round, int order, String name, String category, Integer roll) {
         Map<String, Object> rule = new LinkedHashMap<>();

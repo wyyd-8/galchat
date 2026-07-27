@@ -9,10 +9,13 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 @Component
 public class CocDiceSummaryFormatter {
@@ -25,12 +28,22 @@ public class CocDiceSummaryFormatter {
         for (DiceRollResult result : results) {
             rounds.computeIfAbsent(result.getRoundNo(), ignored -> new ArrayList<>()).add(result);
         }
+        Set<Long> combinedSanLossSources = completedInsanitySourceIds(results);
         List<String> completed = new ArrayList<>();
         for (List<DiceRollResult> round : rounds.values()) {
             if (round.stream().anyMatch(result -> result.getResolvedAt() == null)) {
                 continue;
             }
-            String formatted = formatRound(round);
+            List<DiceRollResult> visibleRound = round.stream()
+                    .filter(result -> !DiceRollConstant.TYPE_SAN_LOSS.equals(
+                            requireResolution(result).getType())
+                            || result.getId() == null
+                            || !combinedSanLossSources.contains(result.getId()))
+                    .toList();
+            if (visibleRound.isEmpty()) {
+                continue;
+            }
+            String formatted = formatRound(visibleRound);
             if (formatted != null && !formatted.isBlank()) {
                 completed.add(formatted);
             }
@@ -55,6 +68,9 @@ public class CocDiceSummaryFormatter {
         if (ordered.stream().allMatch(result -> DiceRollConstant.TYPE_OPPOSED_CHECK.equals(
                 requireResolution(result).getType()))) {
             return formatOpposed(ordered);
+        }
+        if (ordered.stream().allMatch(this::isInsanityResult)) {
+            return formatInsanityRound(ordered);
         }
         return ordered.stream()
                 .map(this::formatIndividual)
@@ -98,7 +114,88 @@ public class CocDiceSummaryFormatter {
                 case FUMBLE -> "大失败";
             };
         }
+        if (DiceRollConstant.TYPE_SAN_LOSS.equals(resolution.getType())) {
+            Map<String, Object> effect = resolution.getEffect();
+            if (effect == null) {
+                return "";
+            }
+            return stringValue(resolution.getRule(), "characterName")
+                    + "理智-" + intValue(effect, "sanLoss");
+        }
         return "";
+    }
+
+    private String formatInsanityRound(List<DiceRollResult> results) {
+        Map<Long, List<DiceRollResult>> pairs = results.stream()
+                .collect(Collectors.groupingBy(
+                        result -> {
+                            Long source = requireResolution(result).getSourceResultId();
+                            if (source == null) {
+                                throw new UserRequestException("临时疯狂结果缺少来源");
+                            }
+                            return source;
+                        },
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+        List<String> formatted = new ArrayList<>();
+        for (List<DiceRollResult> pair : pairs.values()) {
+            DiceRollResult type = pair.stream()
+                    .filter(result -> DiceRollConstant.TYPE_TEMPORARY_INSANITY_TYPE.equals(
+                            requireResolution(result).getType()))
+                    .findFirst()
+                    .orElseThrow(() -> new UserRequestException("临时疯狂类型结果不存在"));
+            DiceRollResult duration = pair.stream()
+                    .filter(result -> DiceRollConstant.TYPE_TEMPORARY_INSANITY_DURATION.equals(
+                            requireResolution(result).getType()))
+                    .findFirst()
+                    .orElseThrow(() -> new UserRequestException("临时疯狂持续时间结果不存在"));
+            DiceResolutionDataVO typeResolution = requireResolution(type);
+            DiceResolutionDataVO durationResolution = requireResolution(duration);
+            if (typeResolution.getOutcome() == null
+                    || durationResolution.getOutcome() == null
+                    || durationResolution.getEffect() == null) {
+                throw new UserRequestException("临时疯狂结果尚未完成结算");
+            }
+            formatted.add(stringValue(typeResolution.getRule(), "characterName")
+                    + "理智-" + intValue(typeResolution.getRule(), "sanLoss")
+                    + "；进入临时疯狂："
+                    + stringValue(typeResolution.getOutcome(), "display")
+                    + "，持续"
+                    + intValue(durationResolution.getOutcome(), "durationHours")
+                    + "小时");
+        }
+        return String.join("；", formatted);
+    }
+
+    private Set<Long> completedInsanitySourceIds(List<DiceRollResult> results) {
+        Map<Long, List<DiceRollResult>> pairs = new LinkedHashMap<>();
+        for (DiceRollResult result : results) {
+            if (!isInsanityResult(result)) {
+                continue;
+            }
+            Long source = requireResolution(result).getSourceResultId();
+            if (source != null) {
+                pairs.computeIfAbsent(source, ignored -> new ArrayList<>()).add(result);
+            }
+        }
+        return pairs.entrySet().stream()
+                .filter(entry -> entry.getValue().stream().anyMatch(result ->
+                        DiceRollConstant.TYPE_TEMPORARY_INSANITY_TYPE.equals(
+                                requireResolution(result).getType())
+                                && result.getResolvedAt() != null))
+                .filter(entry -> entry.getValue().stream().anyMatch(result ->
+                        DiceRollConstant.TYPE_TEMPORARY_INSANITY_DURATION.equals(
+                                requireResolution(result).getType())
+                                && result.getResolvedAt() != null
+                                && requireResolution(result).getEffect() != null))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+    }
+
+    private boolean isInsanityResult(DiceRollResult result) {
+        String type = requireResolution(result).getType();
+        return DiceRollConstant.TYPE_TEMPORARY_INSANITY_TYPE.equals(type)
+                || DiceRollConstant.TYPE_TEMPORARY_INSANITY_DURATION.equals(type);
     }
 
     private DiceResolutionDataVO requireResolution(DiceRollResult result) {

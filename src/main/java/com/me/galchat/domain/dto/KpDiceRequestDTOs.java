@@ -37,4 +37,10 @@ public final class KpDiceRequestDTOs {
             String reason,
             List<String> characterNames) {
     }
+
+    public record SanLoss(
+            String reason,
+            String successFormula,
+            String failureFormula) {
+    }
 }

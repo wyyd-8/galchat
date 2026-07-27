@@ -11,6 +11,7 @@ import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.CharacterCardContextFormatter;
 import com.me.galchat.service.impl.GroupContextAssembler;
+import com.me.galchat.tool.KpDiceTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -29,15 +30,18 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final GroupContextAssembler contextAssembler;
     private final ICharacterCardService characterCardService;
     private final CharacterCardContextFormatter characterCardFormatter;
+    private final KpDiceTools kpDiceTools;
 
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
                                 GroupContextAssembler contextAssembler,
                                 ICharacterCardService characterCardService,
-                                CharacterCardContextFormatter characterCardFormatter) {
+                                CharacterCardContextFormatter characterCardFormatter,
+                                KpDiceTools kpDiceTools) {
         this.chatClient = chatClient;
         this.contextAssembler = contextAssembler;
         this.characterCardService = characterCardService;
         this.characterCardFormatter = characterCardFormatter;
+        this.kpDiceTools = kpDiceTools;
     }
 
     @Override
@@ -82,7 +86,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             messages.add(new UserMessage("现在轮到" + name + "执行当前" + phase
                     + "行动。只输出该角色的公开言语和行动，不要输出发言者标签。"));
         }
-        return new GroupModelInvocation(chatClient, new Prompt(messages), List.of());
+        List<Object> tools = GroupChatConstant.ACTOR_KP.equals(actor.type())
+                ? List.of(kpDiceTools)
+                : List.of();
+        return new GroupModelInvocation(chatClient, new Prompt(messages), tools);
     }
 
     @Override

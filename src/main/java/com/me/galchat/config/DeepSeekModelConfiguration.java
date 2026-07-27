@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.retry.RetryTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.ResponseErrorHandler;
@@ -86,6 +87,7 @@ public class DeepSeekModelConfiguration {
             ObjectProvider<WebClient.Builder> webClientBuilderProvider,
             ToolCallingManager toolCallingManager,
             GroupToolCallStore groupToolCallStore,
+            TransactionTemplate transactionTemplate,
             ObjectProvider<RetryTemplate> retryTemplate,
             ObjectProvider<ResponseErrorHandler> responseErrorHandler,
             ObjectProvider<ObservationRegistry> observationRegistry,
@@ -94,7 +96,8 @@ public class DeepSeekModelConfiguration {
         return buildChatModel(connectionProperties, chatProperties,
                 restClientBuilderProvider.getIfAvailable(RestClient::builder),
                 webClientBuilderProvider.getIfAvailable(WebClient::builder),
-                new RecordingGroupToolCallingManager(toolCallingManager, groupToolCallStore),
+                new RecordingGroupToolCallingManager(
+                        toolCallingManager, groupToolCallStore, transactionTemplate),
                 retryTemplate, responseErrorHandler, observationRegistry,
                 observationConvention, toolExecutionEligibilityPredicate);
     }
@@ -107,6 +110,7 @@ public class DeepSeekModelConfiguration {
             ObjectProvider<WebClient.Builder> webClientBuilderProvider,
             ToolCallingManager toolCallingManager,
             GroupToolCallStore groupToolCallStore,
+            TransactionTemplate transactionTemplate,
             ObjectProvider<RetryTemplate> retryTemplate,
             ObjectProvider<ResponseErrorHandler> responseErrorHandler,
             ObjectProvider<ObservationRegistry> observationRegistry,
@@ -118,7 +122,8 @@ public class DeepSeekModelConfiguration {
                 .requestInterceptor(new DeepSeekThinkingInterceptor());
         return buildChatModel(connectionProperties, chatProperties, restClientBuilder,
                 webClientBuilderProvider.getIfAvailable(WebClient::builder),
-                new RecordingGroupToolCallingManager(toolCallingManager, groupToolCallStore),
+                new RecordingGroupToolCallingManager(
+                        toolCallingManager, groupToolCallStore, transactionTemplate),
                 retryTemplate, responseErrorHandler, observationRegistry,
                 observationConvention, toolExecutionEligibilityPredicate);
     }

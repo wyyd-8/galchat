@@ -1,6 +1,8 @@
 package com.me.galchat.groupchat.tool;
 
+import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.domain.po.GroupChatToolCall;
+import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.service.DiceFollowUpLocator;
@@ -12,6 +14,8 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.HashMap;
 import java.util.List;
@@ -22,9 +26,12 @@ import java.util.Set;
 public class GroupToolCallStore implements DiceFollowUpLocator {
 
     private final GroupChatToolCallMapper mapper;
+    private final ObjectMapper objectMapper;
 
-    public GroupToolCallStore(GroupChatToolCallMapper mapper) {
+    public GroupToolCallStore(
+            GroupChatToolCallMapper mapper, ObjectMapper objectMapper) {
         this.mapper = mapper;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -90,8 +97,28 @@ public class GroupToolCallStore implements DiceFollowUpLocator {
                     continue;
                 }
                 row.setToolResult(response.responseData());
+                if (DiceRollConstant.KP_STATE_TOOL_NAMES.contains(row.getToolName())) {
+                    row.setDiceRollSummaryId(readSummaryId(response.responseData()));
+                }
                 mapper.updateById(row);
             }
+        }
+    }
+
+    private Long readSummaryId(String responseData) {
+        if (responseData == null || responseData.isBlank()) {
+            throw new UserRequestException("掷骰工具未返回结构化结果");
+        }
+        try {
+            KpDiceToolResult result = objectMapper.readValue(
+                    responseData, KpDiceToolResult.class);
+            if (result == null || result.summary() == null
+                    || result.summary().getId() == null) {
+                throw new UserRequestException("掷骰工具结果缺少概要id");
+            }
+            return result.summary().getId();
+        } catch (JacksonException exception) {
+            throw new UserRequestException("掷骰工具返回结果无法解析");
         }
     }
 }

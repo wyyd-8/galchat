@@ -16,6 +16,7 @@ import com.me.galchat.service.impl.CharacterCardContextFormatter;
 import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
+import com.me.galchat.tool.KpDiceTools;
 import com.me.galchat.vector.GroupTopicVectorService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -100,7 +101,11 @@ class GroupModeRuntimeTest {
                         GroupChatConstant.ACTOR_CHARACTER, 11L, "default", "群聊", 1, 1),
                 context);
         GroupModelInvocation trpg = new TrpgGroupAgentPolicy(
-                client, assembler, cardService, new CharacterCardContextFormatter()).prepare(
+                client,
+                assembler,
+                cardService,
+                new CharacterCardContextFormatter(),
+                mock(KpDiceTools.class)).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_TRPG_COMBAT,
                         GroupChatConstant.ACTOR_CHARACTER, 11L, "round:1", "第1轮", 1, 1),

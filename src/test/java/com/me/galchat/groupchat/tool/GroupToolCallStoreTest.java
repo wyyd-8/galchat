@@ -9,6 +9,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.model.tool.ToolExecutionResult;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
 import java.util.Set;
@@ -25,7 +26,8 @@ class GroupToolCallStoreTest {
     @Test
     void savesToolCallAndItsResponseInOneModelStep() {
         GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
-        GroupToolCallStore store = new GroupToolCallStore(mapper);
+        GroupToolCallStore store = new GroupToolCallStore(
+                mapper, JsonMapper.builder().build());
         when(mapper.nextToolStepNo(41L)).thenReturn(3);
         doAnswer(invocation -> {
             invocation.<GroupChatToolCall>getArgument(0).setId(9L);
@@ -64,7 +66,8 @@ class GroupToolCallStoreTest {
     @Test
     void bindsDiceSummaryByReplyStepAndToolCallId() {
         GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
-        GroupToolCallStore store = new GroupToolCallStore(mapper);
+        GroupToolCallStore store = new GroupToolCallStore(
+                mapper, JsonMapper.builder().build());
 
         store.bindDiceSummary(41L, "call-1", 501L);
 
@@ -74,7 +77,8 @@ class GroupToolCallStoreTest {
     @Test
     void locatesFollowUpOnlyWithinRequestedConversation() {
         GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
-        GroupToolCallStore store = new GroupToolCallStore(mapper);
+        GroupToolCallStore store = new GroupToolCallStore(
+                mapper, JsonMapper.builder().build());
         when(mapper.findLatestDiceSummaryId(7L, Set.of("requestCheck")))
                 .thenReturn(501L);
 
@@ -82,5 +86,44 @@ class GroupToolCallStoreTest {
                 7L, Set.of("requestCheck"))).isEqualTo(501L);
 
         verify(mapper).findLatestDiceSummaryId(7L, Set.of("requestCheck"));
+    }
+
+    @Test
+    void directDiceResponseBindsSummaryWhileSavingToolResult() {
+        GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
+        GroupToolCallStore store = new GroupToolCallStore(
+                mapper, JsonMapper.builder().build());
+        when(mapper.nextToolStepNo(41L)).thenReturn(1);
+        doAnswer(invocation -> {
+            invocation.<GroupChatToolCall>getArgument(0).setId(9L);
+            return 1;
+        }).when(mapper).insert(any(GroupChatToolCall.class));
+        AssistantMessage assistant = AssistantMessage.builder()
+                .content("")
+                .toolCalls(List.of(new AssistantMessage.ToolCall(
+                        "call-1", "function", "rollDamage", "{}")))
+                .build();
+        ChatResponse response = new ChatResponse(List.of(new Generation(assistant)));
+        ToolResponseMessage toolResponse = ToolResponseMessage.builder()
+                .responses(List.of(new ToolResponseMessage.ToolResponse(
+                        "call-1",
+                        "rollDamage",
+                        """
+                        {"summary":{"id":501,"conversationId":7,"roundCount":1,"status":"COMPLETED"},
+                         "results":[{"id":601,"summaryId":501,"roundNo":1,
+                           "resolution":{"type":"DAMAGE","sourceResultId":null,
+                             "outcome":{"rawDamage":4},"effect":{"hpAfter":6}}}],
+                         "semanticResult":"生命-4"}
+                        """)))
+                .build();
+        ToolExecutionResult result = mock(ToolExecutionResult.class);
+        when(result.conversationHistory()).thenReturn(List.of(toolResponse));
+
+        store.saveExecution(41L, response, result);
+
+        verify(mapper).updateById(org.mockito.ArgumentMatchers.argThat(
+                (GroupChatToolCall call) ->
+                        Long.valueOf(501L).equals(call.getDiceRollSummaryId())
+                                && call.getToolResult().contains("生命-4")));
     }
 }

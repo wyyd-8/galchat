@@ -1,5 +1,7 @@
 package com.me.galchat.constant;
 
+import java.util.Set;
+
 public final class DiceRollConstant {
 
     public static final String STATUS_PENDING = "PENDING";
@@ -18,6 +20,14 @@ public final class DiceRollConstant {
     public static final String TOOL_REQUEST_SAN_CHECK = "requestSanCheck";
     public static final String TOOL_REQUEST_PUSHED_CHECK = "requestPushedCheck";
     public static final String TOOL_REQUEST_OPPOSED_CHECK = "requestOpposedCheck";
+
+    public static final Set<String> KP_STATE_TOOL_NAMES = Set.of(
+            TOOL_REQUEST_CHECK,
+            TOOL_REQUEST_OPPOSED_CHECK,
+            TOOL_REQUEST_PUSHED_CHECK,
+            TOOL_REQUEST_SAN_CHECK,
+            "rollSanLoss",
+            "rollDamage");
 
     private DiceRollConstant() {
     }

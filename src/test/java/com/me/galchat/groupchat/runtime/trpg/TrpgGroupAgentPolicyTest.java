@@ -9,6 +9,7 @@ import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.CharacterCardContextFormatter;
 import com.me.galchat.service.impl.GroupContextAssembler;
+import com.me.galchat.tool.KpDiceTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 
@@ -27,6 +28,7 @@ class TrpgGroupAgentPolicyTest {
         GroupContextAssembler contextAssembler = mock(GroupContextAssembler.class);
         ICharacterCardService cardService = mock(ICharacterCardService.class);
         CharacterCardContextFormatter formatter = new CharacterCardContextFormatter();
+        KpDiceTools kpDiceTools = mock(KpDiceTools.class);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
@@ -34,7 +36,8 @@ class TrpgGroupAgentPolicyTest {
         when(cardService.listDiceCharacters(5L)).thenReturn(List.of(card("林恩", null)));
 
         TrpgGroupAgentPolicy policy =
-                new TrpgGroupAgentPolicy(client, contextAssembler, cardService, formatter);
+                new TrpgGroupAgentPolicy(
+                        client, contextAssembler, cardService, formatter, kpDiceTools);
         var invocation = policy.prepare(
                 conversation,
                 new GroupActionSpec(
@@ -54,6 +57,7 @@ class TrpgGroupAgentPolicyTest {
                 .contains("最多调用一个会改变状态的掷骰工具")
                 .contains("不得继续输出叙事或JSON");
         assertThat(policy.actorName(5L, kp)).isEqualTo("KP");
+        assertThat(invocation.tools()).containsExactly(kpDiceTools);
     }
 
     private CocDiceCharacterVO card(String name, Long participantId) {

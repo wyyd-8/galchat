@@ -17,7 +17,6 @@ public class GroupChatMessageVO {
     private String speakerName;
     private String messageKind;
     private String content;
-    private Long diceRollSummaryId;
     private Long sequenceNo;
     private String status;
     private LocalDateTime createdAt;

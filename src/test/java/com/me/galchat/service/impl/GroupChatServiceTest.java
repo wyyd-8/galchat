@@ -11,6 +11,7 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupChatMessageVO;
+import com.me.galchat.groupchat.dice.DiceRollMessageCodec;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupAgentPolicy;
@@ -22,7 +23,6 @@ import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.groupchat.runtime.GroupTurnPolicy;
 import com.me.galchat.groupchat.tool.GroupToolContextFactory;
-import com.me.galchat.groupchat.tool.GroupToolCallStore;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
@@ -47,8 +47,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -86,7 +84,7 @@ class GroupChatServiceTest {
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         GroupChatService service = new GroupChatService(conversationService, lockService, replyPlanService,
                 runtimeRegistry, messageMapper, turnMapper, stepMapper, recoveryService, new GroupToolContextFactory(),
-                userWorldPrefixService, transactionTemplate, mock(GroupToolCallStore.class),
+                userWorldPrefixService, transactionTemplate, diceMessageCodec(),
                 JsonMapper.builder().build());
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
@@ -245,7 +243,7 @@ class GroupChatServiceTest {
                 conversationService, lockService, replyPlanService, runtimeRegistry,
                 messageMapper, turnMapper, stepMapper, recoveryService, new GroupToolContextFactory(),
                 mock(IUserWorldPrefixService.class), transactionTemplate,
-                mock(GroupToolCallStore.class), JsonMapper.builder().build());
+                diceMessageCodec(), JsonMapper.builder().build());
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -326,7 +324,7 @@ class GroupChatServiceTest {
                 new GroupToolContextFactory(),
                 mock(IUserWorldPrefixService.class),
                 mock(TransactionTemplate.class),
-                mock(GroupToolCallStore.class),
+                diceMessageCodec(),
                 JsonMapper.builder().build());
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(7L)
@@ -375,7 +373,7 @@ class GroupChatServiceTest {
                 conversationService, lockService, replyPlanService, runtimeRegistry,
                 messageMapper, turnMapper, stepMapper, mock(GroupTurnRecoveryService.class),
                 new GroupToolContextFactory(), mock(IUserWorldPrefixService.class),
-                transactionTemplate, mock(GroupToolCallStore.class), JsonMapper.builder().build());
+                transactionTemplate, diceMessageCodec(), JsonMapper.builder().build());
 
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(1L).setWorldId(2L)
@@ -424,8 +422,9 @@ class GroupChatServiceTest {
                 .thenReturn(1L, 2L);
         String directJson = """
                 {"summary":{"id":501,"conversationId":7,"reason":"侦查",
-                  "roundCount":1,"status":"COMPLETED"},
-                 "results":[],"semanticResult":"陈默成功"}
+                  "roundCount":3,"status":"COMPLETED"},
+                 "results":[{"roundNo":3},{"roundNo":2},{"roundNo":3}],
+                 "semanticResult":"陈默成功"}
                 """;
         Generation direct = new Generation(
                 new org.springframework.ai.chat.messages.AssistantMessage(directJson),
@@ -452,15 +451,15 @@ class GroupChatServiceTest {
         verify(messageMapper).updateById(org.mockito.ArgumentMatchers.argThat(
                 (GroupChatMessage message) ->
                         GroupChatConstant.MESSAGE_DICE_ROLL.equals(message.getMessageKind())
-                                && message.getContent() == null
+                                && "{\"summaryId\":501,\"roundNos\":[2,3]}"
+                                        .equals(message.getContent())
                                 && GroupChatConstant.STATUS_COMPLETED.equals(message.getStatus())));
     }
 
     @Test
-    void historyReturnsSummaryIdForDiceMessagesWithoutStoredJsonContent() {
+    void historyReturnsStoredDiceReferenceWithoutToolCallLookup() {
         GroupConversationService conversationService = mock(GroupConversationService.class);
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
-        GroupToolCallStore store = mock(GroupToolCallStore.class);
         GroupRuntimeRegistry runtimeRegistry = mock(GroupRuntimeRegistry.class);
         GroupModeRuntime runtime = mock(GroupModeRuntime.class);
         GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
@@ -470,7 +469,8 @@ class GroupChatServiceTest {
                 messageMapper, mock(GroupChatTurnMapper.class),
                 mock(GroupChatReplyStepMapper.class), mock(GroupTurnRecoveryService.class),
                 new GroupToolContextFactory(), mock(IUserWorldPrefixService.class),
-                mock(TransactionTemplate.class), store, JsonMapper.builder().build());
+                mock(TransactionTemplate.class), diceMessageCodec(),
+                JsonMapper.builder().build());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
@@ -485,18 +485,15 @@ class GroupChatServiceTest {
                 .setReplyStepId(41L)
                 .setSpeakerType(GroupChatConstant.ACTOR_KP)
                 .setMessageKind(GroupChatConstant.MESSAGE_DICE_ROLL)
-                .setContent(null)
+                .setContent("{\"summaryId\":501,\"roundNos\":[2]}")
                 .setSequenceNo(4L)
                 .setStatus(GroupChatConstant.STATUS_COMPLETED)
                 .setCreatedAt(LocalDateTime.of(2026, 7, 27, 12, 0))));
-        when(store.diceSummaryIdsByReplyStepIds(Set.of(41L)))
-                .thenReturn(Map.of(41L, 501L));
-
         GroupChatMessageVO message = service.listHistory(7L, null, 50).getFirst();
 
         assertThat(message.getMessageKind()).isEqualTo(GroupChatConstant.MESSAGE_DICE_ROLL);
-        assertThat(message.getContent()).isNull();
-        assertThat(message.getDiceRollSummaryId()).isEqualTo(501L);
+        assertThat(message.getContent())
+                .isEqualTo("{\"summaryId\":501,\"roundNos\":[2]}");
     }
 
     private TransactionTemplate immediateTransactionTemplate() {
@@ -511,6 +508,10 @@ class GroupChatServiceTest {
             return null;
         }).when(template).executeWithoutResult(any());
         return template;
+    }
+
+    private DiceRollMessageCodec diceMessageCodec() {
+        return new DiceRollMessageCodec(JsonMapper.builder().build());
     }
 
     private GroupReplyPlanItem planItem(Long id, Long actorId, int order) {

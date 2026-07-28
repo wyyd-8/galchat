@@ -12,8 +12,10 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupChatMessageVO;
+import com.me.galchat.domain.vo.DiceRollDetailVO;
 import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.groupchat.dice.DiceRollMessageCodec;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
@@ -22,7 +24,6 @@ import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
 import com.me.galchat.groupchat.tool.GroupToolContextFactory;
-import com.me.galchat.groupchat.tool.GroupToolCallStore;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
@@ -44,10 +45,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
@@ -64,7 +62,7 @@ public class GroupChatService {
     private final GroupToolContextFactory toolContextFactory;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final TransactionTemplate transactionTemplate;
-    private final GroupToolCallStore toolCallStore;
+    private final DiceRollMessageCodec diceMessageCodec;
     private final ObjectMapper objectMapper;
 
     public GroupChatService(GroupConversationService conversationService,
@@ -78,7 +76,7 @@ public class GroupChatService {
                             GroupToolContextFactory toolContextFactory,
                             IUserWorldPrefixService userWorldPrefixService,
                             TransactionTemplate transactionTemplate,
-                            GroupToolCallStore toolCallStore,
+                            DiceRollMessageCodec diceMessageCodec,
                             ObjectMapper objectMapper) {
         this.conversationService = conversationService;
         this.lockService = lockService;
@@ -91,7 +89,7 @@ public class GroupChatService {
         this.toolContextFactory = toolContextFactory;
         this.userWorldPrefixService = userWorldPrefixService;
         this.transactionTemplate = transactionTemplate;
-        this.toolCallStore = toolCallStore;
+        this.diceMessageCodec = diceMessageCodec;
         this.objectMapper = objectMapper;
     }
 
@@ -174,20 +172,10 @@ public class GroupChatService {
             return List.of();
         }
 
-        Set<Long> diceReplyStepIds = new LinkedHashSet<>();
-        for (GroupChatMessage message : messages) {
-            if (GroupChatConstant.MESSAGE_DICE_ROLL.equals(message.getMessageKind())
-                    && message.getReplyStepId() != null) {
-                diceReplyStepIds.add(message.getReplyStepId());
-            }
-        }
-        Map<Long, Long> diceSummaryIds =
-                toolCallStore.diceSummaryIdsByReplyStepIds(diceReplyStepIds);
         return messages.stream().map(message -> new GroupChatMessageVO(
                 message.getId(), message.getConversationId(), message.getTurnId(), message.getReplyStepId(),
                 message.getSpeakerType(), message.getSpeakerId(), speakerName(conversation, message),
                 message.getMessageKind(), message.getContent(),
-                diceSummaryIds.get(message.getReplyStepId()),
                 message.getSequenceNo(), message.getStatus(), message.getCreatedAt())).toList();
     }
 
@@ -443,8 +431,12 @@ public class GroupChatService {
 
     private void persistOutput(GroupChatMessage message, GenerationAccumulator accumulator, String status) {
         if (accumulator.diceRoll != null) {
+            List<Integer> roundNos = accumulator.diceRoll.results().stream()
+                    .map(DiceRollDetailVO::getRoundNo)
+                    .toList();
             message.setMessageKind(GroupChatConstant.MESSAGE_DICE_ROLL)
-                    .setContent(null);
+                    .setContent(diceMessageCodec.encode(
+                            accumulator.diceRoll.summary().getId(), roundNos));
         } else {
             message.setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
                     .setContent(accumulator.content.toString());

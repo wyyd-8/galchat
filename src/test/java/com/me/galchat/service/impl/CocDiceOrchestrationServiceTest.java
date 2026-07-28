@@ -15,6 +15,7 @@ import com.me.galchat.domain.vo.DiceRollAggregate;
 import com.me.galchat.domain.vo.DiceRollResultVO;
 import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.service.DiceFollowUpLocator;
+import com.me.galchat.service.DiceMessageRoundAppender;
 import com.me.galchat.service.DiceRandomSource;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.IDiceRollInternalService;
@@ -47,6 +48,7 @@ class CocDiceOrchestrationServiceTest {
     private GroupConversationService conversations;
     private DiceFollowUpLocator followUps;
     private DiceRandomSource randomSource;
+    private DiceMessageRoundAppender messageRoundAppender;
     private CocDiceOrchestrationService service;
 
     @BeforeEach
@@ -56,13 +58,15 @@ class CocDiceOrchestrationServiceTest {
         conversations = mock(GroupConversationService.class);
         followUps = mock(DiceFollowUpLocator.class);
         randomSource = mock(DiceRandomSource.class);
+        messageRoundAppender = mock(DiceMessageRoundAppender.class);
         service = new CocDiceOrchestrationService(
                 internal,
                 cards,
                 conversations,
                 followUps,
                 new CocDiceSummaryFormatter(),
-                randomSource);
+                randomSource,
+                messageRoundAppender);
         when(conversations.requireActive(7L))
                 .thenReturn(new GroupConversation().setId(7L).setStatus("active"));
     }
@@ -501,6 +505,7 @@ class CocDiceOrchestrationServiceTest {
         verify(internal, times(2)).requireSummaryForUpdate(101L);
         verify(internal, times(1))
                 .appendDiceRollRound(eq(7L), eq(101L), any());
+        verify(messageRoundAppender).appendRounds(7L, 101L, List.of(3));
     }
 
     @Test
@@ -594,6 +599,8 @@ class CocDiceOrchestrationServiceTest {
         assertThat(card.getTemporaryInsanityPhase()).isEqualTo("9:037");
         assertThat(card.getTemporaryInsanityRemainingHours()).isEqualTo(4);
         verify(randomSource).d100();
+        verify(messageRoundAppender, never())
+                .appendRounds(any(), any(), any());
     }
 
     @Test
@@ -778,6 +785,7 @@ class CocDiceOrchestrationServiceTest {
         verify(internal, times(2)).requireSummaryForUpdate(111L);
         verify(internal, times(1))
                 .appendDiceRollRound(eq(7L), eq(111L), any());
+        verify(messageRoundAppender).appendRounds(7L, 111L, List.of(2));
     }
 
     @Test

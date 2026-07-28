@@ -20,6 +20,7 @@ import com.me.galchat.domain.vo.DiceRollSummaryVO;
 import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.DiceFollowUpLocator;
+import com.me.galchat.service.DiceMessageRoundAppender;
 import com.me.galchat.service.DiceRandomSource;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.ICocDiceOrchestrationService;
@@ -51,6 +52,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
     private final DiceFollowUpLocator followUpLocator;
     private final CocDiceSummaryFormatter summaryFormatter;
     private final DiceRandomSource randomSource;
+    private final DiceMessageRoundAppender messageRoundAppender;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -410,6 +412,16 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 : mergeResults(allResults, created);
         created.addAll(appendMajorWoundConRoundIfNeeded(
                 summary, currentResults));
+        List<Integer> createdRounds = created.stream()
+                .map(DiceRollResult::getRoundNo)
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .toList();
+        if (!createdRounds.isEmpty()) {
+            messageRoundAppender.appendRounds(
+                    summary.getConversationId(), summary.getId(), createdRounds);
+        }
         return new DiceRollProgressVO(
                 DiceRollSummaryVO.from(summary),
                 DiceRollDetailVO.from(result),

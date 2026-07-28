@@ -5,6 +5,7 @@ import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
+import com.me.galchat.groupchat.dice.GroupDiceMessageFormatter;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
@@ -34,8 +35,9 @@ class GroupContextAssemblerTest {
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
         GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
+        GroupDiceMessageFormatter diceMessageFormatter = mock(GroupDiceMessageFormatter.class);
         GroupContextAssembler assembler = new GroupContextAssembler(messageMapper, conversationService,
-                chatService, characterService, toolHistoryAssembler);
+                chatService, characterService, toolHistoryAssembler, diceMessageFormatter);
 
         GroupConversation conversation = new GroupConversation().setId(8L).setUserWorldId(1L).setWorldId(2L);
         when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
@@ -72,8 +74,9 @@ class GroupContextAssemblerTest {
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
         GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
+        GroupDiceMessageFormatter diceMessageFormatter = mock(GroupDiceMessageFormatter.class);
         GroupContextAssembler assembler = new GroupContextAssembler(messageMapper, conversationService,
-                chatService, characterService, toolHistoryAssembler);
+                chatService, characterService, toolHistoryAssembler, diceMessageFormatter);
         GroupConversation conversation = new GroupConversation()
                 .setId(8L).setUserWorldId(1L).setWorldId(2L);
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
@@ -102,34 +105,41 @@ class GroupContextAssemblerTest {
     }
 
     @Test
-    void contextUsesSyntheticDiceHistoryAndSkipsNullDiceMessageBody() {
+    void contextFormatsDiceMessageBodyAtItsMessagePosition() {
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
+        GroupDiceMessageFormatter diceMessageFormatter = mock(GroupDiceMessageFormatter.class);
         IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
         GroupContextAssembler assembler = new GroupContextAssembler(
                 messageMapper,
                 mock(GroupConversationService.class),
                 mock(ChatServiceImpl.class),
                 characterService,
-                toolHistoryAssembler);
+                toolHistoryAssembler,
+                diceMessageFormatter);
         GroupConversation conversation = new GroupConversation()
                 .setId(8L).setUserWorldId(1L).setWorldId(2L);
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
         GroupChatMessage diceMessage = message(
-                GroupChatConstant.ACTOR_KP, null, null)
+                GroupChatConstant.ACTOR_KP, null,
+                "{\"summaryId\":501,\"roundNos\":[2]}")
                 .setReplyStepId(41L)
                 .setMessageKind(GroupChatConstant.MESSAGE_DICE_ROLL);
         when(characterService.listByUserWorldId(1L)).thenReturn(List.of());
         when(messageMapper.selectList(any())).thenReturn(List.of(diceMessage));
         when(toolHistoryAssembler.beforeMessages(any(), org.mockito.ArgumentMatchers.eq(kp)))
-                .thenReturn(Map.of(41L, List.of(
-                        new UserMessage("<dice-roll summary-id=\"501\" />"))));
+                .thenReturn(Map.of(41L, List.of()));
+        when(diceMessageFormatter.format(
+                "{\"summaryId\":501,\"roundNos\":[2]}"))
+                .thenReturn("<dice-roll summary-id=\"501\" rounds=\"2\" />");
 
         List<Message> context = assembler.assembleContextFrom(conversation, kp, 1L);
 
         assertThat(context).extracting(Message::getText)
-                .containsExactly("<dice-roll summary-id=\"501\" />")
+                .containsExactly("<dice-roll summary-id=\"501\" rounds=\"2\" />")
                 .doesNotContainNull();
+        verify(diceMessageFormatter)
+                .format("{\"summaryId\":501,\"roundNos\":[2]}");
     }
 
     private GroupChatMessage message(String speakerType, Long speakerId, String content) {

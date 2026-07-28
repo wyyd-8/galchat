@@ -7,6 +7,7 @@ import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
+import com.me.galchat.groupchat.dice.GroupDiceMessageFormatter;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
@@ -32,6 +33,7 @@ public class GroupContextAssembler {
     private final ChatServiceImpl chatService;
     private final IUserCharacterInfoService userCharacterInfoService;
     private final GroupToolHistoryAssembler toolHistoryAssembler;
+    private final GroupDiceMessageFormatter diceMessageFormatter;
 
     public List<Message> assembleContext(GroupConversation conversation, GroupActorRef currentActor,
                                          GroupContextSummary summary) {
@@ -61,6 +63,8 @@ public class GroupContextAssembler {
                 prompt.addAll(toolMessages.getOrDefault(message.getReplyStepId(), List.of()));
             }
             if (GroupChatConstant.MESSAGE_DICE_ROLL.equals(message.getMessageKind())) {
+                prompt.add(new UserMessage(
+                        diceMessageFormatter.format(message.getContent())));
                 continue;
             }
             if (currentActor.matches(message.getSpeakerType(), message.getSpeakerId())) {

@@ -1,20 +1,13 @@
 package com.me.galchat.groupchat.tool;
 
-import com.me.galchat.constant.DiceRollConstant;
-import com.me.galchat.domain.po.DiceRollResult;
-import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatToolCall;
-import com.me.galchat.domain.vo.DiceRollResultVO;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
-import com.me.galchat.mapper.DiceRollResultMapper;
-import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.List;
 import java.util.Map;
@@ -52,12 +45,9 @@ class GroupToolHistoryAssemblerTest {
     }
 
     @Test
-    void diceReferenceUsesPublicSpecialFormatForEveryCharacter() {
+    void diceToolCallIsOmittedFromPrivateToolReplay() {
         GroupChatToolCallMapper toolCallMapper = mock(GroupChatToolCallMapper.class);
-        DiceRollSummaryMapper summaryMapper = mock(DiceRollSummaryMapper.class);
-        DiceRollResultMapper resultMapper = mock(DiceRollResultMapper.class);
-        GroupToolHistoryAssembler assembler =
-                new GroupToolHistoryAssembler(toolCallMapper, summaryMapper, resultMapper);
+        GroupToolHistoryAssembler assembler = assembler(toolCallMapper);
         GroupChatMessage message = message(41L, 99L);
         when(toolCallMapper.selectList(any())).thenReturn(List.of(new GroupChatToolCall()
                 .setReplyStepId(41L)
@@ -65,30 +55,14 @@ class GroupToolHistoryAssemblerTest {
                 .setToolCallId("call-dice")
                 .setToolName("createDiceRoll")
                 .setDiceRollSummaryId(501L)));
-        when(summaryMapper.selectBatchIds(any())).thenReturn(List.of(new DiceRollSummary()
-                .setId(501L)
-                .setReason("哈维攻击邪教徒")
-                .setRoundCount(1)
-                .setStatus(DiceRollConstant.STATUS_COMPLETED)));
-        when(resultMapper.selectList(any())).thenReturn(List.of(new DiceRollResult()
-                .setSummaryId(501L)
-                .setRoundNo(1)
-                .setDisplayOrder(1)
-                .setReason("斗殴检定")
-                .setResultData(new DiceRollResultVO("1D100", List.of(), 34))));
 
         List<Message> kpHistory = assembler.beforeMessages(
                 List.of(message), new GroupActorRef("character", 99L)).get(41L);
         List<Message> investigatorHistory = assembler.beforeMessages(
                 List.of(message), new GroupActorRef("character", 11L)).get(41L);
 
-        assertThat(kpHistory).singleElement().isInstanceOf(UserMessage.class);
-        assertThat(investigatorHistory).singleElement().isInstanceOf(UserMessage.class);
-        assertThat(kpHistory.getFirst().getText())
-                .contains("<dice-roll summary-id=\"501\" status=\"COMPLETED\">")
-                .contains("哈维攻击邪教徒", "斗殴检定", "1D100", "34")
-                .doesNotContain("call-dice", "createDiceRoll");
-        assertThat(investigatorHistory.getFirst().getText()).isEqualTo(kpHistory.getFirst().getText());
+        assertThat(kpHistory).isEmpty();
+        assertThat(investigatorHistory).isEmpty();
     }
 
     @Test
@@ -114,10 +88,7 @@ class GroupToolHistoryAssemblerTest {
     }
 
     private GroupToolHistoryAssembler assembler(GroupChatToolCallMapper toolCallMapper) {
-        return new GroupToolHistoryAssembler(
-                toolCallMapper,
-                mock(DiceRollSummaryMapper.class),
-                mock(DiceRollResultMapper.class));
+        return new GroupToolHistoryAssembler(toolCallMapper);
     }
 
     private GroupChatMessage message(Long replyStepId, Long speakerId) {

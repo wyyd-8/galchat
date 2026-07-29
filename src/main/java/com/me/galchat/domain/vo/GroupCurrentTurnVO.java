@@ -1,0 +1,17 @@
+package com.me.galchat.domain.vo;
+
+import java.util.Map;
+
+public record GroupCurrentTurnVO(
+        Long turnId,
+        Long planId,
+        String planSource,
+        Long planContextId,
+        String status,
+        Long stepId,
+        String actionType,
+        String inputType,
+        String sceneName,
+        boolean waitingForUser,
+        Map<String, String> sceneOptions) {
+}

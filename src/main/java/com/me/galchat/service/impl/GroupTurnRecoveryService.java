@@ -86,6 +86,23 @@ public class GroupTurnRecoveryService {
                         .eq(GroupChatReplyStep::getStatus, GroupChatConstant.STATUS_PENDING));
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelPendingInvestigatorSteps(
+            Long turnId, String reason) {
+        stepMapper.update(
+                new GroupChatReplyStep()
+                        .setStatus(GroupChatConstant.STATUS_CANCELLED)
+                        .setErrorMessage(reason)
+                        .setUpdatedAt(LocalDateTime.now()),
+                new LambdaUpdateWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turnId)
+                        .eq(GroupChatReplyStep::getStatus,
+                                GroupChatConstant.STATUS_PENDING)
+                        .in(GroupChatReplyStep::getSpeakerType,
+                                GroupChatConstant.ACTOR_USER,
+                                GroupChatConstant.ACTOR_CHARACTER));
+    }
+
     public void assertNoNonTerminalTurns(Long userWorldId) {
         if (positive(turnMapper.countNonTerminalByUserWorldId(userWorldId))) {
             throw new UserRequestException("当前世界存在未完成的群聊轮次");

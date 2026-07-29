@@ -74,6 +74,7 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
                     .setImage(character.getImage())
                     .setBackground(character.getBackground())
                     .setPersonality(character.getPersonality())
+                    .setCocPlayStyle(character.getCocPlayStyle())
                     .setFavorability(character.getFavorability())
                     .setInitFavor(character.getInitFavor()));
         }
@@ -114,6 +115,7 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
                 .setImage(character.getImage())
                 .setBackground(character.getBackground())
                 .setPersonality(character.getPersonality())
+                .setCocPlayStyle(character.getCocPlayStyle())
                 .setFavorability(character.getFavorability())
                 .setInitFavor(character.getInitFavor());
     }

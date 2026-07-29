@@ -142,6 +142,49 @@ class GroupContextAssemblerTest {
                 .format("{\"summaryId\":501,\"roundNos\":[2]}");
     }
 
+    @Test
+    void contextConvertsMaterialMessageToAgentSemanticText() {
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupToolHistoryAssembler toolHistoryAssembler =
+                mock(GroupToolHistoryAssembler.class);
+        IUserCharacterInfoService characterService =
+                mock(IUserCharacterInfoService.class);
+        GroupContextAssembler assembler = new GroupContextAssembler(
+                messageMapper,
+                mock(GroupConversationService.class),
+                mock(ChatServiceImpl.class),
+                characterService,
+                toolHistoryAssembler,
+                mock(GroupDiceMessageFormatter.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(8L).setUserWorldId(1L);
+        GroupActorRef investigator = new GroupActorRef(
+                GroupChatConstant.ACTOR_CHARACTER, 11L);
+        GroupChatMessage material = message(
+                GroupChatConstant.ACTOR_KP, null, """
+                        {"schemaVersion":1,"materialId":31,
+                         "title":"玛德琳的信","description":"信中提到酒店",
+                         "imageUrl":"https://oss.example/image.jpg"}
+                        """)
+                .setMessageKind(GroupChatConstant.MESSAGE_MATERIAL);
+        when(characterService.listByUserWorldId(1L))
+                .thenReturn(List.of());
+        when(messageMapper.selectList(any()))
+                .thenReturn(List.of(material));
+        when(toolHistoryAssembler.beforeMessages(
+                any(), org.mockito.ArgumentMatchers.eq(investigator)))
+                .thenReturn(Map.of());
+
+        String result = assembler.assembleContextFrom(
+                conversation, investigator, 1L).getFirst().getText();
+
+        assertThat(result)
+                .contains("玛德琳的信", "信中提到酒店")
+                .doesNotContain("materialId")
+                .doesNotContain("https://oss.example/image.jpg");
+    }
+
     private GroupChatMessage message(String speakerType, Long speakerId, String content) {
         return new GroupChatMessage()
                 .setSpeakerType(speakerType)

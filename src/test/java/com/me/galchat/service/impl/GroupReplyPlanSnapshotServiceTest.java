@@ -87,6 +87,39 @@ class GroupReplyPlanSnapshotServiceTest {
     }
 
     @Test
+    void captureKeepsAllSelectedScenesInNextPlanChain() {
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        GroupReplyPlanSnapshotService service =
+                new GroupReplyPlanSnapshotService(
+                        conversationMapper, planMapper, itemMapper,
+                        mock(GroupReplyPlanService.class));
+        when(conversationMapper.selectList(any()))
+                .thenReturn(List.of(activeConversation(10L)));
+        when(planMapper.selectById(10L)).thenReturn(
+                plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE,
+                        100L, null).setNextPlanId(11L));
+        when(planMapper.selectById(11L)).thenReturn(
+                plan(11L, GroupChatConstant.PLAN_SOURCE_SCENE,
+                        101L, null));
+        when(itemMapper.selectList(any())).thenReturn(
+                List.of(item(10L, 10L, "scene:100",
+                        "地下室", 1, 1, 9L)),
+                List.of(item(11L, 11L, "scene:101",
+                        "码头", 1, 1, 9L)));
+
+        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot active =
+                service.capture(1L).getFirst().getActivePlan();
+
+        assertThat(active.getContextId()).isEqualTo(100L);
+        assertThat(active.getNextPlan().getContextId()).isEqualTo(101L);
+        assertThat(active.getNextPlan().getNextPlan()).isNull();
+    }
+
+    @Test
     void restoreCreatesNewResumeIdBeforeActiveIdAndReopensConversation() {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
@@ -127,6 +160,54 @@ class GroupReplyPlanSnapshotServiceTest {
         assertThat(conversation.getActiveReplyPlanId()).isEqualTo(insertedPlans.get(1).getId());
         assertThat(conversation.getStatus()).isEqualTo(GroupChatConstant.STATUS_ACTIVE);
         assertThat(conversation.getClosedAt()).isNull();
+    }
+
+    @Test
+    void restoreCreatesNextSceneBeforePointingActiveSceneAtIt() {
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        GroupReplyPlanService replyPlanService =
+                mock(GroupReplyPlanService.class);
+        GroupReplyPlanSnapshotService service =
+                new GroupReplyPlanSnapshotService(
+                        conversationMapper, planMapper, itemMapper,
+                        replyPlanService);
+        GroupConversation conversation = activeConversation(99L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        when(conversationMapper.selectById(7L))
+                .thenReturn(conversation);
+        when(planMapper.selectList(any())).thenReturn(List.of());
+        AtomicLong ids = new AtomicLong(100L);
+        List<GroupReplyPlan> insertedPlans = new ArrayList<>();
+        doAnswer(invocation -> {
+            GroupReplyPlan plan = invocation.getArgument(0);
+            plan.setId(ids.incrementAndGet());
+            insertedPlans.add(plan);
+            return 1;
+        }).when(planMapper).insert(any(GroupReplyPlan.class));
+        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot next =
+                planSnapshot(GroupChatConstant.PLAN_SOURCE_SCENE,
+                        101L, "scene:101", "码头", 9L);
+        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot active =
+                planSnapshot(GroupChatConstant.PLAN_SOURCE_SCENE,
+                        100L, "scene:100", "地下室", 9L)
+                        .setNextPlan(next);
+
+        service.restore(1L, List.of(
+                new UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot()
+                        .setConversationId(7L)
+                        .setActivePlan(active)));
+
+        assertThat(insertedPlans)
+                .extracting(GroupReplyPlan::getContextId)
+                .containsExactly(101L, 100L);
+        assertThat(insertedPlans.get(1).getNextPlanId())
+                .isEqualTo(insertedPlans.get(0).getId());
+        assertThat(conversation.getActiveReplyPlanId())
+                .isEqualTo(insertedPlans.get(1).getId());
     }
 
     @Test

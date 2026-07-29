@@ -1,0 +1,302 @@
+package com.me.galchat.service.impl;
+
+import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.po.GroupChatMember;
+import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.CocModuleLocation;
+import com.me.galchat.domain.po.GroupReplyPlan;
+import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.mapper.CocModuleLocationMapper;
+import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.mapper.GroupReplyPlanItemMapper;
+import com.me.galchat.mapper.GroupReplyPlanMapper;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+
+class TrpgSceneSelectionServiceTest {
+
+    @Test
+    void selectionStageSchedulesKpBeforeEveryEnabledInvestigator() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        TrpgParticipantService participantService =
+                mock(TrpgParticipantService.class);
+        TrpgSceneSelectionService service = new TrpgSceneSelectionService(
+                conversationService,
+                mock(CocModuleLocationMapper.class),
+                mock(GroupConversationMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                mock(TrpgSceneSelectionStore.class),
+                participantService,
+                mock(TrpgSelectionRandomizer.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setModuleId(3L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        when(participantService.listInvestigators(conversation))
+                .thenReturn(List.of(
+                        participant(GroupChatConstant.ACTOR_USER,
+                                101L, 101L, "林登", "用户"),
+                        participant(GroupChatConstant.ACTOR_CHARACTER,
+                                9L, 201L, "玛格丽特", "爱丽丝"),
+                        participant(GroupChatConstant.ACTOR_CHARACTER,
+                                7L, 202L, "陈默", "夏洛特")));
+
+        var actions = service.selectionActions(conversation);
+
+        assertThat(actions)
+                .extracting(
+                        action -> action.actorType(),
+                        action -> action.actorId(),
+                        action -> action.actionType())
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                GroupChatConstant.ACTOR_KP, null,
+                                GroupChatConstant.ACTION_TRPG_SCENE_SELECTION),
+                        org.assertj.core.groups.Tuple.tuple(
+                                GroupChatConstant.ACTOR_USER, 101L,
+                                GroupChatConstant.ACTION_TRPG_SCENE_SELECTION),
+                        org.assertj.core.groups.Tuple.tuple(
+                                GroupChatConstant.ACTOR_CHARACTER, 9L,
+                                GroupChatConstant.ACTION_TRPG_SCENE_SELECTION),
+                        org.assertj.core.groups.Tuple.tuple(
+                                GroupChatConstant.ACTOR_CHARACTER, 7L,
+                                GroupChatConstant.ACTION_TRPG_SCENE_SELECTION));
+    }
+
+    @Test
+    void investigatorSelectsLocationByExactName() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        TrpgSceneSelectionStore store = mock(TrpgSceneSelectionStore.class);
+        TrpgSceneSelectionService service = new TrpgSceneSelectionService(
+                conversationService,
+                locationMapper,
+                mock(GroupConversationMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                store,
+                mock(TrpgParticipantService.class),
+                mock(TrpgSelectionRandomizer.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setModuleId(3L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        when(conversationService.requireActive(7L)).thenReturn(conversation);
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                new CocModuleLocation()
+                        .setId(21L)
+                        .setModuleId(3L)
+                        .setName("皇家橡树酒店")));
+
+        service.selectLocation(7L, 9L, " 皇家橡树酒店 ");
+
+        verify(conversationService).checkReplyMember(
+                7L, GroupChatConstant.ACTOR_CHARACTER, 9L, false);
+        verify(store).put(7L, 9L, 21L);
+    }
+
+    @Test
+    void completedSelectionsCreateASeparatePlanChainByLocation() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        TrpgSceneSelectionStore store = mock(TrpgSceneSelectionStore.class);
+        TrpgParticipantService participantService =
+                mock(TrpgParticipantService.class);
+        TrpgSceneSelectionService service = new TrpgSceneSelectionService(
+                conversationService, locationMapper, conversationMapper,
+                planMapper, itemMapper, store,
+                participantService,
+                mock(TrpgSelectionRandomizer.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setModuleId(3L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        when(participantService.listInvestigators(conversation))
+                .thenReturn(List.of(
+                        participant(GroupChatConstant.ACTOR_USER,
+                                101L, 101L, "林登", "用户"),
+                        participant(GroupChatConstant.ACTOR_CHARACTER,
+                                9L, 201L, "玛格丽特", "爱丽丝")));
+        when(store.getSelections(7L)).thenReturn(
+                java.util.Map.of(
+                        "user:101", 21L,
+                        "character:9", 22L));
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                new CocModuleLocation().setId(22L).setModuleId(3L)
+                        .setName("医院"),
+                new CocModuleLocation().setId(21L).setModuleId(3L)
+                        .setName("酒店")));
+        java.util.concurrent.atomic.AtomicLong planIds =
+                new java.util.concurrent.atomic.AtomicLong(100L);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ((GroupReplyPlan) invocation.getArgument(0))
+                    .setId(planIds.incrementAndGet());
+            return 1;
+        }).when(planMapper).insert(any(GroupReplyPlan.class));
+
+        assertThat(service.finalizeSelections(conversation)).isTrue();
+
+        var planCaptor =
+                org.mockito.ArgumentCaptor.forClass(GroupReplyPlan.class);
+        verify(planMapper, times(2)).insert(planCaptor.capture());
+        assertThat(planCaptor.getAllValues())
+                .extracting(GroupReplyPlan::getContextId,
+                        GroupReplyPlan::getNextPlanId)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(22L, null),
+                        org.assertj.core.groups.Tuple.tuple(21L, 101L));
+        assertThat(conversation.getActiveReplyPlanId()).isEqualTo(102L);
+        var itemCaptor =
+                org.mockito.ArgumentCaptor.forClass(GroupReplyPlanItem.class);
+        verify(itemMapper, times(4)).insert(itemCaptor.capture());
+        assertThat(itemCaptor.getAllValues())
+                .extracting(GroupReplyPlanItem::getPlanId,
+                        GroupReplyPlanItem::getActorType,
+                        GroupReplyPlanItem::getActorId)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                101L, GroupChatConstant.ACTOR_CHARACTER, 9L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                101L, GroupChatConstant.ACTOR_KP, null),
+                        org.assertj.core.groups.Tuple.tuple(
+                                102L, GroupChatConstant.ACTOR_USER, 101L),
+                        org.assertj.core.groups.Tuple.tuple(
+                                102L, GroupChatConstant.ACTOR_KP, null));
+        verify(conversationMapper).updateById(conversation);
+        verify(store).clear(7L);
+    }
+
+    @Test
+    void kpPublishesNumberedOptionsAndOneOptionAutoAssignsEveryone() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        TrpgParticipantService participantService =
+                mock(TrpgParticipantService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setModuleId(3L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        TrpgSceneSelectionService service = new TrpgSceneSelectionService(
+                conversationService, locationMapper,
+                mock(GroupConversationMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                store, participantService,
+                mock(TrpgSelectionRandomizer.class));
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                new CocModuleLocation().setId(21L)
+                        .setModuleId(3L).setName("旅店")));
+        var user = participant(GroupChatConstant.ACTOR_USER,
+                101L, 101L, "林登", "用户");
+        var agent = participant(GroupChatConstant.ACTOR_CHARACTER,
+                9L, 201L, "玛格丽特", "爱丽丝");
+        when(participantService.listInvestigators(conversation))
+                .thenReturn(List.of(user, agent));
+        when(store.getSelections(7L)).thenReturn(
+                java.util.Map.of(
+                        "user:101", 21L,
+                        "character:9", 21L));
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                new CocModuleLocation().setId(21L)
+                        .setModuleId(3L).setName("旅店")));
+
+        var result = service.publishOptions(7L, List.of("旅店"));
+
+        assertThat(result.options()).containsExactly(
+                java.util.Map.entry("1", "旅店"));
+        assertThat(result.autoAssigned()).isTrue();
+        verify(store).put(7L, 0L, user.actor(), 21L);
+        verify(store).put(7L, 0L, agent.actor(), 21L);
+    }
+
+    @Test
+    void invalidNumberRandomlyFallsBackToAnUnselectedLocationFirst() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        TrpgParticipantService participantService =
+                mock(TrpgParticipantService.class);
+        TrpgSelectionRandomizer randomizer =
+                mock(TrpgSelectionRandomizer.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setModuleId(3L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        var agent = participant(
+                GroupChatConstant.ACTOR_CHARACTER,
+                9L, 201L, "玛格丽特", "爱丽丝");
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(participantService.listInvestigators(conversation))
+                .thenReturn(List.of(agent));
+        var hotel = new TrpgSceneSelectionStore.LocationOption(
+                21L, "酒店");
+        var hospital = new TrpgSceneSelectionStore.LocationOption(
+                22L, "医院");
+        when(store.getOptions(7L, 0L)).thenReturn(
+                java.util.Map.of("1", hotel, "2", hospital));
+        when(store.getSelections(7L, 0L)).thenReturn(
+                java.util.Map.of("user:101", 21L));
+        when(randomizer.choose(List.of(hospital)))
+                .thenReturn(hospital);
+        TrpgSceneSelectionService service = new TrpgSceneSelectionService(
+                conversationService,
+                mock(CocModuleLocationMapper.class),
+                mock(GroupConversationMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                store, participantService, randomizer);
+
+        var result = service.selectOption(
+                7L, agent.actor(), "99");
+
+        assertThat(result.locationName()).isEqualTo("医院");
+        assertThat(result.randomized()).isTrue();
+        verify(randomizer).choose(List.of(hospital));
+        verify(store).put(7L, 0L, agent.actor(), 22L);
+    }
+
+    private GroupChatMember member(Long actorId, boolean enabled) {
+        return new GroupChatMember()
+                .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                .setActorId(actorId)
+                .setEnabled(enabled);
+    }
+
+    private TrpgParticipantService.Participant participant(
+            String actorType, Long actorId, Long cardId,
+            String investigatorName, String controllerName) {
+        return new TrpgParticipantService.Participant(
+                new com.me.galchat.groupchat.runtime.GroupActorRef(
+                        actorType, actorId),
+                cardId, investigatorName, controllerName);
+    }
+}

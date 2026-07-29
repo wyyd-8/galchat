@@ -11,6 +11,7 @@ public final class GroupChatConstant {
     public static final String PLAN_SOURCE_USER = "USER";
     public static final String PLAN_SOURCE_SCENE = "SCENE";
     public static final String PLAN_SOURCE_COMBAT = "COMBAT";
+    public static final String TURN_SOURCE_SCENE_SELECTION = "SCENE_SELECTION";
 
     public static final String ACTOR_USER = "user";
     public static final String ACTOR_CHARACTER = "character";
@@ -20,10 +21,14 @@ public final class GroupChatConstant {
     public static final String MESSAGE_DIALOGUE = "dialogue";
     public static final String MESSAGE_NARRATION = "narration";
     public static final String MESSAGE_DICE_ROLL = "dice_roll";
+    public static final String MESSAGE_MATERIAL = "material";
 
     public static final String ACTION_CHAT_REPLY = "chat_reply";
     public static final String ACTION_TRPG_SCENE = "trpg_scene_action";
+    public static final String ACTION_TRPG_SCENE_INTRO =
+            "trpg_scene_intro";
     public static final String ACTION_TRPG_COMBAT = "trpg_combat_action";
+    public static final String ACTION_TRPG_SCENE_SELECTION = "trpg_scene_selection";
 
     public static final String TOPIC_BOUNDARY_SEMANTIC = "semantic";
     public static final String TOPIC_BOUNDARY_CAPACITY = "capacity";
@@ -36,6 +41,7 @@ public final class GroupChatConstant {
     public static final String STATUS_FAILED = "failed";
     public static final String STATUS_CANCELLED = "cancelled";
     public static final String STATUS_STREAMING = "streaming";
+    public static final String STATUS_WAITING_INPUT = "waiting_input";
     public static final String STATUS_WITHDRAWN = "withdrawn";
 
     public static final String EVENT_TURN_ACCEPTED = "turn.accepted";
@@ -43,9 +49,15 @@ public final class GroupChatConstant {
     public static final String EVENT_REASONING_DELTA = "reasoning.delta";
     public static final String EVENT_MESSAGE_DELTA = "message.delta";
     public static final String EVENT_DICE_ROLL_CREATED = "dice_roll.created";
+    public static final String EVENT_MATERIAL_CREATED = "material.created";
+    public static final String EVENT_SCENE_OPTIONS_CREATED =
+            "scene_selection.options";
+    public static final String EVENT_SCENE_CHOICE_CREATED =
+            "scene_selection.choice";
     public static final String EVENT_MESSAGE_COMPLETED = "message.completed";
     public static final String EVENT_REPLY_FAILED = "reply.failed";
     public static final String EVENT_TURN_COMPLETED = "turn.completed";
+    public static final String EVENT_TURN_WAITING_INPUT = "turn.waiting_input";
 
     public static final int DEFAULT_HISTORY_PAGE_SIZE = 50;
     public static final int MAX_REPLY_STEPS = 12;

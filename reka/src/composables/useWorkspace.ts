@@ -1,7 +1,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { api, clearSession, currentSession, saveSession, streamGroupMessage, UNAUTHORIZED_EVENT } from '@/api/client'
+import { api, clearSession, currentSession, saveSession, streamGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
 import type {
-  Character, CharacterTemplate, Conversation, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem,
+  Character, CharacterTemplate, Conversation, CurrentTurn, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem,
   UserInfo, UserWorld, WorldDetail, WorldSave, WorldTemplate,
 } from '@/api/types'
 import { errorMessage, notify } from './useNotice'
@@ -28,6 +28,7 @@ export function useWorkspace() {
   const participantIds = ref<number[]>([])
   const messageInput = ref('')
   const messageScroller = ref<HTMLElement | null>(null)
+  const currentTurn = ref<CurrentTurn | null>(null)
 
   const isLoggedIn = computed(() => Boolean(session.token && session.id))
   const selectedWorld = computed(() => worlds.value.find((item) => item.id === selectedWorldId.value) || null)
@@ -38,9 +39,18 @@ export function useWorkspace() {
     participantIds.value.includes(character.characterId) && !planItems.value.some((item) => item.actorId === character.characterId)))
 
   function characterById(id?: number) { return characters.value.find((item) => item.characterId === id) }
+  function eventSpeakerType(event: GroupChatEvent): GroupMessage['speakerType'] {
+    if (event.speaker?.type === 'user' || event.speaker?.type === 'kp' || event.speaker?.type === 'narrator') return event.speaker.type
+    return 'character'
+  }
+  function eventMessageKind(event: GroupChatEvent): GroupMessage['messageKind'] {
+    if (event.messageKind === 'narration' || event.messageKind === 'system_event'
+      || event.messageKind === 'dice_roll' || event.messageKind === 'material') return event.messageKind
+    return 'dialogue'
+  }
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
-    conversations.value = []; messages.value = []; replyPlan.value = freshPlan(); participantIds.value = []
+    conversations.value = []; messages.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null
   }
   function logout() { clearSession(); Object.assign(session, currentSession()); userInfo.value = null; resetWorkspace() }
 
@@ -141,12 +151,14 @@ export function useWorkspace() {
     await selectConversation(created.id); notify('群聊已建立', created.title, 'success')
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; currentTurn.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
       const [history, plan] = await Promise.all([api.groupMessages(id), api.replyPlan(id)])
       messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
       replyPlan.value = plan || freshPlan()
       participantIds.value = [...new Set(replyPlan.value.groups.flatMap((group) => group.items.map((item) => item.actorId)))]
+      const conversation = selectedConversation.value
+      if (conversation?.mode === 'trpg' && conversation.status === 'active') await startTrpgTurn()
       await scrollToBottom()
     } catch (error) { notify('群聊加载失败', errorMessage(error), 'danger') }
     finally { loading.chat = false }
@@ -179,16 +191,30 @@ export function useWorkspace() {
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
       messages.value.push({ id: tempMessageId--, conversationId: selectedConversationId.value!, turnId: event.turnId, replyStepId: step,
-        speakerType: 'character', speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
-        messageKind: 'dialogue', content: '', sequenceNo: event.sequence || Date.now(), status: 'streaming' })
+        speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
+        messageKind: eventMessageKind(event), content: '', sequenceNo: event.sequence || Date.now(), status: 'streaming' })
       reasoning[step] = ''
     } else if (event.eventType === 'reasoning.delta' && step) {
       reasoning[step] = (reasoning[step] || '') + (event.delta || '')
     } else if (event.eventType === 'message.delta' && step) {
       const message = messages.value.find((item) => item.replyStepId === step); if (message) message.content += event.delta || ''
     } else if (event.eventType === 'message.completed' && step) {
-      const message = messages.value.find((item) => item.replyStepId === step)
+      let message = messages.value.find((item) => item.replyStepId === step)
+      if (!message) {
+        message = { id: event.messageId || tempMessageId--, conversationId: selectedConversationId.value!, turnId: event.turnId, replyStepId: step,
+          speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name,
+          messageKind: eventMessageKind(event), content: '', sequenceNo: event.sequence || Date.now(), status: 'completed' }
+        messages.value.push(message)
+      }
       if (message) { if (event.messageId) message.id = event.messageId; message.content = event.content ?? message.content; message.status = 'completed' }
+    } else if (event.eventType === 'turn.waiting_input' && event.turnId && event.replyStepId) {
+      currentTurn.value = {
+        turnId: event.turnId, status: 'waiting_input', stepId: event.replyStepId,
+        actionType: event.actionType, inputType: event.actionType === 'trpg_scene_selection' ? 'selection' : 'message',
+        sceneName: event.groupName, waitingForUser: true, sceneOptions: event.sceneOptions || {},
+      }
+    } else if (event.eventType === 'turn.completed') {
+      currentTurn.value = null
     } else if (event.eventType === 'reply.failed' && step) {
       const message = messages.value.find((item) => item.replyStepId === step)
       if (message) { message.status = 'failed'; message.content ||= event.error || '回复生成失败' }
@@ -197,20 +223,80 @@ export function useWorkspace() {
     }
     void scrollToBottom()
   }
+  async function syncTrpgState(conversation: Conversation) {
+    const [history, plan, turn] = await Promise.all([
+      api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id),
+    ])
+    messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
+    replyPlan.value = plan || freshPlan()
+    currentTurn.value = turn
+  }
+  async function startTrpgTurn() {
+    const conversation = selectedConversation.value
+    if (!conversation || conversation.mode !== 'trpg' || conversation.status !== 'active' || loading.sending) return
+    loading.sending = true
+    try {
+      await streamTrpgTurn.start(conversation.id, crypto.randomUUID?.() || `web-${Date.now()}`, applyEvent)
+      await syncTrpgState(conversation)
+    } catch (error) { notify('行动轮启动失败', errorMessage(error), 'danger') }
+    finally { loading.sending = false; await scrollToBottom() }
+  }
+  async function selectSceneOption(optionNo: string) {
+    const conversation = selectedConversation.value; const turn = currentTurn.value
+    if (!conversation || !turn?.waitingForUser || turn.inputType !== 'selection' || !turn.stepId || loading.sending) return
+    loading.sending = true
+    try {
+      await streamTrpgTurn.selection(conversation.id, turn.turnId, turn.stepId,
+        { clientRequestId: crypto.randomUUID?.() || `web-${Date.now()}`, optionNo }, applyEvent)
+      await syncTrpgState(conversation)
+    } catch (error) { notify('地点选择失败', errorMessage(error), 'danger') }
+    finally { loading.sending = false; await scrollToBottom() }
+  }
+  async function endExploration() {
+    const conversation = selectedConversation.value; const turn = currentTurn.value
+    if (!conversation || !turn?.waitingForUser || turn.inputType !== 'message' || !turn.stepId || loading.sending) return
+    loading.sending = true
+    try {
+      await streamTrpgTurn.endExploration(conversation.id, turn.turnId, turn.stepId,
+        crypto.randomUUID?.() || `web-${Date.now()}`, applyEvent)
+      await syncTrpgState(conversation)
+    } catch (error) { notify('结束探索失败', errorMessage(error), 'danger') }
+    finally { loading.sending = false; await scrollToBottom() }
+  }
   async function sendMessage() {
     const content = messageInput.value.trim(); const conversation = selectedConversation.value
     if (!content || !conversation || conversation.status !== 'active' || loading.sending) return
+    if (conversation.mode === 'trpg') {
+      const turn = currentTurn.value
+      if (!turn?.waitingForUser || turn.inputType !== 'message' || !turn.stepId) {
+        notify('消息发送失败', '当前还没有轮到用户调查员行动', 'danger')
+        return
+      }
+    }
+    const originalInput = messageInput.value
+    const optimisticId = tempMessageId--
     messageInput.value = ''; loading.sending = true
-    messages.value.push({ id: tempMessageId--, conversationId: conversation.id, speakerType: 'user', messageKind: 'dialogue', content,
+    messages.value.push({ id: optimisticId, conversationId: conversation.id, speakerType: 'user', messageKind: 'dialogue', content,
       sequenceNo: Date.now(), status: 'completed', createdAt: new Date().toISOString() })
     await scrollToBottom()
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
-      await streamGroupMessage(conversation.id, { clientRequestId, content }, applyEvent)
-      await api.finishReplyPlan(conversation.id)
-      const [history, plan] = await Promise.all([api.groupMessages(conversation.id), api.replyPlan(conversation.id)])
-      messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo); replyPlan.value = plan
-    } catch (error) { notify('消息发送失败', errorMessage(error), 'danger') }
+      if (conversation.mode === 'trpg') {
+        const turn = currentTurn.value
+        if (!turn?.stepId) throw new Error('当前行动轮状态已变化，请重试')
+        await streamTrpgTurn.message(conversation.id, turn.turnId, turn.stepId, { clientRequestId, content }, applyEvent)
+        await syncTrpgState(conversation)
+      } else {
+        await streamGroupMessage(conversation.id, { clientRequestId, content }, applyEvent)
+        await api.finishReplyPlan(conversation.id)
+        const [history, plan] = await Promise.all([api.groupMessages(conversation.id), api.replyPlan(conversation.id)])
+        messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo); replyPlan.value = plan
+      }
+    } catch (error) {
+      messages.value = messages.value.filter((message) => message.id !== optimisticId)
+      if (!messageInput.value) messageInput.value = originalInput
+      notify('消息发送失败', errorMessage(error), 'danger')
+    }
     finally { loading.sending = false; await scrollToBottom() }
   }
   async function scrollToBottom() { await nextTick(); messageScroller.value?.scrollTo({ top: messageScroller.value.scrollHeight, behavior: 'smooth' }) }
@@ -219,10 +305,10 @@ export function useWorkspace() {
   onMounted(boot)
   return {
     session, loading, userInfo, worlds, templates, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
-    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlan, participantIds, messageInput, messageScroller,
+    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlan, participantIds, messageInput, messageScroller, currentTurn,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, endConversation,
-    savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage,
+    savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration,
   }
 }

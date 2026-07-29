@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS group_chat_turn (
     conversation_id BIGINT NOT NULL,
     trigger_message_id BIGINT,
     client_request_id VARCHAR(100),
+    plan_id BIGINT,
     plan_source VARCHAR(50) NOT NULL,
     plan_context_id BIGINT,
     status VARCHAR(50) NOT NULL,

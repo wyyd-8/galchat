@@ -18,6 +18,7 @@ public class GroupConversation implements Serializable {
     private Long id;
     private Long userWorldId;
     private Long worldId;
+    private Long moduleId;
     private Long activeReplyPlanId;
     private String mode;
     private String title;

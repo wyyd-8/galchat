@@ -251,6 +251,53 @@ class GroupReplyPlanServiceTest {
     }
 
     @Test
+    void finishingSceneActivatesItsNextScenePlan() {
+        Fixture fixture = new Fixture();
+        GroupConversation conversation = activeConversation(GroupChatConstant.MODE_TRPG, 10L);
+        GroupReplyPlan current = plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null)
+                .setNextPlanId(11L);
+        GroupReplyPlan next = plan(11L, GroupChatConstant.PLAN_SOURCE_SCENE, null)
+                .setContextId(101L);
+        when(fixture.conversationService.requireActive(7L)).thenReturn(conversation);
+        when(fixture.planMapper.selectById(10L)).thenReturn(current);
+        when(fixture.planMapper.selectById(11L)).thenReturn(next);
+        when(fixture.itemMapper.selectList(any())).thenReturn(
+                List.of(),
+                List.of(item(12L, 11L, "scene:101", 1, 8L)));
+
+        var result = fixture.service.finishActive(7L);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getId()).isEqualTo(11L);
+        assertThat(result.getContextId()).isEqualTo(101L);
+        assertThat(conversation.getActiveReplyPlanId()).isEqualTo(11L);
+        verify(fixture.planMapper).deleteById(10L);
+        verify(fixture.planMapper, never()).deleteById(11L);
+    }
+
+    @Test
+    void finishingSceneRejectsMissingNextPlanBeforeDeletingCurrent() {
+        Fixture fixture = new Fixture();
+        GroupConversation conversation =
+                activeConversation(GroupChatConstant.MODE_TRPG, 10L);
+        GroupReplyPlan current =
+                plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null)
+                        .setNextPlanId(11L);
+        when(fixture.conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(fixture.planMapper.selectById(10L))
+                .thenReturn(current);
+        when(fixture.planMapper.selectById(11L))
+                .thenReturn(null);
+
+        assertThatThrownBy(() -> fixture.service.finishActive(7L))
+                .isInstanceOf(
+                        com.me.galchat.exception.UserRequestException.class)
+                .hasMessageContaining("下一场景");
+        verify(fixture.planMapper, never()).deleteById(10L);
+    }
+
+    @Test
     void rejectsPlanSourceThatDoesNotMatchConversationMode() {
         Fixture fixture = new Fixture();
         when(fixture.conversationService.requireActive(7L))

@@ -80,19 +80,42 @@ public class GroupConversationLifecycleService {
         }
         try {
             GroupConversation lockedConversation = conversationService.requireActive(conversationId);
-            recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
-            List<GroupChatMessage> messages = completedMessages(conversationId);
-            if (GroupChatConstant.MODE_CHAT.equals(lockedConversation.getMode())) {
-                topicService.flushOpenTopics(lockedConversation);
-            }
-            String summary = generateSummary(lockedConversation, messages);
-            GroupConversation result = transactionTemplate.execute(status ->
-                    saveFinalSummary(lockedConversation, messages, summary));
-            saveWorldEvent(result, summary);
-            return result;
+            return closeUnderLock(lockedConversation);
         } finally {
             lockService.unlock(lock);
         }
+    }
+
+    /**
+     * Closes a conversation while the caller already owns its conversation lock.
+     */
+    public GroupConversation closeUnderLock(
+            GroupConversation lockedConversation) {
+        if (lockedConversation == null
+                || lockedConversation.getId() == null
+                || !GroupChatConstant.STATUS_ACTIVE.equals(
+                        lockedConversation.getStatus())) {
+            throw new UserRequestException("群聊会话已结束");
+        }
+        Long conversationId = lockedConversation.getId();
+        recoveryService.assertConversationHasNoNonTerminalTurns(
+                conversationId);
+        List<GroupChatMessage> messages =
+                completedMessages(conversationId);
+        if (GroupChatConstant.MODE_CHAT.equals(
+                lockedConversation.getMode())) {
+            topicService.flushOpenTopics(lockedConversation);
+        }
+        String summary = generateSummary(
+                lockedConversation, messages);
+        GroupConversation result = transactionTemplate.execute(status ->
+                saveFinalSummary(
+                        lockedConversation, messages, summary));
+        if (result == null) {
+            throw new IllegalStateException("结束群聊事务未返回结果");
+        }
+        saveWorldEvent(result, summary);
+        return result;
     }
 
     private GroupConversation saveFinalSummary(GroupConversation conversation, List<GroupChatMessage> messages,

@@ -41,6 +41,7 @@ CREATE TABLE character_template (
     image VARCHAR(255),
     background TEXT,
     personality TEXT,
+    coc_play_style TEXT,
     favorability JSONB,
     init_favor INT DEFAULT 0
 );
@@ -106,10 +107,79 @@ CREATE INDEX idx_user_chat_tool_call_user_step
 CREATE INDEX idx_user_chat_tool_call_tool_call_id
     ON user_chat_tool_call (tool_call_id);
 
+CREATE TABLE coc_module (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    author VARCHAR(255),
+    era VARCHAR(255),
+    introduction TEXT NOT NULL,
+    investigator_creation TEXT,
+    cover_url TEXT,
+    player_count VARCHAR(100),
+    estimated_duration VARCHAR(100),
+    visible BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE coc_module_context (
+    id BIGSERIAL PRIMARY KEY,
+    module_id BIGINT NOT NULL,
+    truth_background TEXT,
+    investigator_intro TEXT,
+    timeline TEXT,
+    special_rules TEXT,
+    keeper_guidance TEXT,
+    ending_content TEXT,
+    extra_content TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_coc_module_context_module
+    ON coc_module_context (module_id);
+
+CREATE TABLE coc_module_location (
+    id BIGSERIAL PRIMARY KEY,
+    module_id BIGINT NOT NULL,
+    parent_location_id BIGINT,
+    name VARCHAR(255) NOT NULL,
+    summary TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_coc_module_location_name
+    ON coc_module_location (module_id, name);
+
+CREATE TABLE coc_module_clue (
+    id BIGSERIAL PRIMARY KEY,
+    module_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    important BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_coc_module_clue_title
+    ON coc_module_clue (module_id, title);
+
+CREATE TABLE coc_module_material (
+    id BIGSERIAL PRIMARY KEY,
+    module_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    image_url TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_coc_module_material_title
+    ON coc_module_material (module_id, title);
+
 CREATE TABLE group_conversation (
     id BIGSERIAL PRIMARY KEY,
     user_world_id BIGINT NOT NULL,
     world_id BIGINT,
+    module_id BIGINT,
     active_reply_plan_id BIGINT,
     mode VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
@@ -123,6 +193,8 @@ CREATE TABLE group_conversation (
 
 CREATE INDEX idx_group_conversation_user_status
     ON group_conversation (user_world_id, status, id);
+CREATE INDEX idx_group_conversation_module
+    ON group_conversation (module_id, id);
 
 CREATE TABLE group_chat_member (
     id BIGSERIAL PRIMARY KEY,
@@ -143,6 +215,7 @@ CREATE TABLE group_reply_plan (
     source VARCHAR(20) NOT NULL,
     context_id BIGINT,
     resume_plan_id BIGINT,
+    next_plan_id BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -169,6 +242,7 @@ CREATE TABLE group_chat_turn (
     conversation_id BIGINT NOT NULL,
     trigger_message_id BIGINT,
     client_request_id VARCHAR(100),
+    plan_id BIGINT,
     plan_source VARCHAR(50) NOT NULL,
     plan_context_id BIGINT,
     status VARCHAR(50) NOT NULL,
@@ -426,6 +500,7 @@ CREATE TABLE coc_character (
     temporary_insanity BOOLEAN DEFAULT FALSE,
     temporary_insanity_phase VARCHAR(20),
     temporary_insanity_remaining_rounds INT,
+    quick_notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

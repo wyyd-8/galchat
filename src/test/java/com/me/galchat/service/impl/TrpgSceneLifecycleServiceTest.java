@@ -1,0 +1,132 @@
+package com.me.galchat.service.impl;
+
+import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatTurn;
+import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupReplyPlan;
+import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.mapper.GroupChatReplyStepMapper;
+import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.mapper.GroupReplyPlanItemMapper;
+import com.me.galchat.mapper.GroupReplyPlanMapper;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Set;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class TrpgSceneLifecycleServiceTest {
+
+    @Test
+    void lastInvestigatorEndingSceneCancelsRemainingTurnSteps() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        GroupTurnRecoveryService recoveryService =
+                mock(GroupTurnRecoveryService.class);
+        TrpgSceneProgressStore progressStore =
+                mock(TrpgSceneProgressStore.class);
+        TrpgSceneLifecycleService service =
+                new TrpgSceneLifecycleService(
+                        conversationService, stepMapper, turnMapper,
+                        planMapper, itemMapper, recoveryService,
+                        progressStore,
+                        mock(TrpgSceneSummaryService.class),
+                        mock(GroupReplyPlanService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE)
+                .setActiveReplyPlanId(10L);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(stepMapper.selectById(41L)).thenReturn(
+                new GroupChatReplyStep().setId(41L).setTurnId(51L)
+                        .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                        .setSpeakerId(9L));
+        when(turnMapper.selectById(51L)).thenReturn(
+                new GroupChatTurn().setId(51L).setConversationId(7L)
+                        .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setPlanContextId(21L));
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L).setConversationId(7L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setContextId(21L));
+        when(itemMapper.selectList(any())).thenReturn(List.of(
+                item(9L), item(8L),
+                new GroupReplyPlanItem()
+                        .setActorType(GroupChatConstant.ACTOR_KP)));
+        when(progressStore.readyActors(7L, 21L))
+                .thenReturn(Set.of(
+                        "character:8", "character:9"));
+
+        assertThat(service.requestInvestigatorFinish(
+                7L, 41L, 9L)).isTrue();
+
+        verify(progressStore).markReady(
+                7L, 21L,
+                new com.me.galchat.groupchat.runtime.GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L));
+        verify(progressStore).requestFinish(7L, 21L);
+        verify(recoveryService).cancelPendingInvestigatorSteps(
+                51L, "所有调查员已结束当前场景探索");
+    }
+
+    @Test
+    void completedMarkedTurnSummarizesBeforeAdvancingScenePlan() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        TrpgSceneProgressStore progressStore =
+                mock(TrpgSceneProgressStore.class);
+        TrpgSceneSummaryService summaryService =
+                mock(TrpgSceneSummaryService.class);
+        GroupReplyPlanService replyPlanService =
+                mock(GroupReplyPlanService.class);
+        TrpgSceneLifecycleService service =
+                new TrpgSceneLifecycleService(
+                        conversationService,
+                        mock(GroupChatReplyStepMapper.class),
+                        mock(GroupChatTurnMapper.class),
+                        planMapper,
+                        mock(GroupReplyPlanItemMapper.class),
+                        mock(GroupTurnRecoveryService.class),
+                        progressStore, summaryService,
+                        replyPlanService);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setActiveReplyPlanId(10L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L).setConversationId(7L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setContextId(21L));
+        when(progressStore.isFinishRequested(7L, 21L))
+                .thenReturn(true);
+
+        assertThat(service.finalizeAfterTurn(
+                conversation,
+                GroupChatConstant.PLAN_SOURCE_SCENE)).isTrue();
+
+        var ordered = org.mockito.Mockito.inOrder(
+                summaryService, replyPlanService, progressStore);
+        ordered.verify(summaryService).summarize(7L, 21L);
+        ordered.verify(replyPlanService).finishActiveUnderLock(conversation);
+        ordered.verify(progressStore).clear(7L, 21L);
+    }
+
+    private GroupReplyPlanItem item(Long actorId) {
+        return new GroupReplyPlanItem()
+                .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                .setActorId(actorId);
+    }
+}

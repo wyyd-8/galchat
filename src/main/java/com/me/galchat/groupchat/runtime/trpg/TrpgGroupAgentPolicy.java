@@ -11,7 +11,15 @@ import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.CharacterCardContextFormatter;
 import com.me.galchat.service.impl.GroupContextAssembler;
+import com.me.galchat.service.impl.TrpgContextWindowService;
+import com.me.galchat.service.impl.TrpgInvestigatorContextAssembler;
 import com.me.galchat.tool.KpDiceTools;
+import com.me.galchat.tool.InvestigatorSceneTools;
+import com.me.galchat.tool.KpSceneTools;
+import com.me.galchat.tool.KpRunTools;
+import com.me.galchat.tool.TrpgSceneSelectionTools;
+import com.me.galchat.tool.KpSceneSelectionTools;
+import com.me.galchat.tool.KpModuleTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -31,17 +39,44 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final ICharacterCardService characterCardService;
     private final CharacterCardContextFormatter characterCardFormatter;
     private final KpDiceTools kpDiceTools;
+    private final TrpgSceneSelectionTools sceneSelectionTools;
+    private final KpSceneSelectionTools kpSceneSelectionTools;
+    private final KpModuleTools kpModuleTools;
+    private final InvestigatorSceneTools investigatorSceneTools;
+    private final KpSceneTools kpSceneTools;
+    private final KpRunTools kpRunTools;
+    private final TrpgContextWindowService contextWindowService;
+    private final TrpgInvestigatorContextAssembler investigatorContextAssembler;
 
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
                                 GroupContextAssembler contextAssembler,
                                 ICharacterCardService characterCardService,
                                 CharacterCardContextFormatter characterCardFormatter,
-                                KpDiceTools kpDiceTools) {
+                                KpDiceTools kpDiceTools,
+                                TrpgSceneSelectionTools sceneSelectionTools,
+                                KpSceneSelectionTools
+                                        kpSceneSelectionTools,
+                                KpModuleTools kpModuleTools,
+                                InvestigatorSceneTools investigatorSceneTools,
+                                KpSceneTools kpSceneTools,
+                                KpRunTools kpRunTools,
+                                TrpgContextWindowService contextWindowService,
+                                TrpgInvestigatorContextAssembler
+                                        investigatorContextAssembler) {
         this.chatClient = chatClient;
         this.contextAssembler = contextAssembler;
         this.characterCardService = characterCardService;
         this.characterCardFormatter = characterCardFormatter;
         this.kpDiceTools = kpDiceTools;
+        this.sceneSelectionTools = sceneSelectionTools;
+        this.kpSceneSelectionTools = kpSceneSelectionTools;
+        this.kpModuleTools = kpModuleTools;
+        this.investigatorSceneTools = investigatorSceneTools;
+        this.kpSceneTools = kpSceneTools;
+        this.kpRunTools = kpRunTools;
+        this.contextWindowService = contextWindowService;
+        this.investigatorContextAssembler =
+                investigatorContextAssembler;
     }
 
     @Override
@@ -49,17 +84,21 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                                         GroupContextMaterial context) {
         GroupActorRef actor = action.actor();
         String name = actorName(conversation.getUserWorldId(), actor);
-        String phase = GroupChatConstant.ACTION_TRPG_COMBAT.equals(action.actionType()) ? "战斗" : "场景探索";
+        boolean selectionPhase = GroupChatConstant.ACTION_TRPG_SCENE_SELECTION
+                .equals(action.actionType());
+        boolean scenePhase = GroupChatConstant.ACTION_TRPG_SCENE
+                .equals(action.actionType());
+        boolean sceneIntro = GroupChatConstant.ACTION_TRPG_SCENE_INTRO
+                .equals(action.actionType());
+        String phase = selectionPhase ? "选景"
+                : sceneIntro ? "场景引入"
+                : GroupChatConstant.ACTION_TRPG_COMBAT.equals(action.actionType())
+                ? "战斗" : "场景探索";
         List<CocDiceCharacterVO> cards = characterCardService.listDiceCharacters(
                 conversation.getUserWorldId());
-        List<CocDiceCharacterVO> visibleCards = GroupChatConstant.ACTOR_KP.equals(actor.type())
-                ? cards
-                : cards.stream()
-                        .filter(card -> java.util.Objects.equals(card.participantId(), actor.id()))
-                        .toList();
         List<Message> messages = new ArrayList<>();
-        String cardContext = characterCardFormatter.format(visibleCards);
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
+            String cardContext = characterCardFormatter.format(cards);
             messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, actor) + "\n"
                     + cardContext + """
 
@@ -70,8 +109,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     不得输出隐藏思考过程。
                     """.formatted(phase)));
         } else {
-            messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, actor) + "\n"
-                    + cardContext + """
+            messages.add(new SystemMessage(
+                    investigatorContextAssembler.format(
+                            conversation, action) + """
 
                     你正在 TRPG 群聊中扮演%s，当前阶段是%s。
                     只能基于可见场景事实行动；不得替其他角色或用户决定行动，不得把推测写成已确认事实。
@@ -80,16 +120,61 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         }
         messages.addAll(context.messages());
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
-            messages.add(new UserMessage("现在轮到KP推进当前" + phase
-                    + "。根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。"));
+            if (selectionPhase) {
+                messages.add(new UserMessage("""
+                        现在轮到KP开始选景。根据地点标题索引和当前剧情，调用publishExplorationScenes提交当天能够探索的准确地点名称列表。
+                        只提交此刻合理开放的地点，不强制限制地点数量或探索时长；不得输出地点ID。
+                        工具是returnDirect；调用后立即结束响应，不要再输出自然语言或JSON。
+                        如果模组已经完整结束，可调用finishRun并继续输出最终公开收束消息。
+                        """));
+            } else if (sceneIntro) {
+                messages.add(new UserMessage("""
+                        这是当前SCENE Plan第一次进入行动轮。先公开引入当前地点：只描述调查员刚进入时能够观察到的事实，不替调查员决定行动，不泄露未公开真相。
+                        """));
+            } else {
+                messages.add(new UserMessage("现在轮到KP推进当前" + phase
+                        + "。根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。"
+                        + (scenePhase
+                        ? "确认当前场景应当结算时可调用finishSceneExploration，调用后仍要输出公开收束消息。"
+                        : "")));
+            }
         } else {
-            messages.add(new UserMessage("现在轮到" + name + "执行当前" + phase
-                    + "行动。只输出该角色的公开言语和行动，不要输出发言者标签。"));
+            if (selectionPhase) {
+                messages.add(new UserMessage("现在轮到" + name
+                        + "选景。查看KP给出的编号Map和先前调查员的选择结果。"
+                        + "在仍有地点未被选择时，推荐优先选择不同地点，但可按角色性格作出不同决定。"
+                        + "调用selectExplorationScene并且只传地点编号；工具是returnDirect，"
+                        + "调用后立即结束响应，不要再输出自然语言、地点名或JSON。"));
+            } else {
+                messages.add(new UserMessage("现在轮到" + name + "执行当前" + phase
+                        + "行动。只输出该角色的公开言语和行动，不要输出发言者标签。"
+                        + (scenePhase
+                        ? "确定不再执行当前场景行动时可调用endSceneExploration。"
+                        : "")));
+            }
         }
-        List<Object> tools = GroupChatConstant.ACTOR_KP.equals(actor.type())
-                ? List.of(kpDiceTools)
-                : List.of();
-        return new GroupModelInvocation(chatClient, new Prompt(messages), tools);
+        List<Object> tools;
+        if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
+            tools = selectionPhase
+                    ? List.of(
+                            kpSceneSelectionTools,
+                            kpModuleTools, kpRunTools)
+                    : scenePhase
+                    ? List.of(kpDiceTools, kpModuleTools, kpSceneTools, kpRunTools)
+                    : List.of(kpDiceTools, kpModuleTools, kpRunTools);
+        } else {
+            tools = selectionPhase
+                    ? List.of(sceneSelectionTools)
+                    : scenePhase
+                    ? List.of(investigatorSceneTools)
+                    : List.of();
+        }
+        Prompt prompt = new Prompt(messages);
+        if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
+            contextWindowService.recordPrompt(
+                    conversation.getId(), prompt.getInstructions());
+        }
+        return new GroupModelInvocation(chatClient, prompt, tools);
     }
 
     @Override

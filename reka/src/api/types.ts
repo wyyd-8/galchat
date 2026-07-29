@@ -30,7 +30,7 @@ export interface Character {
 }
 export interface CharacterTemplate {
   id?: number; worldId?: number; name: string; image?: string; background?: string; personality?: string
-  favorability?: Record<string, string>; initFavor?: number
+  cocPlayStyle?: string; favorability?: Record<string, string>; initFavor?: number
 }
 
 export interface ChatHistory {
@@ -55,15 +55,22 @@ export interface Conversation {
 }
 export interface GroupMessage {
   id: number; conversationId: number; turnId?: number; replyStepId?: number
-  speakerType: 'user' | 'character' | 'narrator'; speakerId?: number; speakerName?: string
-  messageKind: 'dialogue' | 'narration' | 'system_event'; content: string; sequenceNo: number
+  speakerType: 'user' | 'character' | 'kp' | 'narrator'; speakerId?: number; speakerName?: string
+  messageKind: 'dialogue' | 'narration' | 'system_event' | 'dice_roll' | 'material'; content: string; sequenceNo: number
   status: string; createdAt?: string
 }
 export interface GroupSpeaker { type: string; id?: number; name?: string; avatar?: string }
 export interface GroupChatEvent {
-  eventType: 'turn.accepted' | 'reply.started' | 'reasoning.delta' | 'message.delta' | 'message.completed' | 'reply.failed' | 'turn.completed'
+  eventType: 'turn.accepted' | 'turn.waiting_input' | 'reply.started' | 'reasoning.delta' | 'message.delta' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
-  speaker?: GroupSpeaker; delta?: string; content?: string; error?: string
+  actionType?: string; groupName?: string; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string
+  sceneOptions?: Record<string, string>; autoSelected?: boolean
+  sceneChoice?: { optionNo?: string; controllerName?: string; investigatorName?: string; locationName?: string; randomized?: boolean }
+}
+export interface CurrentTurn {
+  turnId: number; planId?: number; planSource?: string; planContextId?: number; status: string
+  stepId?: number; actionType?: string; inputType?: 'message' | 'selection'; sceneName?: string
+  waitingForUser: boolean; sceneOptions: Record<string, string>
 }
 export interface ReplyPlanItem { id?: number; order: number; actorType: string; actorId: number; status?: string }
 export interface ReplyPlanGroup { key: string; name: string; order: number; items: ReplyPlanItem[] }

@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronDown, CircleStop, GripVertical, LoaderCircle, MessageSquareText, Plus, Save, Send, Trash2, UsersRound } from '@lucide/vue'
+import { ChevronDown, CircleStop, Footprints, GripVertical, LoaderCircle, MessageSquareText, Play, Plus, Save, Send, Trash2, UsersRound } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
-import type { Character, Conversation, GroupMessage, ReplyPlan } from '@/api/types'
+import type { Character, Conversation, CurrentTurn, GroupMessage, ReplyPlan } from '@/api/types'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = defineProps<{ conversation: Conversation; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; sending: boolean; loading: boolean }>()
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; send: []; end: [] }>()
+const props = defineProps<{ conversation: Conversation; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; sending: boolean; loading: boolean }>()
+const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
 const items = computed(() => props.replyPlan.groups[0]?.items || [])
+const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && props.currentTurn.inputType === 'message'))
+const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
 function character(id?: number) { return props.characters.find((item) => item.characterId === id) }
 function drop(index: number) { if (draggedIndex.value !== null) emit('movePlanItem', draggedIndex.value, index); draggedIndex.value = null }
 function addActor() { const id = Number(addActorId.value); if (id) { emit('addPlanItem', id); addActorId.value = '' } }
@@ -33,7 +35,7 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
           <article v-for="message in messages" :key="message.id" class="chat-message" :class="[message.speakerType, message.messageKind]">
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>
             <div class="message-content">
-              <div class="message-meta"><strong>{{ message.speakerType === 'user' ? '你' : message.speakerType === 'narrator' ? '叙事' : message.speakerName || character(message.speakerId)?.characterName || '角色' }}</strong><span v-if="message.status === 'streaming'" class="typing-dot">正在回应</span><span v-if="message.status === 'failed'" class="failed-label">生成失败</span></div>
+              <div class="message-meta"><strong>{{ message.speakerType === 'user' ? '你' : message.speakerType === 'narrator' ? '叙事' : message.speakerType === 'kp' ? (message.speakerName || 'KP') : message.speakerName || character(message.speakerId)?.characterName || '角色' }}</strong><span v-if="message.status === 'streaming'" class="typing-dot">正在回应</span><span v-if="message.status === 'failed'" class="failed-label">生成失败</span></div>
               <CollapsibleRoot v-if="message.replyStepId && reasoning[message.replyStepId]" class="reasoning-block">
                 <CollapsibleTrigger class="reasoning-trigger">思考过程 <ChevronDown :size="14" /></CollapsibleTrigger>
                 <CollapsibleContent class="reasoning-content">{{ reasoning[message.replyStepId] }}</CollapsibleContent>
@@ -42,7 +44,16 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
             </div>
           </article>
         </ScrollAreaViewport><ScrollAreaScrollbar orientation="vertical" class="scrollbar"><ScrollAreaThumb class="scrollbar-thumb" /></ScrollAreaScrollbar></ScrollAreaRoot>
-        <div class="composer" :class="{ disabled: conversation.status !== 'active' }"><textarea v-model="input" :disabled="conversation.status !== 'active' || sending" rows="1" :placeholder="conversation.status === 'active' ? '说点什么…' : '这个群聊已经结束'" @keydown="keydown" /><TooltipProvider><TooltipRoot><TooltipTrigger as-child><button class="send-button" :disabled="!input.trim() || sending || conversation.status !== 'active'" @click="emit('send')"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">Enter 发送 · Shift+Enter 换行</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider></div>
+        <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'selection'" class="scene-selection-panel">
+          <strong>选择调查地点</strong><span>{{ currentTurn.sceneName || 'KP 已给出本轮可选地点' }}</span>
+          <div class="scene-selection-options"><button v-for="[number, name] in selectionOptions" :key="number" class="button secondary" :disabled="sending" @click="emit('selectScene', number)"><b>{{ number }}</b>{{ name }}</button></div>
+        </div>
+        <div class="composer" :class="{ disabled: conversation.status !== 'active' }">
+          <button v-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="emit('startTurn')"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />开始/继续行动轮</button>
+          <textarea v-else v-model="input" :disabled="conversation.status !== 'active' || sending || !waitingForMessage" rows="1" :placeholder="conversation.status !== 'active' ? '这个群聊已经结束' : waitingForMessage ? '输入调查员的行动…' : '等待当前行动轮推进'" @keydown="keydown" />
+          <button v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && replyPlan.source === 'SCENE'" class="button ghost" :disabled="sending" @click="emit('endExploration')"><Footprints :size="17" />结束探索</button>
+          <TooltipProvider v-if="conversation.mode !== 'trpg' || waitingForMessage"><TooltipRoot><TooltipTrigger as-child><button class="send-button" :disabled="!input.trim() || sending || conversation.status !== 'active' || !waitingForMessage" @click="emit('send')"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">Enter 发送 · Shift+Enter 换行</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider>
+        </div>
       </section>
       <aside class="reply-panel">
         <div class="reply-panel-title"><span><UsersRound :size="18" /><strong>回复编排</strong></span><button class="icon-button subtle" @click="planOpen = !planOpen"><ChevronDown :size="17" :class="{ rotated: !planOpen }" /></button></div>

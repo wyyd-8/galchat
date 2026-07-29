@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -54,6 +55,8 @@ public class CocCharacter {
     private Boolean dead;
     private Boolean temporaryInsanity;
     private String temporaryInsanityPhase;
+    @JsonIgnore
+    private String quickNotes;
     @TableField("temporary_insanity_remaining_rounds")
     private Integer temporaryInsanityRemainingHours;
     private LocalDateTime createdAt;

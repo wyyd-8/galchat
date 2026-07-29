@@ -42,6 +42,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
                         CharacterTemplate::getImage,
                         CharacterTemplate::getBackground,
                         CharacterTemplate::getPersonality,
+                        CharacterTemplate::getCocPlayStyle,
                         CharacterTemplate::getFavorability,
                         CharacterTemplate::getInitFavor)
                 .eq(CharacterTemplate::getId, id)
@@ -61,6 +62,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
                         CharacterTemplate::getImage,
                         CharacterTemplate::getBackground,
                         CharacterTemplate::getPersonality,
+                        CharacterTemplate::getCocPlayStyle,
                         CharacterTemplate::getFavorability,
                         CharacterTemplate::getInitFavor)
                 .eq(CharacterTemplate::getId, id)
@@ -102,6 +104,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
                 .setImage(image)
                 .setBackground(characterTemplate.getBackground())
                 .setPersonality(characterTemplate.getPersonality())
+                .setCocPlayStyle(characterTemplate.getCocPlayStyle())
                 .setFavorability(characterTemplate.getFavorability())
                 .setInitFavor(characterTemplate.getInitFavor());
         save(newCharacterTemplate);
@@ -130,6 +133,7 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
                 .setImage(image)
                 .setBackground(characterTemplate.getBackground())
                 .setPersonality(characterTemplate.getPersonality())
+                .setCocPlayStyle(characterTemplate.getCocPlayStyle())
                 .setFavorability(characterTemplate.getFavorability())
                 .setInitFavor(characterTemplate.getInitFavor());
         updateById(updateCharacterTemplate);

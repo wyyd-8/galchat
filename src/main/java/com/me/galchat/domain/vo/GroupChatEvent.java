@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -23,10 +25,14 @@ public class GroupChatEvent {
     private Integer itemOrder;
     private Long messageId;
     private Long sequence;
+    private String messageKind;
     private Speaker speaker;
     private String delta;
     private String content;
     private KpDiceToolResult diceRoll;
+    private Map<String, String> sceneOptions;
+    private SceneChoice sceneChoice;
+    private Boolean autoSelected;
     private String error;
 
     @Data
@@ -39,5 +45,18 @@ public class GroupChatEvent {
         private Long id;
         private String name;
         private String avatar;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class SceneChoice {
+        private String optionNo;
+        private String controllerName;
+        private String investigatorName;
+        private String locationName;
+        private Boolean randomized;
     }
 }

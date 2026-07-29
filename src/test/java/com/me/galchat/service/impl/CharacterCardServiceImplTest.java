@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 import java.util.List;
 
@@ -185,6 +186,19 @@ class CharacterCardServiceImplTest {
 
         assertThatThrownBy(() -> service.requireDiceCharacter(5L, "林恩"))
                 .hasMessage("人物卡名称不唯一");
+    }
+
+    @Test
+    void updatesQuickNotesByExactNameInsideRun() {
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(5L).setName("林恩");
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(characterMapper.updateById(card)).thenReturn(1);
+
+        service.updateQuickNotes(5L, " 林恩 ", " 已感染第一阶段 ");
+
+        assertThat(card.getQuickNotes()).isEqualTo("已感染第一阶段");
+        verify(characterMapper).updateById(card);
     }
 
     private CocCharacter characterWithAllAttributes(int value) {

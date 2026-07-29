@@ -35,6 +35,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
@@ -53,7 +54,7 @@ public class GroupChatService {
 
     private final GroupConversationService conversationService;
     private final GroupConversationLockService lockService;
-    private final GroupReplyPlanService replyPlanService;
+    private final GroupTurnPlanResolver turnPlanResolver;
     private final GroupRuntimeRegistry runtimeRegistry;
     private final GroupChatMessageMapper messageMapper;
     private final GroupChatTurnMapper turnMapper;
@@ -64,10 +65,13 @@ public class GroupChatService {
     private final TransactionTemplate transactionTemplate;
     private final DiceRollMessageCodec diceMessageCodec;
     private final ObjectMapper objectMapper;
+    private final GroupMaterialMessageFeed materialMessageFeed;
+    private final TrpgSceneSelectionService sceneSelectionService;
 
+    @Autowired
     public GroupChatService(GroupConversationService conversationService,
                             GroupConversationLockService lockService,
-                            GroupReplyPlanService replyPlanService,
+                            GroupTurnPlanResolver turnPlanResolver,
                             GroupRuntimeRegistry runtimeRegistry,
                             GroupChatMessageMapper messageMapper,
                             GroupChatTurnMapper turnMapper,
@@ -77,10 +81,13 @@ public class GroupChatService {
                             IUserWorldPrefixService userWorldPrefixService,
                             TransactionTemplate transactionTemplate,
                             DiceRollMessageCodec diceMessageCodec,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            GroupMaterialMessageFeed materialMessageFeed,
+                            TrpgSceneSelectionService
+                                    sceneSelectionService) {
         this.conversationService = conversationService;
         this.lockService = lockService;
-        this.replyPlanService = replyPlanService;
+        this.turnPlanResolver = turnPlanResolver;
         this.runtimeRegistry = runtimeRegistry;
         this.messageMapper = messageMapper;
         this.turnMapper = turnMapper;
@@ -91,6 +98,31 @@ public class GroupChatService {
         this.transactionTemplate = transactionTemplate;
         this.diceMessageCodec = diceMessageCodec;
         this.objectMapper = objectMapper;
+        this.materialMessageFeed = materialMessageFeed;
+        this.sceneSelectionService = sceneSelectionService;
+    }
+
+    GroupChatService(
+            GroupConversationService conversationService,
+            GroupConversationLockService lockService,
+            GroupTurnPlanResolver turnPlanResolver,
+            GroupRuntimeRegistry runtimeRegistry,
+            GroupChatMessageMapper messageMapper,
+            GroupChatTurnMapper turnMapper,
+            GroupChatReplyStepMapper stepMapper,
+            GroupTurnRecoveryService recoveryService,
+            GroupToolContextFactory toolContextFactory,
+            IUserWorldPrefixService userWorldPrefixService,
+            TransactionTemplate transactionTemplate,
+            DiceRollMessageCodec diceMessageCodec,
+            ObjectMapper objectMapper,
+            GroupMaterialMessageFeed materialMessageFeed) {
+        this(conversationService, lockService, turnPlanResolver,
+                runtimeRegistry, messageMapper, turnMapper, stepMapper,
+                recoveryService, toolContextFactory,
+                userWorldPrefixService, transactionTemplate,
+                diceMessageCodec, objectMapper, materialMessageFeed,
+                null);
     }
 
     public Flux<GroupChatEvent> chat(Long conversationId, GroupChatRequestDTO request) {
@@ -104,6 +136,11 @@ public class GroupChatService {
 
             try {
                 GroupConversation conversation = conversationService.requireActive(conversationId);
+                if (GroupChatConstant.MODE_TRPG.equals(
+                        conversation.getMode())) {
+                    throw new UserRequestException(
+                            "TRPG群聊请使用行动轮接口");
+                }
                 recoveryService.recoverInterrupted(conversationId);
                 GroupModeRuntime runtime = runtimeRegistry.require(conversation.getMode());
                 PreparedTurn prepared = transactionTemplate.execute(
@@ -129,6 +166,8 @@ public class GroupChatService {
                         .concatMap(action -> executeStep(runtime, conversation, prepared.turn(), action));
                 Flux<GroupChatEvent> completed = Flux.defer(() -> {
                     completeTurn(prepared.turn());
+                    turnPlanResolver.onTurnCompleted(
+                            conversation, prepared.turn().getPlanSource());
                     return Flux.just(GroupChatEvent.builder()
                             .eventType(GroupChatConstant.EVENT_TURN_COMPLETED)
                             .conversationId(conversationId)
@@ -190,8 +229,9 @@ public class GroupChatService {
             }
         }
 
-        GroupReplyPlanSelection selection = replyPlanService.currentGroupForExecution(conversation);
-        List<GroupActionSpec> actions = runtime.turnPolicy().plan(conversation, selection);
+        GroupTurnPlanResolver.ResolvedTurnPlan resolved =
+                turnPlanResolver.resolve(conversation, runtime);
+        List<GroupActionSpec> actions = resolved.actions();
         if (actions.size() > GroupChatConstant.MAX_REPLY_STEPS) {
             throw new UserRequestException("单次回复人物数量不能超过" + GroupChatConstant.MAX_REPLY_STEPS);
         }
@@ -205,8 +245,8 @@ public class GroupChatService {
                 .setConversationId(conversation.getId())
                 .setClientRequestId(StringUtils.hasText(request.getClientRequestId())
                         ? request.getClientRequestId().trim() : null)
-                .setPlanSource(selection.source())
-                .setPlanContextId(selection.contextId())
+                .setPlanSource(resolved.source())
+                .setPlanContextId(resolved.contextId())
                 .setStatus(GroupChatConstant.STATUS_PENDING)
                 .setRevision(0)
                 .setCreatedAt(now)
@@ -215,6 +255,7 @@ public class GroupChatService {
 
         GroupChatMessage userMessage = new GroupChatMessage()
                 .setConversationId(conversation.getId())
+                .setSceneId(sceneId(turn))
                 .setTurnId(turn.getId())
                 .setSpeakerType(GroupChatConstant.ACTOR_USER)
                 .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
@@ -259,6 +300,9 @@ public class GroupChatService {
         FinalizationGuard finalizationGuard = new FinalizationGuard();
         AtomicReference<GroupChatMessage> outputRef = new AtomicReference<>();
         return Flux.defer(() -> {
+            if (shouldSkipStep(step)) {
+                return Flux.empty();
+            }
             GroupContextMaterial context = runtime.contextPolicy().load(conversation, action);
             GroupModelInvocation invocation = runtime.agentPolicy().prepare(conversation, action, context);
             String speakerName = runtime.agentPolicy()
@@ -270,9 +314,14 @@ public class GroupChatService {
             String favorSystemStatus = userWorld == null ? null : userWorld.getFavorSystemStatus();
             ChatClient.ChatClientRequestSpec requestSpec = invocation.chatClient().prompt(invocation.prompt())
                     .toolContext(toolContextFactory.create(
-                            conversation, action, step.getId(), favorSystemStatus));
+                            conversation, action, turn.getId(),
+                            step.getId(), favorSystemStatus));
             if (!invocation.tools().isEmpty()) {
                 requestSpec = requestSpec.tools(invocation.tools().toArray());
+            }
+            if (isBufferedInvestigatorSelection(action)) {
+                return executeBufferedInvestigatorSelection(
+                        requestSpec, conversation, turn, step, speaker);
             }
             GroupChatMessage outputMessage = transactionTemplate.execute(status -> {
                 step.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
@@ -290,11 +339,14 @@ public class GroupChatService {
                             speaker, accumulator));
             Flux<GroupChatEvent> finished = Flux.defer(() -> {
                 finalizeCompletedStep(step, outputMessage, accumulator, finalizationGuard);
-                return Flux.just(baseEvent(GroupChatConstant.EVENT_MESSAGE_COMPLETED,
+                List<GroupChatEvent> events = new ArrayList<>(
+                        materialEvents(conversation, turn, step, accumulator));
+                events.add(baseEvent(GroupChatConstant.EVENT_MESSAGE_COMPLETED,
                         conversation, turn, step, outputMessage, speaker)
                         .content(accumulator.diceRoll == null
                                 ? accumulator.content.toString() : null)
                         .build());
+                return Flux.fromIterable(events);
             });
             return Flux.concat(started, deltas, finished);
         }).doOnError(error -> finalizeFailedStep(
@@ -306,11 +358,171 @@ public class GroupChatService {
                 });
     }
 
+    private boolean isBufferedInvestigatorSelection(
+            GroupActionSpec action) {
+        return GroupChatConstant.ACTION_TRPG_SCENE_SELECTION.equals(
+                action.actionType())
+                && GroupChatConstant.ACTOR_CHARACTER.equals(
+                action.actorType());
+    }
+
+    private Flux<GroupChatEvent> executeBufferedInvestigatorSelection(
+            ChatClient.ChatClientRequestSpec requestSpec,
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step,
+            GroupChatEvent.Speaker speaker) {
+        if (sceneSelectionService == null) {
+            return Flux.error(new IllegalStateException(
+                    "选景执行器未配置"));
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            step.setStatus(GroupChatConstant.STATUS_RUNNING)
+                    .setUpdatedAt(LocalDateTime.now());
+            stepMapper.updateById(step);
+        });
+        return requestSpec.stream().chatResponse()
+                .collectList()
+                .flatMapMany(responses -> {
+                    BufferedSelectionOutput buffered =
+                            readBufferedSelection(responses);
+                    TrpgSceneSelectionService.SceneChoiceResult choice =
+                            buffered.directResult() != null
+                                    ? buffered.directResult()
+                                    : sceneSelectionService.selectOption(
+                                            conversation.getId(),
+                                            turn.getId(),
+                                            new GroupActorRef(
+                                                    step.getSpeakerType(),
+                                                    step.getSpeakerId()),
+                                            buffered.pureNumber());
+                    GroupChatMessage message =
+                            persistCanonicalSelection(
+                                    conversation, turn, step, choice);
+                    GroupChatEvent choiceEvent = baseEvent(
+                            GroupChatConstant.EVENT_SCENE_CHOICE_CREATED,
+                            conversation, turn, step, message, speaker)
+                            .sceneChoice(toEventChoice(choice))
+                            .build();
+                    GroupChatEvent completed = baseEvent(
+                            GroupChatConstant.EVENT_MESSAGE_COMPLETED,
+                            conversation, turn, step, message, speaker)
+                            .content(message.getContent())
+                            .sceneChoice(toEventChoice(choice))
+                            .build();
+                    return Flux.just(choiceEvent, completed);
+                });
+    }
+
+    private BufferedSelectionOutput readBufferedSelection(
+            List<ChatResponse> responses) {
+        StringBuilder raw = new StringBuilder();
+        for (ChatResponse response : responses) {
+            if (response == null || response.getResults() == null) {
+                continue;
+            }
+            for (Generation generation : response.getResults()) {
+                if (isDirectTool(
+                        generation, "selectExplorationScene")) {
+                    try {
+                        return new BufferedSelectionOutput(
+                                objectMapper.readValue(
+                                        generation.getOutput().getText(),
+                                        TrpgSceneSelectionService
+                                                .SceneChoiceResult.class),
+                                null);
+                    } catch (JacksonException exception) {
+                        throw new IllegalStateException(
+                                "选景工具返回结果无法解析", exception);
+                    }
+                }
+                if (generation.getOutput() != null
+                        && generation.getOutput().getText() != null) {
+                    raw.append(generation.getOutput().getText());
+                }
+            }
+        }
+        String text = raw.toString();
+        String pureNumber = text.matches("\\s*\\d+\\s*")
+                ? text.trim() : null;
+        return new BufferedSelectionOutput(null, pureNumber);
+    }
+
+    private GroupChatMessage persistCanonicalSelection(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step,
+            TrpgSceneSelectionService.SceneChoiceResult choice) {
+        return transactionTemplate.execute(status -> {
+            LocalDateTime now = LocalDateTime.now();
+            String content = choice.controllerName() + ":"
+                    + choice.investigatorName() + ":"
+                    + choice.locationName();
+            GroupChatMessage message = new GroupChatMessage()
+                    .setConversationId(conversation.getId())
+                    .setTurnId(turn.getId())
+                    .setReplyStepId(step.getId())
+                    .setSpeakerType(step.getSpeakerType())
+                    .setSpeakerId(step.getSpeakerId())
+                    .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
+                    .setVisibility("public")
+                    .setContent(content)
+                    .setSequenceNo(conversationService.nextSequence(
+                            conversation.getId()))
+                    .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                    .setCreatedAt(now)
+                    .setUpdatedAt(now);
+            messageMapper.insert(message);
+            step.setOutputMessageId(message.getId())
+                    .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                    .setUpdatedAt(now);
+            stepMapper.updateById(step);
+            return message;
+        });
+    }
+
+    private GroupChatEvent.SceneChoice toEventChoice(
+            TrpgSceneSelectionService.SceneChoiceResult choice) {
+        return GroupChatEvent.SceneChoice.builder()
+                .optionNo(choice.optionNo())
+                .controllerName(choice.controllerName())
+                .investigatorName(choice.investigatorName())
+                .locationName(choice.locationName())
+                .randomized(choice.randomized())
+                .build();
+    }
+
+    Flux<GroupChatEvent> streamPersistedStep(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step) {
+        GroupActionSpec action = new GroupActionSpec(
+                step.getActionType(),
+                step.getSpeakerType(),
+                step.getSpeakerId(),
+                step.getGroupKey(),
+                step.getGroupName(),
+                step.getGroupOrder(),
+                step.getItemOrder());
+        GroupModeRuntime runtime =
+                runtimeRegistry.require(conversation.getMode());
+        return executeStep(
+                runtime, conversation, turn,
+                new PreparedAction(action, step));
+    }
+
+    boolean shouldSkipStep(GroupChatReplyStep scheduledStep) {
+        GroupChatReplyStep persisted = stepMapper.selectById(scheduledStep.getId());
+        return persisted != null
+                && GroupChatConstant.STATUS_CANCELLED.equals(persisted.getStatus());
+    }
+
     private GroupChatMessage createStreamingMessage(GroupConversation conversation, GroupChatTurn turn,
                                                     GroupChatReplyStep step) {
         LocalDateTime now = LocalDateTime.now();
         GroupChatMessage message = new GroupChatMessage()
                 .setConversationId(conversation.getId())
+                .setSceneId(sceneId(turn))
                 .setTurnId(turn.getId())
                 .setReplyStepId(step.getId())
                 .setSpeakerType(step.getSpeakerType())
@@ -328,6 +540,11 @@ public class GroupChatService {
         return message;
     }
 
+    private Long sceneId(GroupChatTurn turn) {
+        return GroupChatConstant.PLAN_SOURCE_SCENE.equals(turn.getPlanSource())
+                ? turn.getPlanContextId() : null;
+    }
+
     private List<GroupChatEvent> toEvents(ChatResponse response, GroupConversation conversation,
                                           GroupChatTurn turn, GroupChatReplyStep step,
                                           GroupChatMessage message, GroupChatEvent.Speaker speaker,
@@ -336,8 +553,33 @@ public class GroupChatService {
             return List.of();
         }
         List<GroupChatEvent> events = new ArrayList<>();
+        events.addAll(materialEvents(
+                conversation, turn, step, accumulator));
         for (Generation generation : response.getResults()) {
             AssistantMessage output = generation.getOutput();
+            if (isDirectTool(
+                    generation, "publishExplorationScenes")) {
+                if (accumulator.sceneOptions != null) {
+                    throw new IllegalStateException(
+                            "同一回复步骤不能多次公布选景地点");
+                }
+                TrpgSceneSelectionService.SceneOptionsResult result =
+                        readSceneOptions(output.getText());
+                accumulator.sceneOptions = result;
+                accumulator.content.append(
+                        canonicalOptionsMessage(result));
+                if (result.autoAssigned()) {
+                    recoveryService.cancelPendingSteps(
+                            turn.getId(), "单地点已自动分配");
+                }
+                events.add(baseEvent(
+                        GroupChatConstant.EVENT_SCENE_OPTIONS_CREATED,
+                        conversation, turn, step, message, speaker)
+                        .sceneOptions(result.options())
+                        .autoSelected(result.autoAssigned())
+                        .build());
+                continue;
+            }
             if (isDirectDiceGeneration(generation)) {
                 if (accumulator.diceRoll != null) {
                     throw new IllegalStateException("同一回复步骤不能返回多个直接掷骰结果");
@@ -367,15 +609,84 @@ public class GroupChatService {
         return events;
     }
 
+    private List<GroupChatEvent> materialEvents(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step,
+            GenerationAccumulator accumulator) {
+        List<GroupChatMessage> materials = materialMessageFeed.listNew(
+                step.getId(), accumulator.lastMaterialMessageId);
+        if (materials.isEmpty()) {
+            return List.of();
+        }
+        List<GroupChatEvent> events = new ArrayList<>();
+        for (GroupChatMessage material : materials) {
+            accumulator.lastMaterialMessageId = material.getId();
+            GroupChatEvent.Speaker materialSpeaker =
+                    GroupChatEvent.Speaker.builder()
+                            .type(GroupChatConstant.ACTOR_KP)
+                            .name("KP")
+                            .build();
+            events.add(baseEvent(
+                    GroupChatConstant.EVENT_MATERIAL_CREATED,
+                    conversation, turn, step, material,
+                    materialSpeaker)
+                    .content(material.getContent())
+                    .build());
+        }
+        return events;
+    }
+
     private boolean isDirectDiceGeneration(Generation generation) {
+        if (generation == null || generation.getMetadata() == null) {
+            return false;
+        }
+        String toolName = generation.getMetadata().get(
+                ToolExecutionResult.METADATA_TOOL_NAME);
+        return toolName != null
+                && DiceRollConstant.KP_STATE_TOOL_NAMES.contains(toolName)
+                && isDirectTool(generation, toolName);
+    }
+
+    private boolean isDirectTool(
+            Generation generation, String toolName) {
         if (generation == null || generation.getMetadata() == null
                 || !ToolExecutionResult.FINISH_REASON.equals(
                 generation.getMetadata().getFinishReason())) {
             return false;
         }
-        String toolName = generation.getMetadata().get(
-                ToolExecutionResult.METADATA_TOOL_NAME);
-        return DiceRollConstant.KP_STATE_TOOL_NAMES.contains(toolName);
+        return toolName.equals(generation.getMetadata().get(
+                ToolExecutionResult.METADATA_TOOL_NAME));
+    }
+
+    private TrpgSceneSelectionService.SceneOptionsResult
+            readSceneOptions(String content) {
+        if (!StringUtils.hasText(content)) {
+            throw new IllegalStateException(
+                    "选景工具未返回结构化结果");
+        }
+        try {
+            return objectMapper.readValue(
+                    content,
+                    TrpgSceneSelectionService.SceneOptionsResult.class);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException(
+                    "选景工具返回结果无法解析", exception);
+        }
+    }
+
+    private String canonicalOptionsMessage(
+            TrpgSceneSelectionService.SceneOptionsResult result) {
+        StringBuilder content =
+                new StringBuilder("KP公布可探索地点：");
+        result.options().forEach((number, name) ->
+                content.append("\n")
+                        .append(number).append(":").append(name));
+        if (result.autoAssigned()) {
+            content.append(
+                    "\n仅有一个地点，所有调查员已自动进入该场景。");
+        }
+        return content.toString();
     }
 
     private KpDiceToolResult readDirectDiceResult(String content) {
@@ -512,6 +823,7 @@ public class GroupChatService {
                 .itemOrder(step.getItemOrder())
                 .messageId(message.getId())
                 .sequence(message.getSequenceNo())
+                .messageKind(message.getMessageKind())
                 .speaker(speaker);
     }
 
@@ -544,10 +856,17 @@ public class GroupChatService {
     private record PreparedAction(GroupActionSpec action, GroupChatReplyStep step) {
     }
 
+    private record BufferedSelectionOutput(
+            TrpgSceneSelectionService.SceneChoiceResult directResult,
+            String pureNumber) {
+    }
+
     private static class GenerationAccumulator {
         private final StringBuilder content = new StringBuilder();
         private final StringBuilder reasoning = new StringBuilder();
         private KpDiceToolResult diceRoll;
+        private TrpgSceneSelectionService.SceneOptionsResult sceneOptions;
+        private Long lastMaterialMessageId;
     }
 
     static final class FinalizationGuard {

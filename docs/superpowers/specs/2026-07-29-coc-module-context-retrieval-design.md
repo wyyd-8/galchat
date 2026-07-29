@@ -1,761 +1,402 @@
-# COC 模组内容、检索工具与 KP 上下文设计
+# COC 模组内容、选景流程与 KP 上下文设计
 
 日期：2026-07-29
 
-## 1. 背景与目标
+## 1. 目标与第一版边界
 
-GalChat 需要把 COC 模组保存为可复用的静态内容，并在具体跑团中为 KP Agent 组装完整但不过量的上下文。调查员的核心探索结构是“地点—人物”，地点同时承担场景调度、当前上下文和场景总结边界；NPC 与调查员数据由现有角色系统提供，不重复存入模组内容表。
+GalChat 将 COC 模组保存为不可编辑的静态内容，并将一个 TRPG 群聊绑定到一次完整跑团。第一版以“地点”为场景边界，保留模组原文，由 KP 根据公开行动裁定，不把作者叙事强行拆成条件、事件或效果 JSON。
 
-本设计依据《克苏鲁的呼唤》第十五章中的模组组织方式，并使用《太阳与九英镑》Markdown 验证字段和检索能力是否足以承载实际模组。第一版优先保留作者原文和稳定的章节级解析，不把自然语言强行转换成不稳定的条件、事件或效果 JSON。
+第一版包含：
 
-目标如下：
+- 五张静态模组内容表。
+- TRPG 群聊与模组的一对一运行时绑定。
+- 独立选景阶段、场景计划链、重复场景轮次和场景结算。
+- KP 专用模组查询、材料展示、快速笔记和结束流程工具。
+- KP 完整上下文装配及上下文字符数监控。
+- 场景计划链的存档与恢复。
 
-- 使用五张关系表保存除调查员、NPC 和具体跑团进度之外的全部静态模组上下文。
-- 对作者明确划分的事件真相、调查员导入、时间线、特殊规则和结局进行低风险拆分。
-- 把地点作为场景切换、场景全文载入和场景总结的基本边界。
-- 使用独立线索表保存跨地点复用的事实与重要证据。
-- 使用独立材料表支持“人类玩家看到图片、Agent 调查员看到文字介绍”的展示行为。
-- 通过固定上下文自动装配和按需检索结合，避免每轮把整本模组放入提示词。
+第一版不包含：
 
-本期不包含：
+- 模组编辑。
+- 模组向量索引、向量召回或重排。
+- 自动压缩或裁剪 TRPG 原文。
+- 隐藏裁定消息。
+- 强制游戏时间、每日轮数或探索次数限制。
+- 结构化的线索获得状态、地点触发条件、事件效果和 NPC 引用。
 
-- 调查员和 NPC 表结构设计。
-- 具体跑团中的线索获得状态表。
-- 将地点原文进一步解析为触发条件、场景事件、NPC 引用、效果或规则 JSON。
-- 多级向量检索编排、复杂重排模型和知识图谱。
-- 材料与地点、线索之间的强制关联。
+## 2. 核心不变量
 
-## 2. 核心边界
+### 2.1 群聊与模组
 
-### 2.1 五张表只负责静态模组内容
+- `group_conversation.module_id` 只允许 TRPG 群聊提供；普通群聊必须为空，TRPG 群聊必须提供。
+- 该规则由服务层校验，不增加数据库 `CHECK`。
+- 不增加模组相关外键。
+- 一个 TRPG 群聊只绑定一个模组，创建后不能更换。
+- 一个群聊只承载一次跑团；KP 确认模组跑完后，当前轮输出最终公开消息，随后群聊直接关闭。
+- 各群聊的场景、消息、总结、材料展示状态、快速笔记和上下文长度相互独立。
 
-五张表覆盖模组名称、时代、导入、真相、时间线、特殊规则、结局、地点、事件原文、线索和展示材料。
+### 2.2 模组生命周期
 
-下列内容不属于五张表：
+- 模组使用一次聚合创建写入全部静态内容。
+- 模组创建后没有编辑接口。
+- 删除模组前，服务层检查所有 `group_conversation.module_id` 引用；只要存在历史或进行中的跑团引用，就拒绝删除。
+- TRPG 群聊创建与模组删除使用同一个 Redis 模组读写锁：
+  - 群聊绑定持有模组读锁，直至事务完成。
+  - 模组删除持有模组写锁，直至事务完成。
+- 依赖校验不在锁外保留一次额外的预检查。
 
-- 调查员和 NPC 的身份、属性、技能、武器、生命值与理智值。
-- 当前所在地点、已经发生的行动和已经获得的信息。
-- 聊天原文、场景总结、掷骰结果和战斗状态。
-- 已展示材料集合。
+### 2.3 时间与推理信息
 
-这些运行时信息分别来自角色系统、现有群聊消息、场景总结、掷骰系统和 Redis。
-
-### 2.2 章节级解析与原文保留并存
-
-作者通常会明确划分守秘人信息、调查员导入、时间线、特殊机制和结局，因此这些内容可以稳定进入全局上下文表的独立字段。
-
-地点内部的检定方式、人物反应、可选事件和剧情分支通常混在叙事原文中。第一版不继续拆解，直接保存在地点 `content` 中，由 KP 阅读和裁定。
-
-### 2.3 地点是场景和调度边界
-
-地点承担三项职责：
-
-- KP 通过地点索引判断调查员可以前往何处。
-- 进入地点后，地点完整原文进入 KP 上下文。
-- 当前地点对应现有消息和场景总结中的 `scene_id`。
-
-第一版令 `scene_id` 直接使用 `coc_module_location.id`。重新访问同一地点时可以再次生成新的场景总结；总结仍通过消息序号范围区分，不要求为每次访问创建新的静态地点。
-
-### 2.4 线索与材料职责分离
-
-线索回答“KP需要掌握什么事实”，材料回答“此刻向玩家展示什么”。
-
-- 线索可以没有图片。
-- 材料可以只是地图、照片、报纸或氛围图，不一定对应一条线索。
-- 材料不使用线索表的 `content_type` 表达。
-- 两者都不保存具体跑团中的已获得状态。
+- 游戏时间可由 KP 按叙事需要表达，但不是必填运行时状态。
+- 系统不强制探索截止时间、行动轮数或每日地点数量。
+- 上下文目标为全程约十万字以内，模型上下文上限为 1M；第一版不做压缩，因为系统无法可靠判断未来推理会使用哪些信息。
+- 第一版不区分公开裁定和隐藏裁定。
 
 ## 3. 数据模型
 
 ### 3.1 `coc_module`
 
-保存模组选择页面需要的内容，以及构建上下文时需要的基础信息。
+保存模组基础信息：
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | BIGINT | PK | 模组 ID |
-| `name` | VARCHAR | NOT NULL | 模组名称 |
-| `author` | VARCHAR | NULL | 作者 |
-| `era` | VARCHAR | NULL | 时代与地区 |
-| `introduction` | TEXT | NOT NULL | 玩家可见简介 |
-| `investigator_creation` | TEXT | NULL | 调查员职业、背景与关系创建建议 |
-| `cover_url` | TEXT | NULL | 封面地址 |
-| `player_count` | VARCHAR | NULL | 推荐人数，保留区间表达 |
-| `estimated_duration` | VARCHAR | NULL | 预计时长 |
-| `visible` | BOOLEAN | NOT NULL | 是否可在前端选择 |
-| `created_at` | TIMESTAMP | NOT NULL | 创建时间 |
-| `updated_at` | TIMESTAMP | NOT NULL | 更新时间 |
-
-`investigator_creation` 只保存创建建议，不保存实际调查员。
+| 字段 | 说明 |
+|---|---|
+| `id` | 模组 ID |
+| `name` | 模组名称 |
+| `author` | 作者 |
+| `era` | 时代与地区 |
+| `introduction` | 玩家可见简介 |
+| `investigator_creation` | 调查员创建建议 |
+| `cover_url` | 封面地址 |
+| `player_count` | 推荐人数 |
+| `estimated_duration` | 预计时长 |
+| `visible` | 是否可选择 |
+| `created_at` / `updated_at` | 创建和更新时间 |
 
 ### 3.2 `coc_module_context`
 
-每个模组最多一条全局上下文记录。
+每个模组最多一条全局上下文：
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | BIGINT | PK | 记录 ID |
-| `module_id` | BIGINT | UNIQUE, NOT NULL | 所属模组 |
-| `truth_background` | TEXT | NULL | 事件真相、幕后原因和历史背景 |
-| `investigator_intro` | TEXT | NULL | 开场、委托和调查入口 |
-| `timeline` | TEXT | NULL | 作者提供的历史时间线 |
-| `special_rules` | TEXT | NULL | 模组专属规则和状态机制 |
-| `keeper_guidance` | TEXT | NULL | 整体主持建议和关键方向 |
-| `ending_content` | TEXT | NULL | 结局、奖励和收束方式 |
-| `extra_content` | TEXT | NULL | 无法归类的全局原文 |
-| `created_at` | TIMESTAMP | NOT NULL | 创建时间 |
-| `updated_at` | TIMESTAMP | NOT NULL | 更新时间 |
+| 字段 | 说明 |
+|---|---|
+| `module_id` | 所属模组，唯一 |
+| `truth_background` | 事件真相和幕后背景 |
+| `investigator_intro` | 开场、委托和调查入口 |
+| `timeline` | 作者提供的时间线 |
+| `special_rules` | 模组专属规则 |
+| `keeper_guidance` | 主持建议 |
+| `ending_content` | 结局、奖励和收束 |
+| `extra_content` | 无法可靠归类的全局原文 |
 
-所有正文均保存 Markdown/Text 原文。字段允许为空，不要求不同作者采用完全相同的章节结构。无法可靠分类的全局内容必须进入 `extra_content`，不能在导入时丢弃。
+正文保存 Markdown/Text 原文，字段允许为空。
 
 ### 3.3 `coc_module_location`
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | BIGINT | PK | 地点 ID，同时作为场景 ID |
-| `module_id` | BIGINT | NOT NULL | 所属模组 |
-| `parent_location_id` | BIGINT | NULL | 父地点 |
-| `name` | VARCHAR | NOT NULL | 地点名称 |
-| `summary` | TEXT | NOT NULL | 地点索引和检索摘要 |
-| `content` | TEXT | NOT NULL | 地点完整原文 |
-| `created_at` | TIMESTAMP | NOT NULL | 创建时间 |
-| `updated_at` | TIMESTAMP | NOT NULL | 更新时间 |
+| 字段 | 说明 |
+|---|---|
+| `module_id` | 所属模组 |
+| `parent_location_id` | 可选父地点 |
+| `name` | 当前模组内唯一的地点名称 |
+| `summary` | 标题索引使用的摘要 |
+| `content` | 地点完整原文 |
 
-`content` 可以包含：
+`id` 同时作为运行时 `scene_id` 和 SCENE Plan 的 `context_id`。同一地点可被多次探索；各次总结通过消息序号范围区分。
 
-- 初始环境描述。
-- 地点内的区域和物件。
-- 可选事件。
-- NPC 在该地点的表现和可提供信息。
-- 检定建议及成功、失败信息。
-- 与时间或调查进展有关的自然语言说明。
-- 地点内可能发生的战斗、理智检定和结局分支。
-
-第一版不增加 `entry_condition`、`scene_events_json`、`npc_refs_json`、`sort_order` 等字段。
+地点内部的环境、NPC 表现、检定建议、成功失败信息、可选事件和分支均保留在 `content`，第一版不继续结构化。
 
 ### 3.4 `coc_module_clue`
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | BIGINT | PK | 线索 ID |
-| `module_id` | BIGINT | NOT NULL | 所属模组 |
-| `title` | VARCHAR | NOT NULL | 便于检索和提醒的名称 |
-| `content` | TEXT | NOT NULL | 线索完整原文 |
-| `important` | BOOLEAN | NOT NULL | 是否为必须保障获得的重要证据 |
-| `created_at` | TIMESTAMP | NOT NULL | 创建时间 |
-| `updated_at` | TIMESTAMP | NOT NULL | 更新时间 |
+| 字段 | 说明 |
+|---|---|
+| `module_id` | 所属模组 |
+| `title` | 当前模组内唯一的线索标题 |
+| `content` | 线索完整原文 |
+| `important` | 是否为 KP 应保障最终获得的重要证据 |
 
-`important=true` 只表达作者意图：KP 应设法确保调查员最终得到此证据。它不表示证据已经被获得，也不规定证据必须从哪个地点或通过哪种检定获得。
-
-第一版不增加 `content_type`、`kp_content`、`player_content`、`source_rules_json`、`effects_json` 和 `sort_order`。KP 读取完整 `content` 后自行决定如何向调查员公开。
+`important` 不表示已经获得，也不规定获取地点或检定。
 
 ### 3.5 `coc_module_material`
 
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `id` | BIGINT | PK | 材料 ID |
-| `module_id` | BIGINT | NOT NULL | 所属模组 |
-| `title` | VARCHAR | NOT NULL | 展示标题 |
-| `description` | TEXT | NOT NULL | Agent 可理解的完整语义介绍 |
-| `image_url` | TEXT | NOT NULL | 人类玩家看到的图片 |
-| `created_at` | TIMESTAMP | NOT NULL | 创建时间 |
-| `updated_at` | TIMESTAMP | NOT NULL | 更新时间 |
-
-`description` 必须覆盖图片中用于调查和推理的文字、符号及关键视觉信息，不能只写外观说明。它是 Agent 调查员对材料的无障碍语义表示。
-
-材料不强制关联地点或线索。KP 根据当前场景和调查员行动决定何时展示。
-
-## 4. 《太阳与九英镑》覆盖验证
-
-验证文件：
-
-`/Users/wyyd/Downloads/MinerU_markdown_太阳与九英镑_2081824310157156352.md`
-
-实际内容映射如下：
-
-| 模组内容 | 保存位置 |
+| 字段 | 说明 |
 |---|---|
-| 名称、简介、时代背景、调查员创建建议 | `coc_module` |
-| 守秘人信息中的事件真相 | `coc_module_context.truth_background` |
-| 1888 年历史时间线 | `coc_module_context.timeline` |
-| 侦探事务所、卫生管理局导入 | `coc_module_context.investigator_intro` |
-| 蠕臭症、感染进度 | `coc_module_context.special_rules` |
-| 点燃街区、放任或阻止莉斯伊尔等结局 | `coc_module_context.ending_content` |
-| 医院、酒店、药剂铺、薰衣草街区等全部场景 | `coc_module_location` |
-| 医院的“活死鸦”等可选事件 | 对应地点的 `content` |
-| 感染源、九英镑交易、法术核心等跨地点事实 | `coc_module_clue` |
-| 玛德琳照片、信件、报纸、解剖研究文件 | `coc_module_material` |
-| 迈德、莉斯伊尔、康拉德等人物 | 现有角色系统 |
+| `module_id` | 所属模组 |
+| `title` | 当前模组内唯一的材料标题 |
+| `description` | Agent 可理解的完整语义说明 |
+| `image_url` | 人类玩家看到的图片 |
 
-模组中的书籍、法术、药剂和战斗说明如果只在单一场景中出现，保留在地点 `content`；如果它们是跨场景推理需要反复查询的事实，则额外建立线索记录。无需为物品、法术或事件增加新表。
+`description` 必须包含推理所需的文字、符号和关键视觉信息，不能只描述外观。
 
-## 5. 检索与上下文总体策略
+### 3.6 现有表扩展
 
-### 5.1 方案比较
+| 表 | 新字段 | 说明 |
+|---|---|---|
+| `group_conversation` | `module_id` | TRPG 必填，普通群聊可空 |
+| `group_reply_plan` | `next_plan_id` | 串联同一批选景产生的后续 SCENE Plan |
+| `coc_character` | `quick_notes` | KP 私有快速笔记 |
 
-#### 方案 A：每轮载入五张表的全部正文
+`resume_plan_id` 只表示战斗结束后恢复的场景；`next_plan_id` 只表示当前场景结束后的下一个场景，二者不能混用。
 
-优点是实现简单，KP 不会漏读内容。缺点是地点和普通线索会迅速占满上下文，不适合完整模组。
+## 4. 独立选景阶段
 
-#### 方案 B：除当前场景外全部通过工具查询
+### 4.1 为什么不使用 USER Plan
 
-优点是上下文最小。缺点是 KP 可能不知道模组中存在什么地点、重要证据和材料，也就不会主动检索。
+TRPG 禁止 USER Plan。没有活动回复计划时，运行时进入独立的 `SCENE_SELECTION` 阶段，而不是创建一个伪 USER Plan。
 
-#### 方案 C：固定核心自动装配，详细正文按需载入
+选景轮的执行顺序固定为：
 
-自动载入模组基础信息、全局上下文、地点索引、重要线索、当前地点全文和材料目录；其他地点与普通线索通过工具检索。
+1. KP。
+2. 当前群聊所有启用的调查员，按群聊成员顺序执行。
 
-本设计采用方案 C。它能够让 KP 保持全局方向，同时避免每轮重复注入整本模组。
+KP 在该轮第一位，通过公开消息列出当天可以探索的地点名称。系统不强迫 KP 使用全部地点，也不限制当天地点数量。
 
-### 5.2 派生向量索引
+### 4.2 名称选择与后端匹配
 
-地点和线索可以使用现有向量能力建立派生索引，但向量存储不是第六张权威内容表。
-
-索引文本：
+调查员调用：
 
 ```text
-地点 = name + summary + content
-线索 = title + content
-材料 = title + description
+selectExplorationScene(locationName)
 ```
 
-向量元数据至少包含：
+模型只能传地点名称，不能传地点 ID。后端执行：
 
-```text
-moduleId
-recordType
-recordId
-```
+1. 验证当前处于 TRPG 选景阶段。
+2. 验证调用者是当前启用调查员。
+3. 在当前群聊绑定的模组内按修剪后的准确名称匹配。
+4. 零条或多条匹配均报错。
+5. 将 `characterId -> locationId` 暂存在当前群聊的 Redis 选景状态中。
 
-检索必须先限制当前 `moduleId`。向量结果只用于定位记录，最终正文始终按 `recordId` 回到关系表读取，避免索引旧内容成为权威结果。
+所有启用调查员完成选择后，后端按地点分组并创建场景计划。
 
-第一版不实现复杂重排；精确 ID、精确名称匹配优先，其余使用向量 Top-K。
+### 4.3 场景计划链
 
-## 6. 内部查询接口
+每个被选择的地点单独创建一个 SCENE Plan：
 
-这些方法由上下文装配器和 KP 工具调用，不直接暴露给模型。
+- `source = SCENE`
+- `context_id = coc_module_location.id`
+- 该 Plan 只包含选择该地点的调查员，最后一位为 KP。
+- 多个地点通过 `next_plan_id` 依次串联。
+- `group_conversation.active_reply_plan_id` 指向第一个地点。
 
-### 6.1 模组和全局上下文
+模型不参与 ID 组装；名称到 ID、成员分组、计划插入和链路连接均由后端完成。
 
-```java
-ModuleOverview getModuleOverview(Long moduleId)
-```
+## 5. 场景探索与结算
 
-返回：
+### 5.1 重复场景轮次
 
-- 名称、作者、时代、简介。
-- 调查员创建建议。
-- 推荐人数和时长。
+活动 SCENE Plan 在场景结束前不会被正常推进或删除。每次用户触发群聊时，都从当前 Plan 创建一个新的 `group_chat_turn`：
 
-不存在或不可用时抛出受控的模组不存在异常。
+- `plan_source = SCENE`
+- `plan_context_id = 当前地点 ID`
+- 一轮包含当前场景所有调查员行动和 KP 回应。
 
-```java
-ModuleGlobalContext getGlobalContext(Long moduleId)
-```
+因此一个 SCENE Plan 可以连续产生多轮 turn，直到场景被明确结束。
 
-按固定标题返回非空的全局上下文字段。该方法不执行相似度检索，也不改变作者原文。
+场景内产生的公开对话和材料消息都记录 `scene_id = plan_context_id`。
 
-### 6.2 地点
+### 5.2 结束场景
 
-```java
-List<LocationIndexItem> listLocationIndex(Long moduleId)
-```
+调查员调用 `endSceneExploration()` 只表示自己完成当前场景行动。系统记录该调查员的结束意向；所有当前场景调查员都结束后：
 
-返回当前模组全部地点的：
+1. 标记当前场景请求结算。
+2. 取消当前 turn 中尚未执行的回复步骤。
+3. 已排队步骤在调用模型前重新读取持久化状态，发现 `CANCELLED` 即跳过。
 
-```text
-locationId
-parentLocationId
-name
-summary
-```
+若仅部分调查员已经结束，后续场景 turn 会跳过这些调查员，只保留尚未结束的调查员和 KP。
 
-不返回 `content`。
+KP 可调用 `finishSceneExploration()` 直接请求场景结算，并取消本轮其余待执行步骤。
 
-```java
-LocationDetail getLocation(Long moduleId, Long locationId)
-```
+这两个工具都不是 `returnDirect` 工具；调用者仍需输出一条具体公开消息。
 
-按 `moduleId + locationId` 查询并返回地点完整记录。组合条件是必要的跨模组访问防线。
+### 5.3 总结与切换
 
-```java
-List<LocationSearchHit> searchLocations(Long moduleId, String query, int limit)
-```
+当前 turn 完成后，如果场景已请求结算：
 
-行为：
+1. 读取该地点上一次总结结束序号之后的新公开完成消息。
+2. 生成新的场景总结，只包含已发生行动、公开发现、已展示材料、状态变化和未解决事项。
+3. 删除当前 SCENE Plan 及其 Plan Item。
+4. 将 `active_reply_plan_id` 更新为 `next_plan_id`。
+5. 清理当前地点的结束意向状态。
 
-1. 查询为空时拒绝执行。
-2. 优先匹配地点 ID 和名称。
-3. 未命中时对当前模组地点做向量检索。
-4. 最多返回五条 `id/name/summary`。
-5. 不返回地点完整原文，不切换场景。
+若没有 `next_plan_id`，`active_reply_plan_id` 变为空，下一次触发重新进入独立选景阶段。这样 KP 可以在新一天或新阶段再次列出可探索地点。
 
-### 6.3 线索
+### 5.4 结束整个跑团
 
-```java
-List<ModuleClue> listImportantClues(Long moduleId)
-```
+KP 调用 `finishRun()` 表示模组已完成。工具调用后 KP 仍输出最终公开收束消息；当前 turn 完成后系统：
 
-返回当前模组所有 `important=true` 的线索标题和完整 `content`。第一版面向小型模组，重要线索全文每轮进入 KP 上下文，以确保 KP 不会忘记必须提供的证据。
+- 取消本轮尚未执行的调查员或 KP 步骤。
+- 生成最终群聊总结。
+- 清理回复计划。
+- 将群聊状态设为 `CLOSED`。
+- 不再进入下一次选景。
 
-```java
-List<ClueSearchHit> searchClues(Long moduleId, String query, int limit)
-```
+## 6. KP 上下文装配
 
-行为：
+### 6.1 固定装配内容
 
-1. 优先匹配线索标题。
-2. 其余使用当前模组内的向量检索。
-3. 最多返回五条标题、完整 `content` 和 `important`。
-4. 没有结果时返回空列表，不生成推测性答案。
+每次 KP 调用模型前，按当前群聊绑定的模组组装：
 
-检索结果已经包含完整正文，因此第一版不提供额外的 `getClue`。
+1. 模组基础信息和完整全局上下文。
+2. 所有地点的名称与摘要。
+3. 所有线索标题；`important=true` 的线索同时放入完整正文。
+4. 当前地点完整 `content`。
+5. 所有材料标题、语义说明和已展示状态，不包含图片 URL。
+6. 当前跑团所有非空 KP 快速笔记。
+7. 当前群聊的完整公开历史、骰子和材料语义消息。
 
-### 6.4 材料
+选景阶段没有当前地点全文，但 KP 仍能看到完整地点标题索引，并据此公开当天可探索列表。
 
-```java
-List<MaterialIndexItem> listMaterials(Long moduleId, Long conversationId)
-```
+### 6.2 调查员上下文
 
-先查询材料表，再读取群聊的 Redis Set，返回：
+调查员不能读取：
 
-```text
-materialId
-title
-description
-shown
-```
+- 全局模组真相。
+- 未公开地点原文。
+- 线索索引或正文。
+- KP 快速笔记。
+- 材料图片 URL。
 
-不返回 `image_url` 给模型。
-
-```java
-ModuleMaterial getMaterial(Long moduleId, Long materialId)
-```
-
-按当前模组校验并读取完整材料，只供展示服务内部使用。
-
-```java
-Set<Long> getShownMaterialIds(Long conversationId)
-```
-
-从 Redis 读取已经展示的材料 ID。Redis Key 为：
-
-```text
-trpg:group:{conversationId}:shown-materials
-```
-
-类型为 Set，成员使用十进制材料 ID 字符串。
-
-## 7. KP 模组工具
-
-模型不能传入 `moduleId`、`conversationId` 或跑团 ID。这些值通过现有 `ToolContext` 取得，并由当前跑团解析出所属模组。
-
-### 7.1 `searchLocations`
-
-```java
-List<LocationSearchResult> searchLocations(String query, ToolContext context)
-```
-
-用途：KP 不确定应该载入哪个地点时搜索地点索引。
-
-结果示例：
-
-```json
-[
-  {
-    "locationId": 204,
-    "name": "皇家阿尔伯特·爱德华医院",
-    "summary": "蠕臭症患者集中隔离的公共医院。"
-  }
-]
-```
-
-本工具只查询，不改变当前场景。
-
-### 7.2 `enterLocation`
-
-```java
-LocationContent enterLocation(Long locationId, ToolContext context)
-```
-
-用途：调查员实际前往地点时载入地点原文并切换场景。
-
-执行过程：
-
-1. 验证调用者是当前群聊的 KP。
-2. 验证地点属于当前模组。
-3. 完成上一地点的场景总结；仍有未完成检定或战斗时拒绝切换。
-4. 将 `locationId` 设置为随后消息和场景总结使用的 `scene_id`。
-5. 返回地点 `name/summary/content` 给 KP。
-6. KP 根据原文生成该地点的初始可观察描述。
-
-重新进入同一地点是允许的。新的消息序号区间形成新的场景过程和总结。
-
-### 7.3 `searchClues`
-
-```java
-List<ClueSearchResult> searchClues(String query, ToolContext context)
-```
-
-用途：KP 需要确认事实、证据、传播方式或跨地点关系时查询线索。
-
-结果示例：
-
-```json
-[
-  {
-    "title": "蠕臭症真正的爆发地",
-    "content": "最早的感染者来自薰衣草街区，拉曼律师并非零号病人……",
-    "important": true
-  }
-]
-```
-
-该结果只进入 KP 的工具上下文，不直接对调查员公开。
-
-### 7.4 `searchMaterials`
-
-```java
-List<MaterialSearchResult> searchMaterials(String query, ToolContext context)
-```
-
-用途：KP 查找可以展示的材料。
-
-结果示例：
-
-```json
-[
-  {
-    "materialId": 301,
-    "title": "玛德琳寄给康拉德的信",
-    "description": "信中提到玛德琳住在皇家橡树酒店，并正在调查一种奇怪药剂。",
-    "shown": false
-  }
-]
-```
-
-工具不返回图片 URL。
-
-### 7.5 `showMaterial`
-
-```java
-void showMaterial(Long materialId, ToolContext context)
-```
-
-这是无返回值的副作用工具。成功调用后必须立即结束当前 KP 响应；工具生成的材料消息就是本次公开输出，KP 不再补充自然语言或 JSON。
-
-成功流程：
-
-1. 从 `ToolContext` 获取 KP 身份、群聊 ID、当前回复步骤和跑团 ID。
-2. 解析当前模组并验证材料归属。
-3. 获取现有群聊世界变更锁，防止同一材料并发重复展示。
-4. 检查 Redis Set；已经展示时直接结束，不插入重复消息。
-5. 创建一条现有 `group_chat_message`：
-   - `speaker_type = KP`
-   - `speaker_id = NULL`
-   - `message_kind = MATERIAL`
-   - `visibility = public`
-   - `scene_id = 当前地点 ID`
-   - `turn_id/reply_step_id = 当前工具上下文`
-6. 把标题、介绍和图片 URL 全部序列化进现有 `content`。
-7. 数据库消息提交成功后尝试执行 `SADD`，把材料 ID 写入 Redis Set；Redis 写入失败只记录错误，不中止后续广播。
-8. 通过现有群聊事件向前端推送材料消息。
-9. 方法以 `void` 正常结束，不产生供 KP 继续叙事的工具结果。
-
-`content` 固定为：
-
-```json
-{
-  "title": "玛德琳的照片",
-  "description": "照片中是一名约25岁的金发女性，脸上有雀斑，穿着偏中性的深色服装。",
-  "imageUrl": "https://oss.example.com/materials/madeline.jpg"
-}
-```
-
-不修改 `group_chat_message` 表和 `GroupChatMessageVO` 的字段结构。前端根据已有 `message_kind` 解析 `content`。
-
-Redis 只承担展示去重和状态提示，不是材料知识的权威来源。数据库消息先于 Redis 写入，保证 Redis 故障时最多允许以后重复展示，而不会出现“Redis 标记已展示但玩家没有看到消息”的永久丢失。
-
-## 8. 材料消息的双重呈现
-
-### 8.1 人类玩家
-
-前端收到 `MATERIAL` 消息后解析 `content`，展示：
-
-- 标题。
-- 图片。
-- 文字介绍。
-
-刷新页面时，历史接口仍返回相同 `message_kind + content`，因此可以恢复图片展示，不需要材料 ID 字段。
-
-### 8.2 调查员 Agent
-
-`GroupContextAssembler` 读取到 `MATERIAL` 消息时不能把原始 JSON 直接发送给 Agent，而应转换为：
+调查员只通过公开历史获取已公开事实。材料消息进入 Agent 上下文时被转换成语义文本：
 
 ```xml
-<shown-material title="玛德琳的照片">
-照片中是一名约25岁的金发女性，脸上有雀斑，穿着偏中性的深色服装。
+<shown-material title="材料标题">
+材料语义说明
 </shown-material>
 ```
 
-Agent 上下文中不包含 `imageUrl`。这样既满足 Agent 无法直接理解材料图片的限制，也避免无意义 URL 占用上下文。
+### 6.3 不做压缩与向量检索
 
-场景总结必须记录材料的标题和 `description` 所表达的信息。材料消息被历史摘要覆盖后，调查员仍能依据总结继续推理。
+- 第一版不创建模组向量索引。
+- 不按相似度搜索地点、线索或材料。
+- 所有标题直接加入 KP 上下文或一级工具结果。
+- 详细查询只接受当前模组中的准确名称。
+- 不自动压缩、摘要替换或裁剪完整上下文。
 
-### 8.3 KP 后续上下文
+## 7. KP 模组与状态工具
 
-材料目录通过 Redis Set 标记 `shown=true`。已展示材料可以在 KP 上下文中显示标题和介绍，帮助 KP 判断哪些信息已经公开；图片 URL 仍不进入模型。
+### 7.1 只读查询
 
-## 9. KP 上下文装配
-
-每次 KP 行动按固定顺序装配：
-
-1. 系统规则与 KP 职责。
-2. 模组基础信息。
-3. 模组全局上下文。
-4. 地点索引。
-5. 重要线索。
-6. 当前地点完整原文。
-7. 材料目录与展示状态。
-8. 调查员和 NPC 信息。
-9. 所有已结束场景总结。
-10. 当前场景公开消息。
-11. 当前待处理检定、战斗和本轮行动。
-
-### 9.1 模组基础信息
-
-```xml
-<module>
-名称：太阳与九英镑
-时代：1888年，英国维根市
-简介：调查员受托寻找失踪的玛德琳，并调查正在蔓延的蠕臭症。
-调查员创建：支持侦探事务所和卫生管理局两种导入背景。
-</module>
+```text
+readModuleLocation(locationName)
+readModuleClue(clueTitle)
+readModuleMaterial(materialTitle)
 ```
 
-### 9.2 全局上下文
+三者都只接收准确名称，不接收 ID。后端限定当前 `moduleId` 并要求唯一匹配。返回结果不包含数据库 ID。
 
-只输出非空字段，并保留固定标题：
+### 7.2 材料展示
 
-```xml
-<module-global-context>
-  <truth-background>……</truth-background>
-  <investigator-intro>……</investigator-intro>
-  <timeline>……</timeline>
-  <special-rules>……</special-rules>
-  <keeper-guidance>……</keeper-guidance>
-  <ending-content>……</ending-content>
-  <extra-content>……</extra-content>
-</module-global-context>
+```text
+showMaterial(materialTitle)
 ```
 
-第一版不对这些字段进行相似度裁剪。小型模组默认全部进入 KP 上下文。
+展示材料是附加行为，不是掷骰式终止行为：
 
-### 9.3 地点索引
+- 工具 `returnDirect = false`。
+- KP 调用后仍必须回复具体消息。
+- 后端写入一条公开、已完成的 `MATERIAL` 消息。
+- SSE 先后可发送 `material.created` 和 KP 对话消息。
 
-```xml
-<location-index>
-[201] 维根市卫生管理局：调查蠕臭症的政府委托入口。
-[202] 卡夫拉私人药剂铺：迈德出售异常药剂的地点。
-[203] 皇家橡树酒店：玛德琳和拉曼先后居住的酒店。
-[204] 皇家阿尔伯特·爱德华医院：患者隔离、爱德华医生和解剖调查。
-[205] 圣玛丽街43号：玛德琳研究莉斯伊尔的住所。
-[206] 薰衣草街区98号：迈德住处及法术核心所在地。
-</location-index>
+材料消息 `content` 保存：
+
+```json
+{
+  "schemaVersion": 1,
+  "materialId": 42,
+  "title": "玛德琳的照片",
+  "description": "照片背面的文字与关键视觉信息……",
+  "imageUrl": "https://..."
+}
 ```
 
-### 9.4 重要线索
+`materialId` 用于 Redis 展示状态丢失时从历史消息恢复。重复展示不会产生第二条材料消息。
 
-```xml
-<important-clues>
-[401] 蠕臭症最早在薰衣草街区出现，拉曼律师不是零号病人。
-[402] 玛德琳曾在皇家橡树酒店236号房居住。
-[403] 爱德华医生曾支付九英镑，预订莉斯伊尔死后的尸体。
-[404] 蠕虫污染水源，并通过接触皮肤造成感染。
-[405] 薰衣草街区98号地下室存在维持转化的法术核心。
-</important-clues>
+### 7.3 快速笔记
+
+```text
+updateQuickNotes(characterName, quickNotes)
 ```
 
-### 9.5 当前地点
+- 仅 KP 工具可调用。
+- 调查员和普通人物卡接口不可读取。
+- 可记录 NPC 或调查员的重要事件、感染、伤势、态度等状态。
+- 人物只通过当前跑团中的准确名称匹配；零条或多条匹配均报错。
+- 空文本表示清除。
 
-```xml
-<current-location id="204">
-名称：皇家阿尔伯特·爱德华医院
+后续角色卡属性和备注工具也遵循同一规则：模型只传调查员/NPC 名称，由后端准确匹配 ID。
 
-医院由红砖砌成，中央有一座黑色塔楼。大量渡鸦停留在附近建筑上。
-所有蠕臭症患者被集中隔离在中央塔楼……
+## 8. Redis 运行时状态
 
-可选事件：活死鸦
-受蠕臭症感染的渡鸦可能袭击室外的调查员……
+以下状态均按群聊隔离：
 
-调查内容：
-- 接待人员可以说明所有患者都在中央塔楼。
-- 爱德华医生知道病症传播方式。
-- 医学生调查员可以获知莉斯伊尔及九英镑交易。
-- 拉曼律师的病房可以进行进一步观察。
-</current-location>
+| 状态 | Key 前缀 | 说明 |
+|---|---|---|
+| 模组读写锁 | `trpg:module:lock:` | 防止绑定与删除竞态 |
+| 选景结果 | `trpg:group:scene-selection:` | 调查员到地点的临时选择 |
+| 场景结束进度 | `trpg:group:scene-progress:` | 调查员结束集合与 KP 结束标记 |
+| 已展示材料 | `trpg:group:shown-materials:` | 可由 MATERIAL 历史恢复 |
+| KP 上下文长度 | `trpg:group:context-window:` | 最近一次最终 Prompt 字符数 |
+| 跑团结束请求 | `trpg:group:run-finish:` | 当前轮结束后关闭 |
+
+Redis 只保存运行时派生状态，不是模组正文的权威来源。
+
+## 9. 上下文长度接口
+
+KP 最终 Prompt 组装完成后，系统统计所有消息文本的字符数，并更新当前群聊 Redis 记录：
+
+```json
+{
+  "characterCount": 82341,
+  "softLimit": 100000,
+  "ratio": 0.82341,
+  "updatedAt": "2026-07-29T..."
+}
 ```
 
-实际上下文使用地点 `content` 原文，不使用此示意中的人工缩写。
+前端通过以下认证接口读取：
 
-### 9.6 材料目录
-
-```xml
-<materials>
-[301] 玛德琳的照片｜已展示
-介绍：25岁左右的金发女性，面有雀斑，穿着偏中性。
-
-[302] 玛德琳的信｜未展示
-介绍：信中提到她住在皇家橡树酒店，并正在追查来源可疑的药剂。
-
-[303] 蠕臭症解剖研究文件｜未展示
-介绍：文件要求分别解剖头部、四肢和腹部，并测试火焰与水对蠕虫的效果。
-</materials>
+```http
+GET /group-chat/conversations/{conversationId}/context-window
 ```
 
-### 9.7 完整效果示意
+写入失败不阻断 KP 回复；读取失败返回无数据。该指标仅用于观察，不触发自动压缩。
 
-```xml
-<module>
-名称：太阳与九英镑
-时代：1888年，英国维根市
-简介：调查员受托寻找失踪的玛德琳，并调查蠕臭症。
-</module>
+## 10. 并发、恢复与失败策略
 
-<module-global-context>
-  <truth-background>
-  迈德·霍西试图用万应灵药挽回家族悲剧，并以九英镑定金购买材料。
-  莉斯伊尔与迈德同时施法，造成蠕行者转化和法术核心异常。
-  从莉斯伊尔身体散落的蠕虫污染了薰衣草街区的水源。
-  </truth-background>
-  <investigator-intro>
-  1888年12月23日，康拉德委托调查员寻找玛德琳；
-  卫生管理局则要求调查蠕臭症的感染源。
-  </investigator-intro>
-  <timeline>
-  11月8日：迈德杀死莉斯伊尔，法术发生冲突。
-  11月14日：薰衣草街区出现第一名患者。
-  12月3日：玛德琳感染。
-  12月18日：拉曼律师住进医院。
-  12月23日：模组开始。
-  12月24日晚：警方计划清扫薰衣草街区。
-  </timeline>
-  <special-rules>
-  蠕臭症通过受污染水源、虫媒以及蠕虫接触皮肤传播。
-  感染程度随接触蠕虫数量和时间发展。
-  </special-rules>
-</module-global-context>
+### 10.1 名称安全
 
-<location-index>
-[201] 维根市卫生管理局：政府委托入口。
-[202] 卡夫拉私人药剂铺：异常药剂来源。
-[203] 皇家橡树酒店：玛德琳和拉曼的住宿地点。
-[204] 皇家阿尔伯特·爱德华医院：患者隔离与医学调查。
-[205] 圣玛丽街43号：玛德琳研究莉斯伊尔的住所。
-[206] 薰衣草街区98号：迈德住处和法术核心。
-</location-index>
+- 所有模组和人物查询都先限定当前群聊/当前模组。
+- 模型不能提供数据库 ID 来跨模组访问。
+- 名称为空、未命中或不唯一时明确失败。
 
-<important-clues>
-[401] 蠕臭症最早在薰衣草街区出现。
-[403] 爱德华医生曾支付九英镑预订莉斯伊尔的尸体。
-[405] 薰衣草街区98号地下室存在法术核心。
-</important-clues>
+### 10.2 计划完整性
 
-<current-location id="204">
-皇家阿尔伯特·爱德华医院的完整模组原文……
-</current-location>
+- `next_plan_id` 非空时，目标必须存在、属于同一群聊且为 SCENE Plan。
+- `resume_plan_id` 非空时，目标必须存在、属于同一群聊且为 SCENE Plan。
+- 当前计划不会在目标链验证失败时被删除。
+- 存档递归保存整个 `nextPlan` 场景链；恢复时从链尾开始创建并重建新 ID。
+- 场景链循环、嵌套战斗恢复或战斗直接连接 `nextPlan` 均拒绝。
 
-<materials>
-[301] 玛德琳的照片｜已展示｜照片中是一名约25岁的金发女性……
-[302] 玛德琳的信｜未展示｜信中提到皇家橡树酒店和奇怪药剂……
-</materials>
+### 10.3 材料恢复
 
-<characters>
-调查员和NPC数据由现有角色系统装配……
-</characters>
+Redis 中没有展示标记时，后端扫描当前群聊历史 `MATERIAL` 消息中的 `materialId`。历史已存在即视为已展示，不重复发送图片。
 
-<scene-summaries>
-调查员此前从卫生管理局得知拉曼律师因蠕臭症住院……
-</scene-summaries>
+### 10.4 快速笔记隐私
 
-<current-scene-messages>
-当前医院场景的公开消息和已经展示材料的文字语义……
-</current-scene-messages>
-```
+`CocCharacter.quickNotes` 不参与人物卡 JSON 序列化。它只由 KP 模组工具更新，并只在 KP 私有系统上下文中装配。
 
-调查员 Agent 不接收 `<module-global-context>`、地点隐藏原文、未公开线索或未展示材料，只接收自身角色信息、公开场景总结、当前公开消息和已经展示材料的文字介绍。
+## 11. 验收标准
 
-## 10. 错误、安全与并发处理
-
-### 10.1 跨模组访问
-
-所有按 ID 查询的方法都必须同时限制当前 `moduleId`。模型提供的地点、线索或材料 ID 不能单独作为查询条件。
-
-### 10.2 检索无结果
-
-地点、线索和材料搜索没有命中时返回空列表。工具不得补造地点、线索或材料。
-
-### 10.3 场景切换失败
-
-地点不存在、属于其他模组、存在未完成检定或战斗时，`enterLocation` 返回受控工具错误，当前地点保持不变。
-
-### 10.4 材料展示失败
-
-- 材料不存在或属于其他模组：拒绝展示。
-- 图片 URL 为空或不满足现有图片安全规则：拒绝展示。
-- 已经展示：无操作并正常结束。
-- 数据库消息写入失败：不写 Redis、不广播。
-- Redis 写入失败：数据库消息仍保留并广播；记录错误，允许后续重复展示。
-- 广播失败：数据库历史仍可在刷新后恢复材料。
-
-### 10.5 并发展示
-
-使用现有群聊世界变更锁串行执行“检查 Set—写消息—写 Set—广播”，避免同一群聊中的两个 KP 工具步骤重复展示同一材料。
-
-## 11. 测试与验收
-
-### 11.1 数据模型
-
-- 一个模组只能有一条全局上下文。
-- 地点父节点必须属于同一模组。
-- 线索 `important` 和材料 `description/image_url` 不允许为空。
-- 不存在 `content_type`、条件 JSON、事件 JSON 和材料强关联字段。
-
-### 11.2 检索
-
-- 所有搜索结果只能来自当前模组。
-- 精确名称优先于向量结果。
-- 地点搜索只返回摘要，进入地点才返回完整原文。
-- 重要线索自动进入 KP 上下文。
-- 普通线索只有检索后才进入本轮工具上下文。
-- 没有命中时返回空列表，不产生幻觉结果。
-
-### 11.3 材料
-
-- `showMaterial` 的 Java 返回类型为 `void`。
-- 成功调用只产生一条 `MATERIAL` 消息，KP 不追加叙事。
-- 消息表和消息 VO 不增加材料字段。
-- 消息 `content` 同时包含 `title/description/imageUrl`。
-- 前端能够从历史消息恢复图片。
-- Agent 上下文包含标题和介绍，但不包含图片 URL。
-- Redis Set 保存材料 ID，并能在材料目录中产生 `shown=true`。
-- 并发调用不会生成两条材料消息。
-
-### 11.4 上下文
-
-- KP 每轮获得模组基础信息、全局上下文、地点索引、重要线索、当前地点全文和材料目录。
-- 调查员 Agent 看不到模组真相、未公开线索和未展示材料。
-- 场景总结包含已经展示材料的语义信息。
-- 使用《太阳与九英镑》数据时，KP 能主持委托导入、医院调查、酒店调查、药剂铺调查、薰衣草街区终局及不同结局，不需要读取五表之外的静态模组正文。
-
-## 12. 第一版完成标准
-
-满足以下条件即可认为第一版设计实现完整：
-
-1. 《太阳与九英镑》的全部非人物内容可以无丢失地导入五张表。
-2. KP 不调用工具也能知道模组真相、时间线、当前地点、重要证据和可展示材料。
-3. KP 能通过地点、线索和材料工具取得其余详细内容。
-4. 地点切换能形成正确的场景上下文与总结边界。
-5. 材料展示不修改聊天消息结构，成功方法无返回值。
-6. 人类玩家看到图片和介绍，Agent 调查员只看到等价的文字语义。
-7. 五张表之外只依赖角色系统和具体跑团运行状态，不需要新增第六张静态模组内容表。
+- TRPG 群聊缺少 `moduleId` 时创建失败；普通群聊仍可不绑定模组。
+- 模组删除与群聊绑定不存在竞态，且任何历史依赖都会阻止删除。
+- 模组创建后不存在编辑入口。
+- TRPG 不创建或接受 USER Plan。
+- 无活动 Plan 时按 KP、全部启用调查员顺序创建选景 turn。
+- 选景、模组查询和人物修改的模型参数只有名称，没有 ID。
+- 多地点选择产生独立 SCENE Plan 和完整 `next_plan_id` 链。
+- 同一场景可反复创建 turn，直到全员或 KP 结束探索。
+- 结束时取消剩余步骤、生成场景总结、删除当前 Plan 并激活下一个。
+- KP 可在链结束后发起下一轮选景，也可明确结束跑团并关闭群聊。
+- KP 获得完整全局上下文、全部标题索引、当前地点全文、重要线索、材料状态和快速笔记。
+- 调查员无法获得模组隐藏正文或快速笔记。
+- `showMaterial` 展示图片后 KP 继续回复，材料历史可恢复 Redis 状态。
+- 不存在模组向量索引、向量查询或自动上下文压缩。
+- 前端可按群聊读取最近一次 KP 最终 Prompt 的字符数。

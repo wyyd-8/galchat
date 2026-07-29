@@ -147,6 +147,26 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
 
     @Override
     public CocDiceCharacterVO requireDiceCharacter(Long runId, String characterName) {
+        return buildDiceCharacter(requireCharacterByName(runId, characterName));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateQuickNotes(
+            Long runId, String characterName, String quickNotes) {
+        CocCharacter character =
+                requireCharacterByName(runId, characterName);
+        String normalizedNotes = quickNotes == null
+                || quickNotes.isBlank() ? null : quickNotes.trim();
+        character.setQuickNotes(normalizedNotes)
+                .setUpdatedAt(java.time.LocalDateTime.now());
+        if (characterMapper.updateById(character) == 0) {
+            throw new UserRequestException("人物卡不存在");
+        }
+    }
+
+    private CocCharacter requireCharacterByName(
+            Long runId, String characterName) {
         requireRunId(runId);
         if (characterName == null || characterName.isBlank()) {
             throw new UserRequestException("人物卡名称不能为空");
@@ -165,7 +185,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         if (matches.size() > 1) {
             throw new UserRequestException("人物卡名称不唯一");
         }
-        return buildDiceCharacter(matches.getFirst());
+        return matches.getFirst();
     }
 
     @Override

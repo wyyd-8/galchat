@@ -41,6 +41,7 @@ public class WorldArchiveDTO {
         private String image;
         private String background;
         private String personality;
+        private String cocPlayStyle;
         private Map<String, String> favorability;
         private Integer initFavor;
     }

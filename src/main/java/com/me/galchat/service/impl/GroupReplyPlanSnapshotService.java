@@ -18,7 +18,9 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -69,9 +71,8 @@ public class GroupReplyPlanSnapshotService {
             }
             UserWorldSaveSnapshotDTO.ReplyPlanSnapshot activeSnapshot = snapshot.getActivePlan();
             if (activeSnapshot != null) {
-                replyPlanService.validateStructure(conversation, toPlanDTO(activeSnapshot));
-                UserWorldSaveSnapshotDTO.ReplyPlanSnapshot resumeSnapshot = activeSnapshot.getResumePlan();
-                validateResume(conversation, activeSnapshot, resumeSnapshot);
+                validatePlanTree(conversation, activeSnapshot,
+                        Collections.newSetFromMap(new IdentityHashMap<>()));
             }
             validatedSnapshots.add(new ValidatedSnapshot(conversation, activeSnapshot));
         }
@@ -83,10 +84,19 @@ public class GroupReplyPlanSnapshotService {
 
             Long activePlanId = null;
             if (activeSnapshot != null) {
-                UserWorldSaveSnapshotDTO.ReplyPlanSnapshot resumeSnapshot = activeSnapshot.getResumePlan();
-                Long resumePlanId = resumeSnapshot == null
-                        ? null : insertPlan(conversation.getId(), resumeSnapshot, null);
-                activePlanId = insertPlan(conversation.getId(), activeSnapshot, resumePlanId);
+                if (GroupChatConstant.PLAN_SOURCE_COMBAT.equalsIgnoreCase(
+                        activeSnapshot.getSource())) {
+                    Long resumePlanId = activeSnapshot.getResumePlan() == null
+                            ? null : insertSceneChain(
+                                    conversation.getId(),
+                                    activeSnapshot.getResumePlan());
+                    activePlanId = insertPlan(
+                            conversation.getId(), activeSnapshot,
+                            resumePlanId, null);
+                } else {
+                    activePlanId = insertSceneChain(
+                            conversation.getId(), activeSnapshot);
+                }
             }
 
             conversation.setActiveReplyPlanId(activePlanId)
@@ -97,23 +107,42 @@ public class GroupReplyPlanSnapshotService {
         }
     }
 
-    private void validateResume(
+    private void validatePlanTree(
             GroupConversation conversation,
-            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot activeSnapshot,
-            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot resumeSnapshot) {
-        if (resumeSnapshot == null) {
-            return;
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot,
+            Set<UserWorldSaveSnapshotDTO.ReplyPlanSnapshot> visited) {
+        if (!visited.add(snapshot)) {
+            throw new UserRequestException("群聊回复计划存档包含循环引用");
         }
-        if (resumeSnapshot.getResumePlan() != null) {
-            throw new UserRequestException("第一版不支持嵌套战斗回复计划存档");
+        replyPlanService.validateStructure(
+                conversation, toPlanDTO(snapshot));
+        boolean combat = GroupChatConstant.PLAN_SOURCE_COMBAT
+                .equalsIgnoreCase(snapshot.getSource());
+        boolean scene = GroupChatConstant.PLAN_SOURCE_SCENE
+                .equalsIgnoreCase(snapshot.getSource());
+        if (snapshot.getResumePlan() != null) {
+            if (!combat) {
+                throw new UserRequestException("只有战斗回复计划可以携带恢复计划");
+            }
+            if (!GroupChatConstant.PLAN_SOURCE_SCENE.equalsIgnoreCase(
+                    snapshot.getResumePlan().getSource())) {
+                throw new UserRequestException("战斗回复计划只能恢复探索回复计划");
+            }
+            validatePlanTree(
+                    conversation, snapshot.getResumePlan(), visited);
         }
-        if (!GroupChatConstant.PLAN_SOURCE_COMBAT.equalsIgnoreCase(activeSnapshot.getSource())) {
-            throw new UserRequestException("只有战斗回复计划可以携带恢复计划");
+        if (snapshot.getNextPlan() != null) {
+            if (!scene
+                    || !GroupChatConstant.PLAN_SOURCE_SCENE.equalsIgnoreCase(
+                            snapshot.getNextPlan().getSource())) {
+                throw new UserRequestException("只有探索回复计划可以串联下一个探索计划");
+            }
+            validatePlanTree(
+                    conversation, snapshot.getNextPlan(), visited);
         }
-        if (!GroupChatConstant.PLAN_SOURCE_SCENE.equalsIgnoreCase(resumeSnapshot.getSource())) {
-            throw new UserRequestException("战斗回复计划只能恢复探索回复计划");
+        if (combat && snapshot.getNextPlan() != null) {
+            throw new UserRequestException("战斗回复计划不能直接串联下一个场景");
         }
-        replyPlanService.validateStructure(conversation, toPlanDTO(resumeSnapshot));
     }
 
     private GroupReplyPlanDTO toPlanDTO(UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot) {
@@ -148,15 +177,51 @@ public class GroupReplyPlanSnapshotService {
             return null;
         }
         GroupReplyPlan active = requirePlan(conversation, conversation.getActiveReplyPlanId());
-        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot = structuralSnapshot(active);
+        if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                active.getSource())) {
+            return captureSceneChain(
+                    conversation, active, new HashSet<>());
+        }
+        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot =
+                structuralSnapshot(active);
+        if (active.getNextPlanId() != null) {
+            throw new UserRequestException("战斗回复计划不能直接串联下一个场景");
+        }
         if (active.getResumePlanId() == null) {
             return snapshot;
         }
         GroupReplyPlan resume = requirePlan(conversation, active.getResumePlanId());
-        if (resume.getResumePlanId() != null) {
-            throw new UserRequestException("第一版不支持嵌套战斗回复计划存档");
+        if (!GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())
+                || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                        resume.getSource())) {
+            throw new UserRequestException("战斗回复计划只能恢复探索回复计划");
         }
-        return snapshot.setResumePlan(structuralSnapshot(resume));
+        return snapshot.setResumePlan(captureSceneChain(
+                conversation, resume, new HashSet<>()));
+    }
+
+    private UserWorldSaveSnapshotDTO.ReplyPlanSnapshot captureSceneChain(
+            GroupConversation conversation,
+            GroupReplyPlan plan,
+            Set<Long> visitedPlanIds) {
+        if (!GroupChatConstant.PLAN_SOURCE_SCENE.equals(plan.getSource())) {
+            throw new UserRequestException("场景链只能包含探索回复计划");
+        }
+        if (plan.getResumePlanId() != null) {
+            throw new UserRequestException("不支持嵌套战斗恢复计划");
+        }
+        if (!visitedPlanIds.add(plan.getId())) {
+            throw new UserRequestException("群聊回复计划数据包含循环场景链");
+        }
+        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot =
+                structuralSnapshot(plan);
+        if (plan.getNextPlanId() == null) {
+            return snapshot;
+        }
+        GroupReplyPlan next = requirePlan(
+                conversation, plan.getNextPlanId());
+        return snapshot.setNextPlan(captureSceneChain(
+                conversation, next, visitedPlanIds));
     }
 
     private GroupReplyPlan requirePlan(GroupConversation conversation, Long planId) {
@@ -209,16 +274,28 @@ public class GroupReplyPlanSnapshotService {
                 .in(GroupReplyPlan::getId, planIds));
     }
 
+    private Long insertSceneChain(
+            Long conversationId,
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot) {
+        Long nextPlanId = snapshot.getNextPlan() == null
+                ? null : insertSceneChain(
+                        conversationId, snapshot.getNextPlan());
+        return insertPlan(
+                conversationId, snapshot, null, nextPlanId);
+    }
+
     private Long insertPlan(
             Long conversationId,
             UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot,
-            Long resumePlanId) {
+            Long resumePlanId,
+            Long nextPlanId) {
         LocalDateTime now = LocalDateTime.now();
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setConversationId(conversationId)
                 .setSource(snapshot.getSource().trim().toUpperCase(Locale.ROOT))
                 .setContextId(snapshot.getContextId())
                 .setResumePlanId(resumePlanId)
+                .setNextPlanId(nextPlanId)
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         planMapper.insert(plan);

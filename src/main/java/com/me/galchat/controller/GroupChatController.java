@@ -4,12 +4,16 @@ import com.me.galchat.domain.Result;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.dto.GroupConversationCreateDTO;
 import com.me.galchat.domain.dto.GroupReplyPlanDTO;
+import com.me.galchat.domain.dto.GroupTurnStartDTO;
+import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.service.impl.GroupChatService;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
 import com.me.galchat.service.impl.GroupReplyPlanService;
+import com.me.galchat.service.impl.TrpgContextWindowService;
+import com.me.galchat.service.impl.TrpgTurnExecutionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,6 +37,8 @@ public class GroupChatController {
     private final GroupChatService groupChatService;
     private final GroupChatWithdrawalService withdrawalService;
     private final GroupReplyPlanService replyPlanService;
+    private final TrpgContextWindowService contextWindowService;
+    private final TrpgTurnExecutionService turnExecutionService;
 
     @PostMapping("/conversations")
     public Result createConversation(@RequestBody GroupConversationCreateDTO dto) {
@@ -50,6 +56,12 @@ public class GroupChatController {
         return Result.success(conversationService.get(conversationId));
     }
 
+    @GetMapping("/conversations/{conversationId}/context-window")
+    public Result getContextWindow(@PathVariable Long conversationId) {
+        conversationService.requireAuthorized(conversationId);
+        return Result.success(contextWindowService.get(conversationId));
+    }
+
     @PostMapping("/conversations/{conversationId}/close")
     public Result closeConversation(@PathVariable Long conversationId) {
         return Result.success(lifecycleService.close(conversationId));
@@ -60,6 +72,57 @@ public class GroupChatController {
     public Flux<GroupChatEvent> chat(@PathVariable Long conversationId,
                                      @RequestBody GroupChatRequestDTO request) {
         return groupChatService.chat(conversationId, request);
+    }
+
+    @PostMapping(
+            value = "/conversations/{conversationId}/turns/start",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> startTurn(
+            @PathVariable Long conversationId,
+            @RequestBody GroupTurnStartDTO request) {
+        return turnExecutionService.start(conversationId, request);
+    }
+
+    @GetMapping("/conversations/{conversationId}/turns/current")
+    public Result currentTurn(@PathVariable Long conversationId) {
+        return Result.success(
+                turnExecutionService.current(conversationId));
+    }
+
+    @PostMapping(
+            value = "/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/message",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> submitTurnMessage(
+            @PathVariable Long conversationId,
+            @PathVariable Long turnId,
+            @PathVariable Long stepId,
+            @RequestBody GroupChatRequestDTO request) {
+        return turnExecutionService.submitMessage(
+                conversationId, turnId, stepId, request);
+    }
+
+    @PostMapping(
+            value = "/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/selection",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> submitSceneSelection(
+            @PathVariable Long conversationId,
+            @PathVariable Long turnId,
+            @PathVariable Long stepId,
+            @RequestBody GroupSceneSelectionDTO request) {
+        return turnExecutionService.submitSelection(
+                conversationId, turnId, stepId, request);
+    }
+
+    @PostMapping(
+            value = "/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/end-exploration",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> endExploration(
+            @PathVariable Long conversationId,
+            @PathVariable Long turnId,
+            @PathVariable Long stepId,
+            @RequestBody GroupTurnStartDTO request) {
+        return turnExecutionService.endExploration(
+                conversationId, turnId, stepId, request);
     }
 
     @GetMapping("/conversations/{conversationId}/messages")

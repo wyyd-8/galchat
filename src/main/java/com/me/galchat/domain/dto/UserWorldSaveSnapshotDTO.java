@@ -128,6 +128,7 @@ public class UserWorldSaveSnapshotDTO {
         private Long contextId;
         private List<ReplyPlanGroupSnapshot> groups;
         private ReplyPlanSnapshot resumePlan;
+        private ReplyPlanSnapshot nextPlan;
     }
 
     @Data

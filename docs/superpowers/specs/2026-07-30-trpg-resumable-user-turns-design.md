@@ -2,7 +2,7 @@
 
 ## 1. 文档状态
 
-本文档定义用户调查员融入现有 TRPG `ReplyPlan → Turn → ReplyStep` 体系的目标设计。设计已确认，覆盖选景、探索、战斗、结束探索、场景首次引入、上下文裁剪、失败恢复和前端接口。
+本文档定义用户调查员融入现有 TRPG `ReplyPlan → Turn → ReplyStep` 体系的目标设计。设计已确认，覆盖选景、探索、战斗、结束探索、场景首次引入、调查员 Agent 的 COC 跑团偏好、上下文裁剪、失败恢复和前端接口。
 
 本文档只描述设计，不包含业务代码实现。
 
@@ -470,7 +470,20 @@ KP 引入负责：
 ```text
 角色名
 CharacterTemplate.personality
+CharacterTemplate.cocPlayStyle
 ```
+
+`personality` 描述角色是什么样的人；`cocPlayStyle` 描述该角色作为调查员时通常怎样行动。两者不得互相替代。
+
+`character_template` 增加可空自由文本字段：
+
+```text
+coc_play_style TEXT NULL
+```
+
+该字段保存模板级默认跑团倾向，例如探索分组偏好、风险承受程度、调查/交涉/潜行/战斗倾向，以及是否通常优先覆盖尚未调查的地点。它不是系统规则或强制指令；Agent 必须结合角色性格、当前线索、调查员能力、角色关系和即时危险作出决定。
+
+该字段只提供给 Agent 调查员，不提供给真人用户或 KP。创建、查询和更新角色模板时完整传递该字段；原创世界导出和导入也必须保留它。现有模板字段为空时保持兼容，不输出空的上下文条目。
 
 公共场景消息、已结束场景概要、当前可见事实和已公开检定结果仍按阶段需要加载。这些是跑团事实上下文，不属于被移除的世界系统提示。
 
@@ -478,7 +491,7 @@ CharacterTemplate.personality
 
 选景 Agent 获得：
 
-- 原世界角色名和 `personality`；
+- 原世界角色名、`personality` 和 `cocPlayStyle`；
 - 编号地点选项；
 - 前序调查员选择；
 - 自己的裁剪后调查员卡。
@@ -501,7 +514,7 @@ CharacterTemplate.personality
 
 探索 Agent 使用与选景相同的身份和调查员卡裁剪：
 
-- 原世界角色名和 `personality`；
+- 原世界角色名、`personality` 和 `cocPlayStyle`；
 - 裁剪后调查员卡；
 - 当前公开场景过程；
 - 历史场景概要；
@@ -513,7 +526,7 @@ CharacterTemplate.personality
 
 战斗 Agent 获得：
 
-- 原世界角色名和 `personality`；
+- 原世界角色名、`personality` 和 `cocPlayStyle`；
 - 调查员属性、HP、SAN、幸运和持续状态；
 - `coc_character_skill` 中实际保存的技能；
 - `coc_character_weapon` 中的武器；
@@ -534,6 +547,25 @@ TrpgInvestigatorContextAssembler
 ```
 
 装配器直接读取人物卡、Profile、Skill、Weapon 和 CharacterTemplate 的必要字段，并返回显式、可测试的阶段 DTO/文本。
+
+输出 `cocPlayStyle` 时使用明确标签，并附带一次统一的非强制说明：
+
+```text
+COC跑团偏好：<模板中配置的倾向>
+跑团偏好是行动建议，不是必须遵守的规则；请结合当前情境和角色性格决定行动。
+```
+
+### 10.6 前端角色模板衔接
+
+角色模板创建/编辑窗口增加“COC 跑团偏好”多行文本框：
+
+- 创建时可不填写；
+- 编辑时回显后端的 `cocPlayStyle`；
+- 提交前与 `personality` 一样去除首尾空白；
+- 字段跟随现有角色模板创建和更新接口传输；
+- 普通角色展示和普通聊天不消费该字段。
+
+这项配置属于原世界角色模板，不属于某次跑团生成的 `coc_character`。如果未来需要同一角色在不同跑团中采用不同玩法，可另行增加跑团级覆盖字段；本设计不提前引入覆盖层。
 
 ## 11. 结束探索
 
@@ -726,7 +758,9 @@ turn.planContextId == activePlan.contextId
 
 ### 15.4 上下文裁剪
 
-- 选景和探索 Agent 能看到 CharacterTemplate `personality`。
+- 选景、探索和战斗 Agent 能看到 CharacterTemplate `personality` 与非空 `cocPlayStyle`。
+- `cocPlayStyle` 以推荐倾向注入，不被描述为强制规则。
+- 真人用户和 KP 上下文不注入 `cocPlayStyle`。
 - 选景和探索 Agent 看不到世界系统内容、CharacterTemplate `background`、好感和长期用户信息。
 - 选景和探索卡包含 Profile 背景条目及数据库 Skill。
 - 选景和探索卡不包含 Weapon、equipmentText 或自动展开的标准技能。
@@ -734,14 +768,21 @@ turn.planContextId == activePlan.contextId
 - 战斗卡包含数据库 Skill、Weapon 和 equipmentText。
 - KP 上下文仍包含完整模组和裁定信息。
 
-### 15.5 场景轮次
+### 15.5 角色模板衔接
+
+- 后端角色模板创建、查询和更新不会丢失 `cocPlayStyle`。
+- 前端角色模板表单可创建、回显和更新 COC 跑团偏好。
+- 原创世界导出和重新导入后保留 COC 跑团偏好。
+- 旧数据的 `coc_play_style` 为空时，普通聊天和 TRPG 上下文行为保持兼容。
+
+### 15.6 场景轮次
 
 - 新 SCENE Plan 首轮为 `KP 引入 → 调查员 → KP`。
 - 同一 Plan 后续轮为 `调查员 → KP`。
 - 同一地点的新 Plan 会再次引入。
 - 已完成引入后服务中断不会重复引入。
 
-### 15.6 结束探索
+### 15.7 结束探索
 
 - 用户只能在自己的等待 Step 调用结束接口。
 - Agent 只能在自己的执行 Step 调用结束工具。

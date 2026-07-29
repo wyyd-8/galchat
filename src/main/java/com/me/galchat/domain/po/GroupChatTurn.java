@@ -19,6 +19,7 @@ public class GroupChatTurn implements Serializable {
     private Long conversationId;
     private Long triggerMessageId;
     private String clientRequestId;
+    private Long planId;
     private String planSource;
     private Long planContextId;
     private String status;

@@ -20,7 +20,7 @@ public interface GroupChatTurnMapper extends BaseMapper<GroupChatTurn> {
             FROM group_chat_turn turn_row
             JOIN group_conversation conversation ON conversation.id = turn_row.conversation_id
             WHERE conversation.user_world_id = #{userWorldId}
-              AND turn_row.status IN ('pending', 'running')
+              AND turn_row.status IN ('pending', 'running', 'waiting_input')
             """)
     Long countNonTerminalByUserWorldId(@Param("userWorldId") Long userWorldId);
 
@@ -28,7 +28,7 @@ public interface GroupChatTurnMapper extends BaseMapper<GroupChatTurn> {
             SELECT COUNT(*)
             FROM group_chat_turn
             WHERE conversation_id = #{conversationId}
-              AND status IN ('pending', 'running')
+              AND status IN ('pending', 'running', 'waiting_input')
             """)
     Long countNonTerminalByConversationId(@Param("conversationId") Long conversationId);
 }

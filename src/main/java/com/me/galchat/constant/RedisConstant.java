@@ -16,6 +16,12 @@ public final class RedisConstant {
     public static final String SINGLE_CHAT_LOCK_PREFIX = "chat:single:conversation:lock:";
     public static final String GROUP_CONVERSATION_LOCK_PREFIX = "chat:group:conversation:lock:";
     public static final String GROUP_WORLD_MUTATION_LOCK_PREFIX = "chat:group:world:mutation:lock:";
+    public static final String COC_MODULE_LOCK_PREFIX = "trpg:module:lock:";
+    public static final String TRPG_SCENE_SELECTION_PREFIX = "trpg:group:scene-selection:";
+    public static final String TRPG_SHOWN_MATERIALS_PREFIX = "trpg:group:shown-materials:";
+    public static final String TRPG_CONTEXT_WINDOW_PREFIX = "trpg:group:context-window:";
+    public static final String TRPG_SCENE_PROGRESS_PREFIX = "trpg:group:scene-progress:";
+    public static final String TRPG_RUN_FINISH_PREFIX = "trpg:group:run-finish:";
     public static final String EMAIL_VERIFY_CODE_KEY_PREFIX = "user:email:verify:code:";
     public static final String EMAIL_VERIFY_COOLDOWN_KEY_PREFIX = "user:email:verify:cooldown:";
     public static final String EMAIL_VERIFY_ATTEMPT_KEY_PREFIX = "user:email:verify:attempt:";

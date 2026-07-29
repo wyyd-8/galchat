@@ -8,11 +8,12 @@ import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.groupchat.dice.GroupDiceMessageFormatter;
+import com.me.galchat.groupchat.material.MaterialMessageCodec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.service.IUserCharacterInfoService;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -25,7 +26,6 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-@RequiredArgsConstructor
 public class GroupContextAssembler {
 
     private final GroupChatMessageMapper messageMapper;
@@ -34,6 +34,40 @@ public class GroupContextAssembler {
     private final IUserCharacterInfoService userCharacterInfoService;
     private final GroupToolHistoryAssembler toolHistoryAssembler;
     private final GroupDiceMessageFormatter diceMessageFormatter;
+    private final MaterialMessageCodec materialMessageCodec;
+
+    @Autowired
+    public GroupContextAssembler(
+            GroupChatMessageMapper messageMapper,
+            GroupConversationService conversationService,
+            ChatServiceImpl chatService,
+            IUserCharacterInfoService userCharacterInfoService,
+            GroupToolHistoryAssembler toolHistoryAssembler,
+            GroupDiceMessageFormatter diceMessageFormatter,
+            MaterialMessageCodec materialMessageCodec) {
+        this.messageMapper = messageMapper;
+        this.conversationService = conversationService;
+        this.chatService = chatService;
+        this.userCharacterInfoService = userCharacterInfoService;
+        this.toolHistoryAssembler = toolHistoryAssembler;
+        this.diceMessageFormatter = diceMessageFormatter;
+        this.materialMessageCodec = materialMessageCodec;
+    }
+
+    GroupContextAssembler(
+            GroupChatMessageMapper messageMapper,
+            GroupConversationService conversationService,
+            ChatServiceImpl chatService,
+            IUserCharacterInfoService userCharacterInfoService,
+            GroupToolHistoryAssembler toolHistoryAssembler,
+            GroupDiceMessageFormatter diceMessageFormatter) {
+        this(messageMapper, conversationService, chatService,
+                userCharacterInfoService, toolHistoryAssembler,
+                diceMessageFormatter,
+                new MaterialMessageCodec(
+                        tools.jackson.databind.json.JsonMapper
+                                .builder().build()));
+    }
 
     public List<Message> assembleContext(GroupConversation conversation, GroupActorRef currentActor,
                                          GroupContextSummary summary) {
@@ -65,6 +99,13 @@ public class GroupContextAssembler {
             if (GroupChatConstant.MESSAGE_DICE_ROLL.equals(message.getMessageKind())) {
                 prompt.add(new UserMessage(
                         diceMessageFormatter.format(message.getContent())));
+                continue;
+            }
+            if (GroupChatConstant.MESSAGE_MATERIAL.equals(
+                    message.getMessageKind())) {
+                prompt.add(new UserMessage(
+                        materialMessageCodec.toAgentText(
+                                message.getContent())));
                 continue;
             }
             if (currentActor.matches(message.getSpeakerType(), message.getSpeakerId())) {

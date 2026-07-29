@@ -66,7 +66,9 @@ class GroupModeRuntimeTest {
                 .thenReturn(List.of(new UserMessage("跑团上下文")));
 
         ChatGroupContextPolicy chatPolicy = new ChatGroupContextPolicy(topicService, vectorService, assembler);
-        TrpgGroupContextPolicy trpgPolicy = new TrpgGroupContextPolicy(assembler);
+        TrpgGroupContextPolicy trpgPolicy = new TrpgGroupContextPolicy(
+                assembler,
+                mock(com.me.galchat.service.impl.TrpgModuleContextAssembler.class));
 
         chatPolicy.onTurnStarted(chat, userMessage);
         trpgPolicy.onTurnStarted(trpg, userMessage);
@@ -105,7 +107,15 @@ class GroupModeRuntimeTest {
                 assembler,
                 cardService,
                 new CharacterCardContextFormatter(),
-                mock(KpDiceTools.class)).prepare(
+                mock(KpDiceTools.class),
+                mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.InvestigatorSceneTools.class),
+                mock(com.me.galchat.tool.KpSceneTools.class),
+                mock(com.me.galchat.tool.KpRunTools.class),
+                mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class)).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_TRPG_COMBAT,
                         GroupChatConstant.ACTOR_CHARACTER, 11L, "round:1", "第1轮", 1, 1),

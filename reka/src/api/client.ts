@@ -1,5 +1,5 @@
 import type {
-  ApiResult, Character, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, Conversation, GroupChatEvent, GroupMessage, ReplyPlan,
+  ApiResult, Character, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, Conversation, CurrentTurn, GroupChatEvent, GroupMessage, ReplyPlan,
   Session, UserInfo, UserToken, UserWorld, WorldArchive, WorldArchiveResult, WorldDetail, WorldSave, WorldTemplate,
 } from './types'
 
@@ -109,6 +109,7 @@ export const api = {
   replyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`),
   saveReplyPlan: (id: number, plan: ReplyPlan) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
   finishReplyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),
+  currentTurn: (id: number) => request<CurrentTurn | null>(`/group-chat/conversations/${id}/turns/current`),
 }
 
 export async function streamChat(payload: ChatMessagePayload, onMessage: (message: ChatFlux) => void) {
@@ -149,7 +150,11 @@ export async function uploadImage(file: File) {
 }
 
 export async function streamGroupMessage(id: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) {
-  const response = await raw(`/group-chat/conversations/${id}/messages`, { method: 'POST', body: body(payload), headers: { Accept: 'text/event-stream' } })
+  return streamGroupTurn(`/group-chat/conversations/${id}/messages`, payload, onEvent)
+}
+
+async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: GroupChatEvent) => void) {
+  const response = await raw(path, { method: 'POST', body: body(payload), headers: { Accept: 'text/event-stream' } })
   if (!response.body) return
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
   const consume = (block: string) => {
@@ -164,4 +169,15 @@ export async function streamGroupMessage(id: number, payload: { clientRequestId:
     blocks.forEach(consume)
   }
   buffer += decoder.decode(); if (buffer.trim()) consume(buffer)
+}
+
+export const streamTrpgTurn = {
+  start: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/start`, { clientRequestId }, onEvent),
+  message: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/message`, payload, onEvent),
+  selection: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; optionNo: string }, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/selection`, payload, onEvent),
+  endExploration: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/end-exploration`, { clientRequestId }, onEvent),
 }

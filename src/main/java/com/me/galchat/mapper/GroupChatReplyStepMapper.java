@@ -15,4 +15,16 @@ public interface GroupChatReplyStepMapper extends BaseMapper<GroupChatReplyStep>
             WHERE conversation.user_world_id = #{userWorldId}
             """)
     Long selectMaxIdByUserWorldId(@Param("userWorldId") Long userWorldId);
+
+    @Select("""
+            SELECT COUNT(*)
+            FROM group_chat_reply_step step
+            JOIN group_chat_turn turn_row ON turn_row.id = step.turn_id
+            WHERE turn_row.plan_id = #{planId}
+              AND step.action_type = #{actionType}
+              AND step.status = 'completed'
+            """)
+    Long countCompletedActionByPlanId(
+            @Param("planId") Long planId,
+            @Param("actionType") String actionType);
 }

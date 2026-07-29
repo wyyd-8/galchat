@@ -63,6 +63,7 @@ class WorldArchiveServiceImplTest {
                 .setImage("")
                 .setBackground("经历")
                 .setPersonality("性格")
+                .setCocPlayStyle("谨慎调查并优先保护同伴")
                 .setFavorability(Map.of("友好", "10"))
                 .setInitFavor(0);
 
@@ -81,6 +82,8 @@ class WorldArchiveServiceImplTest {
         assertThat(archive.getCharacters()).singleElement()
                 .satisfies(item -> {
                     assertThat(item.getName()).isEqualTo("角色");
+                    assertThat(item.getCocPlayStyle())
+                            .isEqualTo("谨慎调查并优先保护同伴");
                     assertThat(item.getFavorability()).containsEntry("友好", "10");
                 });
     }
@@ -116,6 +119,7 @@ class WorldArchiveServiceImplTest {
                         .setImage("")
                         .setBackground("经历")
                         .setPersonality("性格")
+                        .setCocPlayStyle("偏好通过交涉获取线索")
                         .setFavorability(Map.of("友好", "10"))
                         .setInitFavor(5)));
 
@@ -133,6 +137,8 @@ class WorldArchiveServiceImplTest {
         assertThat(worldCaptor.getValue().getAuthorId()).isEqualTo(1L);
         assertThat(worldCaptor.getValue().getVisible()).isFalse();
         assertThat(characterCaptor.getValue().getName()).isEqualTo("角色");
+        assertThat(characterCaptor.getValue().getCocPlayStyle())
+                .isEqualTo("偏好通过交涉获取线索");
         assertThat(result.getWorldId()).isEqualTo(200L);
         assertThat(result.getName()).isEqualTo("世界");
         assertThat(result.getDetailCount()).isEqualTo(1);

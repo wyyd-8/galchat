@@ -15,6 +15,7 @@ public interface ICharacterCardService {
     CharacterCardVO getByRunIdAndParticipantId(Long runId, Long participantId);
     DiceRollResultVO rollLuck(Long id);
     CocDiceCharacterVO requireDiceCharacter(Long runId, String characterName);
+    void updateQuickNotes(Long runId, String characterName, String quickNotes);
     List<CocDiceCharacterVO> listDiceCharacters(Long runId);
     CocCharacter lockDiceCharacter(Long runId, Long cardId);
     void updateDiceCharacter(CocCharacter character);

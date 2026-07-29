@@ -15,6 +15,7 @@ import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -44,6 +45,8 @@ public class GroupReplyPlanService {
     private final GroupReplyPlanItemMapper itemMapper;
     private final GroupTurnRecoveryService recoveryService;
     private final TransactionTemplate transactionTemplate;
+    @Autowired
+    private TrpgParticipantService participantService;
 
     public GroupReplyPlanVO getActive(Long conversationId) {
         GroupConversation conversation = conversationService.requireAuthorized(conversationId);
@@ -92,6 +95,19 @@ public class GroupReplyPlanService {
         } finally {
             lockService.unlock(lock);
         }
+    }
+
+    /** Caller must hold the conversation lock and complete the current turn first. */
+    public GroupReplyPlanVO finishActiveUnderLock(
+            GroupConversation conversation) {
+        if (conversation == null || conversation.getId() == null) {
+            throw new UserRequestException("群聊会话不能为空");
+        }
+        return transactionTemplate.execute(status -> {
+            GroupReplyPlan active = activePlan(conversation);
+            return active == null ? null : finishLocked(
+                    conversation, active);
+        });
     }
 
     /** Caller must hold the conversation lock. */
@@ -207,19 +223,53 @@ public class GroupReplyPlanService {
     }
 
     private GroupReplyPlanVO finishLocked(GroupConversation conversation, GroupReplyPlan active) {
+        GroupReplyPlan resumePlan = null;
+        GroupReplyPlan nextPlan = null;
+        if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
+                active.getSource())
+                && active.getResumePlanId() != null) {
+            resumePlan = planMapper.selectById(
+                    active.getResumePlanId());
+            if (resumePlan == null
+                    || !java.util.Objects.equals(
+                            resumePlan.getConversationId(),
+                            conversation.getId())
+                    || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                            resumePlan.getSource())) {
+                throw new UserRequestException(
+                        "战斗恢复回复计划数据不完整");
+            }
+        }
+        if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                active.getSource())
+                && active.getNextPlanId() != null) {
+            nextPlan = planMapper.selectById(
+                    active.getNextPlanId());
+            if (nextPlan == null
+                    || !java.util.Objects.equals(
+                            nextPlan.getConversationId(),
+                            conversation.getId())
+                    || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                            nextPlan.getSource())) {
+                throw new UserRequestException(
+                        "下一场景回复计划数据不完整");
+            }
+        }
         itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
                 .eq(GroupReplyPlanItem::getPlanId, active.getId()));
         planMapper.deleteById(active.getId());
         if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())) {
-            Long resumePlanId = active.getResumePlanId();
+            Long resumePlanId = resumePlan == null
+                    ? null : resumePlan.getId();
             conversation.setActiveReplyPlanId(resumePlanId).setUpdatedAt(LocalDateTime.now());
             conversationMapper.updateById(conversation);
-            return resumePlanId == null ? null : toVO(planMapper.selectById(resumePlanId));
+            return resumePlan == null ? null : toVO(resumePlan);
         }
         if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(active.getSource())) {
-            conversation.setActiveReplyPlanId(null).setUpdatedAt(LocalDateTime.now());
+            conversation.setActiveReplyPlanId(nextPlan == null ? null : nextPlan.getId())
+                    .setUpdatedAt(LocalDateTime.now());
             conversationMapper.updateById(conversation);
-            return null;
+            return nextPlan == null ? null : toVO(nextPlan);
         }
         return toVO(createDefaultPlan(conversation));
     }
@@ -304,7 +354,7 @@ public class GroupReplyPlanService {
                     first.getGroupOrder(), voItems);
         }).toList();
         return new GroupReplyPlanVO(plan.getId(), plan.getSource(), plan.getContextId(),
-                plan.getResumePlanId(), groups);
+                plan.getNextPlanId(), plan.getResumePlanId(), groups);
     }
 
     private List<GroupReplyPlanItem> orderedItems(Long planId) {
@@ -375,8 +425,29 @@ public class GroupReplyPlanService {
                     }
                     conversationService.checkReplyMember(
                             conversation.getId(), actorType, item.getActorId(), false);
+                } else if (GroupChatConstant.ACTOR_USER.equals(actorType)) {
+                    if (!GroupChatConstant.MODE_TRPG.equals(
+                            conversation.getMode())
+                            || item.getActorId() == null) {
+                        throw new UserRequestException(
+                                "用户调查员只能用于TRPG且actorId不能为空");
+                    }
+                    boolean exists = participantService
+                            .listInvestigators(conversation)
+                            .stream()
+                            .anyMatch(participant ->
+                                    GroupChatConstant.ACTOR_USER.equals(
+                                            participant.actor().type())
+                                            && java.util.Objects.equals(
+                                            participant.actor().id(),
+                                            item.getActorId()));
+                    if (!exists) {
+                        throw new UserRequestException(
+                                "用户调查员人物卡不存在");
+                    }
                 } else {
-                    throw new UserRequestException("回复人物类型仅支持character或kp");
+                    throw new UserRequestException(
+                            "回复人物类型仅支持user、character或kp");
                 }
             }
         }

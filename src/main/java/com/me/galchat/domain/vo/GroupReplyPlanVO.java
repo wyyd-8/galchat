@@ -11,6 +11,7 @@ public class GroupReplyPlanVO {
     private Long id;
     private String source;
     private Long contextId;
+    private Long nextPlanId;
     private Long resumePlanId;
     private List<Group> groups;
 

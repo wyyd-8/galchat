@@ -13,6 +13,7 @@ public class GroupConversationVO {
     private Long id;
     private Long userWorldId;
     private Long worldId;
+    private Long moduleId;
     private Long activeReplyPlanId;
     private String mode;
     private String title;
@@ -30,6 +31,7 @@ public class GroupConversationVO {
                 .setId(conversation.getId())
                 .setUserWorldId(conversation.getUserWorldId())
                 .setWorldId(conversation.getWorldId())
+                .setModuleId(conversation.getModuleId())
                 .setActiveReplyPlanId(conversation.getActiveReplyPlanId())
                 .setMode(conversation.getMode())
                 .setTitle(conversation.getTitle())

@@ -17,6 +17,7 @@ import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.CocModuleMapper;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +48,8 @@ public class GroupConversationService {
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IUserCharacterInfoService userCharacterInfoService;
     private final GroupConversationLockService lockService;
+    private final CocModuleMapper moduleMapper;
+    private final CocModuleLockService moduleLockService;
 
     @Transactional(rollbackFor = Exception.class)
     public GroupConversation create(GroupConversationCreateDTO dto) {
@@ -58,15 +61,37 @@ public class GroupConversationService {
         if (!GroupChatConstant.MODE_CHAT.equals(mode) && !GroupChatConstant.MODE_TRPG.equals(mode)) {
             throw new UserRequestException("群聊模式仅支持chat或trpg");
         }
+        if (GroupChatConstant.MODE_TRPG.equals(mode) && dto.getModuleId() == null) {
+            throw new UserRequestException("TRPG群聊必须绑定模组");
+        }
+        if (GroupChatConstant.MODE_CHAT.equals(mode)
+                && dto.getModuleId() != null) {
+            throw new UserRequestException("只有TRPG群聊可以绑定模组");
+        }
         UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(dto.getUserWorldId(), true);
         GroupConversationLockService.OwnedLock worldLock = lockService.tryWorldLock(dto.getUserWorldId());
         if (worldLock == null) {
             throw new UserRequestException("当前世界正在存档或读档，请稍后再创建群聊");
         }
         boolean unlockAfterTransaction = registerUnlockAfterTransaction(worldLock);
+        CocModuleLockService.OwnedLock moduleLock = null;
+        boolean unlockModuleAfterTransaction = false;
         try {
-            return createConversation(userWorld, mode, dto.getTitle(), dto.getCharacterIds());
+            if (GroupChatConstant.MODE_TRPG.equals(mode)) {
+                moduleLock = moduleLockService.tryReadLock(dto.getModuleId());
+                if (moduleLock == null) {
+                    throw new UserRequestException("当前模组正在删除，请稍后再创建跑团");
+                }
+                unlockModuleAfterTransaction = registerUnlockAfterTransaction(moduleLock);
+                if (moduleMapper.selectById(dto.getModuleId()) == null) {
+                    throw new UserRequestException("模组不存在");
+                }
+            }
+            return createConversation(userWorld, mode, dto.getModuleId(), dto.getTitle(), dto.getCharacterIds());
         } finally {
+            if (moduleLock != null && !unlockModuleAfterTransaction) {
+                moduleLockService.unlock(moduleLock);
+            }
             if (!unlockAfterTransaction) {
                 lockService.unlock(worldLock);
             }
@@ -86,7 +111,20 @@ public class GroupConversationService {
         return true;
     }
 
-    private GroupConversation createConversation(UserWorldPrefix userWorld, String mode, String title,
+    private boolean registerUnlockAfterTransaction(CocModuleLockService.OwnedLock moduleLock) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return false;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                moduleLockService.unlock(moduleLock);
+            }
+        });
+        return true;
+    }
+
+    private GroupConversation createConversation(UserWorldPrefix userWorld, String mode, Long moduleId, String title,
                                                  List<Long> characterIds) {
         Long userWorldId = userWorld.getId();
         List<Long> distinctCharacterIds = characterIds == null ? List.of() : characterIds.stream()
@@ -102,6 +140,7 @@ public class GroupConversationService {
         GroupConversation conversation = new GroupConversation()
                 .setUserWorldId(userWorldId)
                 .setWorldId(userWorld.getWorldId())
+                .setModuleId(moduleId)
                 .setMode(mode)
                 .setTitle(StringUtils.hasText(title) ? title.trim() : "群聊")
                 .setStatus(GroupChatConstant.STATUS_ACTIVE)

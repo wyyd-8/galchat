@@ -89,13 +89,20 @@ public class GroupReplyPlanSnapshotService {
                     Long resumePlanId = activeSnapshot.getResumePlan() == null
                             ? null : insertSceneChain(
                                     conversation.getId(),
-                                    activeSnapshot.getResumePlan());
+                                    activeSnapshot.getResumePlan(),
+                                    restoreParentChain(
+                                            conversation.getId(),
+                                            activeSnapshot.getResumePlan()
+                                                    .getParentPlan()));
                     activePlanId = insertPlan(
                             conversation.getId(), activeSnapshot,
-                            resumePlanId, null);
+                            null, resumePlanId, null);
                 } else {
                     activePlanId = insertSceneChain(
-                            conversation.getId(), activeSnapshot);
+                            conversation.getId(), activeSnapshot,
+                            restoreParentChain(
+                                    conversation.getId(),
+                                    activeSnapshot.getParentPlan()));
                 }
             }
 
@@ -142,6 +149,36 @@ public class GroupReplyPlanSnapshotService {
         }
         if (combat && snapshot.getNextPlan() != null) {
             throw new UserRequestException("战斗回复计划不能直接串联下一个场景");
+        }
+        if (snapshot.getParentPlan() != null) {
+            if (!scene
+                    || !GroupChatConstant.PLAN_SOURCE_SCENE
+                    .equalsIgnoreCase(
+                            snapshot.getParentPlan().getSource())) {
+                throw new UserRequestException(
+                        "只有探索回复计划可以从属于父场景");
+            }
+            validatePlanTree(
+                    conversation, snapshot.getParentPlan(), visited);
+        }
+        for (UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot group :
+                safe(snapshot.getGroups())) {
+            if (group == null) {
+                continue;
+            }
+            for (UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot item :
+                    safe(group.getItems())) {
+                if (item != null
+                        && StringUtils.hasText(
+                        item.getParticipantStatus())
+                        && !GroupChatConstant.PARTICIPANT_ACTIVE.equals(
+                        item.getParticipantStatus())
+                        && !GroupChatConstant.PARTICIPANT_WAITING.equals(
+                        item.getParticipantStatus())) {
+                    throw new UserRequestException(
+                            "调查员场景状态只能为ACTIVE或WAITING");
+                }
+            }
         }
     }
 
@@ -217,6 +254,12 @@ public class GroupReplyPlanSnapshotService {
         }
         UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot =
                 structuralSnapshot(plan);
+        if (plan.getParentPlanId() != null) {
+            GroupReplyPlan parent = requirePlan(
+                    conversation, plan.getParentPlanId());
+            snapshot.setParentPlan(captureSceneChain(
+                    conversation, parent, visitedPlanIds));
+        }
         if (plan.getNextPlanId() == null) {
             return snapshot;
         }
@@ -253,7 +296,9 @@ public class GroupReplyPlanSnapshotService {
                                             .setActorType(item.getActorType())
                                             .setActorId(item.getActorId())
                                             .setSubjectCharacterId(
-                                                    item.getSubjectCharacterId()))
+                                                    item.getSubjectCharacterId())
+                                            .setParticipantStatus(
+                                                    item.getParticipantStatus()))
                                     .toList());
                 })
                 .toList();
@@ -280,17 +325,33 @@ public class GroupReplyPlanSnapshotService {
 
     private Long insertSceneChain(
             Long conversationId,
-            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot) {
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot,
+            Long parentPlanId) {
         Long nextPlanId = snapshot.getNextPlan() == null
                 ? null : insertSceneChain(
-                        conversationId, snapshot.getNextPlan());
+                        conversationId, snapshot.getNextPlan(),
+                        parentPlanId);
         return insertPlan(
-                conversationId, snapshot, null, nextPlanId);
+                conversationId, snapshot, parentPlanId,
+                null, nextPlanId);
+    }
+
+    private Long restoreParentChain(
+            Long conversationId,
+            UserWorldSaveSnapshotDTO.ReplyPlanSnapshot parent) {
+        if (parent == null) {
+            return null;
+        }
+        Long parentPlanId = restoreParentChain(
+                conversationId, parent.getParentPlan());
+        return insertSceneChain(
+                conversationId, parent, parentPlanId);
     }
 
     private Long insertPlan(
             Long conversationId,
             UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot,
+            Long parentPlanId,
             Long resumePlanId,
             Long nextPlanId) {
         LocalDateTime now = LocalDateTime.now();
@@ -298,6 +359,7 @@ public class GroupReplyPlanSnapshotService {
                 .setConversationId(conversationId)
                 .setSource(snapshot.getSource().trim().toUpperCase(Locale.ROOT))
                 .setContextId(snapshot.getContextId())
+                .setParentPlanId(parentPlanId)
                 .setResumePlanId(resumePlanId)
                 .setNextPlanId(nextPlanId)
                 .setCreatedAt(now)
@@ -322,6 +384,12 @@ public class GroupReplyPlanSnapshotService {
                         .setActorId(item.getActorId())
                         .setSubjectCharacterId(
                                 item.getSubjectCharacterId())
+                        .setParticipantStatus(
+                                StringUtils.hasText(
+                                        item.getParticipantStatus())
+                                        ? item.getParticipantStatus()
+                                        : GroupChatConstant
+                                        .PARTICIPANT_ACTIVE)
                         .setCreatedAt(now)
                         .setUpdatedAt(now));
             }

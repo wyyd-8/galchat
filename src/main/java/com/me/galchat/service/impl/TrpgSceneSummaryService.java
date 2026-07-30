@@ -1,16 +1,10 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -22,65 +16,80 @@ public class TrpgSceneSummaryService {
 
     private final GroupChatMessageMapper messageMapper;
     private final GroupContextSummaryMapper summaryMapper;
-    private final ChatClient summaryClient;
+    private final TrpgExplorationRecordService recordService;
+    private final TrpgSummaryTextGenerator textGenerator;
 
     public TrpgSceneSummaryService(
             GroupChatMessageMapper messageMapper,
             GroupContextSummaryMapper summaryMapper,
-            @Qualifier("groupNonThinkingChatClient")
-            ChatClient summaryClient) {
+            TrpgExplorationRecordService recordService,
+            TrpgSummaryTextGenerator textGenerator) {
         this.messageMapper = messageMapper;
         this.summaryMapper = summaryMapper;
-        this.summaryClient = summaryClient;
+        this.recordService = recordService;
+        this.textGenerator = textGenerator;
     }
 
     public GroupContextSummary summarize(
-            Long conversationId, Long sceneId) {
-        GroupContextSummary previous = summaryMapper.selectOne(
+            Long conversationId, Long sceneId, Long scenePlanId) {
+        List<GroupChatMessage> planMessages =
+                messageMapper.selectCompletedPublicByPlanId(
+                        conversationId, scenePlanId);
+        if (planMessages == null || planMessages.isEmpty()) {
+            return null;
+        }
+        long startSequence =
+                planMessages.getFirst().getSequenceNo();
+        long endSequence =
+                planMessages.getLast().getSequenceNo();
+        List<GroupContextSummary> previousVersions =
+                summaryMapper.selectList(
                 new LambdaQueryWrapper<GroupContextSummary>()
                         .eq(GroupContextSummary::getConversationId,
                                 conversationId)
-                        .eq(GroupContextSummary::getSceneId, sceneId)
-                        .orderByDesc(GroupContextSummary::getEndSequence)
-                        .last("limit 1"));
-        long afterSequence = previous == null
-                ? 0L : previous.getEndSequence();
-        List<GroupChatMessage> messages = messageMapper.selectList(
-                new LambdaQueryWrapper<GroupChatMessage>()
-                        .eq(GroupChatMessage::getConversationId,
-                                conversationId)
-                        .eq(GroupChatMessage::getSceneId, sceneId)
-                        .gt(GroupChatMessage::getSequenceNo, afterSequence)
-                        .eq(GroupChatMessage::getStatus,
-                                GroupChatConstant.STATUS_COMPLETED)
-                        .eq(GroupChatMessage::getVisibility, "public")
-                        .orderByAsc(GroupChatMessage::getSequenceNo));
-        if (messages.isEmpty()) {
-            return null;
+                        .eq(GroupContextSummary::getScenePlanId,
+                                scenePlanId)
+                        .orderByDesc(GroupContextSummary::getVersion));
+        GroupContextSummary previous =
+                previousVersions == null || previousVersions.isEmpty()
+                        ? null : previousVersions.getFirst();
+        if (previous != null
+                && Long.valueOf(startSequence).equals(
+                previous.getStartSequence())
+                && Long.valueOf(endSequence).equals(
+                previous.getEndSequence())) {
+            return previous;
         }
         StringBuilder history = new StringBuilder();
-        for (GroupChatMessage message : messages) {
-            history.append('[').append(message.getSpeakerType())
-                    .append("] ").append(message.getContent())
-                    .append('\n');
+        for (TrpgExplorationRecordService.Part part :
+                recordService.assemble(
+                        conversationId, startSequence, endSequence)) {
+            if (part.isSummary()) {
+                history.append("[场景摘要 ")
+                        .append(part.summary().getStartSequence())
+                        .append('-')
+                        .append(part.summary().getEndSequence())
+                        .append("] ")
+                        .append(part.summary().getSummary())
+                        .append('\n');
+                continue;
+            }
+            for (GroupChatMessage message : part.messages()) {
+                history.append('[').append(message.getSpeakerType())
+                        .append("] ").append(message.getContent())
+                        .append('\n');
+            }
         }
-        String summary = summaryClient.prompt(new Prompt(List.of(
-                        new SystemMessage("""
-                                你负责总结刚结束的一段COC场景探索。
-                                只记录已发生的重要行动、公开发现、已展示材料、人物状态变化和未解决问题。
-                                不得加入模组隐藏真相或尚未公开的信息，不输出标题和分析过程。
-                                """),
-                        new UserMessage(history.toString()))))
-                .call()
-                .content();
+        String summary = textGenerator.summarize(history.toString());
         if (!StringUtils.hasText(summary)) {
-            summary = "本场景探索已结束。";
+            return null;
         }
         GroupContextSummary result = new GroupContextSummary()
                 .setConversationId(conversationId)
                 .setSceneId(sceneId)
-                .setStartSequence(messages.getFirst().getSequenceNo())
-                .setEndSequence(messages.getLast().getSequenceNo())
+                .setScenePlanId(scenePlanId)
+                .setStartSequence(startSequence)
+                .setEndSequence(endSequence)
                 .setSummary(summary.trim())
                 .setVersion(previous == null
                         ? 1 : (previous.getVersion() == null

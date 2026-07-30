@@ -149,7 +149,7 @@ class TrpgTurnExecutionServiceTest {
     }
 
     @Test
-    void startPausesAtUserStepWithoutExecutingLaterActors() {
+    void firstSceneRoundContainsOnlyTheKpIntroduction() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupConversationLockService lockService =
@@ -231,12 +231,10 @@ class TrpgTurnExecutionServiceTest {
                 .extracting(GroupChatEvent::getEventType)
                 .containsExactly(
                         GroupChatConstant.EVENT_TURN_ACCEPTED,
-                        GroupChatConstant.EVENT_TURN_WAITING_INPUT);
-        verify(groupChatService).streamPersistedStep(
+                        GroupChatConstant.EVENT_TURN_COMPLETED);
+        verify(groupChatService, never()).streamPersistedStep(
                 org.mockito.ArgumentMatchers.eq(conversation),
-                org.mockito.ArgumentMatchers.argThat(turn ->
-                        GroupChatConstant.STATUS_WAITING_INPUT.equals(
-                                turn.getStatus())),
+                any(GroupChatTurn.class),
                 org.mockito.ArgumentMatchers.argThat(step ->
                         GroupChatConstant.ACTOR_CHARACTER.equals(
                                 step.getSpeakerType())));
@@ -268,20 +266,22 @@ class TrpgTurnExecutionServiceTest {
                         31L,
                         GroupChatConstant.PLAN_SOURCE_SCENE,
                         21L,
-                        GroupChatConstant.STATUS_WAITING_INPUT);
+                        GroupChatConstant.STATUS_COMPLETED);
         var stepCaptor = org.mockito.ArgumentCaptor.forClass(
                 GroupChatReplyStep.class);
-        verify(stepMapper, org.mockito.Mockito.times(4))
+        verify(stepMapper)
                 .insert(stepCaptor.capture());
-        assertThat(stepCaptor.getAllValues().get(2))
+        assertThat(stepCaptor.getValue())
                 .extracting(
+                        GroupChatReplyStep::getActionType,
                         GroupChatReplyStep::getSpeakerType,
                         GroupChatReplyStep::getSpeakerId,
                         GroupChatReplyStep::getStatus)
                 .containsExactly(
-                        GroupChatConstant.ACTOR_USER,
-                        101L,
-                        GroupChatConstant.STATUS_WAITING_INPUT);
+                        GroupChatConstant.ACTION_TRPG_SCENE_INTRO,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        GroupChatConstant.STATUS_PENDING);
     }
 
     @Test

@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS group_reply_plan (
     conversation_id BIGINT NOT NULL,
     source VARCHAR(20) NOT NULL,
     context_id BIGINT,
+    parent_plan_id BIGINT,
     resume_plan_id BIGINT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS group_reply_plan_item (
     item_order INT NOT NULL,
     actor_type VARCHAR(50) NOT NULL,
     actor_id BIGINT,
+    participant_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -123,6 +125,7 @@ CREATE TABLE IF NOT EXISTS group_chat_message (
     id BIGSERIAL PRIMARY KEY,
     conversation_id BIGINT NOT NULL,
     scene_id BIGINT,
+    scene_plan_id BIGINT,
     turn_id BIGINT,
     reply_step_id BIGINT,
     speaker_type VARCHAR(50) NOT NULL,
@@ -164,6 +167,9 @@ CREATE TABLE IF NOT EXISTS group_context_summary (
 );
 CREATE INDEX IF NOT EXISTS idx_group_context_summary_conversation
     ON group_context_summary (conversation_id, end_sequence DESC);
+CREATE INDEX IF NOT EXISTS idx_group_context_summary_interval
+    ON group_context_summary (
+        conversation_id, start_sequence, end_sequence);
 
 DROP TABLE IF EXISTS group_chat_thinking;
 DROP TABLE IF EXISTS world_story_event_character;

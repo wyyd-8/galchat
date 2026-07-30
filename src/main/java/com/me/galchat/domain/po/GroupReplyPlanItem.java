@@ -24,6 +24,7 @@ public class GroupReplyPlanItem implements Serializable {
     private String actorType;
     private Long actorId;
     private Long subjectCharacterId;
+    private String participantStatus;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

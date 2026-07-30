@@ -8,7 +8,9 @@ import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupContextPolicy;
 import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.service.impl.TrpgAgentDecisionContextAssembler;
+import com.me.galchat.service.impl.TrpgExplorationContextAssembler;
 import com.me.galchat.service.impl.TrpgModuleContextAssembler;
+import com.me.galchat.service.impl.TrpgSceneRuntimeContextAssembler;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,21 +23,53 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
     private final GroupContextAssembler contextAssembler;
     private final TrpgModuleContextAssembler moduleContextAssembler;
     private final TrpgAgentDecisionContextAssembler decisionContextAssembler;
+    private final TrpgExplorationContextAssembler
+            explorationContextAssembler;
+    private final TrpgSceneRuntimeContextAssembler
+            sceneRuntimeContextAssembler;
 
     public TrpgGroupContextPolicy(
             GroupContextAssembler contextAssembler,
             TrpgModuleContextAssembler moduleContextAssembler) {
-        this(contextAssembler, moduleContextAssembler, null);
+        this(contextAssembler, moduleContextAssembler,
+                null, null, null);
+    }
+
+    public TrpgGroupContextPolicy(
+            GroupContextAssembler contextAssembler,
+            TrpgModuleContextAssembler moduleContextAssembler,
+            TrpgAgentDecisionContextAssembler decisionContextAssembler) {
+        this(contextAssembler, moduleContextAssembler,
+                decisionContextAssembler, null, null);
+    }
+
+    public TrpgGroupContextPolicy(
+            GroupContextAssembler contextAssembler,
+            TrpgModuleContextAssembler moduleContextAssembler,
+            TrpgAgentDecisionContextAssembler decisionContextAssembler,
+            TrpgExplorationContextAssembler
+                    explorationContextAssembler) {
+        this(contextAssembler, moduleContextAssembler,
+                decisionContextAssembler,
+                explorationContextAssembler, null);
     }
 
     @Autowired
     public TrpgGroupContextPolicy(
             GroupContextAssembler contextAssembler,
             TrpgModuleContextAssembler moduleContextAssembler,
-            TrpgAgentDecisionContextAssembler decisionContextAssembler) {
+            TrpgAgentDecisionContextAssembler decisionContextAssembler,
+            TrpgExplorationContextAssembler
+                    explorationContextAssembler,
+            TrpgSceneRuntimeContextAssembler
+                    sceneRuntimeContextAssembler) {
         this.contextAssembler = contextAssembler;
         this.moduleContextAssembler = moduleContextAssembler;
         this.decisionContextAssembler = decisionContextAssembler;
+        this.explorationContextAssembler =
+                explorationContextAssembler;
+        this.sceneRuntimeContextAssembler =
+                sceneRuntimeContextAssembler;
     }
 
     @Override
@@ -52,9 +86,22 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
             if (StringUtils.hasText(moduleContext)) {
                 messages.add(new SystemMessage(moduleContext));
             }
+            if (sceneRuntimeContextAssembler != null
+                    && !GroupChatConstant.ACTION_TRPG_SCENE_SELECTION
+                    .equals(action.actionType())) {
+                String runtimeContext =
+                        sceneRuntimeContextAssembler.format(
+                                conversation, action);
+                if (StringUtils.hasText(runtimeContext)) {
+                    messages.add(new SystemMessage(runtimeContext));
+                }
+            }
         }
-        messages.addAll(contextAssembler.assembleContext(
-                conversation, action.actor(), null));
+        messages.addAll(explorationContextAssembler == null
+                ? contextAssembler.assembleContext(
+                conversation, action.actor(), null)
+                : explorationContextAssembler.assemble(
+                conversation, action.actor()));
         if (usesPrivateDecisionContext(action)
                 && decisionContextAssembler != null) {
             String privateContext =

@@ -6,6 +6,8 @@ import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.service.impl.TrpgModuleContextAssembler;
 import com.me.galchat.service.impl.TrpgAgentDecisionContextAssembler;
+import com.me.galchat.service.impl.TrpgExplorationContextAssembler;
+import com.me.galchat.service.impl.TrpgSceneRuntimeContextAssembler;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -18,6 +20,61 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TrpgGroupContextPolicyTest {
+
+    @Test
+    void trpgContextUsesIntervalCompressedExplorationRecord() {
+        GroupContextAssembler groupAssembler =
+                mock(GroupContextAssembler.class);
+        TrpgExplorationContextAssembler explorationAssembler =
+                mock(TrpgExplorationContextAssembler.class);
+        TrpgGroupContextPolicy policy = new TrpgGroupContextPolicy(
+                groupAssembler,
+                mock(TrpgModuleContextAssembler.class),
+                null,
+                explorationAssembler);
+        GroupConversation conversation =
+                new GroupConversation().setId(7L);
+        GroupActionSpec action = action(
+                GroupChatConstant.ACTOR_CHARACTER, 9L);
+        when(explorationAssembler.assemble(
+                conversation, action.actor())).thenReturn(List.of(
+                new org.springframework.ai.chat.messages.UserMessage(
+                        "<context-summary>阁楼摘要</context-summary>")));
+
+        assertThat(policy.load(conversation, action).messages())
+                .extracting(message -> message.getText())
+                .contains("<context-summary>阁楼摘要</context-summary>");
+        verify(groupAssembler, never()).assembleContext(
+                any(), any(), any());
+    }
+
+    @Test
+    void kpReceivesCurrentSceneAndRoundParticipants() {
+        TrpgSceneRuntimeContextAssembler runtimeAssembler =
+                mock(TrpgSceneRuntimeContextAssembler.class);
+        GroupConversation conversation =
+                new GroupConversation().setId(7L);
+        GroupActionSpec kpAction = action(
+                GroupChatConstant.ACTOR_KP, null);
+        when(runtimeAssembler.format(
+                conversation, kpAction)).thenReturn(
+                "<current-scene-runtime>书房：艾琳</current-scene-runtime>");
+        GroupContextAssembler groupAssembler =
+                mock(GroupContextAssembler.class);
+        when(groupAssembler.assembleContext(
+                any(), any(), any())).thenReturn(List.of());
+        TrpgGroupContextPolicy policy = new TrpgGroupContextPolicy(
+                groupAssembler,
+                mock(TrpgModuleContextAssembler.class),
+                null,
+                null,
+                runtimeAssembler);
+
+        assertThat(policy.load(conversation, kpAction).messages())
+                .extracting(message -> message.getText())
+                .contains(
+                        "<current-scene-runtime>书房：艾琳</current-scene-runtime>");
+    }
 
     @Test
     void onlyKpReceivesPrivateModuleContext() {

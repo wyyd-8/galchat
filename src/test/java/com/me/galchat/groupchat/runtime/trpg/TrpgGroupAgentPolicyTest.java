@@ -12,6 +12,7 @@ import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.tool.KpDiceTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -83,6 +84,62 @@ class TrpgGroupAgentPolicyTest {
                         org.mockito.ArgumentMatchers.eq(7L),
                         org.mockito.ArgumentMatchers.eq(
                                 invocation.prompt().getInstructions()));
+    }
+
+    @Test
+    void kpSceneOffersChildAndResumeToolsOnlyWhenTheirRuntimeConditionsHold() {
+        ICharacterCardService cardService = mock(ICharacterCardService.class);
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
+        var childTools = mock(com.me.galchat.tool.KpChildSceneTools.class);
+        var waitingTools = mock(
+                com.me.galchat.tool.KpWaitingInvestigatorTools.class);
+        var commandService = mock(
+                com.me.galchat.service.impl.TrpgChildSceneCommandService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setWorldId(2L).setUserWorldId(5L);
+        when(commandService.canStartChildScene(conversation))
+                .thenReturn(true);
+        when(commandService.hasWaitingInvestigators(conversation))
+                .thenReturn(true);
+        TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
+                mock(ChatClient.class),
+                mock(GroupContextAssembler.class),
+                cardService,
+                new CharacterCardContextFormatter(),
+                mock(KpDiceTools.class),
+                mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.InvestigatorSceneTools.class),
+                mock(com.me.galchat.tool.KpSceneTools.class),
+                mock(com.me.galchat.tool.KpRunTools.class),
+                mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class));
+        ReflectionTestUtils.setField(
+                policy, "kpChildSceneTools", childTools);
+        ReflectionTestUtils.setField(
+                policy, "kpWaitingInvestigatorTools", waitingTools);
+        ReflectionTestUtils.setField(
+                policy, "childSceneCommandService", commandService);
+
+        var invocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_TRPG_SCENE,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        "scene:1",
+                        "教堂",
+                        1,
+                        1),
+                new GroupContextMaterial(List.of()));
+
+        assertThat(invocation.tools())
+                .contains(childTools, waitingTools);
+        assertThat(invocation.prompt().getInstructions().getLast().getText())
+                .contains("分头行动")
+                .contains("不会加载更多模组信息")
+                .contains("一起行动时应保持在主场景");
     }
 
     @Test

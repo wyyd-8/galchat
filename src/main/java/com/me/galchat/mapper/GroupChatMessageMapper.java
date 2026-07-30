@@ -17,6 +17,21 @@ public interface GroupChatMessageMapper extends BaseMapper<GroupChatMessage> {
             """)
     Long selectMaxIdByUserWorldId(@Param("userWorldId") Long userWorldId);
 
+    @Select("""
+            SELECT message.*
+            FROM group_chat_message message
+            JOIN group_chat_turn turn_row
+              ON turn_row.id = message.turn_id
+            WHERE message.conversation_id = #{conversationId}
+              AND turn_row.plan_id = #{planId}
+              AND message.status = 'completed'
+              AND message.visibility = 'public'
+            ORDER BY message.sequence_no ASC
+            """)
+    List<GroupChatMessage> selectCompletedPublicByPlanId(
+            @Param("conversationId") Long conversationId,
+            @Param("planId") Long planId);
+
     List<GroupChatMessage> selectLatestCompletedByConversationIds(
             @Param("conversationIds") List<Long> conversationIds);
 }

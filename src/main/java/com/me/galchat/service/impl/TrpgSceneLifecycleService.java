@@ -16,6 +16,7 @@ import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -36,6 +37,8 @@ public class TrpgSceneLifecycleService {
     private final TrpgSceneProgressStore progressStore;
     private final TrpgSceneSummaryService summaryService;
     private final GroupReplyPlanService replyPlanService;
+    @Autowired
+    private TrpgChildScenePlanService childScenePlanService;
 
     public List<GroupActionSpec> remainingActions(
             Long conversationId,
@@ -146,8 +149,15 @@ public class TrpgSceneLifecycleService {
                 conversation.getId(), sceneId)) {
             return false;
         }
-        summaryService.summarize(conversation.getId(), sceneId);
-        replyPlanService.finishActiveUnderLock(conversation);
+        summaryService.summarize(
+                conversation.getId(), sceneId, plan.getId());
+        if (plan.getParentPlanId() != null
+                && childScenePlanService != null) {
+            childScenePlanService.finishChildUnderLock(
+                    conversation, plan);
+        } else {
+            replyPlanService.finishActiveUnderLock(conversation);
+        }
         progressStore.clear(conversation.getId(), sceneId);
         return true;
     }

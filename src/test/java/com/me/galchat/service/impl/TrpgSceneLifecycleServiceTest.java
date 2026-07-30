@@ -119,9 +119,57 @@ class TrpgSceneLifecycleServiceTest {
 
         var ordered = org.mockito.Mockito.inOrder(
                 summaryService, replyPlanService, progressStore);
-        ordered.verify(summaryService).summarize(7L, 21L);
+        ordered.verify(summaryService).summarize(7L, 21L, 10L);
         ordered.verify(replyPlanService).finishActiveUnderLock(conversation);
         ordered.verify(progressStore).clear(7L, 21L);
+    }
+
+    @Test
+    void completedChildSceneReturnsItsInvestigatorsToWaitingParent() {
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        TrpgSceneProgressStore progressStore =
+                mock(TrpgSceneProgressStore.class);
+        TrpgSceneSummaryService summaryService =
+                mock(TrpgSceneSummaryService.class);
+        GroupReplyPlanService replyPlanService =
+                mock(GroupReplyPlanService.class);
+        TrpgChildScenePlanService childPlanService =
+                mock(TrpgChildScenePlanService.class);
+        TrpgSceneLifecycleService service =
+                new TrpgSceneLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupChatReplyStepMapper.class),
+                        mock(GroupChatTurnMapper.class),
+                        planMapper,
+                        mock(GroupReplyPlanItemMapper.class),
+                        mock(GroupTurnRecoveryService.class),
+                        progressStore, summaryService,
+                        replyPlanService);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "childScenePlanService", childPlanService);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setActiveReplyPlanId(12L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        GroupReplyPlan child = new GroupReplyPlan().setId(12L)
+                        .setConversationId(7L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setContextId(22L)
+                        .setParentPlanId(10L);
+        when(planMapper.selectById(12L)).thenReturn(child);
+        when(progressStore.isFinishRequested(7L, 22L))
+                .thenReturn(true);
+
+        assertThat(service.finalizeAfterTurn(
+                conversation,
+                GroupChatConstant.PLAN_SOURCE_SCENE)).isTrue();
+
+        var ordered = org.mockito.Mockito.inOrder(
+                summaryService, childPlanService, progressStore);
+        ordered.verify(summaryService).summarize(7L, 22L, 12L);
+        ordered.verify(childPlanService).finishChildUnderLock(
+                conversation, child);
+        ordered.verify(progressStore).clear(7L, 22L);
+        org.mockito.Mockito.verifyNoInteractions(replyPlanService);
     }
 
     private GroupReplyPlanItem item(Long actorId) {

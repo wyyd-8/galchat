@@ -18,6 +18,7 @@ public class GroupContextSummary implements Serializable {
     private Long id;
     private Long conversationId;
     private Long sceneId;
+    private Long scenePlanId;
     private Long startSequence;
     private Long endSequence;
     private String summary;

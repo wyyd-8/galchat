@@ -47,6 +47,22 @@ class GroupTurnPolicyTest {
                         GroupChatConstant.ACTION_COMBAT_ADJUDICATE);
     }
 
+    @Test
+    void trpgSceneOmitsWaitingInvestigatorsFromTheActionRound() {
+        TrpgGroupTurnPolicy policy = new TrpgGroupTurnPolicy();
+        GroupReplyPlanItem active = item(10L, 11L)
+                .setParticipantStatus(GroupChatConstant.PARTICIPANT_ACTIVE);
+        GroupReplyPlanItem waiting = item(20L, 12L)
+                .setParticipantStatus(GroupChatConstant.PARTICIPANT_WAITING);
+
+        assertThat(policy.plan(
+                new GroupConversation().setMode(GroupChatConstant.MODE_TRPG),
+                selection(GroupChatConstant.PLAN_SOURCE_SCENE,
+                        List.of(active, waiting))))
+                .extracting(GroupActionSpec::actorId)
+                .containsExactly(11L);
+    }
+
     private GroupReplyPlanSelection selection(String source, List<GroupReplyPlanItem> items) {
         return new GroupReplyPlanSelection(source, 100L, "default", "群聊", 1, items);
     }

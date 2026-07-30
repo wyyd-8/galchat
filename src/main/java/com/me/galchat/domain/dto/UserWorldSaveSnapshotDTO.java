@@ -132,6 +132,7 @@ public class UserWorldSaveSnapshotDTO {
         private String source;
         private Long contextId;
         private List<ReplyPlanGroupSnapshot> groups;
+        private ReplyPlanSnapshot parentPlan;
         private ReplyPlanSnapshot resumePlan;
         private ReplyPlanSnapshot nextPlan;
     }
@@ -152,5 +153,6 @@ public class UserWorldSaveSnapshotDTO {
         private String actorType;
         private Long actorId;
         private Long subjectCharacterId;
+        private String participantStatus;
     }
 }

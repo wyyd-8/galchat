@@ -120,6 +120,44 @@ class GroupReplyPlanSnapshotServiceTest {
     }
 
     @Test
+    void captureKeepsActiveChildParentAndWaitingParticipantState() {
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        GroupReplyPlanSnapshotService service =
+                new GroupReplyPlanSnapshotService(
+                        conversationMapper, planMapper, itemMapper,
+                        mock(GroupReplyPlanService.class));
+        when(conversationMapper.selectList(any()))
+                .thenReturn(List.of(activeConversation(12L)));
+        when(planMapper.selectById(12L)).thenReturn(
+                plan(12L, GroupChatConstant.PLAN_SOURCE_SCENE,
+                        102L, null).setParentPlanId(10L));
+        when(planMapper.selectById(10L)).thenReturn(
+                plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE,
+                        100L, null));
+        when(itemMapper.selectList(any())).thenReturn(
+                List.of(item(12L, 12L, "scene:102",
+                        "阁楼", 1, 1, 9L)),
+                List.of(item(10L, 10L, "scene:100",
+                        "教堂", 1, 1, 9L)
+                        .setParticipantStatus(
+                                GroupChatConstant.PARTICIPANT_WAITING)));
+
+        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot active =
+                service.capture(1L).getFirst().getActivePlan();
+
+        assertThat(active.getContextId()).isEqualTo(102L);
+        assertThat(active.getParentPlan().getContextId())
+                .isEqualTo(100L);
+        assertThat(active.getParentPlan().getGroups().getFirst()
+                .getItems().getFirst().getParticipantStatus())
+                .isEqualTo(GroupChatConstant.PARTICIPANT_WAITING);
+    }
+
+    @Test
     void restoreCreatesNewResumeIdBeforeActiveIdAndReopensConversation() {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
@@ -206,6 +244,62 @@ class GroupReplyPlanSnapshotServiceTest {
                 .containsExactly(101L, 100L);
         assertThat(insertedPlans.get(1).getNextPlanId())
                 .isEqualTo(insertedPlans.get(0).getId());
+        assertThat(conversation.getActiveReplyPlanId())
+                .isEqualTo(insertedPlans.get(1).getId());
+    }
+
+    @Test
+    void restoreRebuildsParentBeforeActiveChildAndKeepsWaitingState() {
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        GroupReplyPlanSnapshotService service =
+                new GroupReplyPlanSnapshotService(
+                        conversationMapper, planMapper, itemMapper,
+                        mock(GroupReplyPlanService.class));
+        GroupConversation conversation = activeConversation(99L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        when(conversationMapper.selectById(7L))
+                .thenReturn(conversation);
+        when(planMapper.selectList(any())).thenReturn(List.of());
+        AtomicLong ids = new AtomicLong(100L);
+        List<GroupReplyPlan> insertedPlans = new ArrayList<>();
+        List<GroupReplyPlanItem> insertedItems = new ArrayList<>();
+        doAnswer(invocation -> {
+            GroupReplyPlan plan = invocation.getArgument(0);
+            plan.setId(ids.incrementAndGet());
+            insertedPlans.add(plan);
+            return 1;
+        }).when(planMapper).insert(any(GroupReplyPlan.class));
+        doAnswer(invocation -> {
+            insertedItems.add(invocation.getArgument(0));
+            return 1;
+        }).when(itemMapper).insert(any(GroupReplyPlanItem.class));
+        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot parent =
+                planSnapshot(GroupChatConstant.PLAN_SOURCE_SCENE,
+                        100L, "scene:100", "教堂", 9L);
+        parent.getGroups().getFirst().getItems().getFirst()
+                .setParticipantStatus(
+                        GroupChatConstant.PARTICIPANT_WAITING);
+        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot child =
+                planSnapshot(GroupChatConstant.PLAN_SOURCE_SCENE,
+                        102L, "scene:102", "阁楼", 9L)
+                        .setParentPlan(parent);
+
+        service.restore(1L, List.of(
+                new UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot()
+                        .setConversationId(7L)
+                        .setActivePlan(child)));
+
+        assertThat(insertedPlans)
+                .extracting(GroupReplyPlan::getContextId)
+                .containsExactly(100L, 102L);
+        assertThat(insertedPlans.get(1).getParentPlanId())
+                .isEqualTo(insertedPlans.get(0).getId());
+        assertThat(insertedItems.getFirst().getParticipantStatus())
+                .isEqualTo(GroupChatConstant.PARTICIPANT_WAITING);
         assertThat(conversation.getActiveReplyPlanId())
                 .isEqualTo(insertedPlans.get(1).getId());
     }

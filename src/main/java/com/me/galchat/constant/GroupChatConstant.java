@@ -52,6 +52,9 @@ public final class GroupChatConstant {
     public static final String STATUS_WAITING_DICE = "waiting_dice";
     public static final String STATUS_WITHDRAWN = "withdrawn";
 
+    public static final String PARTICIPANT_ACTIVE = "ACTIVE";
+    public static final String PARTICIPANT_WAITING = "WAITING";
+
     public static final String EVENT_TURN_ACCEPTED = "turn.accepted";
     public static final String EVENT_REPLY_STARTED = "reply.started";
     public static final String EVENT_REASONING_DELTA = "reasoning.delta";

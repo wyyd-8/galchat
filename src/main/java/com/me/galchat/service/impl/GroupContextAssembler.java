@@ -82,14 +82,25 @@ public class GroupContextAssembler {
 
     public List<Message> assembleContextFrom(GroupConversation conversation, GroupActorRef currentActor,
                                              long startSequence) {
-        Map<Long, UserCharacterInfo> characterById = characterById(conversation.getUserWorldId());
-        List<Message> prompt = new ArrayList<>();
         List<GroupChatMessage> messages = messageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
                 .eq(GroupChatMessage::getConversationId, conversation.getId())
                 .ge(GroupChatMessage::getSequenceNo, startSequence)
                 .eq(GroupChatMessage::getStatus, GroupChatConstant.STATUS_COMPLETED)
                 .eq(GroupChatMessage::getVisibility, "public")
                 .orderByAsc(GroupChatMessage::getSequenceNo));
+        return assembleMessages(conversation, currentActor, messages);
+    }
+
+    public List<Message> assembleMessages(
+            GroupConversation conversation,
+            GroupActorRef currentActor,
+            List<GroupChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, UserCharacterInfo> characterById =
+                characterById(conversation.getUserWorldId());
+        List<Message> prompt = new ArrayList<>();
         Map<Long, List<Message>> toolMessages =
                 toolHistoryAssembler.beforeMessages(messages, currentActor);
         for (GroupChatMessage message : messages) {

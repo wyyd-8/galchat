@@ -24,6 +24,9 @@ import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Set;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -65,7 +68,7 @@ public class TrpgModuleContextAssembler {
                         .orderByAsc(CocModuleMaterial::getId));
         Set<Long> shownIds = materialStateStore.shownIds(
                 conversation.getId());
-        Long currentLocationId = currentLocationId(conversation);
+        Long mainLocationId = mainLocationId(conversation);
 
         StringBuilder result = new StringBuilder();
         result.append("<module>\n");
@@ -94,15 +97,9 @@ public class TrpgModuleContextAssembler {
         }
         result.append("</clue-title-index>\n");
 
-        if (currentLocationId != null) {
-            locations.stream()
-                    .filter(location -> currentLocationId.equals(location.getId()))
-                    .findFirst()
-                    .ifPresent(location -> result
-                            .append("<current-location name=\"")
-                            .append(escape(location.getName())).append("\">\n")
-                            .append(location.getContent()).append('\n')
-                            .append("</current-location>\n"));
+        if (mainLocationId != null) {
+            appendMainSceneTree(
+                    result, locations, mainLocationId);
         }
 
         result.append("<material-title-index>\n");
@@ -119,7 +116,7 @@ public class TrpgModuleContextAssembler {
         return result.toString();
     }
 
-    private Long currentLocationId(GroupConversation conversation) {
+    private Long mainLocationId(GroupConversation conversation) {
         if (conversation.getActiveReplyPlanId() == null) {
             return null;
         }
@@ -128,16 +125,89 @@ public class TrpgModuleContextAssembler {
         if (active == null) {
             return null;
         }
-        if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(active.getSource())) {
-            return active.getContextId();
-        }
         if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())
                 && active.getResumePlanId() != null) {
-            GroupReplyPlan resume = planMapper.selectById(
+            active = planMapper.selectById(
                     active.getResumePlanId());
-            return resume == null ? null : resume.getContextId();
         }
-        return null;
+        if (active == null
+                || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                active.getSource())) {
+            return null;
+        }
+        Set<Long> visited = new HashSet<>();
+        while (active.getParentPlanId() != null) {
+            if (!visited.add(active.getId())) {
+                throw new UserRequestException("场景计划父链存在循环");
+            }
+            GroupReplyPlan parent = planMapper.selectById(
+                    active.getParentPlanId());
+            if (parent == null
+                    || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                    parent.getSource())) {
+                throw new UserRequestException("父场景计划不存在");
+            }
+            active = parent;
+        }
+        return active.getContextId();
+    }
+
+    private void appendMainSceneTree(
+            StringBuilder result,
+            List<CocModuleLocation> locations,
+            Long rootId) {
+        Map<Long, CocModuleLocation> byId = new HashMap<>();
+        locations.forEach(location ->
+                byId.put(location.getId(), location));
+        CocModuleLocation root = byId.get(rootId);
+        if (root == null) {
+            throw new UserRequestException("主场景地点不存在");
+        }
+        result.append("<module-scene-context>\n");
+        for (CocModuleLocation location : locations) {
+            if (!isDescendantOrSelf(location, rootId, byId)) {
+                continue;
+            }
+            String element = location.getId().equals(rootId)
+                    ? "main-scene" : "subscene";
+            result.append('<').append(element)
+                    .append(" path=\"")
+                    .append(escape(path(location, byId)))
+                    .append("\">\n")
+                    .append(location.getContent()).append('\n')
+                    .append("</").append(element).append(">\n");
+        }
+        result.append("</module-scene-context>\n");
+    }
+
+    private boolean isDescendantOrSelf(
+            CocModuleLocation location,
+            Long rootId,
+            Map<Long, CocModuleLocation> byId) {
+        CocModuleLocation current = location;
+        Set<Long> visited = new HashSet<>();
+        while (current != null && visited.add(current.getId())) {
+            if (rootId.equals(current.getId())) {
+                return true;
+            }
+            current = current.getParentLocationId() == null
+                    ? null : byId.get(current.getParentLocationId());
+        }
+        return false;
+    }
+
+    private String path(
+            CocModuleLocation location,
+            Map<Long, CocModuleLocation> byId) {
+        List<String> names = new java.util.ArrayList<>();
+        CocModuleLocation current = location;
+        Set<Long> visited = new HashSet<>();
+        while (current != null && visited.add(current.getId())) {
+            names.addFirst(current.getName());
+            current = current.getParentLocationId() == null
+                    ? null : byId.get(current.getParentLocationId());
+        }
+        return String.join(" - ", names);
     }
 
     private void appendGlobal(

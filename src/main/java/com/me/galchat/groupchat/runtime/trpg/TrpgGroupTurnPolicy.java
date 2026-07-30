@@ -19,6 +19,8 @@ public class TrpgGroupTurnPolicy implements GroupTurnPolicy {
                 selection.source());
         if (!combat) {
             return selection.items().stream()
+                    .filter(item -> !GroupChatConstant.PARTICIPANT_WAITING
+                            .equals(item.getParticipantStatus()))
                     .map(item -> new GroupActionSpec(
                             GroupChatConstant.ACTION_TRPG_SCENE,
                             item.getActorType(), item.getActorId(),

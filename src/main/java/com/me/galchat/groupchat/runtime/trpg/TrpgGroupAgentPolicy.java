@@ -12,11 +12,14 @@ import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.CharacterCardContextFormatter;
 import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.service.impl.TrpgContextWindowService;
+import com.me.galchat.service.impl.TrpgChildSceneCommandService;
 import com.me.galchat.service.impl.TrpgInvestigatorContextAssembler;
+import com.me.galchat.tool.KpChildSceneTools;
 import com.me.galchat.tool.KpDiceTools;
 import com.me.galchat.tool.InvestigatorSceneTools;
 import com.me.galchat.tool.KpSceneTools;
 import com.me.galchat.tool.KpRunTools;
+import com.me.galchat.tool.KpWaitingInvestigatorTools;
 import com.me.galchat.tool.TrpgSceneSelectionTools;
 import com.me.galchat.tool.KpSceneSelectionTools;
 import com.me.galchat.tool.KpModuleTools;
@@ -53,6 +56,12 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     @Autowired
     private com.me.galchat.service.impl.TrpgCombatLifecycleService
             combatLifecycleService;
+    @Autowired
+    private KpChildSceneTools kpChildSceneTools;
+    @Autowired
+    private KpWaitingInvestigatorTools kpWaitingInvestigatorTools;
+    @Autowired
+    private TrpgChildSceneCommandService childSceneCommandService;
 
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
                                 GroupContextAssembler contextAssembler,
@@ -176,7 +185,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         ? "选择公开上下文中的目标并描述行动；不要在此步骤裁定成败，也不要掷骰。"
                         : "根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。")
                         + (scenePhase
-                        ? "确认当前场景应当结算时可调用finishSceneExploration，调用后仍要输出公开收束消息。"
+                        ? """
+                         确认当前场景应当结算时可调用finishSceneExploration，调用后仍要输出公开收束消息。
+                        子场景仅用于调查员决定分头行动，且目的地在原模组中有实际描述的情况；
+                        子场景不会加载更多模组信息，当前主场景及其全部子项始终已经包含在模组上下文中。
+                        调查员一起行动时应保持在主场景；即使全员进入同一子场景也不会被拒绝，但不推荐这样做。
+                        创建子场景的本次回复须在原有内容基础上明确说明哪些调查员去了哪里。
+                        """
                         : combatAdjudicate
                         ? (combatLifecycleService == null ? ""
                         : combatLifecycleService.adjudicationPrompt(
@@ -210,13 +225,29 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         }
         List<Object> tools;
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
+            List<Object> sceneTools = tools(
+                    kpDiceTools, kpModuleTools, kpSceneTools,
+                    kpRunTools, kpCombatTools);
+            if (scenePhase && childSceneCommandService != null) {
+                List<Object> dynamicTools = new ArrayList<>(sceneTools);
+                if (kpChildSceneTools != null
+                        && childSceneCommandService.canStartChildScene(
+                        conversation)) {
+                    dynamicTools.add(kpChildSceneTools);
+                }
+                if (kpWaitingInvestigatorTools != null
+                        && childSceneCommandService
+                        .hasWaitingInvestigators(conversation)) {
+                    dynamicTools.add(kpWaitingInvestigatorTools);
+                }
+                sceneTools = List.copyOf(dynamicTools);
+            }
             tools = selectionPhase
                     ? List.of(
                             kpSceneSelectionTools,
                             kpModuleTools, kpRunTools)
                     : scenePhase
-                    ? tools(kpDiceTools, kpModuleTools, kpSceneTools,
-                            kpRunTools, kpCombatTools)
+                    ? sceneTools
                     : combatAdjudicate
                     ? tools(kpDiceTools, kpModuleTools, kpRunTools,
                             kpCombatTools)

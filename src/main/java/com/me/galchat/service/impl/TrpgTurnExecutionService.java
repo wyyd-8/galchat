@@ -929,10 +929,7 @@ public class TrpgTurnExecutionService {
                 first == null ? "场景引入" : first.groupName(),
                 first == null ? 1 : first.groupOrder(),
                 0);
-        List<GroupActionSpec> actions = new ArrayList<>();
-        actions.add(intro);
-        actions.addAll(resolved.actions());
-        return List.copyOf(actions);
+        return List.of(intro);
     }
 
     private Flux<GroupChatEvent> waitForUser(

@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
 import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.domain.po.GroupChatMessage;
+import com.me.galchat.domain.po.GroupChatAgentDecision;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTopic;
@@ -110,6 +111,7 @@ public class UserWorldSaveSnapshotDTO {
         private GroupChatTurn turn;
         private List<GroupChatMessage> messages;
         private List<GroupChatReplyStep> replySteps;
+        private List<GroupChatAgentDecision> decisions;
         private List<GroupChatToolCall> toolCalls;
         private List<UserCharacterFavorLog> favorLogs;
     }

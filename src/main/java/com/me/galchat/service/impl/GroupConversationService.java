@@ -50,6 +50,8 @@ public class GroupConversationService {
     private final GroupConversationLockService lockService;
     private final CocModuleMapper moduleMapper;
     private final CocModuleLockService moduleLockService;
+    private final CocModuleCharacterInstantiationService
+            moduleCharacterInstantiationService;
 
     @Transactional(rollbackFor = Exception.class)
     public GroupConversation create(GroupConversationCreateDTO dto) {
@@ -87,7 +89,14 @@ public class GroupConversationService {
                     throw new UserRequestException("模组不存在");
                 }
             }
-            return createConversation(userWorld, mode, dto.getModuleId(), dto.getTitle(), dto.getCharacterIds());
+            GroupConversation conversation = createConversation(
+                    userWorld, mode, dto.getModuleId(),
+                    dto.getTitle(), dto.getCharacterIds());
+            if (GroupChatConstant.MODE_TRPG.equals(mode)) {
+                moduleCharacterInstantiationService.instantiate(
+                        dto.getModuleId(), conversation.getId());
+            }
+            return conversation;
         } finally {
             if (moduleLock != null && !unlockModuleAfterTransaction) {
                 moduleLockService.unlock(moduleLock);

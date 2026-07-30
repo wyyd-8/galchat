@@ -180,4 +180,6 @@ export const streamTrpgTurn = {
     streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/selection`, payload, onEvent),
   endExploration: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
     streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/end-exploration`, { clientRequestId }, onEvent),
+  retry: (id: number, turnId: number, stepId: number, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/retry`, undefined, onEvent),
 }

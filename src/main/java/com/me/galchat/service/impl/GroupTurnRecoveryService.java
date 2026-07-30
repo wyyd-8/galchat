@@ -15,7 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -39,6 +41,25 @@ public class GroupTurnRecoveryService {
         if (turnIds.isEmpty()) {
             return;
         }
+        List<GroupChatReplyStep> interruptedSteps =
+                stepMapper.selectList(
+                        new LambdaQueryWrapper<
+                                GroupChatReplyStep>()
+                                .in(GroupChatReplyStep::getTurnId,
+                                        turnIds)
+                                .eq(GroupChatReplyStep::getStatus,
+                                        GroupChatConstant
+                                                .STATUS_RUNNING));
+        Map<Long, Integer> retryableStepNosByTurn =
+                new LinkedHashMap<>();
+        for (GroupChatReplyStep step : interruptedSteps) {
+            if (isRetryableCharacterStep(step)) {
+                retryableStepNosByTurn.merge(
+                        step.getTurnId(),
+                        step.getStepNo(),
+                        Math::min);
+            }
+        }
         LocalDateTime now = LocalDateTime.now();
         messageMapper.update(
                 new GroupChatMessage()
@@ -55,14 +76,44 @@ public class GroupTurnRecoveryService {
                 new LambdaUpdateWrapper<GroupChatReplyStep>()
                         .in(GroupChatReplyStep::getTurnId, turnIds)
                         .eq(GroupChatReplyStep::getStatus, GroupChatConstant.STATUS_RUNNING));
-        stepMapper.update(
-                new GroupChatReplyStep()
-                        .setStatus(GroupChatConstant.STATUS_CANCELLED)
-                        .setErrorMessage("前序回复未完成")
-                        .setUpdatedAt(now),
-                new LambdaUpdateWrapper<GroupChatReplyStep>()
-                        .in(GroupChatReplyStep::getTurnId, turnIds)
-                        .eq(GroupChatReplyStep::getStatus, GroupChatConstant.STATUS_PENDING));
+        for (Map.Entry<Long, Integer> entry
+                : retryableStepNosByTurn.entrySet()) {
+            stepMapper.update(
+                    new GroupChatReplyStep()
+                            .setStatus(
+                                    GroupChatConstant.STATUS_BLOCKED)
+                            .setErrorMessage("前序回复未完成")
+                            .setUpdatedAt(now),
+                    new LambdaUpdateWrapper<
+                            GroupChatReplyStep>()
+                            .eq(GroupChatReplyStep::getTurnId,
+                                    entry.getKey())
+                            .gt(GroupChatReplyStep::getStepNo,
+                                    entry.getValue())
+                            .eq(GroupChatReplyStep::getStatus,
+                                    GroupChatConstant
+                                            .STATUS_PENDING));
+        }
+        List<Long> ordinaryTurnIds = turnIds.stream()
+                .filter(turnId ->
+                        !retryableStepNosByTurn.containsKey(turnId))
+                .toList();
+        if (!ordinaryTurnIds.isEmpty()) {
+            stepMapper.update(
+                    new GroupChatReplyStep()
+                            .setStatus(
+                                    GroupChatConstant
+                                            .STATUS_CANCELLED)
+                            .setErrorMessage("前序回复未完成")
+                            .setUpdatedAt(now),
+                    new LambdaUpdateWrapper<
+                            GroupChatReplyStep>()
+                            .in(GroupChatReplyStep::getTurnId,
+                                    ordinaryTurnIds)
+                            .eq(GroupChatReplyStep::getStatus,
+                                    GroupChatConstant
+                                            .STATUS_PENDING));
+        }
         turnMapper.update(
                 new GroupChatTurn()
                         .setStatus(GroupChatConstant.STATUS_FAILED)
@@ -84,6 +135,19 @@ public class GroupTurnRecoveryService {
                 new LambdaUpdateWrapper<GroupChatReplyStep>()
                         .eq(GroupChatReplyStep::getTurnId, turnId)
                         .eq(GroupChatReplyStep::getStatus, GroupChatConstant.STATUS_PENDING));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void blockPendingSteps(Long turnId, String reason) {
+        stepMapper.update(
+                new GroupChatReplyStep()
+                        .setStatus(GroupChatConstant.STATUS_BLOCKED)
+                        .setErrorMessage(reason)
+                        .setUpdatedAt(LocalDateTime.now()),
+                new LambdaUpdateWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turnId)
+                        .eq(GroupChatReplyStep::getStatus,
+                                GroupChatConstant.STATUS_PENDING));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -117,5 +181,17 @@ public class GroupTurnRecoveryService {
 
     private boolean positive(Long value) {
         return value != null && value > 0;
+    }
+
+    private boolean isRetryableCharacterStep(
+            GroupChatReplyStep step) {
+        if (!GroupChatConstant.ACTOR_CHARACTER.equals(
+                step.getSpeakerType())) {
+            return false;
+        }
+        return GroupChatConstant.ACTION_TRPG_SCENE.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_COMBAT.equals(
+                step.getActionType());
     }
 }

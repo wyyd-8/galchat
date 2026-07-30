@@ -2,6 +2,7 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.CharacterCardCreateDTO;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
@@ -9,6 +10,7 @@ import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.po.CharacterTemplate;
+import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserInfo;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
@@ -21,6 +23,7 @@ import com.me.galchat.mapper.CocCharacterSkillMapper;
 import com.me.galchat.mapper.CocCharacterWeaponMapper;
 import com.me.galchat.mapper.CocSkillDefMapper;
 import com.me.galchat.mapper.CharacterTemplateMapper;
+import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.UserInfoMapper;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.utils.CurrentHolder;
@@ -48,6 +51,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     private final CocSkillDefMapper skillDefMapper;
     private final CharacterTemplateMapper characterTemplateMapper;
     private final UserInfoMapper userInfoMapper;
+    private final GroupConversationMapper conversationMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -55,6 +59,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         if (createDTO == null || createDTO.getRunId() == null) {
             throw new UserRequestException("runId不能为空");
         }
+        requireTrpgRun(createDTO.getRunId());
         CharacterCardImportParser.ParsedCharacterCard parsed =
                 CharacterCardImportParser.parse(createDTO.getCharacterText());
         validateAndFillSkills(parsed.character(), parsed.skills());
@@ -302,6 +307,17 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     private void requireRunId(Long runId) {
         if (runId == null) {
             throw new UserRequestException("runId不能为空");
+        }
+    }
+
+    private void requireTrpgRun(Long runId) {
+        GroupConversation conversation =
+                conversationMapper.selectById(runId);
+        if (conversation == null
+                || !GroupChatConstant.MODE_TRPG.equals(
+                conversation.getMode())) {
+            throw new UserRequestException(
+                    "runId必须是TRPG群聊id");
         }
     }
 

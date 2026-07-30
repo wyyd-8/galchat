@@ -13,6 +13,7 @@ import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupChatMessageVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.dice.DiceRollMessageCodec;
+import com.me.galchat.groupchat.decision.GroupAgentDecisionStore;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupAgentPolicy;
@@ -44,6 +45,7 @@ import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
+import reactor.core.publisher.Flux;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDateTime;
@@ -64,6 +66,118 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GroupChatServiceTest {
+
+    @Test
+    void trpgCharacterStepSplitsDecisionAndActionFromOneModelStream() {
+        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        ChatClient chatClient = ChatClient.builder(model).build();
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupContextPolicy contextPolicy = mock(GroupContextPolicy.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupAgentDecisionStore decisionStore =
+                mock(GroupAgentDecisionStore.class);
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatService service = new GroupChatService(
+                conversationService,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                runtimeRegistry,
+                messageMapper,
+                mock(GroupChatTurnMapper.class),
+                stepMapper,
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                immediateTransactionTemplate(),
+                diceMessageCodec(),
+                JsonMapper.builder().build(),
+                emptyMaterialFeed(),
+                null,
+                decisionStore);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L).setWorldId(2L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setPlanContextId(21L);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(31L).setTurnId(30L)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(9L)
+                .setGroupKey("scene:21").setGroupName("书房")
+                .setGroupOrder(1).setItemOrder(1)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        GroupActionSpec action = new GroupActionSpec(
+                step.getActionType(), step.getSpeakerType(),
+                step.getSpeakerId(), step.getGroupKey(),
+                step.getGroupName(), step.getGroupOrder(),
+                step.getItemOrder());
+        GroupContextMaterial context =
+                new GroupContextMaterial(List.of());
+        when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        when(runtime.contextPolicy()).thenReturn(contextPolicy);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(contextPolicy.load(conversation, action))
+                .thenReturn(context);
+        when(agentPolicy.prepare(conversation, action, context))
+                .thenReturn(new GroupModelInvocation(
+                        chatClient,
+                        new Prompt(List.of(new UserMessage("行动"))),
+                        List.of()));
+        when(agentPolicy.actorName(
+                5L,
+                new GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L)))
+                .thenReturn("爱丽丝");
+        when(messageMapper.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0)
+                            .setId(40L);
+                    return 1;
+                });
+        when(conversationService.nextSequence(7L)).thenReturn(1L);
+        DeepSeekAssistantMessage output =
+                new DeepSeekAssistantMessage.Builder()
+                        .reasoningContent("原始推理")
+                        .content("<decision>先确认窗边脚印的方向。</decision>"
+                                + "<action>我蹲到窗边检查脚印。</action>")
+                        .build();
+        when(model.stream(any(Prompt.class))).thenReturn(
+                Flux.just(new ChatResponse(
+                        List.of(new Generation(output)))));
+
+        List<GroupChatEvent> events = service.streamPersistedStep(
+                conversation, turn, step).collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_REPLY_STARTED,
+                        GroupChatConstant.EVENT_REASONING_DELTA,
+                        GroupChatConstant.EVENT_DECISION_DELTA,
+                        GroupChatConstant.EVENT_DECISION_COMPLETED,
+                        GroupChatConstant.EVENT_MESSAGE_DELTA,
+                        GroupChatConstant.EVENT_MESSAGE_COMPLETED);
+        verify(decisionStore).save(
+                31L, "先确认窗边脚印的方向。");
+        verify(messageMapper).updateById(
+                org.mockito.ArgumentMatchers.argThat(
+                        (GroupChatMessage message) ->
+                                "我蹲到窗边检查脚印。".equals(
+                                        message.getContent())
+                                        && GroupChatConstant.STATUS_COMPLETED
+                                        .equals(message.getStatus())));
+        verify(model).stream(any(Prompt.class));
+    }
 
     @Test
     void legacyChatEndpointRejectsTrpgConversations() {
@@ -695,6 +809,74 @@ class GroupChatServiceTest {
         assertThat(message.getMessageKind()).isEqualTo(GroupChatConstant.MESSAGE_DICE_ROLL);
         assertThat(message.getContent())
                 .isEqualTo("{\"summaryId\":501,\"roundNos\":[2]}");
+    }
+
+    @Test
+    void historyAttachesStoredDecisionToCharacterAction() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupAgentDecisionStore decisionStore =
+                mock(GroupAgentDecisionStore.class);
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatService service = new GroupChatService(
+                conversationService,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                runtimeRegistry,
+                messageMapper,
+                mock(GroupChatTurnMapper.class),
+                mock(GroupChatReplyStepMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                mock(TransactionTemplate.class),
+                diceMessageCodec(),
+                JsonMapper.builder().build(),
+                emptyMaterialFeed(),
+                null,
+                decisionStore);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(agentPolicy.actorName(
+                null,
+                new GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L)))
+                .thenReturn("爱丽丝");
+        when(messageMapper.selectList(any())).thenReturn(
+                List.of(new GroupChatMessage()
+                        .setId(91L)
+                        .setConversationId(7L)
+                        .setTurnId(31L)
+                        .setReplyStepId(41L)
+                        .setSpeakerType(
+                                GroupChatConstant.ACTOR_CHARACTER)
+                        .setSpeakerId(9L)
+                        .setMessageKind(
+                                GroupChatConstant.MESSAGE_DIALOGUE)
+                        .setContent("我检查窗框。")
+                        .setSequenceNo(4L)
+                        .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                        .setCreatedAt(LocalDateTime.of(
+                                2026, 7, 30, 12, 0))));
+        when(decisionStore.contentByReplyStepIds(List.of(41L)))
+                .thenReturn(java.util.Map.of(
+                        41L, "窗边泥点可能来自外面。"));
+
+        GroupChatMessageVO message =
+                service.listHistory(7L, null, 50).getFirst();
+
+        assertThat(message.getDecisionContent())
+                .isEqualTo("窗边泥点可能来自外面。");
     }
 
     private TransactionTemplate immediateTransactionTemplate() {

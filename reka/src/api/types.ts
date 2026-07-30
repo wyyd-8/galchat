@@ -57,11 +57,11 @@ export interface GroupMessage {
   id: number; conversationId: number; turnId?: number; replyStepId?: number
   speakerType: 'user' | 'character' | 'kp' | 'narrator'; speakerId?: number; speakerName?: string
   messageKind: 'dialogue' | 'narration' | 'system_event' | 'dice_roll' | 'material'; content: string; sequenceNo: number
-  status: string; createdAt?: string
+  decisionContent?: string; status: string; createdAt?: string
 }
 export interface GroupSpeaker { type: string; id?: number; name?: string; avatar?: string }
 export interface GroupChatEvent {
-  eventType: 'turn.accepted' | 'turn.waiting_input' | 'reply.started' | 'reasoning.delta' | 'message.delta' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice'
+  eventType: 'turn.accepted' | 'turn.waiting_input' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
   actionType?: string; groupName?: string; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string
   sceneOptions?: Record<string, string>; autoSelected?: boolean

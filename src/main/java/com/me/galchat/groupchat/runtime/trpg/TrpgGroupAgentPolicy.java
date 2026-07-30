@@ -95,7 +95,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 : GroupChatConstant.ACTION_TRPG_COMBAT.equals(action.actionType())
                 ? "战斗" : "场景探索";
         List<CocDiceCharacterVO> cards = characterCardService.listDiceCharacters(
-                conversation.getUserWorldId());
+                conversation.getId());
         List<Message> messages = new ArrayList<>();
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
             String cardContext = characterCardFormatter.format(cards);
@@ -147,9 +147,14 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "调用后立即结束响应，不要再输出自然语言、地点名或JSON。"));
             } else {
                 messages.add(new UserMessage("现在轮到" + name + "执行当前" + phase
-                        + "行动。只输出该角色的公开言语和行动，不要输出发言者标签。"
+                        + "行动。决策必须先于行动，并严格使用以下格式，标签外不得输出正文：\n"
+                        + "<decision>一个完整自然语言段落，说明重要观察、线索联系、判断和本轮行动意图</decision>\n"
+                        + "<action>该角色公开说出的话和采取的行动，不要输出发言者标签</action>\n"
+                        + "action必须落实decision中的意图，不得重新选择目标；不得宣布未知事实、"
+                        + "决定其他角色或NPC反应，也不得自行声明检定成功。"
                         + (scenePhase
-                        ? "确定不再执行当前场景行动时可调用endSceneExploration。"
+                        ? "确定不再执行当前场景行动时可调用endSceneExploration；"
+                        + "如需调用，必须先完成工具调用，再一次性输出上述decision和action。"
                         : "")));
             }
         }

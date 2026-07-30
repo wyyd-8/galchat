@@ -115,7 +115,7 @@ public class TrpgModuleContextAssembler {
                     .append('\n');
         }
         result.append("</material-title-index>\n");
-        appendQuickNotes(result, conversation.getUserWorldId());
+        appendQuickNotes(result, conversation.getId());
         return result.toString();
     }
 

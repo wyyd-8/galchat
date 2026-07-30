@@ -50,6 +50,47 @@ class GroupTurnRecoveryServiceTest {
     }
 
     @Test
+    void recoveryBlocksTailAfterInterruptedRetryableCharacterStep() {
+        GroupChatTurnMapper turnMapper =
+                mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupTurnRecoveryService service =
+                new GroupTurnRecoveryService(
+                        turnMapper,
+                        stepMapper,
+                        mock(GroupChatMessageMapper.class));
+        when(turnMapper.selectList(any())).thenReturn(List.of(
+                new GroupChatTurn()
+                        .setId(10L)
+                        .setStatus(
+                                GroupChatConstant.STATUS_RUNNING)));
+        when(stepMapper.selectList(any())).thenReturn(List.of(
+                new GroupChatReplyStep()
+                        .setId(12L)
+                        .setTurnId(10L)
+                        .setStepNo(2)
+                        .setActionType(
+                                GroupChatConstant.ACTION_TRPG_SCENE)
+                        .setSpeakerType(
+                                GroupChatConstant.ACTOR_CHARACTER)
+                        .setStatus(
+                                GroupChatConstant.STATUS_RUNNING)));
+
+        service.recoverInterrupted(7L);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(
+                GroupChatReplyStep.class);
+        verify(stepMapper, times(2))
+                .update(captor.capture(), any(Wrapper.class));
+        assertThat(captor.getAllValues())
+                .extracting(GroupChatReplyStep::getStatus)
+                .containsExactly(
+                        GroupChatConstant.STATUS_FAILED,
+                        GroupChatConstant.STATUS_BLOCKED);
+    }
+
+    @Test
     void saveGuardRejectsAnyNonTerminalTurnInWorld() {
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
         GroupTurnRecoveryService service = new GroupTurnRecoveryService(
@@ -59,5 +100,30 @@ class GroupTurnRecoveryServiceTest {
         assertThatThrownBy(() -> service.assertNoNonTerminalTurns(1L))
                 .isInstanceOf(UserRequestException.class)
                 .hasMessageContaining("未完成");
+    }
+
+    @Test
+    void characterDecisionFailureBlocksPendingTail() {
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupTurnRecoveryService service =
+                new GroupTurnRecoveryService(
+                        mock(GroupChatTurnMapper.class),
+                        stepMapper,
+                        mock(GroupChatMessageMapper.class));
+
+        service.blockPendingSteps(10L, "行动输出格式错误");
+
+        var captor = org.mockito.ArgumentCaptor.forClass(
+                GroupChatReplyStep.class);
+        verify(stepMapper).update(
+                captor.capture(), any(Wrapper.class));
+        assertThat(captor.getValue())
+                .extracting(
+                        GroupChatReplyStep::getStatus,
+                        GroupChatReplyStep::getErrorMessage)
+                .containsExactly(
+                        GroupChatConstant.STATUS_BLOCKED,
+                        "行动输出格式错误");
     }
 }

@@ -3,12 +3,14 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.domain.dto.CocModuleCreateDTO;
 import com.me.galchat.domain.po.CocModule;
+import com.me.galchat.domain.po.CocModuleCharacter;
 import com.me.galchat.domain.po.CocModuleClue;
 import com.me.galchat.domain.po.CocModuleContext;
 import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.CocModuleMaterial;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.mapper.CocModuleCharacterMapper;
 import com.me.galchat.mapper.CocModuleClueMapper;
 import com.me.galchat.mapper.CocModuleContextMapper;
 import com.me.galchat.mapper.CocModuleLocationMapper;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
+import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -41,6 +44,7 @@ public class CocModuleService {
     private final CocModuleMaterialMapper materialMapper;
     private final GroupConversationMapper conversationMapper;
     private final CocModuleLockService lockService;
+    private final CocModuleCharacterMapper moduleCharacterMapper;
 
     @Transactional(rollbackFor = Exception.class)
     public CocModule create(CocModuleCreateDTO request) {
@@ -63,6 +67,8 @@ public class CocModuleService {
         insertLocations(module.getId(), safe(request.getLocations()), now);
         insertClues(module.getId(), safe(request.getClues()), now);
         insertMaterials(module.getId(), safe(request.getMaterials()), now);
+        insertCharacters(
+                module.getId(), safe(request.getCharacters()), now);
         return module;
     }
 
@@ -94,6 +100,10 @@ public class CocModuleService {
                     .eq(CocModuleClue::getModuleId, moduleId));
             materialMapper.delete(new LambdaQueryWrapper<CocModuleMaterial>()
                     .eq(CocModuleMaterial::getModuleId, moduleId));
+            moduleCharacterMapper.delete(
+                    new LambdaQueryWrapper<CocModuleCharacter>()
+                            .eq(CocModuleCharacter::getModuleId,
+                                    moduleId));
             moduleMapper.deleteById(moduleId);
         } finally {
             if (!unlockAfterTransaction) {
@@ -232,6 +242,20 @@ public class CocModuleService {
                     .setTitle(source.getTitle().trim())
                     .setDescription(source.getDescription().trim())
                     .setImageUrl(source.getImageUrl().trim())
+                    .setCreatedAt(now)
+                    .setUpdatedAt(now));
+        }
+    }
+
+    private void insertCharacters(
+            Long moduleId,
+            List<JsonNode> characters,
+            LocalDateTime now) {
+        for (int index = 0; index < characters.size(); index++) {
+            moduleCharacterMapper.insert(new CocModuleCharacter()
+                    .setModuleId(moduleId)
+                    .setSortOrder(index)
+                    .setCardData(characters.get(index))
                     .setCreatedAt(now)
                     .setUpdatedAt(now));
         }

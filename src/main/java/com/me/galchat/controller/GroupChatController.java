@@ -83,6 +83,17 @@ public class GroupChatController {
         return turnExecutionService.start(conversationId, request);
     }
 
+    @PostMapping(
+            value = "/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/retry",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> retryTurnStep(
+            @PathVariable Long conversationId,
+            @PathVariable Long turnId,
+            @PathVariable Long stepId) {
+        return turnExecutionService.retry(
+                conversationId, turnId, stepId);
+    }
+
     @GetMapping("/conversations/{conversationId}/turns/current")
     public Result currentTurn(@PathVariable Long conversationId) {
         return Result.success(

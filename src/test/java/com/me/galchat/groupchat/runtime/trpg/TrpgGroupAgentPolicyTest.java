@@ -41,7 +41,7 @@ class TrpgGroupAgentPolicyTest {
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
         when(contextAssembler.baseSystemPrompt(conversation, kp)).thenReturn("仅世界提示词");
-        when(cardService.listDiceCharacters(5L)).thenReturn(List.of(card("林恩", null)));
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of(card("林恩", null)));
 
         TrpgGroupAgentPolicy policy =
                 new TrpgGroupAgentPolicy(
@@ -88,7 +88,7 @@ class TrpgGroupAgentPolicyTest {
     void investigatorSelectionActionReceivesSelectionTool() {
         ICharacterCardService cardService =
                 mock(ICharacterCardService.class);
-        when(cardService.listDiceCharacters(5L)).thenReturn(List.of());
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
         GroupContextAssembler contextAssembler =
                 mock(GroupContextAssembler.class);
         com.me.galchat.service.impl.TrpgInvestigatorContextAssembler
@@ -137,7 +137,9 @@ class TrpgGroupAgentPolicyTest {
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("编号Map")
                 .contains("推荐优先选择不同地点")
-                .contains("selectExplorationScene");
+                .contains("selectExplorationScene")
+                .doesNotContain("<decision>")
+                .doesNotContain("<action>");
         org.mockito.Mockito.verify(
                 contextAssembler, org.mockito.Mockito.never())
                 .baseSystemPrompt(
@@ -149,7 +151,7 @@ class TrpgGroupAgentPolicyTest {
     void kpSelectionActionMustPublishTodaysLocationNames() {
         ICharacterCardService cardService =
                 mock(ICharacterCardService.class);
-        when(cardService.listDiceCharacters(5L)).thenReturn(List.of());
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
         com.me.galchat.tool.KpModuleTools moduleTools =
                 mock(com.me.galchat.tool.KpModuleTools.class);
         com.me.galchat.tool.KpRunTools runTools =
@@ -198,7 +200,7 @@ class TrpgGroupAgentPolicyTest {
     void investigatorSceneActionReceivesOnlySceneLifecycleTool() {
         ICharacterCardService cardService =
                 mock(ICharacterCardService.class);
-        when(cardService.listDiceCharacters(5L)).thenReturn(List.of());
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
         com.me.galchat.tool.InvestigatorSceneTools sceneTools =
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class);
         TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
@@ -231,6 +233,52 @@ class TrpgGroupAgentPolicyTest {
                 new GroupContextMaterial(List.of()));
 
         assertThat(invocation.tools()).containsExactly(sceneTools);
+        assertThat(invocation.prompt().getInstructions().getLast().getText())
+                .contains("<decision>")
+                .contains("</decision>")
+                .contains("<action>")
+                .contains("</action>")
+                .contains("决策必须先于行动");
+    }
+
+    @Test
+    void investigatorCombatActionUsesDecisionActionProtocolWithoutTools() {
+        ICharacterCardService cardService =
+                mock(ICharacterCardService.class);
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
+        TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
+                mock(ChatClient.class),
+                mock(GroupContextAssembler.class),
+                cardService,
+                new CharacterCardContextFormatter(),
+                mock(KpDiceTools.class),
+                mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.InvestigatorSceneTools.class),
+                mock(com.me.galchat.tool.KpSceneTools.class),
+                mock(com.me.galchat.tool.KpRunTools.class),
+                mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setWorldId(2L).setUserWorldId(5L);
+
+        var invocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_TRPG_COMBAT,
+                        GroupChatConstant.ACTOR_CHARACTER,
+                        9L,
+                        "combat:1",
+                        "战斗",
+                        1,
+                        1),
+                new GroupContextMaterial(List.of()));
+
+        assertThat(invocation.tools()).isEmpty();
+        assertThat(invocation.prompt().getInstructions().getLast().getText())
+                .contains("<decision>")
+                .contains("<action>");
     }
 
     private CocDiceCharacterVO card(String name, Long participantId) {

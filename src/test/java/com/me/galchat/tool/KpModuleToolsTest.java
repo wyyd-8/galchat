@@ -44,7 +44,7 @@ class KpModuleToolsTest {
         verify(materialService).showMaterial(
                 7L, 41L, "玛德琳的信");
         verify(characterCardService).updateQuickNotes(
-                5L, "林恩", "已经感染第一阶段");
+                7L, "林恩", "已经感染第一阶段");
         assertThat(KpModuleTools.class.getMethod(
                         "showMaterial", String.class, ToolContext.class)
                 .getAnnotation(Tool.class).returnDirect()).isFalse();

@@ -10,6 +10,7 @@ import com.me.galchat.domain.dto.UserWorldSaveCreateDTO;
 import com.me.galchat.domain.dto.UserWorldSaveSnapshotDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupChatAgentDecision;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
@@ -28,6 +29,7 @@ import com.me.galchat.domain.vo.UserWorldSaveOverviewVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CharacterTemplateMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
+import com.me.galchat.mapper.GroupChatAgentDecisionMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTopicMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
@@ -91,6 +93,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private final WorldEventLogMapper worldEventLogMapper;
     private final GroupConversationMapper groupConversationMapper;
     private final GroupChatMessageMapper groupChatMessageMapper;
+    private final GroupChatAgentDecisionMapper
+            groupChatAgentDecisionMapper;
     private final GroupChatTurnMapper groupChatTurnMapper;
     private final GroupChatReplyStepMapper groupChatReplyStepMapper;
     private final GroupChatToolCallMapper groupChatToolCallMapper;
@@ -253,6 +257,9 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         userWorldSaveRestoreMapper.deleteWorldEventsAfter(userWorldId, safeMax(snapshot.getMaxWorldEventLogId()));
         if (snapshot.getMaxGroupConversationId() != null) {
             userWorldSaveRestoreMapper.deleteGroupToolCallsAfter(userWorldId,
+                    safeMax(snapshot.getMaxGroupReplyStepId()));
+            userWorldSaveRestoreMapper.deleteGroupAgentDecisionsAfter(
+                    userWorldId,
                     safeMax(snapshot.getMaxGroupReplyStepId()));
             userWorldSaveRestoreMapper.deleteGroupReplyStepsAfter(userWorldId,
                     safeMax(snapshot.getMaxGroupReplyStepId()));
@@ -596,7 +603,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 new LambdaQueryWrapper<GroupConversation>()
                         .eq(GroupConversation::getUserWorldId, userWorldId)
                         .eq(GroupConversation::getStatus, GroupChatConstant.STATUS_ACTIVE)
-                        .eq(GroupConversation::getMode, GroupChatConstant.MODE_CHAT)
                         .orderByAsc(GroupConversation::getId));
         return conversations.stream().map(this::recentGroupTurns).toList();
     }
@@ -634,6 +640,17 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                         .eq(GroupChatReplyStep::getTurnId, turn.getId())
                         .orderByAsc(GroupChatReplyStep::getId));
         List<Long> stepIds = steps.stream().map(GroupChatReplyStep::getId).toList();
+        List<GroupChatAgentDecision> decisions =
+                stepIds.isEmpty() ? List.of()
+                        : groupChatAgentDecisionMapper.selectList(
+                                new LambdaQueryWrapper<
+                                        GroupChatAgentDecision>()
+                                        .in(GroupChatAgentDecision
+                                                        ::getReplyStepId,
+                                                stepIds)
+                                        .orderByAsc(
+                                                GroupChatAgentDecision
+                                                        ::getId));
         List<GroupChatToolCall> toolCalls = stepIds.isEmpty() ? List.of()
                 : groupChatToolCallMapper.selectList(new LambdaQueryWrapper<GroupChatToolCall>()
                         .in(GroupChatToolCall::getReplyStepId, stepIds)
@@ -647,6 +664,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .setTurn(turn)
                 .setMessages(messages)
                 .setReplySteps(steps)
+                .setDecisions(decisions)
                 .setToolCalls(toolCalls)
                 .setFavorLogs(favorLogs);
     }
@@ -677,6 +695,12 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .filter(Objects::nonNull)
                 .toList();
         if (!stepIds.isEmpty()) {
+            groupChatAgentDecisionMapper.delete(
+                    new LambdaQueryWrapper<
+                            GroupChatAgentDecision>()
+                            .in(GroupChatAgentDecision
+                                            ::getReplyStepId,
+                                    stepIds));
             groupChatToolCallMapper.delete(new LambdaQueryWrapper<GroupChatToolCall>()
                     .in(GroupChatToolCall::getReplyStepId, stepIds));
             userCharacterFavorLogMapper.delete(new LambdaQueryWrapper<UserCharacterFavorLog>()
@@ -691,6 +715,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
 
         groupChatTurnMapper.insert(turn);
         emptyIfNull(snapshot.getReplySteps()).forEach(groupChatReplyStepMapper::insert);
+        emptyIfNull(snapshot.getDecisions()).forEach(
+                groupChatAgentDecisionMapper::insert);
         emptyIfNull(snapshot.getMessages()).forEach(groupChatMessageMapper::insert);
         emptyIfNull(snapshot.getToolCalls()).forEach(groupChatToolCallMapper::insert);
         emptyIfNull(snapshot.getFavorLogs()).forEach(userCharacterFavorLogMapper::insert);

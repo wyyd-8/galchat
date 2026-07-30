@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronDown, CircleStop, Footprints, GripVertical, LoaderCircle, MessageSquareText, Play, Plus, Save, Send, Trash2, UsersRound } from '@lucide/vue'
+import { ChevronDown, CircleStop, Footprints, GripVertical, LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, Save, Send, Trash2, UsersRound } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
@@ -10,7 +10,7 @@ import type { Character, Conversation, CurrentTurn, GroupMessage, ReplyPlan } fr
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
 const props = defineProps<{ conversation: Conversation; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; sending: boolean; loading: boolean }>()
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; end: [] }>()
+const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
@@ -40,7 +40,9 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
                 <CollapsibleTrigger class="reasoning-trigger">思考过程 <ChevronDown :size="14" /></CollapsibleTrigger>
                 <CollapsibleContent class="reasoning-content">{{ reasoning[message.replyStepId] }}</CollapsibleContent>
               </CollapsibleRoot>
+              <div v-if="message.decisionContent" class="decision-block"><span>角色决策</span><p>{{ message.decisionContent }}</p></div>
               <p>{{ message.content }}<span v-if="message.status === 'streaming'" class="stream-caret" /></p>
+              <button v-if="conversation.mode === 'trpg' && message.speakerType === 'character' && message.status === 'failed'" class="retry-step-button" :disabled="sending" @click="emit('retry', message)"><RefreshCw :size="13" />重试该角色行动</button>
             </div>
           </article>
         </ScrollAreaViewport><ScrollAreaScrollbar orientation="vertical" class="scrollbar"><ScrollAreaThumb class="scrollbar-thumb" /></ScrollAreaScrollbar></ScrollAreaRoot>

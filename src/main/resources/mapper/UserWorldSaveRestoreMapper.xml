@@ -64,6 +64,17 @@
           AND step.id &gt; #{maxGroupReplyStepId}
     </delete>
 
+    <delete id="deleteGroupAgentDecisionsAfter">
+        DELETE FROM group_chat_agent_decision decision
+        USING group_chat_reply_step step, group_chat_turn turn_row,
+              group_conversation conversation
+        WHERE decision.reply_step_id = step.id
+          AND step.turn_id = turn_row.id
+          AND turn_row.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND step.id &gt; #{maxGroupReplyStepId}
+    </delete>
+
     <delete id="deleteGroupReplyStepsAfter">
         DELETE FROM group_chat_reply_step step
         USING group_chat_turn turn_row, group_conversation conversation

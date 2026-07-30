@@ -112,14 +112,13 @@ public class KpDiceTools {
         }
         Long conversationId = TypeConvertUtils.asLong(
                 values.get(ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY));
-        Long runId = TypeConvertUtils.asLong(
-                values.get(ChatToolContextConstant.USER_WORLD_ID_KEY));
         Long replyStepId = TypeConvertUtils.asLong(
                 values.get(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY));
-        if (conversationId == null || runId == null || replyStepId == null) {
+        if (conversationId == null || replyStepId == null) {
             throw new UserRequestException("KP工具缺少群聊、跑团或回复步骤上下文");
         }
-        return new KpExecutionContext(conversationId, runId, replyStepId);
+        return new KpExecutionContext(
+                conversationId, conversationId, replyStepId);
     }
 
     private record KpExecutionContext(

@@ -190,12 +190,25 @@ export function useWorkspace() {
     const step = event.replyStepId
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
-      messages.value.push({ id: tempMessageId--, conversationId: selectedConversationId.value!, turnId: event.turnId, replyStepId: step,
-        speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
-        messageKind: eventMessageKind(event), content: '', sequenceNo: event.sequence || Date.now(), status: 'streaming' })
+      const existing = messages.value.find((item) => item.replyStepId === step)
+      if (existing) {
+        Object.assign(existing, { id: event.messageId || tempMessageId--, turnId: event.turnId,
+          speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
+          messageKind: eventMessageKind(event), content: '', decisionContent: '', sequenceNo: event.sequence || Date.now(), status: 'streaming' })
+      } else {
+        messages.value.push({ id: event.messageId || tempMessageId--, conversationId: selectedConversationId.value!, turnId: event.turnId, replyStepId: step,
+          speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
+          messageKind: eventMessageKind(event), content: '', decisionContent: '', sequenceNo: event.sequence || Date.now(), status: 'streaming' })
+      }
       reasoning[step] = ''
     } else if (event.eventType === 'reasoning.delta' && step) {
       reasoning[step] = (reasoning[step] || '') + (event.delta || '')
+    } else if (event.eventType === 'decision.delta' && step) {
+      const message = messages.value.find((item) => item.replyStepId === step)
+      if (message) message.decisionContent = (message.decisionContent || '') + (event.delta || '')
+    } else if (event.eventType === 'decision.completed' && step) {
+      const message = messages.value.find((item) => item.replyStepId === step)
+      if (message) message.decisionContent = event.content ?? message.decisionContent
     } else if (event.eventType === 'message.delta' && step) {
       const message = messages.value.find((item) => item.replyStepId === step); if (message) message.content += event.delta || ''
     } else if (event.eventType === 'message.completed' && step) {
@@ -238,7 +251,10 @@ export function useWorkspace() {
     try {
       await streamTrpgTurn.start(conversation.id, crypto.randomUUID?.() || `web-${Date.now()}`, applyEvent)
       await syncTrpgState(conversation)
-    } catch (error) { notify('行动轮启动失败', errorMessage(error), 'danger') }
+    } catch (error) {
+      await syncTrpgState(conversation).catch(() => undefined)
+      notify('行动轮启动失败', errorMessage(error), 'danger')
+    }
     finally { loading.sending = false; await scrollToBottom() }
   }
   async function selectSceneOption(optionNo: string) {
@@ -249,7 +265,10 @@ export function useWorkspace() {
       await streamTrpgTurn.selection(conversation.id, turn.turnId, turn.stepId,
         { clientRequestId: crypto.randomUUID?.() || `web-${Date.now()}`, optionNo }, applyEvent)
       await syncTrpgState(conversation)
-    } catch (error) { notify('地点选择失败', errorMessage(error), 'danger') }
+    } catch (error) {
+      await syncTrpgState(conversation).catch(() => undefined)
+      notify('地点选择失败', errorMessage(error), 'danger')
+    }
     finally { loading.sending = false; await scrollToBottom() }
   }
   async function endExploration() {
@@ -260,7 +279,23 @@ export function useWorkspace() {
       await streamTrpgTurn.endExploration(conversation.id, turn.turnId, turn.stepId,
         crypto.randomUUID?.() || `web-${Date.now()}`, applyEvent)
       await syncTrpgState(conversation)
-    } catch (error) { notify('结束探索失败', errorMessage(error), 'danger') }
+    } catch (error) {
+      await syncTrpgState(conversation).catch(() => undefined)
+      notify('结束探索失败', errorMessage(error), 'danger')
+    }
+    finally { loading.sending = false; await scrollToBottom() }
+  }
+  async function retryStep(message: GroupMessage) {
+    const conversation = selectedConversation.value
+    if (!conversation || conversation.mode !== 'trpg' || !message.turnId || !message.replyStepId || loading.sending) return
+    loading.sending = true
+    try {
+      await streamTrpgTurn.retry(conversation.id, message.turnId, message.replyStepId, applyEvent)
+      await syncTrpgState(conversation)
+    } catch (error) {
+      await syncTrpgState(conversation).catch(() => undefined)
+      notify('角色行动重试失败', errorMessage(error), 'danger')
+    }
     finally { loading.sending = false; await scrollToBottom() }
   }
   async function sendMessage() {
@@ -293,8 +328,12 @@ export function useWorkspace() {
         messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo); replyPlan.value = plan
       }
     } catch (error) {
-      messages.value = messages.value.filter((message) => message.id !== optimisticId)
-      if (!messageInput.value) messageInput.value = originalInput
+      if (conversation.mode === 'trpg') {
+        await syncTrpgState(conversation).catch(() => undefined)
+      } else {
+        messages.value = messages.value.filter((message) => message.id !== optimisticId)
+        if (!messageInput.value) messageInput.value = originalInput
+      }
       notify('消息发送失败', errorMessage(error), 'danger')
     }
     finally { loading.sending = false; await scrollToBottom() }
@@ -309,6 +348,6 @@ export function useWorkspace() {
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, endConversation,
-    savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration,
+    savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep,
   }
 }

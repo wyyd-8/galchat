@@ -15,6 +15,7 @@ import com.me.galchat.domain.vo.GroupChatMessageVO;
 import com.me.galchat.domain.vo.DiceRollDetailVO;
 import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.groupchat.decision.GroupAgentDecisionStore;
 import com.me.galchat.groupchat.dice.DiceRollMessageCodec;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
@@ -23,6 +24,7 @@ import com.me.galchat.groupchat.runtime.GroupModeRuntime;
 import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
+import com.me.galchat.groupchat.runtime.trpg.DecisionActionStreamParser;
 import com.me.galchat.groupchat.tool.GroupToolContextFactory;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
@@ -47,6 +49,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
@@ -67,6 +70,7 @@ public class GroupChatService {
     private final ObjectMapper objectMapper;
     private final GroupMaterialMessageFeed materialMessageFeed;
     private final TrpgSceneSelectionService sceneSelectionService;
+    private final GroupAgentDecisionStore decisionStore;
 
     @Autowired
     public GroupChatService(GroupConversationService conversationService,
@@ -84,7 +88,8 @@ public class GroupChatService {
                             ObjectMapper objectMapper,
                             GroupMaterialMessageFeed materialMessageFeed,
                             TrpgSceneSelectionService
-                                    sceneSelectionService) {
+                                    sceneSelectionService,
+                            GroupAgentDecisionStore decisionStore) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.turnPlanResolver = turnPlanResolver;
@@ -100,6 +105,31 @@ public class GroupChatService {
         this.objectMapper = objectMapper;
         this.materialMessageFeed = materialMessageFeed;
         this.sceneSelectionService = sceneSelectionService;
+        this.decisionStore = decisionStore;
+    }
+
+    GroupChatService(
+            GroupConversationService conversationService,
+            GroupConversationLockService lockService,
+            GroupTurnPlanResolver turnPlanResolver,
+            GroupRuntimeRegistry runtimeRegistry,
+            GroupChatMessageMapper messageMapper,
+            GroupChatTurnMapper turnMapper,
+            GroupChatReplyStepMapper stepMapper,
+            GroupTurnRecoveryService recoveryService,
+            GroupToolContextFactory toolContextFactory,
+            IUserWorldPrefixService userWorldPrefixService,
+            TransactionTemplate transactionTemplate,
+            DiceRollMessageCodec diceMessageCodec,
+            ObjectMapper objectMapper,
+            GroupMaterialMessageFeed materialMessageFeed,
+            TrpgSceneSelectionService sceneSelectionService) {
+        this(conversationService, lockService, turnPlanResolver,
+                runtimeRegistry, messageMapper, turnMapper, stepMapper,
+                recoveryService, toolContextFactory,
+                userWorldPrefixService, transactionTemplate,
+                diceMessageCodec, objectMapper, materialMessageFeed,
+                sceneSelectionService, null);
     }
 
     GroupChatService(
@@ -122,7 +152,7 @@ public class GroupChatService {
                 recoveryService, toolContextFactory,
                 userWorldPrefixService, transactionTemplate,
                 diceMessageCodec, objectMapper, materialMessageFeed,
-                null);
+                null, null);
     }
 
     public Flux<GroupChatEvent> chat(Long conversationId, GroupChatRequestDTO request) {
@@ -210,11 +240,20 @@ public class GroupChatService {
         if (messages.isEmpty()) {
             return List.of();
         }
+        List<Long> replyStepIds = messages.stream()
+                .map(GroupChatMessage::getReplyStepId)
+                .filter(id -> id != null)
+                .distinct()
+                .toList();
+        Map<Long, String> decisions = decisionStore == null
+                ? Map.of()
+                : decisionStore.contentByReplyStepIds(replyStepIds);
 
         return messages.stream().map(message -> new GroupChatMessageVO(
                 message.getId(), message.getConversationId(), message.getTurnId(), message.getReplyStepId(),
                 message.getSpeakerType(), message.getSpeakerId(), speakerName(conversation, message),
                 message.getMessageKind(), message.getContent(),
+                decisions.get(message.getReplyStepId()),
                 message.getSequenceNo(), message.getStatus(), message.getCreatedAt())).toList();
     }
 
@@ -296,7 +335,8 @@ public class GroupChatService {
                                              GroupChatTurn turn, PreparedAction preparedAction) {
         GroupActionSpec action = preparedAction.action();
         GroupChatReplyStep step = preparedAction.step();
-        GenerationAccumulator accumulator = new GenerationAccumulator();
+        GenerationAccumulator accumulator = new GenerationAccumulator(
+                usesDecisionActionProtocol(conversation, action));
         FinalizationGuard finalizationGuard = new FinalizationGuard();
         AtomicReference<GroupChatMessage> outputRef = new AtomicReference<>();
         return Flux.defer(() -> {
@@ -338,6 +378,7 @@ public class GroupChatService {
                     .flatMapIterable(response -> toEvents(response, conversation, turn, step, outputMessage,
                             speaker, accumulator));
             Flux<GroupChatEvent> finished = Flux.defer(() -> {
+                accumulator.finishDecisionAction();
                 finalizeCompletedStep(step, outputMessage, accumulator, finalizationGuard);
                 List<GroupChatEvent> events = new ArrayList<>(
                         materialEvents(conversation, turn, step, accumulator));
@@ -601,9 +642,44 @@ public class GroupChatService {
             }
             String content = output.getText();
             if (StringUtils.hasText(content)) {
-                accumulator.content.append(content);
-                events.add(baseEvent(GroupChatConstant.EVENT_MESSAGE_DELTA,
-                        conversation, turn, step, message, speaker).delta(content).build());
+                if (accumulator.decisionActionParser == null) {
+                    accumulator.content.append(content);
+                    events.add(baseEvent(
+                            GroupChatConstant.EVENT_MESSAGE_DELTA,
+                            conversation, turn, step, message, speaker)
+                            .delta(content).build());
+                } else {
+                    DecisionActionStreamParser.Delta delta =
+                            accumulator.decisionActionParser.accept(content);
+                    if (!delta.decision().isEmpty()) {
+                        events.add(baseEvent(
+                                GroupChatConstant.EVENT_DECISION_DELTA,
+                                conversation, turn, step, message,
+                                speaker).delta(delta.decision()).build());
+                    }
+                    if (delta.decisionCompleted()) {
+                        String decision =
+                                accumulator.decisionActionParser
+                                        .decision();
+                        if (decisionStore == null) {
+                            throw new IllegalStateException(
+                                    "角色决策存储器未配置");
+                        }
+                        decisionStore.save(step.getId(), decision);
+                        events.add(baseEvent(
+                                GroupChatConstant
+                                        .EVENT_DECISION_COMPLETED,
+                                conversation, turn, step, message,
+                                speaker).content(decision).build());
+                    }
+                    if (!delta.action().isEmpty()) {
+                        accumulator.content.append(delta.action());
+                        events.add(baseEvent(
+                                GroupChatConstant.EVENT_MESSAGE_DELTA,
+                                conversation, turn, step, message,
+                                speaker).delta(delta.action()).build());
+                    }
+                }
             }
         }
         return events;
@@ -646,6 +722,18 @@ public class GroupChatService {
         return toolName != null
                 && DiceRollConstant.KP_STATE_TOOL_NAMES.contains(toolName)
                 && isDirectTool(generation, toolName);
+    }
+
+    private boolean usesDecisionActionProtocol(
+            GroupConversation conversation, GroupActionSpec action) {
+        return GroupChatConstant.MODE_TRPG.equals(
+                conversation.getMode())
+                && GroupChatConstant.ACTOR_CHARACTER.equals(
+                action.actorType())
+                && (GroupChatConstant.ACTION_TRPG_SCENE.equals(
+                action.actionType())
+                || GroupChatConstant.ACTION_TRPG_COMBAT.equals(
+                action.actionType()));
     }
 
     private boolean isDirectTool(
@@ -724,7 +812,13 @@ public class GroupChatService {
                     }
                     String reason = errorMessage(error);
                     updateStepStatus(step, GroupChatConstant.STATUS_FAILED, reason);
-                    recoveryService.cancelPendingSteps(turn.getId(), reason);
+                    if (accumulator.decisionActionParser != null) {
+                        recoveryService.blockPendingSteps(
+                                turn.getId(), reason);
+                    } else {
+                        recoveryService.cancelPendingSteps(
+                                turn.getId(), reason);
+                    }
                 }));
     }
 
@@ -864,9 +958,22 @@ public class GroupChatService {
     private static class GenerationAccumulator {
         private final StringBuilder content = new StringBuilder();
         private final StringBuilder reasoning = new StringBuilder();
+        private final DecisionActionStreamParser decisionActionParser;
         private KpDiceToolResult diceRoll;
         private TrpgSceneSelectionService.SceneOptionsResult sceneOptions;
         private Long lastMaterialMessageId;
+
+        private GenerationAccumulator(
+                boolean decisionActionProtocol) {
+            this.decisionActionParser = decisionActionProtocol
+                    ? new DecisionActionStreamParser() : null;
+        }
+
+        private void finishDecisionAction() {
+            if (decisionActionParser != null) {
+                decisionActionParser.finish();
+            }
+        }
     }
 
     static final class FinalizationGuard {

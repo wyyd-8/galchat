@@ -74,6 +74,6 @@ class KpDiceToolsTest {
 
         tools.requestSanCheck(request, context);
 
-        verify(orchestration).requestSanCheck(7L, 5L, request);
+        verify(orchestration).requestSanCheck(7L, 7L, request);
     }
 }

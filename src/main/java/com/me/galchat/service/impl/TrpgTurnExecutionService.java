@@ -7,6 +7,7 @@ import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.dto.GroupTurnStartDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.GroupChatEvent;
@@ -16,8 +17,10 @@ import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
 import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
+import com.me.galchat.groupchat.decision.GroupAgentDecisionStore;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
+import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,6 +54,10 @@ public class TrpgTurnExecutionService {
     private TrpgSceneSelectionStore sceneSelectionStore;
     @Autowired
     private TrpgParticipantService participantService;
+    @Autowired
+    private GroupAgentDecisionStore decisionStore;
+    @Autowired
+    private GroupChatToolCallMapper toolCallMapper;
 
     public TrpgTurnExecutionService(
             GroupConversationService conversationService,
@@ -137,6 +144,165 @@ public class TrpgTurnExecutionService {
                 return Flux.error(exception);
             }
         });
+    }
+
+    public Flux<GroupChatEvent> retry(
+            Long conversationId, Long turnId, Long stepId) {
+        return Flux.defer(() -> {
+            conversationService.requireAuthorized(conversationId);
+            GroupConversationLockService.OwnedLock lock =
+                    lockService.tryLock(conversationId);
+            if (lock == null) {
+                return Flux.error(new UserRequestException(
+                        "当前群聊正在执行行动轮，请稍后再试"));
+            }
+            try {
+                GroupConversation conversation =
+                        conversationService.requireActive(
+                                conversationId);
+                requireTrpg(conversation);
+                GroupChatTurn turn = requireFailedTurn(
+                        conversationId, turnId);
+                GroupChatReplyStep failedStep =
+                        requireRetryableStep(turnId, stepId);
+                transactionTemplate.executeWithoutResult(status ->
+                        restoreFailedStep(turn, failedStep));
+                List<GroupChatReplyStep> remaining =
+                        stepMapper.selectList(
+                                new LambdaQueryWrapper<
+                                        GroupChatReplyStep>()
+                                        .eq(GroupChatReplyStep::getTurnId,
+                                                turnId)
+                                        .ge(GroupChatReplyStep::getStepNo,
+                                                failedStep.getStepNo())
+                                        .eq(GroupChatReplyStep::getStatus,
+                                                GroupChatConstant
+                                                        .STATUS_PENDING)
+                                        .orderByAsc(
+                                                GroupChatReplyStep
+                                                        ::getStepNo));
+                int nextUserIndex = firstUserStep(remaining);
+                List<GroupChatReplyStep> executable =
+                        nextUserIndex < 0
+                                ? remaining
+                                : remaining.subList(0, nextUserIndex);
+                Flux<GroupChatEvent> accepted = Flux.just(
+                        GroupChatEvent.builder()
+                                .eventType(GroupChatConstant
+                                        .EVENT_TURN_ACCEPTED)
+                                .conversationId(conversationId)
+                                .turnId(turnId)
+                                .replyStepId(stepId)
+                                .build());
+                Flux<GroupChatEvent> replies =
+                        Flux.fromIterable(executable)
+                                .concatMap(step ->
+                                        groupChatService
+                                                .streamPersistedStep(
+                                                        conversation,
+                                                        turn,
+                                                        step));
+                Flux<GroupChatEvent> tail =
+                        nextUserIndex < 0
+                                ? complete(conversation, turn)
+                                : waitForUser(
+                                        conversation,
+                                        turn,
+                                        remaining.get(nextUserIndex));
+                return Flux.concat(accepted, replies, tail)
+                        .doOnError(error ->
+                                recoveryService.recoverInterrupted(
+                                        conversationId))
+                        .doFinally(signal ->
+                                lockService.unlock(lock));
+            } catch (RuntimeException exception) {
+                lockService.unlock(lock);
+                return Flux.error(exception);
+            }
+        });
+    }
+
+    private GroupChatTurn requireFailedTurn(
+            Long conversationId, Long turnId) {
+        GroupChatTurn turn = turnMapper.selectById(turnId);
+        if (turn == null
+                || !conversationId.equals(
+                        turn.getConversationId())) {
+            throw new UserRequestException("行动轮不存在");
+        }
+        if (!GroupChatConstant.STATUS_FAILED.equals(
+                turn.getStatus())) {
+            throw new UserRequestException(
+                    "只能重试失败的行动轮");
+        }
+        return turn;
+    }
+
+    private GroupChatReplyStep requireRetryableStep(
+            Long turnId, Long stepId) {
+        GroupChatReplyStep step = stepMapper.selectById(stepId);
+        if (step == null
+                || !turnId.equals(step.getTurnId())) {
+            throw new UserRequestException("回复步骤不存在");
+        }
+        if (!GroupChatConstant.STATUS_FAILED.equals(
+                step.getStatus())
+                || !GroupChatConstant.ACTOR_CHARACTER.equals(
+                step.getSpeakerType())
+                || !(GroupChatConstant.ACTION_TRPG_SCENE.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_COMBAT.equals(
+                step.getActionType()))) {
+            throw new UserRequestException(
+                    "只能重试失败的角色行动步骤");
+        }
+        return step;
+    }
+
+    private void restoreFailedStep(
+            GroupChatTurn turn, GroupChatReplyStep failedStep) {
+        if (decisionStore == null || toolCallMapper == null) {
+            throw new IllegalStateException(
+                    "角色行动重试组件未配置");
+        }
+        decisionStore.deleteByReplyStepId(failedStep.getId());
+        toolCallMapper.delete(
+                new LambdaQueryWrapper<GroupChatToolCall>()
+                        .eq(GroupChatToolCall::getReplyStepId,
+                                failedStep.getId()));
+        if (failedStep.getOutputMessageId() != null) {
+            messageMapper.deleteById(
+                    failedStep.getOutputMessageId());
+        }
+        LocalDateTime now = LocalDateTime.now();
+        failedStep.setOutputMessageId(null)
+                .setStatus(GroupChatConstant.STATUS_PENDING)
+                .setErrorMessage(null)
+                .setUpdatedAt(now);
+        stepMapper.updateById(failedStep);
+        List<GroupChatReplyStep> blockedTail =
+                stepMapper.selectList(
+                        new LambdaQueryWrapper<
+                                GroupChatReplyStep>()
+                                .eq(GroupChatReplyStep::getTurnId,
+                                        turn.getId())
+                                .gt(GroupChatReplyStep::getStepNo,
+                                        failedStep.getStepNo())
+                                .eq(GroupChatReplyStep::getStatus,
+                                        GroupChatConstant
+                                                .STATUS_BLOCKED)
+                                .orderByAsc(
+                                        GroupChatReplyStep
+                                                ::getStepNo));
+        for (GroupChatReplyStep blocked : blockedTail) {
+            blocked.setStatus(GroupChatConstant.STATUS_PENDING)
+                    .setErrorMessage(null)
+                    .setUpdatedAt(now);
+            stepMapper.updateById(blocked);
+        }
+        turn.setStatus(GroupChatConstant.STATUS_RUNNING)
+                .setUpdatedAt(now);
+        turnMapper.updateById(turn);
     }
 
     public GroupCurrentTurnVO current(Long conversationId) {

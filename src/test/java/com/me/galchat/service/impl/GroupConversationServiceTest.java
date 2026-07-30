@@ -46,6 +46,8 @@ class GroupConversationServiceTest {
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleLockService moduleLockService = mock(CocModuleLockService.class);
+        CocModuleCharacterInstantiationService moduleCharacterService =
+                mock(CocModuleCharacterInstantiationService.class);
         GroupConversationService service = new GroupConversationService(
                 conversationMapper,
                 memberMapper,
@@ -56,7 +58,8 @@ class GroupConversationServiceTest {
                 characterService,
                 lockService,
                 moduleMapper,
-                moduleLockService);
+                moduleLockService,
+                moduleCharacterService);
         when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
                 new UserWorldPrefix().setId(1L).setWorldId(10L));
         when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
@@ -79,6 +82,7 @@ class GroupConversationServiceTest {
         GroupConversation result = service.create(request);
 
         assertThat(result.getActiveReplyPlanId()).isNull();
+        verify(moduleCharacterService).instantiate(3L, 7L);
         verify(planMapper, never()).insert(any(GroupReplyPlan.class));
         verify(itemMapper, never()).insert(any(GroupReplyPlanItem.class));
         verify(lockService).unlock(any(GroupConversationLockService.OwnedLock.class));
@@ -100,7 +104,8 @@ class GroupConversationServiceTest {
                 characterService,
                 lockService,
                 mock(CocModuleMapper.class),
-                mock(CocModuleLockService.class));
+                mock(CocModuleLockService.class),
+                mock(CocModuleCharacterInstantiationService.class));
         when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
                 new UserWorldPrefix().setId(1L).setWorldId(10L));
         when(lockService.tryWorldLock(1L)).thenReturn(
@@ -132,7 +137,8 @@ class GroupConversationServiceTest {
                 mock(IUserCharacterInfoService.class),
                 mock(GroupConversationLockService.class),
                 mock(CocModuleMapper.class),
-                mock(CocModuleLockService.class));
+                mock(CocModuleLockService.class),
+                mock(CocModuleCharacterInstantiationService.class));
         GroupConversationCreateDTO request =
                 new GroupConversationCreateDTO();
         request.setUserWorldId(1L);
@@ -165,7 +171,8 @@ class GroupConversationServiceTest {
                 characterService,
                 lockService,
                 moduleMapper,
-                moduleLockService);
+                moduleLockService,
+                mock(CocModuleCharacterInstantiationService.class));
         when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
                 new UserWorldPrefix().setId(1L).setWorldId(10L));
         when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
@@ -200,7 +207,8 @@ class GroupConversationServiceTest {
                 mock(IUserCharacterInfoService.class),
                 lockService,
                 mock(CocModuleMapper.class),
-                mock(CocModuleLockService.class));
+                mock(CocModuleLockService.class),
+                mock(CocModuleCharacterInstantiationService.class));
         GroupConversationCreateDTO request = new GroupConversationCreateDTO();
         request.setUserWorldId(1L);
         request.setCharacterIds(List.of(11L));
@@ -226,7 +234,8 @@ class GroupConversationServiceTest {
                 mock(IUserCharacterInfoService.class),
                 lockService,
                 mock(CocModuleMapper.class),
-                mock(CocModuleLockService.class));
+                mock(CocModuleLockService.class),
+                mock(CocModuleCharacterInstantiationService.class));
         GroupConversationCreateDTO request = new GroupConversationCreateDTO();
         request.setUserWorldId(1L);
         request.setCharacterIds(List.of(11L));
@@ -249,7 +258,8 @@ class GroupConversationServiceTest {
                 mock(GroupChatMemberMapper.class), mock(GroupChatMessageMapper.class),
                 mock(GroupReplyPlanMapper.class), mock(GroupReplyPlanItemMapper.class),
                 worldService, characterService, lockService,
-                mock(CocModuleMapper.class), mock(CocModuleLockService.class));
+                mock(CocModuleMapper.class), mock(CocModuleLockService.class),
+                mock(CocModuleCharacterInstantiationService.class));
         when(lockService.tryWorldLock(1L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
@@ -274,7 +284,8 @@ class GroupConversationServiceTest {
                 mock(GroupChatMemberMapper.class), messageMapper, mock(GroupReplyPlanMapper.class),
                 mock(GroupReplyPlanItemMapper.class), worldService, mock(IUserCharacterInfoService.class),
                 mock(GroupConversationLockService.class), mock(CocModuleMapper.class),
-                mock(CocModuleLockService.class));
+                mock(CocModuleLockService.class),
+                mock(CocModuleCharacterInstantiationService.class));
         LocalDateTime messageTime = LocalDateTime.of(2026, 7, 14, 10, 30);
         GroupConversation first = new GroupConversation().setId(2L).setUserWorldId(1L).setTitle("调查");
         GroupConversation second = new GroupConversation().setId(1L).setUserWorldId(1L).setTitle("闲聊");

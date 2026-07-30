@@ -2,15 +2,20 @@ package com.me.galchat.service.impl;
 
 import com.me.galchat.domain.dto.CocModuleCreateDTO;
 import com.me.galchat.domain.po.CocModule;
+import com.me.galchat.domain.po.CocModuleCharacter;
 import com.me.galchat.domain.po.CocModuleLocation;
+import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocModuleClueMapper;
 import com.me.galchat.mapper.CocModuleContextMapper;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.CocModuleMapper;
+import com.me.galchat.mapper.CocModuleCharacterMapper;
 import com.me.galchat.mapper.CocModuleMaterialMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 import org.redisson.api.RLock;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -24,6 +29,51 @@ import static org.mockito.Mockito.when;
 class CocModuleServiceTest {
 
     @Test
+    void createStoresCharacterCardsInInputOrderWithoutBusinessValidation() {
+        CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
+        CocModuleCharacterMapper moduleCharacterMapper =
+                mock(CocModuleCharacterMapper.class);
+        CocModuleService service = new CocModuleService(
+                moduleMapper,
+                mock(CocModuleContextMapper.class),
+                mock(CocModuleLocationMapper.class),
+                mock(CocModuleClueMapper.class),
+                mock(CocModuleMaterialMapper.class),
+                mock(GroupConversationMapper.class),
+                mock(CocModuleLockService.class),
+                moduleCharacterMapper);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ((CocModule) invocation.getArgument(0)).setId(3L);
+            return 1;
+        }).when(moduleMapper).insert(any(CocModule.class));
+        var jsonMapper = JsonMapper.builder().build();
+        var first = jsonMapper.valueToTree(new CharacterCardVO(
+                new CocCharacter().setName("无完整属性的NPC"),
+                null, null, null));
+        var second = jsonMapper.createObjectNode()
+                .put("arbitrary", "不校验或丢弃未知结构");
+        CocModuleCreateDTO request = new CocModuleCreateDTO();
+        request.setName("闹鬼");
+        request.setIntroduction("调查老宅");
+        request.setCharacters(java.util.List.of(first, second));
+
+        service.create(request);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(
+                CocModuleCharacter.class);
+        verify(moduleCharacterMapper,
+                org.mockito.Mockito.times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(
+                        CocModuleCharacter::getModuleId,
+                        CocModuleCharacter::getSortOrder,
+                        CocModuleCharacter::getCardData)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(3L, 0, first),
+                        org.assertj.core.groups.Tuple.tuple(3L, 1, second));
+    }
+
+    @Test
     void createResolvesParentLocationByNameInsideNewModule() {
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleContextMapper contextMapper = mock(CocModuleContextMapper.class);
@@ -31,7 +81,8 @@ class CocModuleServiceTest {
         CocModuleService service = new CocModuleService(
                 moduleMapper, contextMapper, locationMapper,
                 mock(CocModuleClueMapper.class), mock(CocModuleMaterialMapper.class),
-                mock(GroupConversationMapper.class), mock(CocModuleLockService.class));
+                mock(GroupConversationMapper.class), mock(CocModuleLockService.class),
+                mock(CocModuleCharacterMapper.class));
         org.mockito.Mockito.doAnswer(invocation -> {
             ((CocModule) invocation.getArgument(0)).setId(3L);
             return 1;
@@ -80,7 +131,8 @@ class CocModuleServiceTest {
         CocModuleLockService lockService = mock(CocModuleLockService.class);
         CocModuleService service = new CocModuleService(
                 moduleMapper, contextMapper, locationMapper, clueMapper,
-                materialMapper, conversationMapper, lockService);
+                materialMapper, conversationMapper, lockService,
+                mock(CocModuleCharacterMapper.class));
         when(lockService.tryWriteLock(3L)).thenReturn(
                 new CocModuleLockService.OwnedLock(mock(RLock.class), 1L));
         when(moduleMapper.selectById(3L)).thenReturn(new CocModule().setId(3L));

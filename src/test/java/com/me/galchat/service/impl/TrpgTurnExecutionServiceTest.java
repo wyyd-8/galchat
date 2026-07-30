@@ -9,11 +9,13 @@ import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.GroupChatEvent;
+import com.me.galchat.groupchat.decision.GroupAgentDecisionStore;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
 import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
+import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
@@ -33,6 +35,118 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TrpgTurnExecutionServiceTest {
+
+    @Test
+    void retryRerunsFailedCharacterStepAndRestoredBlockedTailOnly() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupTurnPlanResolver planResolver =
+                mock(GroupTurnPlanResolver.class);
+        GroupChatTurnMapper turnMapper =
+                mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupChatService groupChatService =
+                mock(GroupChatService.class);
+        GroupAgentDecisionStore decisionStore =
+                mock(GroupAgentDecisionStore.class);
+        GroupChatToolCallMapper toolCallMapper =
+                mock(GroupChatToolCallMapper.class);
+        TrpgTurnExecutionService service =
+                new TrpgTurnExecutionService(
+                        conversationService,
+                        lockService,
+                        planResolver,
+                        mock(GroupRuntimeRegistry.class),
+                        turnMapper,
+                        stepMapper,
+                        messageMapper,
+                        mock(GroupTurnRecoveryService.class),
+                        groupChatService,
+                        immediateTransactionTemplate());
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "decisionStore", decisionStore);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "toolCallMapper", toolCallMapper);
+        GroupConversation conversation =
+                new GroupConversation()
+                        .setId(7L)
+                        .setMode(GroupChatConstant.MODE_TRPG)
+                        .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L)
+                .setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setStatus(GroupChatConstant.STATUS_FAILED);
+        GroupChatReplyStep completed =
+                new GroupChatReplyStep()
+                        .setId(102L).setTurnId(101L)
+                        .setStepNo(1)
+                        .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        GroupChatReplyStep failed =
+                new GroupChatReplyStep()
+                        .setId(103L).setTurnId(101L)
+                        .setStepNo(2)
+                        .setActionType(
+                                GroupChatConstant.ACTION_TRPG_SCENE)
+                        .setSpeakerType(
+                                GroupChatConstant.ACTOR_CHARACTER)
+                        .setSpeakerId(9L)
+                        .setOutputMessageId(203L)
+                        .setStatus(GroupChatConstant.STATUS_FAILED);
+        GroupChatReplyStep blocked =
+                new GroupChatReplyStep()
+                        .setId(104L).setTurnId(101L)
+                        .setStepNo(3)
+                        .setActionType(
+                                GroupChatConstant.ACTION_TRPG_SCENE)
+                        .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                        .setStatus(GroupChatConstant.STATUS_BLOCKED);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turnMapper.selectById(101L)).thenReturn(turn);
+        when(stepMapper.selectById(103L)).thenReturn(failed);
+        when(stepMapper.selectList(any()))
+                .thenReturn(List.of(failed, blocked));
+        when(groupChatService.streamPersistedStep(
+                conversation, turn, failed))
+                .thenReturn(Flux.empty());
+        when(groupChatService.streamPersistedStep(
+                conversation, turn, blocked))
+                .thenReturn(Flux.empty());
+
+        List<GroupChatEvent> events = service.retry(
+                7L, 101L, 103L).collectList().block();
+
+        assertThat(events)
+                .extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_TURN_ACCEPTED,
+                        GroupChatConstant.EVENT_TURN_COMPLETED);
+        verify(decisionStore).deleteByReplyStepId(103L);
+        verify(messageMapper).deleteById(203L);
+        verify(toolCallMapper).delete(any());
+        verify(groupChatService).streamPersistedStep(
+                conversation, turn, failed);
+        verify(groupChatService).streamPersistedStep(
+                conversation, turn, blocked);
+        verify(groupChatService, never()).streamPersistedStep(
+                conversation, turn, completed);
+        assertThat(failed.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_PENDING);
+        assertThat(failed.getOutputMessageId()).isNull();
+        assertThat(blocked.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_PENDING);
+    }
 
     @Test
     void startPausesAtUserStepWithoutExecutingLaterActors() {

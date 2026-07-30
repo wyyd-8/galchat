@@ -21,7 +21,8 @@
 - 不校验模组人物卡的属性范围、必填字段、技能点、技能名称、武器规则或 profile 内容。
 - 不设计 NPC 在战斗、探索、群聊成员或 Agent 回复计划中的用途。
 - 不增加模组人物卡管理页面或单独的增删改查接口。
-- 不修改玩家人物卡和角色模板人物卡的既有创建流程。
+- 玩家人物卡仍沿用既有导入和校验流程，但其 `runId` 必须指向
+  `GroupConversation.id`，不再接受 `userWorldId`。
 - 不把模组人物卡的后续修改同步到已经创建的跑团。
 
 ## 4. 第 15 章 NPC 表兼容性
@@ -125,7 +126,13 @@ module_id IS NOT NULL
 
 普通群聊不查询或复制模组人物卡。
 
-现有代码使用 `GroupConversation.userWorldId` 作为人物卡的 `run_id`。本功能沿用这一语义，不改变 `run_id` 的含义。
+`coc_character.run_id` 使用 `GroupConversation.id`。创建跑团时必须先写入会话并取得 ID，再以该 ID 置入模组人物卡；不同跑团不会共享人物卡状态。
+
+该字段此前错误使用 `userWorldId`。切换前必须检查已有
+`coc_character`：若存在旧数据，需要根据实际跑团归属迁移后再部署；
+同一用户世界可以有多个跑团，不能仅凭 `userWorldId` 自动且无歧义地
+改写。当前开发数据库检查结果为空，因此本次不执行有损或猜测性的
+历史数据迁移。
 
 ### 7.2 事务与锁
 
@@ -166,7 +173,7 @@ module_id IS NOT NULL
 系统覆盖设置：
 
 ```text
-run_id = 当前 GroupConversation.userWorldId
+run_id = 当前 GroupConversation.id
 actor_type = NPC
 participant_id = NULL
 creation_method = MODULE

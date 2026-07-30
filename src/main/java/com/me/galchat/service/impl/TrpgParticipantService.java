@@ -33,7 +33,7 @@ public class TrpgParticipantService {
         List<CocCharacter> cards = characterMapper.selectList(
                 new LambdaQueryWrapper<CocCharacter>()
                         .eq(CocCharacter::getRunId,
-                                conversation.getUserWorldId())
+                                conversation.getId())
                         .orderByAsc(CocCharacter::getId));
         List<CocCharacter> playerCards = cards.stream()
                 .filter(card -> "PLAYER".equals(card.getActorType()))

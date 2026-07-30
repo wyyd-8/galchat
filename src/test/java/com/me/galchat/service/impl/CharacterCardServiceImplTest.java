@@ -5,6 +5,8 @@ import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.po.CharacterTemplate;
+import com.me.galchat.domain.dto.CharacterCardCreateDTO;
+import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserInfo;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.exception.UserAuthException;
@@ -16,6 +18,8 @@ import com.me.galchat.mapper.CocCharacterWeaponMapper;
 import com.me.galchat.mapper.CocSkillDefMapper;
 import com.me.galchat.mapper.CharacterTemplateMapper;
 import com.me.galchat.mapper.UserInfoMapper;
+import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.utils.CurrentHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +42,7 @@ class CharacterCardServiceImplTest {
     private CocSkillDefMapper skillDefMapper;
     private CharacterTemplateMapper characterTemplateMapper;
     private UserInfoMapper userInfoMapper;
+    private GroupConversationMapper conversationMapper;
     private CharacterCardServiceImpl service;
 
     @BeforeEach
@@ -47,9 +52,11 @@ class CharacterCardServiceImplTest {
         skillDefMapper = mock(CocSkillDefMapper.class);
         characterTemplateMapper = mock(CharacterTemplateMapper.class);
         userInfoMapper = mock(UserInfoMapper.class);
+        conversationMapper = mock(GroupConversationMapper.class);
         service = new CharacterCardServiceImpl(characterMapper, skillMapper,
                 mock(CocCharacterWeaponMapper.class), mock(CocCharacterProfileMapper.class), skillDefMapper,
-                characterTemplateMapper, userInfoMapper);
+                characterTemplateMapper, userInfoMapper,
+                conversationMapper);
     }
 
     @AfterEach
@@ -148,6 +155,21 @@ class CharacterCardServiceImplTest {
         assertThatThrownBy(() -> service.fillPlayerAndImage(new CocCharacter(), null))
                 .isInstanceOf(UserAuthException.class)
                 .hasMessage("用户未登录");
+    }
+
+    @Test
+    void rejectsCharacterCreationWhenRunIdIsNotATrpgConversation() {
+        CharacterCardCreateDTO request = new CharacterCardCreateDTO();
+        request.setRunId(5L);
+        request.setCharacterText("不应在校验跑团前解析");
+        when(conversationMapper.selectById(5L)).thenReturn(
+                new GroupConversation()
+                        .setId(5L)
+                        .setMode(GroupChatConstant.MODE_CHAT));
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("runId必须是TRPG群聊id");
     }
 
     @Test

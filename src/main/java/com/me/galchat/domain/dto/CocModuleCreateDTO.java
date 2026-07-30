@@ -1,6 +1,7 @@
 package com.me.galchat.domain.dto;
 
 import lombok.Data;
+import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 
@@ -20,6 +21,7 @@ public class CocModuleCreateDTO {
     private List<Location> locations;
     private List<Clue> clues;
     private List<Material> materials;
+    private List<JsonNode> characters;
 
     @Data
     public static class GlobalContext {

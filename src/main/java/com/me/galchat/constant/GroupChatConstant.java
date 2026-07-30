@@ -39,6 +39,7 @@ public final class GroupChatConstant {
     public static final String STATUS_RUNNING = "running";
     public static final String STATUS_COMPLETED = "completed";
     public static final String STATUS_FAILED = "failed";
+    public static final String STATUS_BLOCKED = "blocked";
     public static final String STATUS_CANCELLED = "cancelled";
     public static final String STATUS_STREAMING = "streaming";
     public static final String STATUS_WAITING_INPUT = "waiting_input";
@@ -47,6 +48,9 @@ public final class GroupChatConstant {
     public static final String EVENT_TURN_ACCEPTED = "turn.accepted";
     public static final String EVENT_REPLY_STARTED = "reply.started";
     public static final String EVENT_REASONING_DELTA = "reasoning.delta";
+    public static final String EVENT_DECISION_DELTA = "decision.delta";
+    public static final String EVENT_DECISION_COMPLETED =
+            "decision.completed";
     public static final String EVENT_MESSAGE_DELTA = "message.delta";
     public static final String EVENT_DICE_ROLL_CREATED = "dice_roll.created";
     public static final String EVENT_MATERIAL_CREATED = "material.created";

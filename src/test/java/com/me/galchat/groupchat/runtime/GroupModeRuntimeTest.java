@@ -94,7 +94,7 @@ class GroupModeRuntimeTest {
         when(assembler.baseSystemPrompt(conversation, alice)).thenReturn("角色基础提示词");
         when(assembler.actorName(conversation.getUserWorldId(), alice)).thenReturn("Alice");
         ICharacterCardService cardService = mock(ICharacterCardService.class);
-        when(cardService.listDiceCharacters(conversation.getUserWorldId())).thenReturn(List.of());
+        when(cardService.listDiceCharacters(conversation.getId())).thenReturn(List.of());
 
         GroupModelInvocation chat = new ChatGroupAgentPolicy(
                 client, assembler, vectorTools, favorTools).prepare(

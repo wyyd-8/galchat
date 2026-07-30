@@ -171,6 +171,11 @@ button:disabled { opacity: .46; cursor: not-allowed !important; }
 .reasoning-block { margin-bottom: 5px; }
 .reasoning-trigger { padding: 3px 0; border: 0; display: flex; align-items: center; gap: 4px; color: #96978f; background: transparent; font-size: 9px; cursor: pointer; }
 .reasoning-content { max-height: 150px; margin: 3px 0 7px; padding: 8px 10px; overflow: auto; border-left: 2px solid #d7d5cc; color: #878880; font-size: 10px; line-height: 1.6; white-space: pre-wrap; }
+.decision-block { margin: 4px 0 7px; padding: 9px 11px; border-left: 2px solid #849e91; background: #f0f4f0; }
+.decision-block > span { display: block; margin-bottom: 3px; color: #597267; font-size: 9px; font-weight: 700; letter-spacing: .08em; }
+.decision-block > p { margin: 0; color: #53635b; font-size: 11px; line-height: 1.65; white-space: pre-wrap; }
+.retry-step-button { margin-top: 6px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; color: var(--wine); background: transparent; font-size: 10px; cursor: pointer; }
+.retry-step-button:disabled { opacity: .55; cursor: not-allowed; }
 .stream-caret { width: 5px; height: 14px; margin-left: 3px; display: inline-block; vertical-align: -2px; background: currentColor; animation: blink 900ms steps(1) infinite; }
 .empty-chat, .chat-loading { height: 60vh; display: grid; place-content: center; justify-items: center; color: var(--muted); text-align: center; }
 .empty-chat h2 { margin: 12px 0 2px; color: var(--ink); font-family: 'Playfair Display', serif; }

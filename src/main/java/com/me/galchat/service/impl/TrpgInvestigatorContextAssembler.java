@@ -86,7 +86,7 @@ public class TrpgInvestigatorContextAssembler {
         LambdaQueryWrapper<CocCharacter> query =
                 new LambdaQueryWrapper<CocCharacter>()
                         .eq(CocCharacter::getRunId,
-                                conversation.getUserWorldId());
+                                conversation.getId());
         if (GroupChatConstant.ACTOR_USER.equals(action.actorType())) {
             query.eq(CocCharacter::getId, action.actorId())
                     .eq(CocCharacter::getActorType, "PLAYER");

@@ -4,7 +4,8 @@ import com.me.galchat.domain.Result;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.dto.GroupConversationCreateDTO;
 import com.me.galchat.domain.dto.GroupReplyPlanDTO;
-import com.me.galchat.domain.dto.GroupTurnStartDTO;
+import com.me.galchat.domain.dto.GroupEndExplorationDTO;
+import com.me.galchat.domain.dto.GroupTurnContinueDTO;
 import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.service.impl.GroupChatService;
@@ -75,20 +76,11 @@ public class GroupChatController {
     }
 
     @PostMapping(
-            value = "/conversations/{conversationId}/turns/start",
-            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<GroupChatEvent> startTurn(
-            @PathVariable Long conversationId,
-            @RequestBody GroupTurnStartDTO request) {
-        return turnExecutionService.start(conversationId, request);
-    }
-
-    @PostMapping(
             value = "/conversations/{conversationId}/turns/continue",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<GroupChatEvent> continueTurn(
             @PathVariable Long conversationId,
-            @RequestBody GroupTurnStartDTO request) {
+            @RequestBody GroupTurnContinueDTO request) {
         return turnExecutionService.continueTurn(
                 conversationId, request);
     }
@@ -141,7 +133,7 @@ public class GroupChatController {
             @PathVariable Long conversationId,
             @PathVariable Long turnId,
             @PathVariable Long stepId,
-            @RequestBody GroupTurnStartDTO request) {
+            @RequestBody GroupEndExplorationDTO request) {
         return turnExecutionService.endExploration(
                 conversationId, turnId, stepId, request);
     }

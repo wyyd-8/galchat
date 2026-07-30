@@ -339,7 +339,8 @@ Accept: text/event-stream
 
 ### 11.3 现有接口
 
-现有 `turns/start` 和 step retry 接口保留兼容，但内部委托给统一 continuation service。正常前端流程只使用 `turns/continue`。
+删除旧 `turns/start` 接口。创建下一轮和恢复现有 Turn
+统一使用 `turns/continue`，避免维护两套状态路由。
 
 用户调查员继续使用：
 
@@ -551,7 +552,7 @@ KP 裁定 step 成功完成后，先追加本主动位结果，再检查 `finish
 - 场景轮和战斗轮都适用；
 - paused、waiting_dice、failed、blocked、遗留 running 分支正确；
 - 等待用户行动时拒绝继续；
-- clientRequestId 防止重复继续；
+- clientRequestId 同时检查 Turn 与用户行动消息，防止重复继续或重复提交；
 - 一次继续执行到下一个明确暂停点。
 
 ### 18.7 结束和回写

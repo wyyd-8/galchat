@@ -20,6 +20,7 @@ public class GroupChatMessage implements Serializable {
     private Long sceneId;
     private Long turnId;
     private Long replyStepId;
+    private String clientRequestId;
     private String speakerType;
     private Long speakerId;
     private String messageKind;

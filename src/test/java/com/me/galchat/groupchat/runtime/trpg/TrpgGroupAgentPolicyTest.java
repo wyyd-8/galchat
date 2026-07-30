@@ -12,7 +12,6 @@ import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.tool.KpDiceTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -36,6 +35,8 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.KpSceneTools.class);
         com.me.galchat.tool.KpRunTools kpRunTools =
                 mock(com.me.galchat.tool.KpRunTools.class);
+        com.me.galchat.tool.KpCombatTools kpCombatTools =
+                mock(com.me.galchat.tool.KpCombatTools.class);
         com.me.galchat.service.impl.TrpgContextWindowService contextWindowService =
                 mock(com.me.galchat.service.impl.TrpgContextWindowService.class);
         GroupConversation conversation = new GroupConversation()
@@ -54,7 +55,15 @@ class TrpgGroupAgentPolicyTest {
                         kpSceneTools,
                         kpRunTools,
                         contextWindowService,
-                        mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class));
+                        mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                        kpCombatTools,
+                        mock(com.me.galchat.service.impl
+                                .TrpgCombatLifecycleService.class),
+                        mock(com.me.galchat.tool.KpChildSceneTools.class),
+                        mock(com.me.galchat.tool
+                                .KpWaitingInvestigatorTools.class),
+                        mock(com.me.galchat.service.impl
+                                .TrpgChildSceneCommandService.class));
         var invocation = policy.prepare(
                 conversation,
                 new GroupActionSpec(
@@ -78,7 +87,7 @@ class TrpgGroupAgentPolicyTest {
         assertThat(invocation.tools())
                 .containsExactly(
                         kpDiceTools, kpModuleTools,
-                        kpSceneTools, kpRunTools);
+                        kpSceneTools, kpRunTools, kpCombatTools);
         org.mockito.Mockito.verify(contextWindowService)
                 .recordPrompt(
                         org.mockito.ArgumentMatchers.eq(7L),
@@ -114,13 +123,13 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
                 mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class));
-        ReflectionTestUtils.setField(
-                policy, "kpChildSceneTools", childTools);
-        ReflectionTestUtils.setField(
-                policy, "kpWaitingInvestigatorTools", waitingTools);
-        ReflectionTestUtils.setField(
-                policy, "childSceneCommandService", commandService);
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgCombatLifecycleService.class),
+                childTools,
+                waitingTools,
+                commandService);
 
         var invocation = policy.prepare(
                 conversation,
@@ -182,7 +191,15 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
                 mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                investigatorAssembler);
+                investigatorAssembler,
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool
+                        .KpWaitingInvestigatorTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgChildSceneCommandService.class));
 
         var invocation = policy.prepare(
                 conversation,
@@ -229,7 +246,15 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 runTools,
                 mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class));
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool
+                        .KpWaitingInvestigatorTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgChildSceneCommandService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
 
@@ -274,7 +299,15 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
                 mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class));
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool
+                        .KpWaitingInvestigatorTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgChildSceneCommandService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
 
@@ -317,7 +350,15 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
                 mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class));
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool
+                        .KpWaitingInvestigatorTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgChildSceneCommandService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
 

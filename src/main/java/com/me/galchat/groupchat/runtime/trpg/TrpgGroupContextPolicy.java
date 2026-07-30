@@ -6,7 +6,6 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupContextPolicy;
-import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.service.impl.TrpgAgentDecisionContextAssembler;
 import com.me.galchat.service.impl.TrpgExplorationContextAssembler;
 import com.me.galchat.service.impl.TrpgModuleContextAssembler;
@@ -20,7 +19,6 @@ import org.springframework.util.StringUtils;
 @Component
 public class TrpgGroupContextPolicy implements GroupContextPolicy {
 
-    private final GroupContextAssembler contextAssembler;
     private final TrpgModuleContextAssembler moduleContextAssembler;
     private final TrpgAgentDecisionContextAssembler decisionContextAssembler;
     private final TrpgExplorationContextAssembler
@@ -28,42 +26,14 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
     private final TrpgSceneRuntimeContextAssembler
             sceneRuntimeContextAssembler;
 
-    public TrpgGroupContextPolicy(
-            GroupContextAssembler contextAssembler,
-            TrpgModuleContextAssembler moduleContextAssembler) {
-        this(contextAssembler, moduleContextAssembler,
-                null, null, null);
-    }
-
-    public TrpgGroupContextPolicy(
-            GroupContextAssembler contextAssembler,
-            TrpgModuleContextAssembler moduleContextAssembler,
-            TrpgAgentDecisionContextAssembler decisionContextAssembler) {
-        this(contextAssembler, moduleContextAssembler,
-                decisionContextAssembler, null, null);
-    }
-
-    public TrpgGroupContextPolicy(
-            GroupContextAssembler contextAssembler,
-            TrpgModuleContextAssembler moduleContextAssembler,
-            TrpgAgentDecisionContextAssembler decisionContextAssembler,
-            TrpgExplorationContextAssembler
-                    explorationContextAssembler) {
-        this(contextAssembler, moduleContextAssembler,
-                decisionContextAssembler,
-                explorationContextAssembler, null);
-    }
-
     @Autowired
     public TrpgGroupContextPolicy(
-            GroupContextAssembler contextAssembler,
             TrpgModuleContextAssembler moduleContextAssembler,
             TrpgAgentDecisionContextAssembler decisionContextAssembler,
             TrpgExplorationContextAssembler
                     explorationContextAssembler,
             TrpgSceneRuntimeContextAssembler
                     sceneRuntimeContextAssembler) {
-        this.contextAssembler = contextAssembler;
         this.moduleContextAssembler = moduleContextAssembler;
         this.decisionContextAssembler = decisionContextAssembler;
         this.explorationContextAssembler =
@@ -86,8 +56,7 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
             if (StringUtils.hasText(moduleContext)) {
                 messages.add(new SystemMessage(moduleContext));
             }
-            if (sceneRuntimeContextAssembler != null
-                    && !GroupChatConstant.ACTION_TRPG_SCENE_SELECTION
+            if (!GroupChatConstant.ACTION_TRPG_SCENE_SELECTION
                     .equals(action.actionType())) {
                 String runtimeContext =
                         sceneRuntimeContextAssembler.format(
@@ -97,13 +66,9 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
                 }
             }
         }
-        messages.addAll(explorationContextAssembler == null
-                ? contextAssembler.assembleContext(
-                conversation, action.actor(), null)
-                : explorationContextAssembler.assemble(
+        messages.addAll(explorationContextAssembler.assemble(
                 conversation, action.actor()));
-        if (usesPrivateDecisionContext(action)
-                && decisionContextAssembler != null) {
+        if (usesPrivateDecisionContext(action)) {
             String privateContext =
                     decisionContextAssembler.format(
                             conversation, action);

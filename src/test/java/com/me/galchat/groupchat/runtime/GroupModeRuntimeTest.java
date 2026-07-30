@@ -62,13 +62,21 @@ class GroupModeRuntimeTest {
                 .thenReturn(List.of(new UserMessage("上一话题"), new UserMessage("继续调查仓库")));
         when(vectorService.search(1L, 10L, "上一话题\n继续调查仓库"))
                 .thenReturn("更早话题的相关记忆");
-        when(assembler.assembleContext(trpg, actor, null))
+        com.me.galchat.service.impl.TrpgExplorationContextAssembler
+                explorationAssembler = mock(
+                com.me.galchat.service.impl
+                        .TrpgExplorationContextAssembler.class);
+        when(explorationAssembler.assemble(trpg, actor))
                 .thenReturn(List.of(new UserMessage("跑团上下文")));
 
         ChatGroupContextPolicy chatPolicy = new ChatGroupContextPolicy(topicService, vectorService, assembler);
         TrpgGroupContextPolicy trpgPolicy = new TrpgGroupContextPolicy(
-                assembler,
-                mock(com.me.galchat.service.impl.TrpgModuleContextAssembler.class));
+                mock(com.me.galchat.service.impl.TrpgModuleContextAssembler.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgAgentDecisionContextAssembler.class),
+                explorationAssembler,
+                mock(com.me.galchat.service.impl
+                        .TrpgSceneRuntimeContextAssembler.class));
 
         chatPolicy.onTurnStarted(chat, userMessage);
         trpgPolicy.onTurnStarted(trpg, userMessage);
@@ -115,7 +123,15 @@ class GroupModeRuntimeTest {
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
                 mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class)).prepare(
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool
+                        .KpWaitingInvestigatorTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgChildSceneCommandService.class)).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_TRPG_COMBAT,
                         GroupChatConstant.ACTOR_CHARACTER, 11L, "round:1", "第1轮", 1, 1),

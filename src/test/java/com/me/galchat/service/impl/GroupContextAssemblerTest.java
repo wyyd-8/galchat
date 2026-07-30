@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.groupchat.dice.GroupDiceMessageFormatter;
+import com.me.galchat.groupchat.material.MaterialMessageCodec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
@@ -37,7 +38,8 @@ class GroupContextAssemblerTest {
         GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
         GroupDiceMessageFormatter diceMessageFormatter = mock(GroupDiceMessageFormatter.class);
         GroupContextAssembler assembler = new GroupContextAssembler(messageMapper, conversationService,
-                chatService, characterService, toolHistoryAssembler, diceMessageFormatter);
+                chatService, characterService, toolHistoryAssembler,
+                diceMessageFormatter, materialMessageCodec());
 
         GroupConversation conversation = new GroupConversation().setId(8L).setUserWorldId(1L).setWorldId(2L);
         when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
@@ -76,7 +78,8 @@ class GroupContextAssemblerTest {
         GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
         GroupDiceMessageFormatter diceMessageFormatter = mock(GroupDiceMessageFormatter.class);
         GroupContextAssembler assembler = new GroupContextAssembler(messageMapper, conversationService,
-                chatService, characterService, toolHistoryAssembler, diceMessageFormatter);
+                chatService, characterService, toolHistoryAssembler,
+                diceMessageFormatter, materialMessageCodec());
         GroupConversation conversation = new GroupConversation()
                 .setId(8L).setUserWorldId(1L).setWorldId(2L);
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
@@ -116,7 +119,8 @@ class GroupContextAssemblerTest {
                 mock(ChatServiceImpl.class),
                 characterService,
                 toolHistoryAssembler,
-                diceMessageFormatter);
+                diceMessageFormatter,
+                materialMessageCodec());
         GroupConversation conversation = new GroupConversation()
                 .setId(8L).setUserWorldId(1L).setWorldId(2L);
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
@@ -156,7 +160,8 @@ class GroupContextAssemblerTest {
                 mock(ChatServiceImpl.class),
                 characterService,
                 toolHistoryAssembler,
-                mock(GroupDiceMessageFormatter.class));
+                mock(GroupDiceMessageFormatter.class),
+                materialMessageCodec());
         GroupConversation conversation = new GroupConversation()
                 .setId(8L).setUserWorldId(1L);
         GroupActorRef investigator = new GroupActorRef(
@@ -191,5 +196,10 @@ class GroupContextAssemblerTest {
                 .setSpeakerId(speakerId)
                 .setContent(content)
                 .setStatus(GroupChatConstant.STATUS_COMPLETED);
+    }
+
+    private MaterialMessageCodec materialMessageCodec() {
+        return new MaterialMessageCodec(
+                tools.jackson.databind.json.JsonMapper.builder().build());
     }
 }

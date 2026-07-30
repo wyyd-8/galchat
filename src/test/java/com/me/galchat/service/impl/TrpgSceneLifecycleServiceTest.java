@@ -43,7 +43,8 @@ class TrpgSceneLifecycleServiceTest {
                         planMapper, itemMapper, recoveryService,
                         progressStore,
                         mock(TrpgSceneSummaryService.class),
-                        mock(GroupReplyPlanService.class));
+                        mock(GroupReplyPlanService.class),
+                        mock(TrpgChildScenePlanService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE)
@@ -102,7 +103,8 @@ class TrpgSceneLifecycleServiceTest {
                         mock(GroupReplyPlanItemMapper.class),
                         mock(GroupTurnRecoveryService.class),
                         progressStore, summaryService,
-                        replyPlanService);
+                        replyPlanService,
+                        mock(TrpgChildScenePlanService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(10L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -144,9 +146,8 @@ class TrpgSceneLifecycleServiceTest {
                         mock(GroupReplyPlanItemMapper.class),
                         mock(GroupTurnRecoveryService.class),
                         progressStore, summaryService,
-                        replyPlanService);
-        org.springframework.test.util.ReflectionTestUtils.setField(
-                service, "childScenePlanService", childPlanService);
+                        replyPlanService,
+                        childPlanService);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(12L)
                 .setMode(GroupChatConstant.MODE_TRPG);

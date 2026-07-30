@@ -51,18 +51,14 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final KpRunTools kpRunTools;
     private final TrpgContextWindowService contextWindowService;
     private final TrpgInvestigatorContextAssembler investigatorContextAssembler;
-    @Autowired
-    private com.me.galchat.tool.KpCombatTools kpCombatTools;
-    @Autowired
-    private com.me.galchat.service.impl.TrpgCombatLifecycleService
+    private final com.me.galchat.tool.KpCombatTools kpCombatTools;
+    private final com.me.galchat.service.impl.TrpgCombatLifecycleService
             combatLifecycleService;
-    @Autowired
-    private KpChildSceneTools kpChildSceneTools;
-    @Autowired
-    private KpWaitingInvestigatorTools kpWaitingInvestigatorTools;
-    @Autowired
-    private TrpgChildSceneCommandService childSceneCommandService;
+    private final KpChildSceneTools kpChildSceneTools;
+    private final KpWaitingInvestigatorTools kpWaitingInvestigatorTools;
+    private final TrpgChildSceneCommandService childSceneCommandService;
 
+    @Autowired
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
                                 GroupContextAssembler contextAssembler,
                                 ICharacterCardService characterCardService,
@@ -77,7 +73,17 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                                 KpRunTools kpRunTools,
                                 TrpgContextWindowService contextWindowService,
                                 TrpgInvestigatorContextAssembler
-                                        investigatorContextAssembler) {
+                                        investigatorContextAssembler,
+                                com.me.galchat.tool.KpCombatTools
+                                        kpCombatTools,
+                                com.me.galchat.service.impl
+                                        .TrpgCombatLifecycleService
+                                        combatLifecycleService,
+                                KpChildSceneTools kpChildSceneTools,
+                                KpWaitingInvestigatorTools
+                                        kpWaitingInvestigatorTools,
+                                TrpgChildSceneCommandService
+                                        childSceneCommandService) {
         this.chatClient = chatClient;
         this.contextAssembler = contextAssembler;
         this.characterCardService = characterCardService;
@@ -92,6 +98,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         this.contextWindowService = contextWindowService;
         this.investigatorContextAssembler =
                 investigatorContextAssembler;
+        this.kpCombatTools = kpCombatTools;
+        this.combatLifecycleService = combatLifecycleService;
+        this.kpChildSceneTools = kpChildSceneTools;
+        this.kpWaitingInvestigatorTools =
+                kpWaitingInvestigatorTools;
+        this.childSceneCommandService =
+                childSceneCommandService;
     }
 
     @Override
@@ -193,9 +206,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         创建子场景的本次回复须在原有内容基础上明确说明哪些调查员去了哪里。
                         """
                         : combatAdjudicate
-                        ? (combatLifecycleService == null ? ""
-                        : combatLifecycleService.adjudicationPrompt(
-                                conversation.getId(), action))
+                        ? combatLifecycleService.adjudicationPrompt(
+                                conversation.getId(), action)
                         + " 在没有剩余检定或掷骰需求、且应结束战斗时调用markCombatFinished；调用后继续输出完整公开裁定和收束。"
                         : "")));
             }
@@ -214,7 +226,6 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "action必须落实decision中的意图，不得重新选择目标；不得宣布未知事实、"
                         + "决定其他角色或NPC反应，也不得自行声明检定成功。"
                         + (combatDefense
-                        && combatLifecycleService != null
                         ? combatLifecycleService.defensePrompt(action)
                         : "")
                         + (scenePhase
@@ -228,15 +239,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             List<Object> sceneTools = tools(
                     kpDiceTools, kpModuleTools, kpSceneTools,
                     kpRunTools, kpCombatTools);
-            if (scenePhase && childSceneCommandService != null) {
+            if (scenePhase) {
                 List<Object> dynamicTools = new ArrayList<>(sceneTools);
-                if (kpChildSceneTools != null
-                        && childSceneCommandService.canStartChildScene(
+                if (childSceneCommandService.canStartChildScene(
                         conversation)) {
                     dynamicTools.add(kpChildSceneTools);
                 }
-                if (kpWaitingInvestigatorTools != null
-                        && childSceneCommandService
+                if (childSceneCommandService
                         .hasWaitingInvestigators(conversation)) {
                     dynamicTools.add(kpWaitingInvestigatorTools);
                 }

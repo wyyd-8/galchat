@@ -1,7 +1,8 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.domain.dto.GroupTurnStartDTO;
+import com.me.galchat.domain.dto.GroupEndExplorationDTO;
+import com.me.galchat.domain.dto.GroupTurnContinueDTO;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
@@ -28,10 +29,12 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class TrpgTurnExecutionServiceTest {
@@ -67,11 +70,18 @@ class TrpgTurnExecutionServiceTest {
                         messageMapper,
                         mock(GroupTurnRecoveryService.class),
                         groupChatService,
-                        immediateTransactionTemplate());
-        org.springframework.test.util.ReflectionTestUtils.setField(
-                service, "decisionStore", decisionStore);
-        org.springframework.test.util.ReflectionTestUtils.setField(
-                service, "toolCallMapper", toolCallMapper);
+                        immediateTransactionTemplate(),
+                        mock(TrpgSceneSelectionService.class),
+                        mock(TrpgSceneLifecycleService.class),
+                        mock(TrpgSceneSelectionStore.class),
+                        mock(TrpgParticipantService.class),
+                        decisionStore,
+                        toolCallMapper,
+                        mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                        mock(com.me.galchat.groupchat.dice
+                                .DiceRollMessageCodec.class),
+                        mock(TrpgCombatLifecycleService.class),
+                        mock(com.me.galchat.mapper.GroupReplyPlanMapper.class));
         GroupConversation conversation =
                 new GroupConversation()
                         .setId(7L)
@@ -175,7 +185,18 @@ class TrpgTurnExecutionServiceTest {
                 mock(GroupChatMessageMapper.class),
                 mock(GroupTurnRecoveryService.class),
                 groupChatService,
-                transactionTemplate);
+                transactionTemplate,
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(GroupChatToolCallMapper.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setUserWorldId(3L)
@@ -210,22 +231,27 @@ class TrpgTurnExecutionServiceTest {
                     .setId(ids.incrementAndGet());
             return 1;
         });
+        List<GroupChatReplyStep> insertedSteps =
+                new java.util.ArrayList<>();
         when(stepMapper.insert(any(GroupChatReplyStep.class)))
                 .thenAnswer(invocation -> {
-            invocation.<GroupChatReplyStep>getArgument(0)
-                    .setId(ids.incrementAndGet());
+            GroupChatReplyStep inserted = invocation.getArgument(0);
+            inserted.setId(ids.incrementAndGet());
+            insertedSteps.add(inserted);
             return 1;
         });
+        when(stepMapper.selectList(any()))
+                .thenAnswer(invocation -> List.copyOf(insertedSteps));
         when(groupChatService.streamPersistedStep(
                 org.mockito.ArgumentMatchers.eq(conversation),
                 any(GroupChatTurn.class),
                 any(GroupChatReplyStep.class)))
                 .thenReturn(Flux.empty());
 
-        GroupTurnStartDTO request = new GroupTurnStartDTO();
+        GroupTurnContinueDTO request = new GroupTurnContinueDTO();
         request.setClientRequestId("start-1");
         List<GroupChatEvent> events =
-                service.start(7L, request).collectList().block();
+                service.continueTurn(7L, request).collectList().block();
 
         assertThat(events)
                 .extracting(GroupChatEvent::getEventType)
@@ -310,7 +336,18 @@ class TrpgTurnExecutionServiceTest {
                 messageMapper,
                 mock(GroupTurnRecoveryService.class),
                 groupChatService,
-                immediateTransactionTemplate());
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(GroupChatToolCallMapper.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setUserWorldId(3L)
@@ -362,6 +399,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(Flux.empty());
 
         GroupChatRequestDTO request = new GroupChatRequestDTO();
+        request.setClientRequestId("action-1");
         request.setContent("我检查餐桌下面。");
         List<GroupChatEvent> events = service.submitMessage(
                 7L, 101L, 102L, request).collectList().block();
@@ -384,11 +422,12 @@ class TrpgTurnExecutionServiceTest {
                         GroupChatMessage::getSpeakerType,
                         GroupChatMessage::getSpeakerId,
                         GroupChatMessage::getContent,
+                        GroupChatMessage::getClientRequestId,
                         GroupChatMessage::getSequenceNo)
                 .containsExactly(
                         101L, 102L,
                         GroupChatConstant.ACTOR_USER, 501L,
-                        "我检查餐桌下面。", 9L);
+                        "我检查餐桌下面。", "action-1", 9L);
         assertThat(userStep)
                 .extracting(
                         GroupChatReplyStep::getStatus,
@@ -411,37 +450,59 @@ class TrpgTurnExecutionServiceTest {
     }
 
     @Test
-    void startReturnsExistingWaitingStepInsteadOfCreatingAnotherTurn() {
+    void continueRecreatesSceneSelectionWhenWaitingOptionsExpired() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupConversationLockService lockService =
                 mock(GroupConversationLockService.class);
+        GroupTurnPlanResolver planResolver =
+                mock(GroupTurnPlanResolver.class);
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
         GroupChatReplyStepMapper stepMapper =
                 mock(GroupChatReplyStepMapper.class);
+        TrpgSceneSelectionStore selectionStore =
+                mock(TrpgSceneSelectionStore.class);
         TrpgTurnExecutionService service = new TrpgTurnExecutionService(
                 conversationService,
                 lockService,
-                mock(GroupTurnPlanResolver.class),
-                mock(GroupRuntimeRegistry.class),
+                planResolver,
+                runtimeRegistry,
                 turnMapper,
                 stepMapper,
                 mock(GroupChatMessageMapper.class),
                 mock(GroupTurnRecoveryService.class),
                 mock(GroupChatService.class),
-                immediateTransactionTemplate());
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                selectionStore,
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(GroupChatToolCallMapper.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
-        GroupChatTurn turn = new GroupChatTurn()
+        GroupChatTurn expiredTurn = new GroupChatTurn()
                 .setId(101L)
                 .setConversationId(7L)
+                .setPlanSource(
+                        GroupChatConstant.TURN_SOURCE_SCENE_SELECTION)
                 .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
-        GroupChatReplyStep step = new GroupChatReplyStep()
+        GroupChatReplyStep expiredStep = new GroupChatReplyStep()
                 .setId(102L)
                 .setTurnId(101L)
-                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setStepNo(2)
+                .setActionType(
+                        GroupChatConstant.ACTION_TRPG_SCENE_SELECTION)
                 .setSpeakerType(GroupChatConstant.ACTOR_USER)
                 .setSpeakerId(501L)
                 .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
@@ -452,24 +513,55 @@ class TrpgTurnExecutionServiceTest {
         when(lockService.tryLock(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
-        when(turnMapper.selectList(any())).thenReturn(List.of(turn));
-        when(stepMapper.selectList(any())).thenReturn(List.of(step));
+        when(turnMapper.selectList(any()))
+                .thenReturn(List.of(expiredTurn));
+        when(stepMapper.selectList(any()))
+                .thenReturn(List.of(expiredStep), List.of());
+        when(selectionStore.getOptions(7L, 101L))
+                .thenReturn(java.util.Map.of());
+        when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        when(planResolver.resolve(conversation, runtime))
+                .thenReturn(new GroupTurnPlanResolver.ResolvedTurnPlan(
+                        GroupChatConstant.TURN_SOURCE_SCENE_SELECTION,
+                        null,
+                        List.of(new GroupActionSpec(
+                                GroupChatConstant
+                                        .ACTION_TRPG_SCENE_SELECTION,
+                                GroupChatConstant.ACTOR_KP,
+                                null,
+                                "scene-selection",
+                                "选择场景",
+                                1,
+                                1))));
+        AtomicLong ids = new AtomicLong(200L);
+        when(turnMapper.insert(any(GroupChatTurn.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatTurn>getArgument(0)
+                            .setId(ids.incrementAndGet());
+                    return 1;
+                });
+        when(stepMapper.insert(any(GroupChatReplyStep.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatReplyStep>getArgument(0)
+                            .setId(ids.incrementAndGet());
+                    return 1;
+                });
 
-        GroupTurnStartDTO request = new GroupTurnStartDTO();
-        request.setClientRequestId("reconnect-1");
-        List<GroupChatEvent> events =
-                service.start(7L, request).collectList().block();
+        List<GroupChatEvent> events = service.continueTurn(
+                7L, new GroupTurnContinueDTO()).collectList().block();
 
         assertThat(events)
-                .extracting(
-                        GroupChatEvent::getEventType,
-                        GroupChatEvent::getTurnId,
-                        GroupChatEvent::getReplyStepId)
+                .extracting(GroupChatEvent::getEventType)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple(
-                                GroupChatConstant.EVENT_TURN_WAITING_INPUT,
-                                101L, 102L));
-        verify(turnMapper, never()).insert(any(GroupChatTurn.class));
+                        GroupChatConstant.EVENT_TURN_ACCEPTED,
+                        GroupChatConstant.EVENT_TURN_COMPLETED);
+        assertThat(expiredTurn.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_FAILED);
+        assertThat(expiredStep.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_FAILED);
+        verify(selectionStore).clear(7L);
+        verify(turnMapper).insert(any(GroupChatTurn.class));
     }
 
     @Test
@@ -492,9 +584,18 @@ class TrpgTurnExecutionServiceTest {
                 conversationService, lockService, planResolver,
                 mock(GroupRuntimeRegistry.class), turnMapper, stepMapper,
                 messageMapper, mock(GroupTurnRecoveryService.class),
-                groupChatService, immediateTransactionTemplate());
-        org.springframework.test.util.ReflectionTestUtils.setField(
-                service, "sceneSelectionService", selectionService);
+                groupChatService, immediateTransactionTemplate(),
+                selectionService,
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(GroupChatToolCallMapper.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
@@ -544,6 +645,7 @@ class TrpgTurnExecutionServiceTest {
 
         GroupSceneSelectionDTO request =
                 new GroupSceneSelectionDTO();
+        request.setClientRequestId("selection-1");
         request.setOptionNo("2");
         service.submitSelection(
                 7L, 101L, 102L, request).collectList().block();
@@ -559,7 +661,9 @@ class TrpgTurnExecutionServiceTest {
                                 "用户:林登:餐厅".equals(
                                         message.getContent())
                                         && message.getReplyStepId()
-                                                .equals(102L)));
+                                                .equals(102L)
+                                        && "selection-1".equals(
+                                        message.getClientRequestId())));
         verify(groupChatService).streamPersistedStep(
                 conversation, turn, kp);
     }
@@ -584,9 +688,18 @@ class TrpgTurnExecutionServiceTest {
                 mock(GroupRuntimeRegistry.class),
                 turnMapper, stepMapper, messageMapper,
                 mock(GroupTurnRecoveryService.class),
-                groupChatService, immediateTransactionTemplate());
-        org.springframework.test.util.ReflectionTestUtils.setField(
-                service, "sceneLifecycleService", lifecycleService);
+                groupChatService, immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                lifecycleService,
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(GroupChatToolCallMapper.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
@@ -625,7 +738,8 @@ class TrpgTurnExecutionServiceTest {
         when(groupChatService.streamPersistedStep(
                 conversation, turn, kp)).thenReturn(Flux.empty());
 
-        GroupTurnStartDTO request = new GroupTurnStartDTO();
+        GroupEndExplorationDTO request = new GroupEndExplorationDTO();
+        request.setClientRequestId("end-1");
         service.endExploration(
                 7L, 101L, 102L, request).collectList().block();
 
@@ -638,7 +752,98 @@ class TrpgTurnExecutionServiceTest {
         verify(messageMapper).insert(
                 org.mockito.ArgumentMatchers.argThat(
                         (GroupChatMessage message) ->
-                                message.getContent().contains("结束当前场景探索")));
+                                message.getContent().contains("结束当前场景探索")
+                                        && "end-1".equals(
+                                        message.getClientRequestId())));
+    }
+
+    @Test
+    void duplicateClientRequestIdRejectsContinueAndEveryUserActionBeforeMutation() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turnMapper =
+                mock(GroupChatTurnMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        TrpgSceneSelectionService selectionService =
+                mock(TrpgSceneSelectionService.class);
+        TrpgSceneLifecycleService lifecycleService =
+                mock(TrpgSceneLifecycleService.class);
+        TrpgTurnExecutionService service =
+                new TrpgTurnExecutionService(
+                        conversationService,
+                        lockService,
+                        mock(GroupTurnPlanResolver.class),
+                        mock(GroupRuntimeRegistry.class),
+                        turnMapper,
+                        mock(GroupChatReplyStepMapper.class),
+                        messageMapper,
+                        mock(GroupTurnRecoveryService.class),
+                        mock(GroupChatService.class),
+                        immediateTransactionTemplate(),
+                        selectionService,
+                        lifecycleService,
+                        mock(TrpgSceneSelectionStore.class),
+                        mock(TrpgParticipantService.class),
+                        mock(GroupAgentDecisionStore.class),
+                        mock(GroupChatToolCallMapper.class),
+                        mock(com.me.galchat.mapper
+                                .DiceRollSummaryMapper.class),
+                        mock(com.me.galchat.groupchat.dice
+                                .DiceRollMessageCodec.class),
+                        mock(TrpgCombatLifecycleService.class),
+                        mock(com.me.galchat.mapper
+                                .GroupReplyPlanMapper.class));
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turnMapper.selectCount(any())).thenReturn(1L);
+        when(messageMapper.selectCount(any())).thenReturn(0L);
+
+        GroupChatRequestDTO messageRequest =
+                new GroupChatRequestDTO();
+        messageRequest.setClientRequestId("duplicate-1");
+        messageRequest.setContent("检查书桌");
+        GroupSceneSelectionDTO selectionRequest =
+                new GroupSceneSelectionDTO();
+        selectionRequest.setClientRequestId("duplicate-1");
+        selectionRequest.setOptionNo("2");
+        GroupEndExplorationDTO endRequest =
+                new GroupEndExplorationDTO();
+        endRequest.setClientRequestId("duplicate-1");
+        GroupTurnContinueDTO continueRequest =
+                new GroupTurnContinueDTO();
+        continueRequest.setClientRequestId("duplicate-1");
+
+        assertDuplicateRejected(() -> service.continueTurn(
+                7L, continueRequest).collectList().block());
+
+        when(turnMapper.selectCount(any())).thenReturn(0L);
+        when(messageMapper.selectCount(any())).thenReturn(1L);
+        assertDuplicateRejected(() -> service.submitMessage(
+                7L, 101L, 102L, messageRequest)
+                .collectList().block());
+        assertDuplicateRejected(() -> service.submitSelection(
+                7L, 101L, 102L, selectionRequest)
+                .collectList().block());
+        assertDuplicateRejected(() -> service.endExploration(
+                7L, 101L, 102L, endRequest)
+                .collectList().block());
+
+        verify(messageMapper, never())
+                .insert(any(GroupChatMessage.class));
+        verifyNoInteractions(selectionService, lifecycleService);
+    }
+
+    private void assertDuplicateRejected(Runnable action) {
+        assertThatThrownBy(action::run)
+                .isInstanceOf(
+                        com.me.galchat.exception
+                                .UserRequestException.class)
+                .hasMessageContaining(
+                        "clientRequestId已处理");
     }
 
     private GroupActionSpec action(

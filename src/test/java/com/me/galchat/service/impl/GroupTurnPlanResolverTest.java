@@ -27,7 +27,8 @@ class GroupTurnPlanResolverTest {
         GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
                 replyPlanService, selectionService,
                 mock(TrpgSceneLifecycleService.class),
-                mock(TrpgRunLifecycleService.class));
+                mock(TrpgRunLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -61,7 +62,8 @@ class GroupTurnPlanResolverTest {
         GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
                 mock(GroupReplyPlanService.class), selectionService,
                 mock(TrpgSceneLifecycleService.class),
-                mock(TrpgRunLifecycleService.class));
+                mock(TrpgRunLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -81,7 +83,8 @@ class GroupTurnPlanResolverTest {
                 mock(GroupReplyPlanService.class),
                 mock(TrpgSceneSelectionService.class),
                 lifecycleService,
-                mock(TrpgRunLifecycleService.class));
+                mock(TrpgRunLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
 
@@ -104,7 +107,8 @@ class GroupTurnPlanResolverTest {
                 mock(GroupReplyPlanService.class),
                 selectionService,
                 sceneLifecycle,
-                runLifecycle);
+                runLifecycle,
+                mock(TrpgCombatLifecycleService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         when(runLifecycle.finalizeAfterTurn(conversation))
@@ -132,7 +136,8 @@ class GroupTurnPlanResolverTest {
                 replyPlanService,
                 mock(TrpgSceneSelectionService.class),
                 sceneLifecycle,
-                mock(TrpgRunLifecycleService.class));
+                mock(TrpgRunLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)

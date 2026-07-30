@@ -54,21 +54,6 @@ public class GroupContextAssembler {
         this.materialMessageCodec = materialMessageCodec;
     }
 
-    GroupContextAssembler(
-            GroupChatMessageMapper messageMapper,
-            GroupConversationService conversationService,
-            ChatServiceImpl chatService,
-            IUserCharacterInfoService userCharacterInfoService,
-            GroupToolHistoryAssembler toolHistoryAssembler,
-            GroupDiceMessageFormatter diceMessageFormatter) {
-        this(messageMapper, conversationService, chatService,
-                userCharacterInfoService, toolHistoryAssembler,
-                diceMessageFormatter,
-                new MaterialMessageCodec(
-                        tools.jackson.databind.json.JsonMapper
-                                .builder().build()));
-    }
-
     public List<Message> assembleContext(GroupConversation conversation, GroupActorRef currentActor,
                                          GroupContextSummary summary) {
         List<Message> prompt = new ArrayList<>();

@@ -546,7 +546,8 @@ class GroupReplyPlanServiceTest {
         private final GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         private final GroupReplyPlanService service = new GroupReplyPlanService(conversationService, lockService,
-                conversationMapper, planMapper, itemMapper, recoveryService, transactionTemplate);
+                conversationMapper, planMapper, itemMapper, recoveryService,
+                transactionTemplate, mock(TrpgParticipantService.class));
 
         private Fixture() {
             when(lockService.tryLock(7L)).thenReturn(

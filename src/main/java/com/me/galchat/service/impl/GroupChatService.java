@@ -71,8 +71,7 @@ public class GroupChatService {
     private final GroupMaterialMessageFeed materialMessageFeed;
     private final TrpgSceneSelectionService sceneSelectionService;
     private final GroupAgentDecisionStore decisionStore;
-    @Autowired
-    private TrpgCombatLifecycleService combatLifecycleService;
+    private final TrpgCombatLifecycleService combatLifecycleService;
 
     @Autowired
     public GroupChatService(GroupConversationService conversationService,
@@ -91,7 +90,9 @@ public class GroupChatService {
                             GroupMaterialMessageFeed materialMessageFeed,
                             TrpgSceneSelectionService
                                     sceneSelectionService,
-                            GroupAgentDecisionStore decisionStore) {
+                            GroupAgentDecisionStore decisionStore,
+                            TrpgCombatLifecycleService
+                                    combatLifecycleService) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.turnPlanResolver = turnPlanResolver;
@@ -108,53 +109,7 @@ public class GroupChatService {
         this.materialMessageFeed = materialMessageFeed;
         this.sceneSelectionService = sceneSelectionService;
         this.decisionStore = decisionStore;
-    }
-
-    GroupChatService(
-            GroupConversationService conversationService,
-            GroupConversationLockService lockService,
-            GroupTurnPlanResolver turnPlanResolver,
-            GroupRuntimeRegistry runtimeRegistry,
-            GroupChatMessageMapper messageMapper,
-            GroupChatTurnMapper turnMapper,
-            GroupChatReplyStepMapper stepMapper,
-            GroupTurnRecoveryService recoveryService,
-            GroupToolContextFactory toolContextFactory,
-            IUserWorldPrefixService userWorldPrefixService,
-            TransactionTemplate transactionTemplate,
-            DiceRollMessageCodec diceMessageCodec,
-            ObjectMapper objectMapper,
-            GroupMaterialMessageFeed materialMessageFeed,
-            TrpgSceneSelectionService sceneSelectionService) {
-        this(conversationService, lockService, turnPlanResolver,
-                runtimeRegistry, messageMapper, turnMapper, stepMapper,
-                recoveryService, toolContextFactory,
-                userWorldPrefixService, transactionTemplate,
-                diceMessageCodec, objectMapper, materialMessageFeed,
-                sceneSelectionService, null);
-    }
-
-    GroupChatService(
-            GroupConversationService conversationService,
-            GroupConversationLockService lockService,
-            GroupTurnPlanResolver turnPlanResolver,
-            GroupRuntimeRegistry runtimeRegistry,
-            GroupChatMessageMapper messageMapper,
-            GroupChatTurnMapper turnMapper,
-            GroupChatReplyStepMapper stepMapper,
-            GroupTurnRecoveryService recoveryService,
-            GroupToolContextFactory toolContextFactory,
-            IUserWorldPrefixService userWorldPrefixService,
-            TransactionTemplate transactionTemplate,
-            DiceRollMessageCodec diceMessageCodec,
-            ObjectMapper objectMapper,
-            GroupMaterialMessageFeed materialMessageFeed) {
-        this(conversationService, lockService, turnPlanResolver,
-                runtimeRegistry, messageMapper, turnMapper, stepMapper,
-                recoveryService, toolContextFactory,
-                userWorldPrefixService, transactionTemplate,
-                diceMessageCodec, objectMapper, materialMessageFeed,
-                null, null);
+        this.combatLifecycleService = combatLifecycleService;
     }
 
     public Flux<GroupChatEvent> chat(Long conversationId, GroupChatRequestDTO request) {
@@ -248,9 +203,8 @@ public class GroupChatService {
                 .filter(id -> id != null)
                 .distinct()
                 .toList();
-        Map<Long, String> decisions = decisionStore == null
-                ? Map.of()
-                : decisionStore.contentByReplyStepIds(replyStepIds);
+        Map<Long, String> decisions =
+                decisionStore.contentByReplyStepIds(replyStepIds);
 
         return messages.stream().map(message -> new GroupChatMessageVO(
                 message.getId(), message.getConversationId(), message.getTurnId(), message.getReplyStepId(),
@@ -415,10 +369,6 @@ public class GroupChatService {
             GroupConversation conversation,
             GroupChatTurn turn,
             GroupChatReplyStep step) {
-        if (combatLifecycleService == null) {
-            return Flux.error(new IllegalStateException(
-                    "战斗路由执行器未配置"));
-        }
         transactionTemplate.executeWithoutResult(status -> {
             step.setStatus(GroupChatConstant.STATUS_RUNNING)
                     .setUpdatedAt(LocalDateTime.now());
@@ -494,10 +444,6 @@ public class GroupChatService {
             GroupChatTurn turn,
             GroupChatReplyStep step,
             GroupChatEvent.Speaker speaker) {
-        if (sceneSelectionService == null) {
-            return Flux.error(new IllegalStateException(
-                    "选景执行器未配置"));
-        }
         transactionTemplate.executeWithoutResult(status -> {
             step.setStatus(GroupChatConstant.STATUS_RUNNING)
                     .setUpdatedAt(LocalDateTime.now());
@@ -743,10 +689,6 @@ public class GroupChatService {
                         String decision =
                                 accumulator.decisionActionParser
                                         .decision();
-                        if (decisionStore == null) {
-                            throw new IllegalStateException(
-                                    "角色决策存储器未配置");
-                        }
                         decisionStore.save(step.getId(), decision);
                         events.add(baseEvent(
                                 GroupChatConstant
@@ -924,8 +866,7 @@ public class GroupChatService {
                     }
                     updateStepStatus(step,
                             GroupChatConstant.STATUS_COMPLETED, null);
-                    if (combatLifecycleService != null
-                            && GroupChatConstant
+                    if (GroupChatConstant
                             .ACTION_COMBAT_ADJUDICATE.equals(
                             step.getActionType())) {
                         boolean finished =

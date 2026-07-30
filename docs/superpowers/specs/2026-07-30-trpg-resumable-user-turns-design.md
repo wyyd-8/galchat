@@ -143,7 +143,7 @@ plan_id BIGINT NULL
 
 新增可恢复的 Turn 执行服务，将“创建 Turn”和“从下一 Step 继续执行”分离：
 
-1. 前端调用开始/继续接口。
+1. 前端调用统一继续接口。
 2. 若不存在未完成 Turn，则解析当前 Plan 并一次性创建完整 Step 快照。
 3. 按 `groupOrder → itemOrder → stepNo` 顺序执行。
 4. Agent/KP Step 调用模型或工具，完成后继续。
@@ -166,14 +166,19 @@ plan_id BIGINT NULL
 - 创建、占用用户 Step 和恢复执行均持有现有会话锁。
 - Step 状态更新必须带原状态条件，只有 `waiting_input → running/completed` 的首次更新成功。
 - `clientRequestId` 在同一会话内保持幂等约束。
+- 创建或继续 Turn 的请求 ID 保存在 `group_chat_turn.client_request_id`；
+  普通行动、选景和结束探索的请求 ID 保存在对应的
+  `group_chat_message.client_request_id`。
+- 所有上述入口在持有会话锁后同时检查 Turn 与用户行动消息，
+  已处理的请求 ID 在任何新状态变更前返回业务错误。
 - 重复完成、提前提交、提交错误 Step 或替其他 Actor 提交均返回业务错误。
 
 ## 7. 对外接口
 
-### 7.1 开始或继续行动轮
+### 7.1 统一继续行动轮
 
 ```http
-POST /group-chat/conversations/{conversationId}/turns/start
+POST /group-chat/conversations/{conversationId}/turns/continue
 Accept: text/event-stream
 
 {
@@ -184,7 +189,7 @@ Accept: text/event-stream
 行为：
 
 - 无未完成 Turn：创建新 Turn 并执行；
-- 当前 Turn 正在等待用户：不越过用户 Step，重新返回当前等待状态；
+- 当前 Turn 正在等待用户：不越过用户 Step，要求调用对应用户提交接口；
 - 当前 Turn 正在生成：返回“正在执行”；
 - 没有用户 Step：执行到 Turn 完成；
 - 遇到用户 Step：执行到等待点后结束 SSE。

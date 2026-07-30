@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS group_chat_message (
     scene_plan_id BIGINT,
     turn_id BIGINT,
     reply_step_id BIGINT,
+    client_request_id VARCHAR(100),
     speaker_type VARCHAR(50) NOT NULL,
     speaker_id BIGINT,
     message_kind VARCHAR(50) NOT NULL,
@@ -142,6 +143,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_message_sequence
     ON group_chat_message (conversation_id, sequence_no);
 CREATE INDEX IF NOT EXISTS idx_group_chat_message_turn
     ON group_chat_message (turn_id, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_group_chat_message_request
+    ON group_chat_message (conversation_id, client_request_id);
 
 CREATE TABLE IF NOT EXISTS group_chat_topic (
     id BIGSERIAL PRIMARY KEY,

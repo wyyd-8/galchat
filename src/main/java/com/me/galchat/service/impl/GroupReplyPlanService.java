@@ -15,7 +15,6 @@ import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -45,8 +44,7 @@ public class GroupReplyPlanService {
     private final GroupReplyPlanItemMapper itemMapper;
     private final GroupTurnRecoveryService recoveryService;
     private final TransactionTemplate transactionTemplate;
-    @Autowired
-    private TrpgParticipantService participantService;
+    private final TrpgParticipantService participantService;
 
     public GroupReplyPlanVO getActive(Long conversationId) {
         GroupConversation conversation = conversationService.requireAuthorized(conversationId);

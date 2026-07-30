@@ -3,7 +3,6 @@ package com.me.galchat.groupchat.runtime.trpg;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
-import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.service.impl.TrpgModuleContextAssembler;
 import com.me.galchat.service.impl.TrpgAgentDecisionContextAssembler;
 import com.me.galchat.service.impl.TrpgExplorationContextAssembler;
@@ -23,15 +22,13 @@ class TrpgGroupContextPolicyTest {
 
     @Test
     void trpgContextUsesIntervalCompressedExplorationRecord() {
-        GroupContextAssembler groupAssembler =
-                mock(GroupContextAssembler.class);
         TrpgExplorationContextAssembler explorationAssembler =
                 mock(TrpgExplorationContextAssembler.class);
         TrpgGroupContextPolicy policy = new TrpgGroupContextPolicy(
-                groupAssembler,
                 mock(TrpgModuleContextAssembler.class),
-                null,
-                explorationAssembler);
+                mock(TrpgAgentDecisionContextAssembler.class),
+                explorationAssembler,
+                mock(TrpgSceneRuntimeContextAssembler.class));
         GroupConversation conversation =
                 new GroupConversation().setId(7L);
         GroupActionSpec action = action(
@@ -44,8 +41,6 @@ class TrpgGroupContextPolicyTest {
         assertThat(policy.load(conversation, action).messages())
                 .extracting(message -> message.getText())
                 .contains("<context-summary>阁楼摘要</context-summary>");
-        verify(groupAssembler, never()).assembleContext(
-                any(), any(), any());
     }
 
     @Test
@@ -59,15 +54,14 @@ class TrpgGroupContextPolicyTest {
         when(runtimeAssembler.format(
                 conversation, kpAction)).thenReturn(
                 "<current-scene-runtime>书房：艾琳</current-scene-runtime>");
-        GroupContextAssembler groupAssembler =
-                mock(GroupContextAssembler.class);
-        when(groupAssembler.assembleContext(
-                any(), any(), any())).thenReturn(List.of());
+        TrpgExplorationContextAssembler explorationAssembler =
+                mock(TrpgExplorationContextAssembler.class);
+        when(explorationAssembler.assemble(
+                any(), any())).thenReturn(List.of());
         TrpgGroupContextPolicy policy = new TrpgGroupContextPolicy(
-                groupAssembler,
                 mock(TrpgModuleContextAssembler.class),
-                null,
-                null,
+                mock(TrpgAgentDecisionContextAssembler.class),
+                explorationAssembler,
                 runtimeAssembler);
 
         assertThat(policy.load(conversation, kpAction).messages())
@@ -78,16 +72,19 @@ class TrpgGroupContextPolicyTest {
 
     @Test
     void onlyKpReceivesPrivateModuleContext() {
-        GroupContextAssembler groupAssembler =
-                mock(GroupContextAssembler.class);
         TrpgModuleContextAssembler moduleAssembler =
                 mock(TrpgModuleContextAssembler.class);
+        TrpgExplorationContextAssembler explorationAssembler =
+                mock(TrpgExplorationContextAssembler.class);
         TrpgGroupContextPolicy policy = new TrpgGroupContextPolicy(
-                groupAssembler, moduleAssembler);
+                moduleAssembler,
+                mock(TrpgAgentDecisionContextAssembler.class),
+                explorationAssembler,
+                mock(TrpgSceneRuntimeContextAssembler.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(3L);
-        when(groupAssembler.assembleContext(
-                any(), any(), any())).thenReturn(List.of());
+        when(explorationAssembler.assemble(
+                any(), any())).thenReturn(List.of());
         when(moduleAssembler.formatKpContext(conversation))
                 .thenReturn("<module-global-context>幕后真相</module-global-context>");
 
@@ -106,14 +103,15 @@ class TrpgGroupContextPolicyTest {
 
     @Test
     void onlyEligibleCharacterReceivesItsPrivateDecisionHistory() {
-        GroupContextAssembler groupAssembler =
-                mock(GroupContextAssembler.class);
         TrpgAgentDecisionContextAssembler decisionAssembler =
                 mock(TrpgAgentDecisionContextAssembler.class);
+        TrpgExplorationContextAssembler explorationAssembler =
+                mock(TrpgExplorationContextAssembler.class);
         TrpgGroupContextPolicy policy = new TrpgGroupContextPolicy(
-                groupAssembler,
                 mock(TrpgModuleContextAssembler.class),
-                decisionAssembler);
+                decisionAssembler,
+                explorationAssembler,
+                mock(TrpgSceneRuntimeContextAssembler.class));
         GroupConversation conversation =
                 new GroupConversation().setId(7L);
         GroupActionSpec sceneAction = action(
@@ -122,8 +120,8 @@ class TrpgGroupContextPolicyTest {
                 GroupChatConstant.ACTION_TRPG_SCENE_SELECTION,
                 GroupChatConstant.ACTOR_CHARACTER,
                 9L, "scene-selection", "选景", 1, 1);
-        when(groupAssembler.assembleContext(
-                any(), any(), any())).thenReturn(List.of());
+        when(explorationAssembler.assemble(
+                any(), any())).thenReturn(List.of());
         when(decisionAssembler.format(
                 conversation, sceneAction))
                 .thenReturn("<private-decision-history>先前判断</private-decision-history>");

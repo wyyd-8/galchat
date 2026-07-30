@@ -398,11 +398,11 @@ class TrpgTurnExecutionServiceTest {
         assertThat(turn.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_COMPLETED);
         verify(planResolver).onTurnCompleted(
-                conversation, GroupChatConstant.PLAN_SOURCE_SCENE);
+                conversation, turn);
         var completionOrder = org.mockito.Mockito.inOrder(
                 planResolver, turnMapper);
         completionOrder.verify(planResolver).onTurnCompleted(
-                conversation, GroupChatConstant.PLAN_SOURCE_SCENE);
+                conversation, turn);
         completionOrder.verify(turnMapper).updateById(
                 org.mockito.ArgumentMatchers.argThat(
                         (GroupChatTurn updated) ->

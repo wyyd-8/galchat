@@ -173,6 +173,37 @@ class CharacterCardServiceImplTest {
     }
 
     @Test
+    void rejectsImportedInvestigatorWhoseNameMatchesAnyRunCharacter() {
+        CharacterCardCreateDTO request = new CharacterCardCreateDTO();
+        request.setRunId(5L);
+        request.setParticipantId(9L);
+        request.setCharacterText("""
+                食尸鬼，怪物，未知，30岁
+                出身墓园，现居地下
+                时代: 现代
+                STR 50 CON 50 SIZ 50 DEX 50
+                APP 50 INT 50 POW 50 EDU 50
+                """);
+        when(conversationMapper.selectById(5L)).thenReturn(
+                new GroupConversation()
+                        .setId(5L)
+                        .setMode(GroupChatConstant.MODE_TRPG));
+        when(characterMapper.selectList(any())).thenReturn(List.of(
+                new CocCharacter()
+                        .setId(81L)
+                        .setRunId(5L)
+                        .setActorType("NPC")
+                        .setName("食尸鬼")));
+        when(skillDefMapper.selectList(null)).thenReturn(List.of());
+        when(characterTemplateMapper.selectById(9L)).thenReturn(
+                new CharacterTemplate().setName("Agent"));
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("同一跑团内人物卡名称不能重复：食尸鬼");
+    }
+
+    @Test
     void resolvesAttributeAndSkillChecksByRunAndUniqueCardName() {
         CocCharacter card = new CocCharacter()
                 .setId(71L).setRunId(5L).setParticipantId(null)

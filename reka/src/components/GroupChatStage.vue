@@ -50,6 +50,9 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
           <strong>选择调查地点</strong><span>{{ currentTurn.sceneName || 'KP 已给出本轮可选地点' }}</span>
           <div class="scene-selection-options"><button v-for="[number, name] in selectionOptions" :key="number" class="button secondary" :disabled="sending" @click="emit('selectScene', number)"><b>{{ number }}</b>{{ name }}</button></div>
         </div>
+        <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType === 'combat_defense'" class="scene-selection-panel">
+          <strong>轮到你防守</strong><span>{{ currentTurn.sceneName || '请选择闪避、反击或 KP 给出的其他合法反应' }}</span>
+        </div>
         <div class="composer" :class="{ disabled: conversation.status !== 'active' }">
           <button v-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="emit('startTurn')"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />开始/继续行动轮</button>
           <textarea v-else v-model="input" :disabled="conversation.status !== 'active' || sending || !waitingForMessage" rows="1" :placeholder="conversation.status !== 'active' ? '这个群聊已经结束' : waitingForMessage ? '输入调查员的行动…' : '等待当前行动轮推进'" @keydown="keydown" />
@@ -61,13 +64,13 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
         <div class="reply-panel-title"><span><UsersRound :size="18" /><strong>回复编排</strong></span><button class="icon-button subtle" @click="planOpen = !planOpen"><ChevronDown :size="17" :class="{ rotated: !planOpen }" /></button></div>
         <p>从上到下依次回复。拖动调整，点击移除。</p>
         <div v-show="planOpen" class="reply-plan-list">
-          <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}`" class="reply-plan-item" draggable="true" :class="{ running: item.status === 'running', done: item.status === 'completed' }" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
-            <GripVertical class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="character(item.actorId)?.characterImage ? { backgroundImage: `url(${character(item.actorId)?.characterImage})` } : {}">{{ character(item.actorId)?.characterImage ? '' : (character(item.actorId)?.characterName || '?').slice(0, 1) }}</span><span class="reply-name">{{ character(item.actorId)?.characterName || `角色 #${item.actorId}` }}<small>{{ item.status === 'running' ? '回复中' : item.status === 'completed' ? '本轮已完成' : '等待回复' }}</small></span><button class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
+          <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}-${item.subjectCharacterId}`" class="reply-plan-item" :draggable="replyPlan.source !== 'COMBAT'" :class="{ running: item.status === 'running', done: item.status === 'completed' }" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
+            <GripVertical v-if="replyPlan.source !== 'COMBAT'" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="character(item.actorId)?.characterImage ? { backgroundImage: `url(${character(item.actorId)?.characterImage})` } : {}">{{ character(item.actorId)?.characterImage ? '' : (character(item.actorId)?.characterName || (item.actorType === 'kp' ? 'KP' : '?')).slice(0, 1) }}</span><span class="reply-name">{{ character(item.actorId)?.characterName || (item.actorType === 'kp' ? `KP · NPC #${item.subjectCharacterId}` : `角色 #${item.actorId}`) }}<small>{{ item.status === 'running' ? '回复中' : item.status === 'completed' ? '本轮已完成' : '等待回复' }}</small></span><button v-if="replyPlan.source !== 'COMBAT'" class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
           </div>
           <div v-if="!items.length" class="plan-empty">暂无回复角色</div>
         </div>
-        <div class="add-plan-row"><select v-model="addActorId" :disabled="!availableCharacters.length"><option value="">{{ availableCharacters.length ? '添加参与角色' : '没有可添加角色' }}</option><option v-for="item in availableCharacters" :key="item.characterId" :value="String(item.characterId)">{{ item.characterName }}</option></select><button class="icon-button bordered" :disabled="!addActorId" @click="addActor"><Plus :size="17" /></button></div>
-        <button class="button secondary save-plan" :disabled="!items.length || sending" @click="emit('savePlan')"><Save :size="16" />保存回复顺序</button>
+        <div v-if="replyPlan.source !== 'COMBAT'" class="add-plan-row"><select v-model="addActorId" :disabled="!availableCharacters.length"><option value="">{{ availableCharacters.length ? '添加参与角色' : '没有可添加角色' }}</option><option v-for="item in availableCharacters" :key="item.characterId" :value="String(item.characterId)">{{ item.characterName }}</option></select><button class="icon-button bordered" :disabled="!addActorId" @click="addActor"><Plus :size="17" /></button></div>
+        <button v-if="replyPlan.source !== 'COMBAT'" class="button secondary save-plan" :disabled="!items.length || sending" @click="emit('savePlan')"><Save :size="16" />保存回复顺序</button>
         <div class="panel-note"><strong>当前规则</strong><span>每位角色依次生成，后一位能看到前一位刚完成的回复。</span></div>
       </aside>
     </div>

@@ -36,6 +36,10 @@ public class TrpgInvestigatorContextAssembler {
             GroupConversation conversation, GroupActionSpec action) {
         CocCharacter card = requireCard(conversation, action);
         boolean combat = GroupChatConstant.ACTION_TRPG_COMBAT.equals(
+                action.actionType())
+                || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
+                action.actionType())
+                || GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
                 action.actionType());
         StringBuilder result = new StringBuilder(
                 "<controlled-investigator>");

@@ -39,7 +39,12 @@ class GroupTurnPolicyTest {
                 .containsExactly(GroupChatConstant.ACTION_TRPG_SCENE);
         assertThat(policy.plan(conversation, selection(GroupChatConstant.PLAN_SOURCE_COMBAT, ordered)))
                 .extracting(GroupActionSpec::actionType)
-                .containsExactly(GroupChatConstant.ACTION_TRPG_COMBAT);
+                .containsExactly(
+                        GroupChatConstant.ACTION_COMBAT_ATTACK,
+                        GroupChatConstant
+                                .ACTION_COMBAT_REACTION_ROUTE,
+                        GroupChatConstant.ACTION_COMBAT_DEFENSE,
+                        GroupChatConstant.ACTION_COMBAT_ADJUDICATE);
     }
 
     private GroupReplyPlanSelection selection(String source, List<GroupReplyPlanItem> items) {

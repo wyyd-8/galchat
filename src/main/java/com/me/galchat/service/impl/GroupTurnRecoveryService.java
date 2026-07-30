@@ -53,7 +53,7 @@ public class GroupTurnRecoveryService {
         Map<Long, Integer> retryableStepNosByTurn =
                 new LinkedHashMap<>();
         for (GroupChatReplyStep step : interruptedSteps) {
-            if (isRetryableCharacterStep(step)) {
+            if (isRetryableTrpgStep(step)) {
                 retryableStepNosByTurn.merge(
                         step.getTurnId(),
                         step.getStepNo(),
@@ -183,15 +183,26 @@ public class GroupTurnRecoveryService {
         return value != null && value > 0;
     }
 
-    private boolean isRetryableCharacterStep(
+    private boolean isRetryableTrpgStep(
             GroupChatReplyStep step) {
-        if (!GroupChatConstant.ACTOR_CHARACTER.equals(
-                step.getSpeakerType())) {
-            return false;
-        }
         return GroupChatConstant.ACTION_TRPG_SCENE.equals(
                 step.getActionType())
                 || GroupChatConstant.ACTION_TRPG_COMBAT.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_SCENE_INTRO.equals(
+                step.getActionType())
+                || GroupChatConstant
+                .ACTION_TRPG_SCENE_SELECTION.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
+                step.getActionType())
+                || GroupChatConstant
+                .ACTION_COMBAT_REACTION_ROUTE.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
+                step.getActionType())
+                || GroupChatConstant
+                .ACTION_COMBAT_ADJUDICATE.equals(
                 step.getActionType());
     }
 }

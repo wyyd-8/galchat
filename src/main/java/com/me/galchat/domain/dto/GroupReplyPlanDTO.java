@@ -23,5 +23,6 @@ public class GroupReplyPlanDTO {
         private Integer order;
         private String actorType;
         private Long actorId;
+        private Long subjectCharacterId;
     }
 }

@@ -58,6 +58,7 @@ public class GroupReplyPlanService {
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
             GroupConversation conversation = conversationService.requireActive(conversationId);
+            rejectPublicCombatSource(request);
             validateStructure(conversation, request);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> replaceLocked(conversation, request));
@@ -74,6 +75,7 @@ public class GroupReplyPlanService {
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> {
                 GroupReplyPlan active = activePlan(conversation);
+                rejectPublicCombatPlan(active);
                 if (active == null) {
                     return GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
                             ? toVO(createDefaultPlan(conversation)) : null;
@@ -91,7 +93,11 @@ public class GroupReplyPlanService {
         try {
             GroupConversation conversation = conversationService.requireActive(conversationId);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
-            return transactionTemplate.execute(status -> advanceLocked(conversation));
+            return transactionTemplate.execute(status -> {
+                GroupReplyPlan active = activePlan(conversation);
+                rejectPublicCombatPlan(active);
+                return advanceLocked(conversation);
+            });
         } finally {
             lockService.unlock(lock);
         }
@@ -108,6 +114,60 @@ public class GroupReplyPlanService {
             return active == null ? null : finishLocked(
                     conversation, active);
         });
+    }
+
+    /**
+     * Trusted combat lifecycle entry point. Caller must hold the conversation
+     * lock and must invoke this only after the scene KP step completed.
+     */
+    public GroupReplyPlanVO startCombatUnderLock(
+            GroupConversation conversation,
+            Long combatId,
+            int round,
+            List<CombatPlanItem> participants) {
+        if (conversation == null || conversation.getId() == null
+                || combatId == null || participants == null
+                || participants.isEmpty()) {
+            throw new UserRequestException("战斗计划参数不完整");
+        }
+        GroupReplyPlan scene = activePlan(conversation);
+        if (scene == null || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                scene.getSource())) {
+            throw new UserRequestException("战斗只能从活动场景发起");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        GroupReplyPlan combat = new GroupReplyPlan()
+                .setConversationId(conversation.getId())
+                .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                .setContextId(combatId)
+                .setResumePlanId(scene.getId())
+                .setCreatedAt(now)
+                .setUpdatedAt(now);
+        planMapper.insert(combat);
+        insertCombatItems(combat.getId(), round, participants, now);
+        conversation.setActiveReplyPlanId(combat.getId())
+                .setUpdatedAt(now);
+        conversationMapper.updateById(conversation);
+        return toVO(combat);
+    }
+
+    /** Trusted combat lifecycle entry point. Caller must hold the lock. */
+    public GroupReplyPlanVO replaceCombatRoundUnderLock(
+            GroupConversation conversation,
+            int round,
+            List<CombatPlanItem> participants) {
+        GroupReplyPlan combat = activePlan(conversation);
+        if (combat == null || !GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
+                combat.getSource())) {
+            throw new UserRequestException("当前没有活动战斗");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
+                .eq(GroupReplyPlanItem::getPlanId, combat.getId()));
+        insertCombatItems(combat.getId(), round, participants, now);
+        combat.setUpdatedAt(now);
+        planMapper.updateById(combat);
+        return toVO(combat);
     }
 
     /** Caller must hold the conversation lock. */
@@ -298,6 +358,30 @@ public class GroupReplyPlanService {
         }
     }
 
+    private void insertCombatItems(
+            Long planId,
+            int round,
+            List<CombatPlanItem> participants,
+            LocalDateTime now) {
+        String key = "combat:round:" + round;
+        for (int index = 0; index < participants.size(); index++) {
+            CombatPlanItem participant = participants.get(index);
+            itemMapper.insert(new GroupReplyPlanItem()
+                    .setPlanId(planId)
+                    .setGroupKey(key)
+                    .setGroupName("战斗第" + round + "轮")
+                    .setGroupOrder(round)
+                    .setItemOrder(participant.order() == null
+                            ? index + 1 : participant.order())
+                    .setActorType(participant.actorType())
+                    .setActorId(participant.actorId())
+                    .setSubjectCharacterId(
+                            participant.subjectCharacterId())
+                    .setCreatedAt(now)
+                    .setUpdatedAt(now));
+        }
+    }
+
     private GroupReplyPlan createDefaultPlan(GroupConversation conversation) {
         LocalDateTime now = LocalDateTime.now();
         GroupReplyPlan plan = new GroupReplyPlan()
@@ -348,7 +432,8 @@ public class GroupReplyPlanService {
             GroupReplyPlanItem first = groupItems.getFirst();
             List<GroupReplyPlanVO.Item> voItems = groupItems.stream()
                     .map(item -> new GroupReplyPlanVO.Item(item.getId(), item.getItemOrder(), item.getActorType(),
-                            item.getActorId()))
+                            item.getActorId(),
+                            item.getSubjectCharacterId()))
                     .toList();
             return new GroupReplyPlanVO.Group(first.getGroupKey(), first.getGroupName(),
                     first.getGroupOrder(), voItems);
@@ -409,7 +494,15 @@ public class GroupReplyPlanService {
                 String actorType = StringUtils.hasText(item.getActorType())
                         ? item.getActorType().trim().toLowerCase(Locale.ROOT)
                         : GroupChatConstant.ACTOR_CHARACTER;
-                if (!actors.add(actorType + "\n" + item.getActorId())) {
+                if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(source)
+                        && item.getSubjectCharacterId() == null) {
+                    throw new UserRequestException(
+                            "战斗回复人物必须绑定人物卡");
+                }
+                String actorKey = actorType + "\n" + item.getActorId()
+                        + (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(source)
+                        ? "\n" + item.getSubjectCharacterId() : "");
+                if (!actors.add(actorKey)) {
                     throw new UserRequestException("同一分组中不能重复安排同一人物");
                 }
                 if (GroupChatConstant.ACTOR_KP.equals(actorType)) {
@@ -462,5 +555,26 @@ public class GroupReplyPlanService {
             throw new UserRequestException("当前群聊正在生成回复，请稍后再试");
         }
         return lock;
+    }
+
+    private void rejectPublicCombatSource(GroupReplyPlanDTO request) {
+        if (request != null && StringUtils.hasText(request.getSource())
+                && GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
+                request.getSource().trim().toUpperCase(Locale.ROOT))) {
+            throw new UserRequestException("战斗只能由 KP 在场景中发起，不能通过回复计划接口创建");
+        }
+    }
+
+    private void rejectPublicCombatPlan(GroupReplyPlan active) {
+        if (active != null && GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())) {
+            throw new UserRequestException("战斗计划只能通过战斗流程推进或结束");
+        }
+    }
+
+    public record CombatPlanItem(
+            String actorType,
+            Long actorId,
+            Long subjectCharacterId,
+            Integer order) {
     }
 }

@@ -11,6 +11,7 @@ import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTopic;
 import com.me.galchat.domain.po.GroupChatTurn;
+import com.me.galchat.domain.po.TrpgCombat;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.Data;
@@ -57,6 +58,8 @@ public class UserWorldSaveSnapshotDTO {
     private List<GroupConversationTurnsSnapshot> recentGroupTurnsByConversation;
 
     private List<GroupConversationPlanSnapshot> conversationPlans;
+
+    private List<TrpgCombat> combats;
 
     private WorldEventLog lastWorldEventLog;
 
@@ -148,5 +151,6 @@ public class UserWorldSaveSnapshotDTO {
         private Integer order;
         private String actorType;
         private Long actorId;
+        private Long subjectCharacterId;
     }
 }

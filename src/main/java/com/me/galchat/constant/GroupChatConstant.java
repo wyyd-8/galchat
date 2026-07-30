@@ -22,12 +22,17 @@ public final class GroupChatConstant {
     public static final String MESSAGE_NARRATION = "narration";
     public static final String MESSAGE_DICE_ROLL = "dice_roll";
     public static final String MESSAGE_MATERIAL = "material";
+    public static final String MESSAGE_COMBAT_RESULT = "combat_result";
 
     public static final String ACTION_CHAT_REPLY = "chat_reply";
     public static final String ACTION_TRPG_SCENE = "trpg_scene_action";
     public static final String ACTION_TRPG_SCENE_INTRO =
             "trpg_scene_intro";
     public static final String ACTION_TRPG_COMBAT = "trpg_combat_action";
+    public static final String ACTION_COMBAT_ATTACK = "combat_attack";
+    public static final String ACTION_COMBAT_REACTION_ROUTE = "combat_reaction_route";
+    public static final String ACTION_COMBAT_DEFENSE = "combat_defense";
+    public static final String ACTION_COMBAT_ADJUDICATE = "combat_adjudicate";
     public static final String ACTION_TRPG_SCENE_SELECTION = "trpg_scene_selection";
 
     public static final String TOPIC_BOUNDARY_SEMANTIC = "semantic";
@@ -43,6 +48,8 @@ public final class GroupChatConstant {
     public static final String STATUS_CANCELLED = "cancelled";
     public static final String STATUS_STREAMING = "streaming";
     public static final String STATUS_WAITING_INPUT = "waiting_input";
+    public static final String STATUS_PAUSED = "paused";
+    public static final String STATUS_WAITING_DICE = "waiting_dice";
     public static final String STATUS_WITHDRAWN = "withdrawn";
 
     public static final String EVENT_TURN_ACCEPTED = "turn.accepted";
@@ -62,6 +69,16 @@ public final class GroupChatConstant {
     public static final String EVENT_REPLY_FAILED = "reply.failed";
     public static final String EVENT_TURN_COMPLETED = "turn.completed";
     public static final String EVENT_TURN_WAITING_INPUT = "turn.waiting_input";
+    public static final String EVENT_TURN_PAUSED = "turn.paused";
+    public static final String EVENT_COMBAT_STARTED = "combat.started";
+    public static final String EVENT_COMBAT_COMPLETED = "combat.completed";
+
+    public static final String COMBAT_STATUS_START_REQUESTED = "START_REQUESTED";
+    public static final String COMBAT_STATUS_ACTIVE = "ACTIVE";
+    public static final String COMBAT_STATUS_COMPLETED = "COMPLETED";
+    public static final String COMBAT_STATUS_CANCELLED = "CANCELLED";
+    public static final String COMBAT_ORDER_DEX = "DEX";
+    public static final String COMBAT_ORDER_INVESTIGATORS_FIRST = "INVESTIGATORS_FIRST";
 
     public static final int DEFAULT_HISTORY_PAGE_SIZE = 50;
     public static final int MAX_REPLY_STEPS = 12;

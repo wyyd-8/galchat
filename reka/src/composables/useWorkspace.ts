@@ -153,12 +153,17 @@ export function useWorkspace() {
   async function selectConversation(id: number) {
     selectedConversationId.value = id; loading.chat = true; messages.value = []; currentTurn.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
-      const [history, plan] = await Promise.all([api.groupMessages(id), api.replyPlan(id)])
+      const [history, plan, turn] = await Promise.all([
+        api.groupMessages(id), api.replyPlan(id), api.currentTurn(id),
+      ])
       messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
       replyPlan.value = plan || freshPlan()
-      participantIds.value = [...new Set(replyPlan.value.groups.flatMap((group) => group.items.map((item) => item.actorId)))]
+      currentTurn.value = turn
+      participantIds.value = [...new Set(replyPlan.value.groups
+        .flatMap((group) => group.items.map((item) => item.actorId))
+        .filter((id): id is number => typeof id === 'number'))]
       const conversation = selectedConversation.value
-      if (conversation?.mode === 'trpg' && conversation.status === 'active') await startTrpgTurn()
+      if (conversation?.mode === 'trpg' && conversation.status === 'active' && !turn) await startTrpgTurn()
       await scrollToBottom()
     } catch (error) { notify('群聊加载失败', errorMessage(error), 'danger') }
     finally { loading.chat = false }
@@ -226,6 +231,12 @@ export function useWorkspace() {
         actionType: event.actionType, inputType: event.actionType === 'trpg_scene_selection' ? 'selection' : 'message',
         sceneName: event.groupName, waitingForUser: true, sceneOptions: event.sceneOptions || {},
       }
+    } else if (event.eventType === 'turn.paused' && event.turnId) {
+      currentTurn.value = {
+        turnId: event.turnId, status: 'paused',
+        inputType: 'continue', waitingForUser: false,
+        sceneOptions: {},
+      }
     } else if (event.eventType === 'turn.completed') {
       currentTurn.value = null
     } else if (event.eventType === 'reply.failed' && step) {
@@ -249,7 +260,7 @@ export function useWorkspace() {
     if (!conversation || conversation.mode !== 'trpg' || conversation.status !== 'active' || loading.sending) return
     loading.sending = true
     try {
-      await streamTrpgTurn.start(conversation.id, crypto.randomUUID?.() || `web-${Date.now()}`, applyEvent)
+      await streamTrpgTurn.continue(conversation.id, crypto.randomUUID?.() || `web-${Date.now()}`, applyEvent)
       await syncTrpgState(conversation)
     } catch (error) {
       await syncTrpgState(conversation).catch(() => undefined)

@@ -62,6 +62,8 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         requireTrpgRun(createDTO.getRunId());
         CharacterCardImportParser.ParsedCharacterCard parsed =
                 CharacterCardImportParser.parse(createDTO.getCharacterText());
+        requireUniqueName(
+                createDTO.getRunId(), parsed.character());
         validateAndFillSkills(parsed.character(), parsed.skills());
         CocCharacter character = parsed.character()
                 .setRunId(createDTO.getRunId())
@@ -83,6 +85,24 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         parsed.profile().setCharacterId(characterId);
         profileMapper.insert(parsed.profile());
         return requireById(characterId);
+    }
+
+    private void requireUniqueName(
+            Long runId, CocCharacter character) {
+        String name = character == null || character.getName() == null
+                ? null : character.getName().trim();
+        if (name == null || name.isEmpty()) {
+            throw new UserRequestException("人物卡名称不能为空");
+        }
+        character.setName(name);
+        List<CocCharacter> matches = characterMapper.selectList(
+                new LambdaQueryWrapper<CocCharacter>()
+                        .eq(CocCharacter::getRunId, runId)
+                        .eq(CocCharacter::getName, name));
+        if (matches != null && !matches.isEmpty()) {
+            throw new UserRequestException(
+                    "同一跑团内人物卡名称不能重复：" + name);
+        }
     }
 
     @Override

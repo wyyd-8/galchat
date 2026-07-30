@@ -56,12 +56,12 @@ export interface Conversation {
 export interface GroupMessage {
   id: number; conversationId: number; turnId?: number; replyStepId?: number
   speakerType: 'user' | 'character' | 'kp' | 'narrator'; speakerId?: number; speakerName?: string
-  messageKind: 'dialogue' | 'narration' | 'system_event' | 'dice_roll' | 'material'; content: string; sequenceNo: number
+  messageKind: 'dialogue' | 'narration' | 'system_event' | 'dice_roll' | 'material' | 'combat_result'; content: string; sequenceNo: number
   decisionContent?: string; status: string; createdAt?: string
 }
 export interface GroupSpeaker { type: string; id?: number; name?: string; avatar?: string }
 export interface GroupChatEvent {
-  eventType: 'turn.accepted' | 'turn.waiting_input' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice'
+  eventType: 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
   actionType?: string; groupName?: string; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string
   sceneOptions?: Record<string, string>; autoSelected?: boolean
@@ -69,10 +69,10 @@ export interface GroupChatEvent {
 }
 export interface CurrentTurn {
   turnId: number; planId?: number; planSource?: string; planContextId?: number; status: string
-  stepId?: number; actionType?: string; inputType?: 'message' | 'selection'; sceneName?: string
+  stepId?: number; actionType?: string; inputType?: 'message' | 'selection' | 'continue' | 'dice'; sceneName?: string
   waitingForUser: boolean; sceneOptions: Record<string, string>
 }
-export interface ReplyPlanItem { id?: number; order: number; actorType: string; actorId: number; status?: string }
+export interface ReplyPlanItem { id?: number; order: number; actorType: string; actorId?: number; subjectCharacterId?: number; status?: string }
 export interface ReplyPlanGroup { key: string; name: string; order: number; items: ReplyPlanItem[] }
 export interface ReplyPlan {
   id?: number; source: 'USER' | 'SCENE' | 'COMBAT'; contextId?: number; resumePlanId?: number; groups: ReplyPlanGroup[]

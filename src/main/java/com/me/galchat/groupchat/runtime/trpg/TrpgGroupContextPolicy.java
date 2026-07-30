@@ -76,6 +76,10 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
         return GroupChatConstant.ACTION_TRPG_SCENE.equals(
                 action.actionType())
                 || GroupChatConstant.ACTION_TRPG_COMBAT.equals(
+                action.actionType())
+                || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
+                action.actionType())
+                || GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
                 action.actionType());
     }
 }

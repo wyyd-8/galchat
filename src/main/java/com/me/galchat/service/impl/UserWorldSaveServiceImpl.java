@@ -101,6 +101,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private final GroupContextSummaryMapper groupContextSummaryMapper;
     private final GroupChatTopicMapper groupChatTopicMapper;
     private final GroupReplyPlanSnapshotService groupReplyPlanSnapshotService;
+    private final TrpgCombatSnapshotService trpgCombatSnapshotService;
     private final GroupTurnRecoveryService groupTurnRecoveryService;
     private final SingleChatLockService singleChatLockService;
     private final GroupConversationLockService groupConversationLockService;
@@ -194,6 +195,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     protected List<Long> doLoadWorld(Long userWorldId, UserWorldSaveSnapshotDTO snapshot) {
         List<Long> deletedUserMessageIds = listUserMessageIdsAfter(userWorldId, snapshot.getMaxChatHistoryId());
         deleteAfterSnapshot(userWorldId, snapshot);
+        trpgCombatSnapshotService.restore(
+                userWorldId, snapshot.getCombats());
         groupReplyPlanSnapshotService.restore(userWorldId, snapshot.getConversationPlans());
         restoreRecentChatRounds(userWorldId, snapshot);
         restoreRecentGroupTurns(snapshot);
@@ -224,6 +227,8 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .setRecentChatRoundsByCharacter(recentChatRounds(userWorldId, characters))
                 .setRecentGroupTurnsByConversation(recentGroupTurns(userWorldId))
                 .setConversationPlans(groupReplyPlanSnapshotService.capture(userWorldId))
+                .setCombats(trpgCombatSnapshotService.capture(
+                        userWorldId))
                 .setLastWorldEventLog(lastWorldEventLog(userWorldId));
     }
 

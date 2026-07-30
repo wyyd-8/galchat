@@ -62,7 +62,7 @@ class GroupReplyPlanServiceTest {
     }
 
     @Test
-    void combatPlanRemembersExplorationPlan() {
+    void publicReplaceCannotCreateCombatPlan() {
         Fixture fixture = new Fixture();
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
@@ -77,16 +77,44 @@ class GroupReplyPlanServiceTest {
         when(fixture.conversationService.requireActive(7L)).thenReturn(conversation);
         when(fixture.planMapper.selectById(10L)).thenReturn(exploration);
         when(fixture.itemMapper.selectList(any())).thenReturn(List.of());
+        assertThatThrownBy(() -> fixture.service.replace(7L, combatRequest()))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessageContaining("KP")
+                .hasMessageContaining("战斗");
+        verify(fixture.planMapper, never()).insert(any(GroupReplyPlan.class));
+    }
+
+    @Test
+    void internalCombatStartKeepsScenePlanAndBindsSubjectCard() {
+        Fixture fixture = new Fixture();
+        GroupConversation conversation = activeConversation(
+                GroupChatConstant.MODE_TRPG, 10L);
+        GroupReplyPlan exploration = plan(
+                10L, GroupChatConstant.PLAN_SOURCE_SCENE, null)
+                .setContextId(100L);
+        when(fixture.planMapper.selectById(10L))
+                .thenReturn(exploration);
         doAnswer(invocation -> {
             ((GroupReplyPlan) invocation.getArgument(0)).setId(20L);
             return 1;
         }).when(fixture.planMapper).insert(any(GroupReplyPlan.class));
 
-        var result = fixture.service.replace(7L, combatRequest());
+        var result = fixture.service.startCombatUnderLock(
+                conversation, 200L, 1, List.of(
+                        new GroupReplyPlanService.CombatPlanItem(
+                                GroupChatConstant.ACTOR_KP,
+                                null, 71L, 1)));
 
-        assertThat(result.getId()).isEqualTo(20L);
         assertThat(result.getResumePlanId()).isEqualTo(10L);
+        assertThat(result.getContextId()).isEqualTo(200L);
         assertThat(conversation.getActiveReplyPlanId()).isEqualTo(20L);
+        verify(fixture.itemMapper).insert(
+                org.mockito.ArgumentMatchers.argThat(
+                        (GroupReplyPlanItem item) ->
+                                item.getSubjectCharacterId().equals(71L)
+                                        && item.getActorId() == null
+                                        && GroupChatConstant.ACTOR_KP.equals(
+                                        item.getActorType())));
         verify(fixture.planMapper, never()).deleteById(10L);
     }
 
@@ -122,7 +150,7 @@ class GroupReplyPlanServiceTest {
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                 .setActorId(9L)));
 
-        var result = fixture.service.finishActive(7L);
+        var result = fixture.service.finishActiveUnderLock(conversation);
 
         assertThat(result.getId()).isEqualTo(10L);
         assertThat(result.getGroups().getFirst().getItems().getFirst())
@@ -202,23 +230,21 @@ class GroupReplyPlanServiceTest {
     }
 
     @Test
-    void advancingLastCombatGroupRestoresResumePlan() {
+    void publicAdvanceCannotManipulateCombatPlan() {
         Fixture fixture = new Fixture();
         GroupConversation conversation = activeConversation(GroupChatConstant.MODE_TRPG, 20L);
         GroupReplyPlan combat = plan(20L, GroupChatConstant.PLAN_SOURCE_COMBAT, 10L);
         GroupReplyPlan scene = plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null);
         when(fixture.conversationService.requireActive(7L)).thenReturn(conversation);
         when(fixture.planMapper.selectById(20L)).thenReturn(combat);
-        when(fixture.planMapper.selectById(10L)).thenReturn(scene);
         when(fixture.itemMapper.selectList(any()))
                 .thenReturn(List.of(item(21L, 20L, "round:1", 1, 9L)), List.of(
                         item(11L, 10L, "scene:1", 1, 9L)));
 
-        var result = fixture.service.advanceGroup(7L);
-
-        assertThat(result.getSource()).isEqualTo(GroupChatConstant.PLAN_SOURCE_SCENE);
-        assertThat(conversation.getActiveReplyPlanId()).isEqualTo(10L);
-        verify(fixture.planMapper).deleteById(20L);
+        assertThatThrownBy(() -> fixture.service.advanceGroup(7L))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessageContaining("战斗");
+        verify(fixture.planMapper, never()).deleteById(20L);
     }
 
     @Test
@@ -311,8 +337,8 @@ class GroupReplyPlanServiceTest {
                 .thenReturn(activeConversation(GroupChatConstant.MODE_CHAT, null));
         assertThatThrownBy(() -> fixture.service.replace(7L, combatRequest()))
                 .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
-                .hasMessageContaining("SCENE")
-                .hasMessageContaining("COMBAT");
+                .hasMessageContaining("KP")
+                .hasMessageContaining("战斗");
     }
 
     @Test
@@ -320,7 +346,8 @@ class GroupReplyPlanServiceTest {
         Fixture fixture = new Fixture();
         when(fixture.conversationService.requireActive(7L))
                 .thenReturn(activeConversation(GroupChatConstant.MODE_TRPG, null));
-        GroupReplyPlanDTO request = combatRequest();
+        GroupReplyPlanDTO request = sceneRequest(
+                planActor(GroupChatConstant.ACTOR_KP, null));
         request.setContextId(null);
 
         assertThatThrownBy(() -> fixture.service.replace(7L, request))

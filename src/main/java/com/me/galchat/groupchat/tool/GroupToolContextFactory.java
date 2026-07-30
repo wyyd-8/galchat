@@ -28,6 +28,10 @@ public class GroupToolContextFactory {
         context.put(ChatToolContextConstant.USER_WORLD_ID_KEY, conversation.getUserWorldId());
         context.put(ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY, conversation.getId());
         context.put(ChatToolContextConstant.ACTOR_TYPE_KEY, action.actorType());
+        if (action.subjectCharacterId() != null) {
+            context.put(ChatToolContextConstant.SUBJECT_CHARACTER_ID_KEY,
+                    action.subjectCharacterId());
+        }
         if (action.actorId() != null) {
             context.put(ChatToolContextConstant.CHARACTER_ID_KEY, action.actorId());
         }

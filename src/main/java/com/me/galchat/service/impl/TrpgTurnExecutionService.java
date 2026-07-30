@@ -2,6 +2,7 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.dto.GroupTurnStartDTO;
@@ -10,6 +11,7 @@ import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupCurrentTurnVO;
 import com.me.galchat.exception.UserRequestException;
@@ -22,6 +24,8 @@ import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.mapper.DiceRollSummaryMapper;
+import com.me.galchat.mapper.GroupReplyPlanMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -58,6 +62,90 @@ public class TrpgTurnExecutionService {
     private GroupAgentDecisionStore decisionStore;
     @Autowired
     private GroupChatToolCallMapper toolCallMapper;
+    @Autowired
+    private DiceRollSummaryMapper diceRollSummaryMapper;
+    @Autowired
+    private com.me.galchat.groupchat.dice.DiceRollMessageCodec
+            diceMessageCodec;
+    @Autowired
+    private TrpgCombatLifecycleService combatLifecycleService;
+    @Autowired
+    private GroupReplyPlanMapper replyPlanMapper;
+
+    public Flux<GroupChatEvent> continueTurn(
+            Long conversationId,
+            GroupTurnStartDTO request) {
+        return Flux.defer(() -> {
+            validateStartRequest(request);
+            conversationService.requireAuthorized(conversationId);
+            GroupConversationLockService.OwnedLock lock =
+                    lockService.tryLock(conversationId);
+            if (lock == null) {
+                return Flux.error(new UserRequestException(
+                        "当前群聊正在执行行动轮，请稍后再试"));
+            }
+            try {
+                GroupConversation conversation =
+                        conversationService.requireActive(
+                                conversationId);
+                requireTrpg(conversation);
+                GroupChatTurn turn = latestRecoverableTurn(
+                        conversationId);
+                if (turn != null
+                        && GroupChatConstant.STATUS_RUNNING.equals(
+                        turn.getStatus())
+                        && hasRunningStep(turn.getId())) {
+                    recoveryService.recoverInterrupted(
+                            conversationId);
+                    turn = latestRecoverableTurn(conversationId);
+                }
+                if (turn == null
+                        || GroupChatConstant.STATUS_COMPLETED.equals(
+                        turn.getStatus())) {
+                    GroupChatTurn previousTurn = turn;
+                    PreparedTurn prepared =
+                            transactionTemplate.execute(status -> {
+                                if (GroupChatConstant
+                                        .PLAN_SOURCE_COMBAT.equals(
+                                        activePlanSource(conversation))
+                                        && previousTurn != null
+                                        && GroupChatConstant
+                                        .PLAN_SOURCE_COMBAT.equals(
+                                        previousTurn.getPlanSource())) {
+                                    combatLifecycleService
+                                            .startNextRoundUnderLock(
+                                                    conversation);
+                                }
+                                return createTurn(
+                                        conversation, request);
+                            });
+                    turn = prepared.turn();
+                } else if (!GroupChatConstant.STATUS_RUNNING.equals(
+                        turn.getStatus())) {
+                    resumeTurn(turn);
+                }
+                GroupChatTurn selected = turn;
+                Flux<GroupChatEvent> accepted = Flux.just(
+                        GroupChatEvent.builder()
+                                .eventType(GroupChatConstant
+                                        .EVENT_TURN_ACCEPTED)
+                                .conversationId(conversationId)
+                                .turnId(selected.getId())
+                                .build());
+                return Flux.concat(accepted,
+                                executePendingSteps(
+                                        conversation, selected))
+                        .doOnError(error ->
+                                recoveryService.recoverInterrupted(
+                                        conversationId))
+                        .doFinally(signal ->
+                                lockService.unlock(lock));
+            } catch (RuntimeException exception) {
+                lockService.unlock(lock);
+                return Flux.error(exception);
+            }
+        });
+    }
 
     public TrpgTurnExecutionService(
             GroupConversationService conversationService,
@@ -119,22 +207,10 @@ public class TrpgTurnExecutionService {
                                 .conversationId(conversationId)
                                 .turnId(prepared.turn().getId())
                                 .build());
-                int userIndex = firstUserStep(prepared.steps());
-                List<GroupChatReplyStep> executable = userIndex < 0
-                        ? prepared.steps()
-                        : prepared.steps().subList(0, userIndex);
-                Flux<GroupChatEvent> replies =
-                        Flux.fromIterable(executable)
-                                .concatMap(step ->
-                                        groupChatService.streamPersistedStep(
-                                                conversation,
-                                                prepared.turn(), step));
-                Flux<GroupChatEvent> tail = userIndex < 0
-                        ? complete(conversation, prepared.turn())
-                        : continueFromUserBoundary(
-                                conversation, prepared.turn(),
-                                prepared.steps().get(userIndex));
-                return Flux.concat(accepted, replies, tail)
+                return Flux.concat(accepted,
+                                executeScheduledSteps(
+                                        conversation, prepared.turn(),
+                                        prepared.steps(), 0))
                         .doOnError(error ->
                                 recoveryService.recoverInterrupted(
                                         conversationId))
@@ -181,11 +257,6 @@ public class TrpgTurnExecutionService {
                                         .orderByAsc(
                                                 GroupChatReplyStep
                                                         ::getStepNo));
-                int nextUserIndex = firstUserStep(remaining);
-                List<GroupChatReplyStep> executable =
-                        nextUserIndex < 0
-                                ? remaining
-                                : remaining.subList(0, nextUserIndex);
                 Flux<GroupChatEvent> accepted = Flux.just(
                         GroupChatEvent.builder()
                                 .eventType(GroupChatConstant
@@ -194,22 +265,10 @@ public class TrpgTurnExecutionService {
                                 .turnId(turnId)
                                 .replyStepId(stepId)
                                 .build());
-                Flux<GroupChatEvent> replies =
-                        Flux.fromIterable(executable)
-                                .concatMap(step ->
-                                        groupChatService
-                                                .streamPersistedStep(
-                                                        conversation,
-                                                        turn,
-                                                        step));
-                Flux<GroupChatEvent> tail =
-                        nextUserIndex < 0
-                                ? complete(conversation, turn)
-                                : waitForUser(
-                                        conversation,
-                                        turn,
-                                        remaining.get(nextUserIndex));
-                return Flux.concat(accepted, replies, tail)
+                return Flux.concat(accepted,
+                                executeScheduledSteps(
+                                        conversation, turn,
+                                        remaining, 0))
                         .doOnError(error ->
                                 recoveryService.recoverInterrupted(
                                         conversationId))
@@ -238,6 +297,132 @@ public class TrpgTurnExecutionService {
         return turn;
     }
 
+    private GroupChatTurn latestRecoverableTurn(
+            Long conversationId) {
+        List<GroupChatTurn> turns = turnMapper.selectList(
+                new LambdaQueryWrapper<GroupChatTurn>()
+                        .eq(GroupChatTurn::getConversationId,
+                                conversationId)
+                        .in(GroupChatTurn::getStatus,
+                                GroupChatConstant.STATUS_COMPLETED,
+                                GroupChatConstant.STATUS_RUNNING,
+                                GroupChatConstant.STATUS_WAITING_INPUT,
+                                GroupChatConstant.STATUS_PAUSED,
+                                GroupChatConstant.STATUS_WAITING_DICE,
+                                GroupChatConstant.STATUS_FAILED,
+                                GroupChatConstant.STATUS_BLOCKED)
+                        .orderByDesc(GroupChatTurn::getId)
+                        .last("limit 1"));
+        return turns == null || turns.isEmpty()
+                ? null : turns.getFirst();
+    }
+
+    private boolean hasRunningStep(Long turnId) {
+        Long count = stepMapper.selectCount(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turnId)
+                        .eq(GroupChatReplyStep::getStatus,
+                                GroupChatConstant.STATUS_RUNNING));
+        return count != null && count > 0;
+    }
+
+    private String activePlanSource(
+            GroupConversation conversation) {
+        if (conversation.getActiveReplyPlanId() == null) {
+            return null;
+        }
+        var plan = replyPlanMapper.selectById(
+                conversation.getActiveReplyPlanId());
+        return plan == null ? null : plan.getSource();
+    }
+
+    private void resumeTurn(GroupChatTurn turn) {
+        if (GroupChatConstant.STATUS_WAITING_INPUT.equals(
+                turn.getStatus())) {
+            throw new UserRequestException(
+                    "当前等待用户调查员行动，请使用用户行动接口");
+        }
+        List<GroupChatReplyStep> activeSteps = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turn.getId())
+                        .in(GroupChatReplyStep::getStatus,
+                                GroupChatConstant.STATUS_PAUSED,
+                                GroupChatConstant.STATUS_WAITING_DICE,
+                                GroupChatConstant.STATUS_FAILED)
+                        .orderByAsc(GroupChatReplyStep::getStepNo)
+                        .last("limit 1"));
+        GroupChatReplyStep step =
+                activeSteps == null || activeSteps.isEmpty()
+                        ? null : activeSteps.getFirst();
+        if (GroupChatConstant.STATUS_WAITING_DICE.equals(
+                turn.getStatus())) {
+            if (step == null || hasPendingDice(step.getId())) {
+                throw new UserRequestException(
+                        "当前仍有用户骰点未完成");
+            }
+        }
+        if (GroupChatConstant.STATUS_FAILED.equals(turn.getStatus())
+                || GroupChatConstant.STATUS_BLOCKED.equals(
+                turn.getStatus())) {
+            if (step == null) {
+                List<GroupChatReplyStep> failed =
+                        stepMapper.selectList(
+                                new LambdaQueryWrapper<
+                                        GroupChatReplyStep>()
+                                        .eq(GroupChatReplyStep::getTurnId,
+                                                turn.getId())
+                                        .eq(GroupChatReplyStep::getStatus,
+                                                GroupChatConstant
+                                                        .STATUS_FAILED)
+                                        .orderByAsc(
+                                                GroupChatReplyStep
+                                                        ::getStepNo)
+                                        .last("limit 1"));
+                step = failed == null || failed.isEmpty()
+                        ? null : failed.getFirst();
+            }
+            if (step == null) {
+                throw new UserRequestException(
+                        "失败行动轮没有可恢复的步骤");
+            }
+            restoreFailedStep(turn, step);
+            return;
+        }
+        if (step == null) {
+            throw new UserRequestException(
+                    "当前行动轮没有可继续的暂停步骤");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        step.setStatus(GroupChatConstant.STATUS_PENDING)
+                .setErrorMessage(null)
+                .setUpdatedAt(now);
+        stepMapper.updateById(step);
+        turn.setStatus(GroupChatConstant.STATUS_RUNNING)
+                .setUpdatedAt(now);
+        turnMapper.updateById(turn);
+    }
+
+    private boolean hasPendingDice(Long replyStepId) {
+        List<GroupChatMessage> messages = messageMapper.selectList(
+                new LambdaQueryWrapper<GroupChatMessage>()
+                        .eq(GroupChatMessage::getReplyStepId,
+                                replyStepId)
+                        .eq(GroupChatMessage::getMessageKind,
+                                GroupChatConstant.MESSAGE_DICE_ROLL)
+                        .orderByDesc(GroupChatMessage::getId)
+                        .last("limit 1"));
+        if (messages == null || messages.isEmpty()) {
+            return true;
+        }
+        Long summaryId = diceMessageCodec.decode(
+                messages.getFirst().getContent()).summaryId();
+        DiceRollSummary summary =
+                diceRollSummaryMapper.selectById(summaryId);
+        return summary == null
+                || DiceRollConstant.STATUS_PENDING.equals(
+                summary.getStatus());
+    }
+
     private GroupChatReplyStep requireRetryableStep(
             Long turnId, Long stepId) {
         GroupChatReplyStep step = stepMapper.selectById(stepId);
@@ -252,6 +437,10 @@ public class TrpgTurnExecutionService {
                 || !(GroupChatConstant.ACTION_TRPG_SCENE.equals(
                 step.getActionType())
                 || GroupChatConstant.ACTION_TRPG_COMBAT.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
                 step.getActionType()))) {
             throw new UserRequestException(
                     "只能重试失败的角色行动步骤");
@@ -266,6 +455,10 @@ public class TrpgTurnExecutionService {
                     "角色行动重试组件未配置");
         }
         decisionStore.deleteByReplyStepId(failedStep.getId());
+        if (combatLifecycleService != null) {
+            combatLifecycleService.clearControlMarkersForRetry(
+                    failedStep.getId());
+        }
         toolCallMapper.delete(
                 new LambdaQueryWrapper<GroupChatToolCall>()
                         .eq(GroupChatToolCall::getReplyStepId,
@@ -315,7 +508,11 @@ public class TrpgTurnExecutionService {
                                 conversationId)
                         .in(GroupChatTurn::getStatus,
                                 GroupChatConstant.STATUS_RUNNING,
-                                GroupChatConstant.STATUS_WAITING_INPUT)
+                                GroupChatConstant.STATUS_WAITING_INPUT,
+                                GroupChatConstant.STATUS_PAUSED,
+                                GroupChatConstant.STATUS_WAITING_DICE,
+                                GroupChatConstant.STATUS_FAILED,
+                                GroupChatConstant.STATUS_BLOCKED)
                         .orderByDesc(GroupChatTurn::getId)
                         .last("limit 1"));
         if (turns == null || turns.isEmpty()) {
@@ -327,7 +524,10 @@ public class TrpgTurnExecutionService {
                         .eq(GroupChatReplyStep::getTurnId, turn.getId())
                         .in(GroupChatReplyStep::getStatus,
                                 GroupChatConstant.STATUS_RUNNING,
-                                GroupChatConstant.STATUS_WAITING_INPUT)
+                                GroupChatConstant.STATUS_WAITING_INPUT,
+                                GroupChatConstant.STATUS_PAUSED,
+                                GroupChatConstant.STATUS_WAITING_DICE,
+                                GroupChatConstant.STATUS_FAILED)
                         .orderByAsc(GroupChatReplyStep::getStepNo)
                         .last("limit 1"));
         GroupChatReplyStep step = steps == null || steps.isEmpty()
@@ -337,7 +537,11 @@ public class TrpgTurnExecutionService {
                         step.getStatus())
                 && GroupChatConstant.ACTOR_USER.equals(
                         step.getSpeakerType());
-        String inputType = step == null ? null
+        String inputType = GroupChatConstant.STATUS_PAUSED.equals(
+                turn.getStatus()) ? "continue"
+                : GroupChatConstant.STATUS_WAITING_DICE.equals(
+                turn.getStatus()) ? "dice"
+                : step == null ? null
                 : GroupChatConstant.ACTION_TRPG_SCENE_SELECTION.equals(
                         step.getActionType())
                 ? "selection" : "message";
@@ -530,22 +734,9 @@ public class TrpgTurnExecutionService {
                         .messageId(message.getId())
                         .sequence(message.getSequenceNo())
                         .build());
-        int nextUserIndex = firstUserStep(remaining);
-        List<GroupChatReplyStep> executable =
-                nextUserIndex < 0
-                        ? remaining
-                        : remaining.subList(0, nextUserIndex);
-        Flux<GroupChatEvent> replies =
-                Flux.fromIterable(executable)
-                        .concatMap(step ->
-                                groupChatService.streamPersistedStep(
-                                        conversation, turn, step));
-        Flux<GroupChatEvent> tail = nextUserIndex < 0
-                ? complete(conversation, turn)
-                : waitForUser(
-                        conversation, turn,
-                        remaining.get(nextUserIndex));
-        return Flux.concat(accepted, replies, tail)
+        return Flux.concat(accepted,
+                        executeScheduledSteps(
+                                conversation, turn, remaining, 0))
                 .doOnError(error ->
                         recoveryService.recoverInterrupted(
                                 conversation.getId()))
@@ -652,9 +843,11 @@ public class TrpgTurnExecutionService {
         int syntheticSteps = actions.stream().anyMatch(action ->
                 GroupChatConstant.ACTION_TRPG_SCENE_INTRO.equals(
                         action.actionType())) ? 1 : 0;
-        if (actions.size()
-                > GroupChatConstant.MAX_REPLY_STEPS
-                + syntheticSteps) {
+        int actionLimit = GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
+                resolved.source())
+                ? GroupChatConstant.MAX_REPLY_STEPS * 4
+                : GroupChatConstant.MAX_REPLY_STEPS + syntheticSteps;
+        if (actions.size() > actionLimit) {
             throw new UserRequestException(
                     "单次行动轮人物数量不能超过"
                             + GroupChatConstant.MAX_REPLY_STEPS);
@@ -699,6 +892,8 @@ public class TrpgTurnExecutionService {
                     .setActionType(action.actionType())
                     .setSpeakerType(action.actorType())
                     .setSpeakerId(action.actorId())
+                    .setSubjectCharacterId(
+                            action.subjectCharacterId())
                     .setForceReply(false)
                     .setStatus(GroupChatConstant.STATUS_PENDING)
                     .setCreatedAt(now)
@@ -756,6 +951,89 @@ public class TrpgTurnExecutionService {
             });
             return Flux.just(waitingEvent(conversation, turn, step));
         });
+    }
+
+    /**
+     * Re-queries after every step so a hidden combat route can either cancel
+     * its defense placeholder or bind it to the selected user/agent/NPC.
+     */
+    private Flux<GroupChatEvent> executePendingSteps(
+            GroupConversation conversation,
+            GroupChatTurn turn) {
+        List<GroupChatReplyStep> pending = stepMapper.selectList(
+                    new LambdaQueryWrapper<GroupChatReplyStep>()
+                            .eq(GroupChatReplyStep::getTurnId,
+                                    turn.getId())
+                            .eq(GroupChatReplyStep::getStatus,
+                                    GroupChatConstant.STATUS_PENDING)
+                            .orderByAsc(
+                                    GroupChatReplyStep::getStepNo));
+        return executeScheduledSteps(
+                conversation, turn,
+                pending == null ? List.of() : pending, 0);
+    }
+
+    private Flux<GroupChatEvent> executeScheduledSteps(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            List<GroupChatReplyStep> scheduled,
+            int index) {
+        return Flux.defer(() -> {
+            String turnStatus = turn.getStatus();
+            GroupChatTurn persistedTurn = turnMapper.selectById(turn.getId());
+            if (persistedTurn != null) {
+                turnStatus = persistedTurn.getStatus();
+                turn.setStatus(turnStatus);
+            }
+            if (GroupChatConstant.STATUS_PAUSED.equals(turnStatus)
+                    || GroupChatConstant.STATUS_WAITING_DICE.equals(
+                    turnStatus)) {
+                return Flux.just(pausedEvent(conversation, turn));
+            }
+            if (GroupChatConstant.STATUS_COMPLETED.equals(turnStatus)) {
+                return Flux.just(GroupChatEvent.builder()
+                        .eventType(
+                                GroupChatConstant.EVENT_TURN_COMPLETED)
+                        .conversationId(conversation.getId())
+                        .turnId(turn.getId())
+                        .build());
+            }
+            if (index >= scheduled.size()) {
+                return complete(conversation, turn);
+            }
+            GroupChatReplyStep original = scheduled.get(index);
+            GroupChatReplyStep persisted =
+                    stepMapper.selectById(original.getId());
+            GroupChatReplyStep next =
+                    persisted == null ? original : persisted;
+            if (GroupChatConstant.STATUS_CANCELLED.equals(
+                    next.getStatus())
+                    || GroupChatConstant.STATUS_COMPLETED.equals(
+                    next.getStatus())) {
+                return executeScheduledSteps(
+                        conversation, turn, scheduled, index + 1);
+            }
+            if (GroupChatConstant.ACTOR_USER.equals(
+                    next.getSpeakerType())) {
+                return waitForUser(conversation, turn, next);
+            }
+            return groupChatService.streamPersistedStep(
+                            conversation, turn, next)
+                    .concatWith(Flux.defer(() ->
+                            executeScheduledSteps(
+                                    conversation, turn,
+                                    scheduled, index + 1)));
+        });
+    }
+
+    private GroupChatEvent pausedEvent(
+            GroupConversation conversation,
+            GroupChatTurn turn) {
+        return GroupChatEvent.builder()
+                .eventType(GroupChatConstant.EVENT_TURN_PAUSED)
+                .conversationId(conversation.getId())
+                .turnId(turn.getId())
+                .build();
     }
 
     private Flux<GroupChatEvent> continueFromUserBoundary(
@@ -899,7 +1177,7 @@ public class TrpgTurnExecutionService {
         return Flux.defer(() -> {
             transactionTemplate.executeWithoutResult(status -> {
                 planResolver.onTurnCompleted(
-                        conversation, turn.getPlanSource());
+                        conversation, turn);
                 turn.setStatus(GroupChatConstant.STATUS_COMPLETED)
                         .setUpdatedAt(LocalDateTime.now());
                 turnMapper.updateById(turn);

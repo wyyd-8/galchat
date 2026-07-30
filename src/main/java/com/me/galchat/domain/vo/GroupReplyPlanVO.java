@@ -31,5 +31,12 @@ public class GroupReplyPlanVO {
         private Integer order;
         private String actorType;
         private Long actorId;
+        private Long subjectCharacterId;
+
+        public Item(
+                Long id, Integer order,
+                String actorType, Long actorId) {
+            this(id, order, actorType, actorId, null);
+        }
     }
 }

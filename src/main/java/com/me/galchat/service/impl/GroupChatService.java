@@ -71,6 +71,8 @@ public class GroupChatService {
     private final GroupMaterialMessageFeed materialMessageFeed;
     private final TrpgSceneSelectionService sceneSelectionService;
     private final GroupAgentDecisionStore decisionStore;
+    @Autowired
+    private TrpgCombatLifecycleService combatLifecycleService;
 
     @Autowired
     public GroupChatService(GroupConversationService conversationService,
@@ -233,6 +235,7 @@ public class GroupChatService {
         }
         List<GroupChatMessage> messages = messageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
                 .eq(GroupChatMessage::getConversationId, conversationId)
+                .eq(GroupChatMessage::getVisibility, "public")
                 .lt(beforeId != null, GroupChatMessage::getId, beforeId)
                 .orderByDesc(GroupChatMessage::getId)
                 .last("limit " + size));
@@ -321,6 +324,7 @@ public class GroupChatService {
                     .setActionType(action.actionType())
                     .setSpeakerType(action.actorType())
                     .setSpeakerId(action.actorId())
+                    .setSubjectCharacterId(action.subjectCharacterId())
                     .setForceReply(false)
                     .setStatus(GroupChatConstant.STATUS_PENDING)
                     .setCreatedAt(now)
@@ -363,6 +367,11 @@ public class GroupChatService {
                 return executeBufferedInvestigatorSelection(
                         requestSpec, conversation, turn, step, speaker);
             }
+            if (GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE.equals(
+                    action.actionType())) {
+                return executeBufferedCombatRoute(
+                        requestSpec, conversation, turn, step);
+            }
             GroupChatMessage outputMessage = transactionTemplate.execute(status -> {
                 step.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
                 stepMapper.updateById(step);
@@ -379,7 +388,9 @@ public class GroupChatService {
                             speaker, accumulator));
             Flux<GroupChatEvent> finished = Flux.defer(() -> {
                 accumulator.finishDecisionAction();
-                finalizeCompletedStep(step, outputMessage, accumulator, finalizationGuard);
+                finalizeCompletedStep(
+                        conversation, turn, step, outputMessage,
+                        accumulator, finalizationGuard);
                 List<GroupChatEvent> events = new ArrayList<>(
                         materialEvents(conversation, turn, step, accumulator));
                 events.add(baseEvent(GroupChatConstant.EVENT_MESSAGE_COMPLETED,
@@ -396,6 +407,76 @@ public class GroupChatService {
                     if (signal == SignalType.CANCEL) {
                         finalizeCancelledStep(turn, step, outputRef.get(), accumulator, finalizationGuard);
                     }
+                });
+    }
+
+    private Flux<GroupChatEvent> executeBufferedCombatRoute(
+            ChatClient.ChatClientRequestSpec requestSpec,
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step) {
+        if (combatLifecycleService == null) {
+            return Flux.error(new IllegalStateException(
+                    "战斗路由执行器未配置"));
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            step.setStatus(GroupChatConstant.STATUS_RUNNING)
+                    .setUpdatedAt(LocalDateTime.now());
+            stepMapper.updateById(step);
+        });
+        return requestSpec.stream().chatResponse()
+                .collectList()
+                .flatMapMany(responses -> {
+                    StringBuilder raw = new StringBuilder();
+                    responses.forEach(response -> {
+                        if (response != null
+                                && response.getResults() != null) {
+                            response.getResults().forEach(generation -> {
+                                if (generation.getOutput() != null
+                                        && generation.getOutput()
+                                        .getText() != null) {
+                                    raw.append(generation.getOutput()
+                                            .getText());
+                                }
+                            });
+                        }
+                    });
+                    transactionTemplate.executeWithoutResult(status -> {
+                        LocalDateTime now = LocalDateTime.now();
+                        GroupChatMessage message =
+                                new GroupChatMessage()
+                                        .setConversationId(
+                                                conversation.getId())
+                                        .setTurnId(turn.getId())
+                                        .setReplyStepId(step.getId())
+                                        .setSpeakerType(
+                                                GroupChatConstant.ACTOR_KP)
+                                        .setMessageKind(
+                                                GroupChatConstant
+                                                        .MESSAGE_DIALOGUE)
+                                        .setVisibility("internal")
+                                        .setContent(raw.toString())
+                                        .setSequenceNo(
+                                                conversationService
+                                                        .nextSequence(
+                                                                conversation
+                                                                        .getId()))
+                                        .setStatus(
+                                                GroupChatConstant
+                                                        .STATUS_COMPLETED)
+                                        .setCreatedAt(now)
+                                        .setUpdatedAt(now);
+                        messageMapper.insert(message);
+                        combatLifecycleService.completeReactionRoute(
+                                conversation, turn, step,
+                                raw.toString());
+                        step.setOutputMessageId(message.getId())
+                                .setStatus(
+                                        GroupChatConstant.STATUS_COMPLETED)
+                                .setUpdatedAt(now);
+                        stepMapper.updateById(step);
+                    });
+                    return Flux.empty();
                 });
     }
 
@@ -541,6 +622,7 @@ public class GroupChatService {
                 step.getActionType(),
                 step.getSpeakerType(),
                 step.getSpeakerId(),
+                step.getSubjectCharacterId(),
                 step.getGroupKey(),
                 step.getGroupName(),
                 step.getGroupOrder(),
@@ -733,6 +815,10 @@ public class GroupChatService {
                 && (GroupChatConstant.ACTION_TRPG_SCENE.equals(
                 action.actionType())
                 || GroupChatConstant.ACTION_TRPG_COMBAT.equals(
+                action.actionType())
+                || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
+                action.actionType())
+                || GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
                 action.actionType()));
     }
 
@@ -794,12 +880,69 @@ public class GroupChatService {
         }
     }
 
-    private void finalizeCompletedStep(GroupChatReplyStep step, GroupChatMessage message,
+    private void finalizeCompletedStep(
+                                       GroupConversation conversation,
+                                       GroupChatTurn turn,
+                                       GroupChatReplyStep step, GroupChatMessage message,
                                        GenerationAccumulator accumulator, FinalizationGuard guard) {
         guard.run(() ->
                 transactionTemplate.executeWithoutResult(status -> {
-                    persistOutput(message, accumulator, GroupChatConstant.STATUS_COMPLETED);
-                    updateStepStatus(step, GroupChatConstant.STATUS_COMPLETED, null);
+                    persistOutput(message, accumulator,
+                            GroupChatConstant.STATUS_COMPLETED);
+                    if (accumulator.diceRoll != null
+                            && GroupChatConstant.MODE_TRPG.equals(
+                            conversation.getMode())) {
+                        String pausedStatus = DiceRollConstant.STATUS_PENDING
+                                .equals(accumulator.diceRoll.summary()
+                                        .getStatus())
+                                ? GroupChatConstant.STATUS_WAITING_DICE
+                                : GroupChatConstant.STATUS_PAUSED;
+                        step.setOutputMessageId(null);
+                        step.setStatus(pausedStatus)
+                                .setErrorMessage(null)
+                                .setUpdatedAt(LocalDateTime.now());
+                        stepMapper.update(
+                                null,
+                                new LambdaUpdateWrapper<
+                                        GroupChatReplyStep>()
+                                        .eq(GroupChatReplyStep::getId,
+                                                step.getId())
+                                        .set(GroupChatReplyStep
+                                                        ::getOutputMessageId,
+                                                null)
+                                        .set(GroupChatReplyStep::getStatus,
+                                                pausedStatus)
+                                        .set(GroupChatReplyStep
+                                                        ::getErrorMessage,
+                                                null)
+                                        .set(GroupChatReplyStep::getUpdatedAt,
+                                                step.getUpdatedAt()));
+                        turn.setStatus(pausedStatus)
+                                .setUpdatedAt(LocalDateTime.now());
+                        turnMapper.updateById(turn);
+                        return;
+                    }
+                    updateStepStatus(step,
+                            GroupChatConstant.STATUS_COMPLETED, null);
+                    if (combatLifecycleService != null
+                            && GroupChatConstant
+                            .ACTION_COMBAT_ADJUDICATE.equals(
+                            step.getActionType())) {
+                        boolean finished =
+                                combatLifecycleService
+                                        .completeAdjudication(
+                                conversation, turn, step, message);
+                        if (finished) {
+                            recoveryService.cancelPendingSteps(
+                                    turn.getId(), "战斗已结束");
+                            turn.setStatus(
+                                            GroupChatConstant
+                                                    .STATUS_COMPLETED)
+                                    .setUpdatedAt(
+                                            LocalDateTime.now());
+                            turnMapper.updateById(turn);
+                        }
+                    }
                 }));
     }
 
@@ -812,7 +955,9 @@ public class GroupChatService {
                     }
                     String reason = errorMessage(error);
                     updateStepStatus(step, GroupChatConstant.STATUS_FAILED, reason);
-                    if (accumulator.decisionActionParser != null) {
+                    if (accumulator.decisionActionParser != null
+                            || !GroupChatConstant.PLAN_SOURCE_USER.equals(
+                            turn.getPlanSource())) {
                         recoveryService.blockPendingSteps(
                                 turn.getId(), reason);
                     } else {

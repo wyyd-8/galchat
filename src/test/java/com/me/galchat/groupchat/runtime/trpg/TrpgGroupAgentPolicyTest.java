@@ -71,7 +71,8 @@ class TrpgGroupAgentPolicyTest {
                 .contains("林恩")
                 .contains("KP不是可见的调查员")
                 .contains("最多调用一个会改变状态的掷骰工具")
-                .contains("不得继续输出叙事或JSON");
+                .contains("本次响应会暂停")
+                .contains("恢复同一步骤");
         assertThat(policy.actorName(5L, kp)).isEqualTo("KP");
         assertThat(invocation.tools())
                 .containsExactly(

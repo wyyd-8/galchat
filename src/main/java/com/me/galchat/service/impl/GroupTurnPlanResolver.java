@@ -6,6 +6,7 @@ import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -18,6 +19,8 @@ public class GroupTurnPlanResolver {
     private final TrpgSceneSelectionService selectionService;
     private final TrpgSceneLifecycleService sceneLifecycleService;
     private final TrpgRunLifecycleService runLifecycleService;
+    @Autowired
+    private TrpgCombatLifecycleService combatLifecycleService;
 
     public ResolvedTurnPlan resolve(
             GroupConversation conversation, GroupModeRuntime runtime) {
@@ -55,6 +58,17 @@ public class GroupTurnPlanResolver {
             return;
         }
         sceneLifecycleService.finalizeAfterTurn(conversation, turnSource);
+    }
+
+    public void onTurnCompleted(
+            GroupConversation conversation,
+            com.me.galchat.domain.po.GroupChatTurn turn) {
+        if (combatLifecycleService != null
+                && combatLifecycleService.finalizeStartAfterTurn(
+                conversation, turn)) {
+            return;
+        }
+        onTurnCompleted(conversation, turn.getPlanSource());
     }
 
     public record ResolvedTurnPlan(

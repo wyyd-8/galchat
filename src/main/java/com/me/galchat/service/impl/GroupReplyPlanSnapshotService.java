@@ -165,6 +165,8 @@ public class GroupReplyPlanSnapshotService {
                 item.setOrder(itemSnapshot.getOrder());
                 item.setActorType(itemSnapshot.getActorType());
                 item.setActorId(itemSnapshot.getActorId());
+                item.setSubjectCharacterId(
+                        itemSnapshot.getSubjectCharacterId());
                 return item;
             }).toList());
             return group;
@@ -249,7 +251,9 @@ public class GroupReplyPlanSnapshotService {
                                     .map(item -> new UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot()
                                             .setOrder(item.getItemOrder())
                                             .setActorType(item.getActorType())
-                                            .setActorId(item.getActorId()))
+                                            .setActorId(item.getActorId())
+                                            .setSubjectCharacterId(
+                                                    item.getSubjectCharacterId()))
                                     .toList());
                 })
                 .toList();
@@ -316,6 +320,8 @@ public class GroupReplyPlanSnapshotService {
                                 ? item.getActorType().trim().toLowerCase(Locale.ROOT)
                                 : GroupChatConstant.ACTOR_CHARACTER)
                         .setActorId(item.getActorId())
+                        .setSubjectCharacterId(
+                                item.getSubjectCharacterId())
                         .setCreatedAt(now)
                         .setUpdatedAt(now));
             }

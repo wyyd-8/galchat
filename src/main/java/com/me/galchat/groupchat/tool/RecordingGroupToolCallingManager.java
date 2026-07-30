@@ -44,13 +44,22 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
         long diceToolCount = toolNames.stream()
                 .filter(DiceRollConstant.KP_STATE_TOOL_NAMES::contains)
                 .count();
+        boolean finishMarker = toolNames.contains(
+                "markCombatFinished");
         if (diceToolCount > 0 && toolNames.size() != 1) {
             throw new UserRequestException("一次响应只能调用一个掷骰工具，且不能与其他工具并行");
+        }
+        if (finishMarker && diceToolCount > 0) {
+            throw new UserRequestException(
+                    "结束战斗标记不能与掷骰工具并行调用");
         }
         Long replyStepId = replyStepId(prompt);
         if (diceToolCount == 1) {
             return transactionTemplate.execute(status ->
                     executeAndRecord(prompt, response, replyStepId));
+        }
+        if (finishMarker && toolNames.size() == 1) {
+            return delegate.executeToolCalls(prompt, response);
         }
         return executeAndRecord(prompt, response, replyStepId);
     }

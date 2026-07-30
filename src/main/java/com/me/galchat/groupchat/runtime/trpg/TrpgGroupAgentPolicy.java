@@ -26,6 +26,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -47,6 +48,11 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final KpRunTools kpRunTools;
     private final TrpgContextWindowService contextWindowService;
     private final TrpgInvestigatorContextAssembler investigatorContextAssembler;
+    @Autowired
+    private com.me.galchat.tool.KpCombatTools kpCombatTools;
+    @Autowired
+    private com.me.galchat.service.impl.TrpgCombatLifecycleService
+            combatLifecycleService;
 
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
                                 GroupContextAssembler contextAssembler,
@@ -90,8 +96,22 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 .equals(action.actionType());
         boolean sceneIntro = GroupChatConstant.ACTION_TRPG_SCENE_INTRO
                 .equals(action.actionType());
+        boolean combatAttack = GroupChatConstant.ACTION_COMBAT_ATTACK
+                .equals(action.actionType());
+        boolean combatDefense = GroupChatConstant.ACTION_COMBAT_DEFENSE
+                .equals(action.actionType());
+        boolean combatAdjudicate =
+                GroupChatConstant.ACTION_COMBAT_ADJUDICATE
+                        .equals(action.actionType());
+        boolean combatRoute =
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE
+                        .equals(action.actionType());
         String phase = selectionPhase ? "选景"
                 : sceneIntro ? "场景引入"
+                : combatAttack ? "战斗攻击"
+                : combatDefense ? "战斗防守"
+                : combatRoute ? "战斗反应路由"
+                : combatAdjudicate ? "战斗裁定"
                 : GroupChatConstant.ACTION_TRPG_COMBAT.equals(action.actionType())
                 ? "战斗" : "场景探索";
         List<CocDiceCharacterVO> cards = characterCardService.listDiceCharacters(
@@ -105,7 +125,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     你是当前 TRPG 群聊唯一的KP，当前阶段是%s。KP不是可见的调查员。
                     你负责描述场景、裁定规则并在需要时发起掷骰；不得替用户决定调查员行动。
                     每次响应最多调用一个会改变状态的掷骰工具，且不得与其他工具并行调用。
-                    调用掷骰工具后必须立即结束响应，不得继续输出叙事或JSON。
+                    调用掷骰工具后本次响应会暂停；稍后恢复同一步骤时，再根据骰点结果继续裁定。
                     不得输出隐藏思考过程。
                     """.formatted(phase)));
         } else {
@@ -131,11 +151,37 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 messages.add(new UserMessage("""
                         这是当前SCENE Plan第一次进入行动轮。先公开引入当前地点：只描述调查员刚进入时能够观察到的事实，不替调查员决定行动，不泄露未公开真相。
                         """));
+            } else if (combatRoute) {
+                messages.add(new UserMessage("""
+                        读取紧邻的攻击行动，识别攻击者选择的准确目标，并判断目标是否需要获得闪避、反击或其他即时防守行动。
+                        只输出一个JSON对象，不要Markdown，不要叙事：
+                        {"targetName":"准确人物卡名称","insertDefense":true,"defenseOptions":["闪避","反击"],"reason":"简短原因"}
+                        目标缺失、歧义、不在参战者中或行动不合法时不要猜测，改为：
+                        {"error":"明确说明问题"}
+                        """));
             } else {
+                String subjectName = action.subjectCharacterId() == null
+                        ? null : cards.stream()
+                        .filter(card -> action.subjectCharacterId()
+                                .equals(card.cardId()))
+                        .map(CocDiceCharacterVO::name)
+                        .findFirst().orElse(
+                                "人物卡#" + action.subjectCharacterId());
+                String subjectHint = subjectName == null
+                        ? "" : " 当前行动绑定人物卡“"
+                        + subjectName + "”，只能代表该人物行动。";
                 messages.add(new UserMessage("现在轮到KP推进当前" + phase
-                        + "。根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。"
+                        + "。" + subjectHint
+                        + (combatAttack || combatDefense
+                        ? "选择公开上下文中的目标并描述行动；不要在此步骤裁定成败，也不要掷骰。"
+                        : "根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。")
                         + (scenePhase
                         ? "确认当前场景应当结算时可调用finishSceneExploration，调用后仍要输出公开收束消息。"
+                        : combatAdjudicate
+                        ? (combatLifecycleService == null ? ""
+                        : combatLifecycleService.adjudicationPrompt(
+                                conversation.getId(), action))
+                        + " 在没有剩余检定或掷骰需求、且应结束战斗时调用markCombatFinished；调用后继续输出完整公开裁定和收束。"
                         : "")));
             }
         } else {
@@ -152,6 +198,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "<action>该角色公开说出的话和采取的行动，不要输出发言者标签</action>\n"
                         + "action必须落实decision中的意图，不得重新选择目标；不得宣布未知事实、"
                         + "决定其他角色或NPC反应，也不得自行声明检定成功。"
+                        + (combatDefense
+                        && combatLifecycleService != null
+                        ? combatLifecycleService.defensePrompt(action)
+                        : "")
                         + (scenePhase
                         ? "确定不再执行当前场景行动时可调用endSceneExploration；"
                         + "如需调用，必须先完成工具调用，再一次性输出上述decision和action。"
@@ -165,8 +215,14 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                             kpSceneSelectionTools,
                             kpModuleTools, kpRunTools)
                     : scenePhase
-                    ? List.of(kpDiceTools, kpModuleTools, kpSceneTools, kpRunTools)
-                    : List.of(kpDiceTools, kpModuleTools, kpRunTools);
+                    ? tools(kpDiceTools, kpModuleTools, kpSceneTools,
+                            kpRunTools, kpCombatTools)
+                    : combatAdjudicate
+                    ? tools(kpDiceTools, kpModuleTools, kpRunTools,
+                            kpCombatTools)
+                    : combatAttack || combatDefense || combatRoute
+                    ? List.of()
+                    : tools(kpDiceTools, kpModuleTools, kpRunTools);
         } else {
             tools = selectionPhase
                     ? List.of(sceneSelectionTools)
@@ -180,6 +236,16 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     conversation.getId(), prompt.getInstructions());
         }
         return new GroupModelInvocation(chatClient, prompt, tools);
+    }
+
+    private List<Object> tools(Object... candidates) {
+        List<Object> result = new ArrayList<>();
+        for (Object candidate : candidates) {
+            if (candidate != null) {
+                result.add(candidate);
+            }
+        }
+        return List.copyOf(result);
     }
 
     @Override

@@ -107,6 +107,32 @@ class RecordingGroupToolCallingManagerTest {
         verifyNoInteractions(delegate);
     }
 
+    @Test
+    void combatFinishMarkerIsExecutedButNotRecorded() {
+        ToolCallingManager delegate = mock(ToolCallingManager.class);
+        GroupToolCallStore store = mock(GroupToolCallStore.class);
+        TransactionTemplate transactionTemplate =
+                mock(TransactionTemplate.class);
+        RecordingGroupToolCallingManager manager =
+                new RecordingGroupToolCallingManager(
+                        delegate, store, transactionTemplate);
+        Prompt prompt = prompt(Map.of(
+                ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L));
+        ChatResponse response =
+                responseWithCalls("markCombatFinished");
+        ToolExecutionResult result = mock(ToolExecutionResult.class);
+        when(delegate.executeToolCalls(prompt, response))
+                .thenReturn(result);
+
+        assertThat(manager.executeToolCalls(prompt, response))
+                .isSameAs(result);
+
+        verify(store, never()).saveExecution(
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
     private Prompt prompt(Map<String, Object> toolContext) {
         return new Prompt("test", DeepSeekChatOptions.builder().toolContext(toolContext).build());
     }

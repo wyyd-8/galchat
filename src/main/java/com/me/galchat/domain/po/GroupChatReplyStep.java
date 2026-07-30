@@ -25,6 +25,7 @@ public class GroupChatReplyStep implements Serializable {
     private String actionType;
     private String speakerType;
     private Long speakerId;
+    private Long subjectCharacterId;
     private Boolean forceReply;
     private String status;
     private Long outputMessageId;

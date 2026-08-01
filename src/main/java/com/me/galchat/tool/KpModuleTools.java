@@ -2,6 +2,7 @@ package com.me.galchat.tool;
 
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.ICharacterCardService;
@@ -89,6 +90,24 @@ public class KpModuleTools {
         characterCardService.updateQuickNotes(
                 kp.runId(), characterName, quickNotes);
         return "快速笔记已更新。";
+    }
+
+    @Tool(
+            name = "adjustBasicAttributes",
+            description = """
+                    按人物卡准确名称增量修正调查员或NPC的八项基础属性。
+                    只填写需要修改的字段；结果会限制在0到100，并自动重算DB与build。
+                    其他人物卡属性和状态保持不变。调用后仍必须继续回复具体消息。
+                    """)
+    public KpCharacterAttributeDTOs.Result adjustBasicAttributes(
+            @ToolParam(description = "调查员或NPC的人物卡准确名称，不能传ID")
+            String characterName,
+            @ToolParam(description = "需要修改的基础属性及整数修正值")
+            KpCharacterAttributeDTOs.Adjustments adjustments,
+            ToolContext context) {
+        KpContext kp = requireKpContext(context);
+        return characterCardService.adjustBasicAttributes(
+                kp.runId(), characterName, adjustments);
     }
 
     private KpContext requireKpContext(ToolContext context) {

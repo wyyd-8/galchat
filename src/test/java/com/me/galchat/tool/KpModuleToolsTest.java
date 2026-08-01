@@ -2,11 +2,13 @@ package com.me.galchat.tool;
 
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.TrpgMaterialService;
 import com.me.galchat.service.impl.TrpgModuleQueryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.annotation.Tool;
 
 import java.lang.reflect.Method;
@@ -40,17 +42,29 @@ class KpModuleToolsTest {
         tools.showMaterial("玛德琳的信", context);
         tools.updateQuickNotes(
                 "林恩", "已经感染第一阶段", context);
+        KpCharacterAttributeDTOs.Adjustments adjustments =
+                new KpCharacterAttributeDTOs.Adjustments(
+                        10, null, null, null,
+                        -5, null, null, null);
+        tools.adjustBasicAttributes("林恩", adjustments, context);
 
         verify(materialService).showMaterial(
                 7L, 41L, "玛德琳的信");
         verify(characterCardService).updateQuickNotes(
                 7L, "林恩", "已经感染第一阶段");
+        verify(characterCardService).adjustBasicAttributes(
+                7L, "林恩", adjustments);
         assertThat(KpModuleTools.class.getMethod(
                         "showMaterial", String.class, ToolContext.class)
                 .getAnnotation(Tool.class).returnDirect()).isFalse();
         assertThat(KpModuleTools.class.getMethod(
                         "updateQuickNotes", String.class,
                         String.class, ToolContext.class)
+                .getAnnotation(Tool.class).returnDirect()).isFalse();
+        assertThat(KpModuleTools.class.getMethod(
+                        "adjustBasicAttributes", String.class,
+                        KpCharacterAttributeDTOs.Adjustments.class,
+                        ToolContext.class)
                 .getAnnotation(Tool.class).returnDirect()).isFalse();
     }
 
@@ -60,7 +74,23 @@ class KpModuleToolsTest {
                 .filter(method -> method.isAnnotationPresent(Tool.class))
                 .flatMap(method -> Arrays.stream(method.getParameterTypes()))
                 .filter(type -> !ToolContext.class.equals(type)))
-                .allMatch(String.class::equals);
+                .doesNotContain(Long.class, Long.TYPE);
+    }
+
+    @Test
+    void basicAttributeToolSchemaUsesCocIntFieldName() {
+        String schema = Arrays.stream(ToolCallbacks.from(
+                        new KpModuleTools(null, null, null)))
+                .filter(callback -> callback.getToolDefinition().name()
+                        .equals("adjustBasicAttributes"))
+                .findFirst()
+                .orElseThrow()
+                .getToolDefinition()
+                .inputSchema();
+
+        assertThat(schema)
+                .contains("\"str\"", "\"int\"", "\"edu\"")
+                .doesNotContain("\"intValue\"");
     }
 
     private ToolContext kpContext() {

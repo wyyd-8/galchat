@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.CharacterCardCreateDTO;
+import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
@@ -34,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -188,6 +190,100 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         if (characterMapper.updateById(character) == 0) {
             throw new UserRequestException("人物卡不存在");
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KpCharacterAttributeDTOs.Result adjustBasicAttributes(
+            Long runId, String characterName,
+            KpCharacterAttributeDTOs.Adjustments adjustments) {
+        if (adjustments == null || allAdjustmentsMissing(adjustments)) {
+            throw new UserRequestException(
+                    "至少需要提供一个基础属性修正值");
+        }
+        CocCharacter character =
+                requireCharacterByName(runId, characterName);
+        Map<String, KpCharacterAttributeDTOs.ValueChange> changes =
+                new LinkedHashMap<>();
+        if (adjustments.str() != null) {
+            character.setStr(adjust(
+                    changes, "STR", character.getStr(),
+                    adjustments.str()));
+        }
+        if (adjustments.con() != null) {
+            character.setCon(adjust(
+                    changes, "CON", character.getCon(),
+                    adjustments.con()));
+        }
+        if (adjustments.siz() != null) {
+            character.setSiz(adjust(
+                    changes, "SIZ", character.getSiz(),
+                    adjustments.siz()));
+        }
+        if (adjustments.dex() != null) {
+            character.setDex(adjust(
+                    changes, "DEX", character.getDex(),
+                    adjustments.dex()));
+        }
+        if (adjustments.app() != null) {
+            character.setApp(adjust(
+                    changes, "APP", character.getApp(),
+                    adjustments.app()));
+        }
+        if (adjustments.intValue() != null) {
+            character.setIntValue(adjust(
+                    changes, "INT", character.getIntValue(),
+                    adjustments.intValue()));
+        }
+        if (adjustments.pow() != null) {
+            character.setPow(adjust(
+                    changes, "POW", character.getPow(),
+                    adjustments.pow()));
+        }
+        if (adjustments.edu() != null) {
+            character.setEdu(adjust(
+                    changes, "EDU", character.getEdu(),
+                    adjustments.edu()));
+        }
+        CharacterCardRules.DamageBuild damageBuild =
+                CharacterCardRules.deriveDamageBuild(
+                        character.getStr(), character.getSiz());
+        character.setDamageBonus(damageBuild.damageBonus())
+                .setBuild(damageBuild.build())
+                .setUpdatedAt(java.time.LocalDateTime.now());
+        if (characterMapper.updateById(character) == 0) {
+            throw new UserRequestException("人物卡不存在");
+        }
+        return new KpCharacterAttributeDTOs.Result(
+                character.getName(),
+                Collections.unmodifiableMap(changes),
+                damageBuild.damageBonus(), damageBuild.build());
+    }
+
+    private boolean allAdjustmentsMissing(
+            KpCharacterAttributeDTOs.Adjustments adjustments) {
+        return adjustments.str() == null
+                && adjustments.con() == null
+                && adjustments.siz() == null
+                && adjustments.dex() == null
+                && adjustments.app() == null
+                && adjustments.intValue() == null
+                && adjustments.pow() == null
+                && adjustments.edu() == null;
+    }
+
+    private int adjust(
+            Map<String, KpCharacterAttributeDTOs.ValueChange> changes,
+            String attribute, Integer before, int correction) {
+        if (before == null) {
+            throw new UserRequestException(
+                    "人物卡" + attribute + "属性不存在");
+        }
+        int after = (int) Math.clamp(
+                (long) before + correction, 0L, 100L);
+        changes.put(attribute,
+                new KpCharacterAttributeDTOs.ValueChange(before, after));
+        return after;
     }
 
     private CocCharacter requireCharacterByName(

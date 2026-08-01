@@ -97,4 +97,43 @@ class CharacterCardImportParserTest {
                 .hasMessageContaining("属性总和不能超过460")
                 .hasMessageContaining("470");
     }
+
+    @Test
+    void acceptsCreationAttributeBoundsTenAndNinety() {
+        CharacterCardImportParser.ParsedCharacterCard parsed =
+                CharacterCardImportParser.parse(cardWithAttributes(
+                        "STR 10 CON 90 SIZ 50 DEX 50",
+                        "APP 50 INT 50 POW 50 EDU 50"));
+
+        assertThat(parsed.character().getStr()).isEqualTo(10);
+        assertThat(parsed.character().getCon()).isEqualTo(90);
+    }
+
+    @Test
+    void rejectsCreationAttributesOutsideTenAndNinety() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> CharacterCardImportParser.parse(
+                                cardWithAttributes(
+                                        "STR 9 CON 50 SIZ 50 DEX 50",
+                                        "APP 50 INT 50 POW 50 EDU 50")))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessage("STR属性值必须在10到90之间");
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> CharacterCardImportParser.parse(
+                                cardWithAttributes(
+                                        "STR 50 CON 50 SIZ 50 DEX 50",
+                                        "APP 50 INT 50 POW 50 EDU 91")))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessage("EDU属性值必须在10到90之间");
+    }
+
+    private String cardWithAttributes(String firstLine, String secondLine) {
+        return """
+                测试角色，调查员，女，30岁
+                出身上海，现居上海
+                时代: 现代
+                %s
+                %s
+                """.formatted(firstLine, secondLine);
+    }
 }

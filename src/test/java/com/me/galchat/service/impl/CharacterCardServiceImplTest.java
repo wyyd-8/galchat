@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.dto.CharacterCardCreateDTO;
+import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserInfo;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
@@ -252,6 +253,74 @@ class CharacterCardServiceImplTest {
 
         assertThat(card.getQuickNotes()).isEqualTo("已感染第一阶段");
         verify(characterMapper).updateById(card);
+    }
+
+    @Test
+    void adjustsOnlyRequestedAttributesAndRecalculatesDamageBonusAndBuild() {
+        CocCharacter card = characterWithAllAttributes(50)
+                .setId(71L).setRunId(5L).setName("林恩")
+                .setStr(60).setSiz(60)
+                .setDamageBonus("0").setBuild(0).setMov(8)
+                .setHpCurrent(11).setHpMax(11)
+                .setSanCurrent(42).setSanMax(99)
+                .setMpCurrent(10).setMpMax(10)
+                .setLuckCurrent(55).setQuickNotes("保持不变");
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(characterMapper.updateById(card)).thenReturn(1);
+        KpCharacterAttributeDTOs.Adjustments adjustments =
+                new KpCharacterAttributeDTOs.Adjustments(
+                        10, null, null, null, -65, null, null, 60);
+
+        KpCharacterAttributeDTOs.Result result =
+                service.adjustBasicAttributes(
+                        5L, " 林恩 ", adjustments);
+
+        assertThat(card.getStr()).isEqualTo(70);
+        assertThat(card.getApp()).isZero();
+        assertThat(card.getEdu()).isEqualTo(100);
+        assertThat(card.getCon()).isEqualTo(50);
+        assertThat(card.getDamageBonus()).isEqualTo("+1D4");
+        assertThat(card.getBuild()).isEqualTo(1);
+        assertThat(card)
+                .extracting(
+                        CocCharacter::getMov,
+                        CocCharacter::getHpCurrent,
+                        CocCharacter::getHpMax,
+                        CocCharacter::getSanCurrent,
+                        CocCharacter::getSanMax,
+                        CocCharacter::getMpCurrent,
+                        CocCharacter::getMpMax,
+                        CocCharacter::getLuckCurrent,
+                        CocCharacter::getQuickNotes)
+                .containsExactly(
+                        8, 11, 11, 42, 99, 10, 10, 55,
+                        "保持不变");
+        assertThat(result.characterName()).isEqualTo("林恩");
+        assertThat(result.changes())
+                .containsEntry("STR",
+                        new KpCharacterAttributeDTOs.ValueChange(60, 70))
+                .containsEntry("APP",
+                        new KpCharacterAttributeDTOs.ValueChange(50, 0))
+                .containsEntry("EDU",
+                        new KpCharacterAttributeDTOs.ValueChange(50, 100))
+                .doesNotContainKey("CON");
+        assertThat(result.damageBonus()).isEqualTo("+1D4");
+        assertThat(result.build()).isEqualTo(1);
+        verify(characterMapper).updateById(card);
+    }
+
+    @Test
+    void rejectsEmptyBasicAttributeAdjustmentWithoutUpdatingCard() {
+        assertThatThrownBy(() -> service.adjustBasicAttributes(
+                5L, "林恩",
+                new KpCharacterAttributeDTOs.Adjustments(
+                        null, null, null, null,
+                        null, null, null, null)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("至少需要提供一个基础属性修正值");
+        org.mockito.Mockito.verify(characterMapper,
+                org.mockito.Mockito.never())
+                .updateById(any(CocCharacter.class));
     }
 
     private CocCharacter characterWithAllAttributes(int value) {

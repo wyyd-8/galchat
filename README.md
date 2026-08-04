@@ -137,6 +137,8 @@ GalChat 的存档不是简单记录一段聊天文本，而是为一个用户世
 |-- vue                         # 旧版 Element Plus 前端
 `-- python
     |-- bert.py                 # 输入完整性判断服务，默认 localhost:8081
+    |-- character_card_pdf.py   # 角色卡 PDF 调用入口
+    |-- character_card/         # 角色卡实现、资源、依赖、示例和测试
     `-- reranker_server.py      # rerank 服务，默认 localhost:8082
 ```
 
@@ -148,7 +150,7 @@ GalChat 的存档不是简单记录一段聊天文本，而是为一个用户世
 - Redis
 - Ollama，并准备 1024 维 embedding 模型，例如 `bge-m3`
 - DeepSeek API Key
-- Python 3.10+，仅在启用本地 BERT / reranker 服务时需要
+- Python 3.10+，在启用本地 BERT、reranker 服务或生成角色卡 PDF 时需要
 - Aliyun OSS / Aliyun Direct Mail 配置，仅在使用图片上传、邮箱验证码等能力时需要
 
 默认配置位于 `src/main/resources/application.yaml`。首次运行前请按自己的环境修改数据库、Redis、DeepSeek、Ollama、OSS 和邮件配置。生产环境请使用环境变量或外部配置覆盖敏感信息，不要提交真实密钥。

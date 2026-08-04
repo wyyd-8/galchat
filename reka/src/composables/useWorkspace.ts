@@ -102,7 +102,7 @@ export function useWorkspace() {
     worlds.value = worlds.value.map((item) => item.id === updated.id ? { ...item, ...updated } : item)
     notify('世界设置已保存', '', 'success')
   }
-  async function removeWorld() { if (!selectedWorldId.value) return; await api.deleteWorld(selectedWorldId.value); resetWorkspace(); await loadWorlds(); notify('世界已删除', '', 'success') }
+  async function removeWorld() { if (!selectedWorldId.value) return; await api.deleteWorld(selectedWorldId.value); resetWorkspace(); await Promise.all([loadWorlds(), loadModules()]); notify('当前世界已删除', '', 'success') }
   async function createTemplate(payload: WorldTemplate) { await api.createWorldTemplate(payload); await loadTemplates(); notify('世界模板已创建', '', 'success') }
   async function loadEditableWorldTemplate() {
     if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有原创世界可以修改模板')
@@ -153,7 +153,7 @@ export function useWorkspace() {
     if (!selectedWorldId.value) return
     const created = await api.createConversation({ ...payload, userWorldId: selectedWorldId.value })
     conversations.value = await api.conversations(selectedWorldId.value); participantIds.value = [...payload.characterIds]
-    await selectConversation(created.id); notify('群聊已建立', created.title, 'success')
+    await selectConversation(created.id); notify(payload.mode === 'trpg' ? 'CoC 跑团已建立' : '普通群聊已建立', created.title, 'success')
   }
   async function selectConversation(id: number) {
     selectedConversationId.value = id; loading.chat = true; messages.value = []; currentTurn.value = null; latestDiceRoll.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
@@ -169,10 +169,8 @@ export function useWorkspace() {
       participantIds.value = [...new Set(replyPlan.value.groups
         .flatMap((group) => group.items.map((item) => item.actorId))
         .filter((id): id is number => typeof id === 'number'))]
-      const conversation = selectedConversation.value
-      if (conversation?.mode === 'trpg' && conversation.status === 'active' && !turn) await startTrpgTurn()
       await scrollToBottom()
-    } catch (error) { notify('群聊加载失败', errorMessage(error), 'danger') }
+    } catch (error) { notify('会话加载失败', errorMessage(error), 'danger') }
     finally { loading.chat = false }
   }
   async function closeConversation() {
@@ -208,11 +206,6 @@ export function useWorkspace() {
     replyPlan.value = await api.saveReplyPlan(selectedConversationId.value, { ...replyPlan.value, source: 'USER', groups })
     notify('回复顺序已保存', '', 'success')
   }
-  async function advancePlan() {
-    if (!selectedConversationId.value) return
-    replyPlan.value = await api.advanceReplyPlan(selectedConversationId.value)
-    notify('已推进到下一回复分组', '', 'success')
-  }
   function movePlanItem(from: number, to: number) {
     const items = replyPlan.value.groups[0]?.items; if (!items || from === to || to < 0 || to >= items.length) return
     const [moved] = items.splice(from, 1); if (moved) items.splice(to, 0, moved)
@@ -220,7 +213,7 @@ export function useWorkspace() {
   function deletePlanItem(index: number) { replyPlan.value.groups[0]?.items.splice(index, 1) }
   function addPlanItem(actorId: number) {
     const group = replyPlan.value.groups[0] || (replyPlan.value.groups[0] = { key: 'default', name: '群聊', order: 1, items: [] })
-    if (!group.items.some((item) => item.actorId === actorId)) group.items.push({ order: group.items.length + 1, actorType: 'character', actorId, status: 'pending' })
+    if (!group.items.some((item) => item.actorId === actorId)) group.items.push({ order: group.items.length + 1, actorType: 'character', actorId })
   }
 
   function applyEvent(event: GroupChatEvent) {
@@ -393,6 +386,6 @@ export function useWorkspace() {
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,
-    loadOlderGroupMessages, withdrawGroupTurn, savePlan, advancePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep,
+    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep,
   }
 }

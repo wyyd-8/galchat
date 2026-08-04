@@ -1,6 +1,6 @@
 # Character card fonts
 
-`character_card_pdf.py` exposes three bundled handwriting fonts by runtime number:
+The outer `python/character_card_pdf.py` entry point exposes three bundled handwriting fonts by runtime number:
 
 - `0`: `ZCOOLXiaoWei-Regular.ttf`.
 - `1`: `ZhiMangXing-Regular.ttf`.

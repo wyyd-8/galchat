@@ -8,9 +8,15 @@ python/character_card_pdf.py character-card.json character-card.pdf \
   --font-index 0
 ```
 
-A complete input example is available at `python/examples/character-card.sample.json`.
+A complete input example is available at `python/character_card/examples/character-card.sample.json`.
 
-The renderer uses the four bundled PNG backgrounds under `python/character_card_templates`; it does not read the complete rulebook PDF. The required `--background` runtime parameter accepts `1920s` or `modern`. There is no automatic background selection.
+The renderer and all of its supporting files are grouped under `python/character_card`. The four bundled PNG backgrounds live in `python/character_card/assets/templates`; the renderer does not read the complete rulebook PDF. The required `--background` runtime parameter accepts `1920s` or `modern`. There is no automatic background selection.
+
+Install the renderer dependencies with:
+
+```bash
+python -m pip install -r python/character_card/requirements.txt
+```
 
 ## Fonts
 

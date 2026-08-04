@@ -1,13 +1,43 @@
 <script setup lang="ts">
-import { BookOpen, ChevronLeft, LogOut, MessageCircle, MoreHorizontal, Plus, Settings, Sparkles, UserRound } from '@lucide/vue'
+import { computed } from 'vue'
+import { BookOpen, Dices, LogOut, MessageCircle, MessagesSquare, MoreHorizontal, Plus, Settings, Sparkles, UserRound } from '@lucide/vue'
 import {
   DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger,
   ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport,
 } from 'reka-ui'
-import type { Conversation, Session, UserWorld } from '@/api/types'
+import type { Character, Conversation, Session, UserWorld } from '@/api/types'
 
-defineProps<{ session: Session; worlds: UserWorld[]; conversations: Conversation[]; selectedWorldId: number | null; selectedConversationId: number | null; loading: boolean }>()
-const emit = defineEmits<{ selectWorld: [id: number]; selectConversation: [id: number]; home: []; newWorld: []; newConversation: []; account: []; password: []; logout: [] }>()
+const props = defineProps<{ session: Session; worlds: UserWorld[]; characters: Character[]; conversations: Conversation[]; selectedWorldId: number | null; selectedCharacterId: number | null; selectedConversationId: number | null; loading: boolean }>()
+const emit = defineEmits<{ selectWorld: [id: number]; selectDirect: [id: number]; selectConversation: [id: number]; home: []; newWorld: []; account: []; password: []; logout: [] }>()
+
+const recentDirect = computed(() => latestItem(props.characters, (item) => item.lastChatTime))
+const recentGroup = computed(() => latestItem(props.conversations.filter((item) => item.mode === 'chat'), (item) => item.lastChatTime || item.updatedAt))
+const recentTrpg = computed(() => latestItem(props.conversations.filter((item) => item.mode === 'trpg'), (item) => item.lastChatTime || item.updatedAt))
+
+function latestItem<T>(items: T[], timeOf: (item: T) => string | undefined) {
+  return [...items].sort((left, right) => timestamp(timeOf(right)) - timestamp(timeOf(left)))[0] || null
+}
+
+function timestamp(value?: string) {
+  if (!value) return 0
+  const result = Date.parse(value)
+  return Number.isNaN(result) ? 0 : result
+}
+
+function activityLabel(value?: string) {
+  if (!value) return '尚未开始'
+  const time = timestamp(value)
+  if (!time) return value
+  const minutes = Math.floor((Date.now() - time) / 60000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days} 天前`
+  const date = new Date(time)
+  return `${date.getMonth() + 1}月${date.getDate()}日`
+}
 </script>
 
 <template>
@@ -18,13 +48,27 @@ const emit = defineEmits<{ selectWorld: [id: number]; selectConversation: [id: n
       <ScrollAreaViewport class="sidebar-viewport">
         <button v-for="world in worlds" :key="world.id" class="sidebar-item" :class="{ active: selectedWorldId === world.id }" @click="emit('selectWorld', world.id)">
           <span class="mini-cover" :style="world.image ? { backgroundImage: `url(${world.image})` } : {}"><BookOpen v-if="!world.image" :size="16" /></span>
-          <span class="sidebar-item-copy"><strong>{{ world.name }}</strong><small>{{ world.myWorld ? '原创世界' : '收藏世界' }}</small></span>
+          <span class="sidebar-item-copy"><strong>{{ world.name }}</strong><small>{{ world.myWorld === true ? '原创世界' : world.myWorld === false ? '模板世界' : '用户世界' }}</small></span>
         </button>
         <template v-if="selectedWorldId">
-          <div class="sidebar-heading conversation-heading"><span>群聊</span><button class="icon-button subtle" title="新建群聊" @click="emit('newConversation')"><Plus :size="16" /></button></div>
-          <button v-for="conversation in conversations" :key="conversation.id" class="sidebar-item conversation-item" :class="{ active: selectedConversationId === conversation.id }" @click="emit('selectConversation', conversation.id)">
-            <span class="status-dot" :class="conversation.status" /><span class="sidebar-item-copy"><strong>{{ conversation.title }}</strong><small>{{ conversation.mode === 'trpg' ? '跑团' : '群聊' }} · {{ conversation.status === 'active' ? '进行中' : '已结束' }}</small></span>
-          </button>
+          <div class="sidebar-heading recent-heading"><span>最近互动</span></div>
+          <div class="sidebar-recent-list">
+            <button v-if="recentDirect" class="sidebar-recent-item recent-direct" :class="{ active: selectedCharacterId === recentDirect.characterId }" @click="emit('selectDirect', recentDirect.characterId)">
+              <span class="recent-entry-icon recent-character" :style="recentDirect.characterImage ? { backgroundImage: `url(${recentDirect.characterImage})` } : {}"><UserRound v-if="!recentDirect.characterImage" :size="16" /></span>
+              <span class="sidebar-item-copy"><strong>{{ recentDirect.characterName }}</strong><small>单聊 · {{ activityLabel(recentDirect.lastChatTime) }}</small></span>
+            </button>
+            <div v-else class="sidebar-recent-item recent-empty"><span class="recent-entry-icon recent-character"><UserRound :size="16" /></span><span class="sidebar-item-copy"><strong>暂无最近单聊</strong><small>选择角色后开始互动</small></span></div>
+
+            <button v-if="recentGroup" class="sidebar-recent-item recent-group" :class="{ active: selectedConversationId === recentGroup.id }" @click="emit('selectConversation', recentGroup.id)">
+              <span class="recent-entry-icon"><MessagesSquare :size="16" /></span><span class="sidebar-item-copy"><strong>{{ recentGroup.title }}</strong><small>群聊 · {{ activityLabel(recentGroup.lastChatTime || recentGroup.updatedAt) }}</small></span>
+            </button>
+            <div v-else class="sidebar-recent-item recent-empty recent-group"><span class="recent-entry-icon"><MessagesSquare :size="16" /></span><span class="sidebar-item-copy"><strong>暂无最近群聊</strong><small>在主界面建立会话</small></span></div>
+
+            <button v-if="recentTrpg" class="sidebar-recent-item recent-trpg" :class="{ active: selectedConversationId === recentTrpg.id }" @click="emit('selectConversation', recentTrpg.id)">
+              <span class="recent-entry-icon"><Dices :size="16" /></span><span class="sidebar-item-copy"><strong>{{ recentTrpg.title }}</strong><small>跑团 · {{ activityLabel(recentTrpg.lastChatTime || recentTrpg.updatedAt) }}</small></span>
+            </button>
+            <div v-else class="sidebar-recent-item recent-empty recent-trpg"><span class="recent-entry-icon"><Dices :size="16" /></span><span class="sidebar-item-copy"><strong>暂无最近跑团</strong><small>在主界面建立跑团</small></span></div>
+          </div>
         </template>
       </ScrollAreaViewport>
       <ScrollAreaScrollbar orientation="vertical" class="scrollbar"><ScrollAreaThumb class="scrollbar-thumb" /></ScrollAreaScrollbar>

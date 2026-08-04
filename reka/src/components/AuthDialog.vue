@@ -29,12 +29,12 @@ async function sendCode() {
 </script>
 
 <template>
-  <BaseDialog v-model="open" :title="title" description="世界、角色、单聊与群聊记录会安全地留在你的账号中。" size="sm">
+  <BaseDialog v-model="open" :title="title" description="世界、角色、单聊与群聊记录会保存在当前账号下。" size="sm">
     <form class="form-stack" @submit.prevent="submit">
-      <label class="field"><span>邮箱</span><input v-model.trim="form.email" type="email" autocomplete="email" placeholder="name@example.com" /></label>
-      <label class="field"><span>密码</span><input v-model="form.password" type="password" autocomplete="current-password" placeholder="至少 6 位" /></label>
+      <label class="field"><span>邮箱</span><input v-model.trim="form.email" type="email" autocomplete="email" :placeholder="mode === 'register' ? '8 位学号@bjtu.edu.cn' : '请输入账号邮箱'" /></label>
+      <label class="field"><span>密码</span><input v-model="form.password" type="password" autocomplete="current-password" placeholder="请输入密码" /></label>
       <label v-if="mode === 'register'" class="field"><span>确认密码</span><input v-model="form.confirmPassword" type="password" autocomplete="new-password" /></label>
-      <label v-if="mode === 'register'" class="field"><span>邮箱验证码</span><div class="field-inline"><input v-model.trim="form.code" /><button class="button secondary" type="button" :disabled="codeBusy" @click="sendCode">{{ codeBusy ? '发送中' : '获取验证码' }}</button></div></label>
+      <label v-if="mode === 'register'" class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="form.code" inputmode="numeric" maxlength="6" placeholder="验证码 5 分钟内有效" /><button class="button secondary" type="button" :disabled="codeBusy" @click="sendCode">{{ codeBusy ? '发送中' : '获取验证码' }}</button></div></label>
     </form>
     <template #footer>
       <button class="button ghost" @click="mode = mode === 'login' ? 'register' : 'login'">{{ mode === 'login' ? '创建账号' : '已有账号' }}</button>

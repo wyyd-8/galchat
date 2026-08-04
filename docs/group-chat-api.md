@@ -2,13 +2,11 @@
 
 ## 数据库
 
-项目当前未启用 Flyway。部署前手动执行：
+项目当前未启用 Flyway。新建测试或开发数据库时执行统一初始化脚本：
 
-`docs/sql/V20260711__group_chat.sql`
+`src/test/java/com/me/galchat/init/console.sql`
 
-已有环境还需要执行：
-
-`docs/sql/V20260725__favor_binding_type.sql`
+该脚本已包含远程基线之后的全部群聊与跑团表结构。它面向空数据库；已有环境升级前应先备份，再按实际版本比对结构。
 
 ## 创建群聊
 

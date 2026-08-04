@@ -78,10 +78,10 @@ export interface CurrentTurn {
   stepId?: number; actionType?: string; inputType?: 'message' | 'selection' | 'continue' | 'dice'; sceneName?: string
   waitingForUser: boolean; sceneOptions: Record<string, string>
 }
-export interface ReplyPlanItem { id?: number; order: number; actorType: string; actorId?: number; subjectCharacterId?: number; status?: string }
+export interface ReplyPlanItem { id?: number; order: number; actorType: string; actorId?: number; subjectCharacterId?: number }
 export interface ReplyPlanGroup { key: string; name: string; order: number; items: ReplyPlanItem[] }
 export interface ReplyPlan {
-  id?: number; source: 'USER' | 'SCENE' | 'COMBAT'; contextId?: number; resumePlanId?: number; groups: ReplyPlanGroup[]
+  id?: number; source: 'USER' | 'SCENE' | 'COMBAT'; contextId?: number; nextPlanId?: number; resumePlanId?: number; groups: ReplyPlanGroup[]
 }
 
 export interface ContextWindowUsage {

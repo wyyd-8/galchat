@@ -37,10 +37,6 @@ export function useDirectChat(context: DirectChatContext) {
   let ignoreInputWatch = false
   let notificationAsked = false
 
-  function replacePronouns(content: string, role: DirectMessage['role']) {
-    if (!context.world.value?.addSpecialPrompt || (role !== 'assistant' && role !== 'thinking')) return content
-    return content.replace(/[他她]/g, 'ta')
-  }
   function roleOf(item: ChatHistory): DirectMessage['role'] {
     if (item.type === 'thinking') return 'thinking'
     if (item.type === 'tool') return 'tool'
@@ -48,7 +44,7 @@ export function useDirectChat(context: DirectChatContext) {
     return 'user'
   }
   function historyMessages(item: ChatHistory): DirectMessage[] {
-    const role = roleOf(item); const content = replacePronouns(item.content || (role === 'tool' ? '调用了工具' : ''), role)
+    const role = roleOf(item); const content = item.content || (role === 'tool' ? '调用了工具' : '')
     const parts = context.world.value?.thinkStatus === false ? splitContent(content) : [content]
     return parts.map((part, index) => ({ id: `history-${item.id || Date.now()}-${index}`, historyId: item.id, role, content: part, time: formatTime(item.timestamp) }))
   }
@@ -164,14 +160,14 @@ export function useDirectChat(context: DirectChatContext) {
         let assistant: DirectMessage | null = null; let received = false
         await streamChat(data, (chunk) => {
           if (chunk.type === 'thinking') {
-            const last = messages.value.at(-1); const value = replacePronouns(chunk.content || '正在整理记忆', 'thinking')
+            const last = messages.value.at(-1); const value = chunk.content || '正在整理记忆'
             if (last?.role === 'thinking') last.content += value
             else messages.value.push({ id: `thinking-${Date.now()}-${Math.random()}`, role: 'thinking', content: value })
           } else if (chunk.type === 'tool') {
             assistant = null; messages.value.push({ id: `tool-${Date.now()}-${Math.random()}`, role: 'tool', content: chunk.content || '调用了工具' })
           } else if (chunk.type === 'response' || chunk.type === 'reponse') {
             if (!assistant) { assistant = { id: `assistant-${Date.now()}-${Math.random()}`, role: 'assistant', content: '' }; messages.value.push(assistant) }
-            assistant.content += replacePronouns(chunk.content || '', 'assistant'); received ||= Boolean(chunk.content?.trim())
+            assistant.content += chunk.content || ''; received ||= Boolean(chunk.content?.trim())
           }
           void scrollToBottom()
         })

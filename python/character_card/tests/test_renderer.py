@@ -1,6 +1,6 @@
 import unittest
 
-from character_card_pdf import Renderer, resolve_font
+from character_card.renderer import Renderer, resolve_font
 
 
 class CharacterCardPdfTest(unittest.TestCase):

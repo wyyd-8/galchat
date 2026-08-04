@@ -306,7 +306,7 @@ flowchart LR
 - 支持 data URL、HTTP URL 和本地肖像。
 - 对过长文本执行截断，避免破坏表格布局。
 
-使用说明见 [`角色卡 PDF 文档`](character-card-pdf.md)，示例见 [`character-card.sample.json`](../python/examples/character-card.sample.json)，已生成的 PDF 与预览位于 [`output/pdf/character-card-prototype/`](../output/pdf/character-card-prototype/)。
+使用说明见 [`角色卡 PDF 文档`](character-card-pdf.md)，实现、资源、依赖和测试统一位于 [`python/character_card`](../python/character_card/)，示例见 [`character-card.sample.json`](../python/character_card/examples/character-card.sample.json)，已生成的 PDF 与预览位于 [`output/pdf/character-card-prototype/`](../output/pdf/character-card-prototype/)。
 
 ### 6.4 3D 骰子实验室
 
@@ -327,7 +327,7 @@ flowchart LR
 
 完整初始化脚本位于 [`console.sql`](../src/test/java/com/me/galchat/init/console.sql)，包含用户、世界、角色、单聊、群聊、世界事件、用户事件、存档和 CoC 角色卡等表。
 
-群聊增量脚本位于 [`V20260711__group_chat.sql`](sql/V20260711__group_chat.sql)，创建：
+远程基线之后的数据库结构变更已合并到该初始化脚本，不再维护分散的手动迁移文件。脚本包含：
 
 - `group_conversation`
 - `group_chat_member`
@@ -364,11 +364,11 @@ Spring AI 启动时还会初始化以下 pgvector 表：
 
 | 验证项 | 结果 |
 | --- | --- |
-| `./mvnw test` | 通过：51 个测试，0 失败、0 错误、0 跳过 |
+| `./mvnw test` | 通过：342 个测试，0 失败、0 错误、0 跳过 |
 | `reka/npm run build` | 通过：TypeScript 检查和 Vite 生产构建成功 |
 | `vue/npm run build` | 通过：旧前端可构建；存在大 chunk 与依赖注释警告 |
 | `dice-lab/npm run build` | 通过：TypeScript 检查和 Vite 生产构建成功；存在大 chunk 警告 |
-| `python/test_character_card_pdf.py` | 通过：3 个测试；使用临时安装的 ReportLab 依赖执行 |
+| `python/character_card/tests/test_renderer.py` | 通过：3 个测试；使用角色卡目录内的依赖定义执行 |
 
 后端测试目前以单元测试和 Mockito 测试为主。覆盖重点包括：
 

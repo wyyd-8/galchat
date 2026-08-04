@@ -56,6 +56,7 @@ public class GroupReplyPlanService {
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
             GroupConversation conversation = conversationService.requireActive(conversationId);
+            rejectPublicTrpgMutation(conversation);
             rejectPublicCombatSource(request);
             validateStructure(conversation, request);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
@@ -70,6 +71,7 @@ public class GroupReplyPlanService {
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
             GroupConversation conversation = conversationService.requireActive(conversationId);
+            rejectPublicTrpgMutation(conversation);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> {
                 GroupReplyPlan active = activePlan(conversation);
@@ -90,6 +92,7 @@ public class GroupReplyPlanService {
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
             GroupConversation conversation = conversationService.requireActive(conversationId);
+            rejectPublicTrpgMutation(conversation);
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
             return transactionTemplate.execute(status -> {
                 GroupReplyPlan active = activePlan(conversation);
@@ -560,6 +563,16 @@ public class GroupReplyPlanService {
                 && GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
                 request.getSource().trim().toUpperCase(Locale.ROOT))) {
             throw new UserRequestException("战斗只能由 KP 在场景中发起，不能通过回复计划接口创建");
+        }
+    }
+
+    private void rejectPublicTrpgMutation(
+            GroupConversation conversation) {
+        if (conversation != null
+                && GroupChatConstant.MODE_TRPG.equals(
+                conversation.getMode())) {
+            throw new UserRequestException(
+                    "TRPG回复计划只能通过跑团生命周期变更");
         }
     }
 

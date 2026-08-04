@@ -1,0 +1,662 @@
+package com.me.galchat.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
+import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.CocCharacterProfile;
+import com.me.galchat.domain.po.CocCharacterSkill;
+import com.me.galchat.domain.po.CocCharacterWeapon;
+import com.me.galchat.domain.po.DiceRollResult;
+import com.me.galchat.domain.po.DiceRollSummary;
+import com.me.galchat.domain.po.GroupChatAgentDecision;
+import com.me.galchat.domain.po.GroupChatMessage;
+import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatToolCall;
+import com.me.galchat.domain.po.GroupChatTurn;
+import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupReplyPlan;
+import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.GroupTurnCheckpoint;
+import com.me.galchat.domain.po.TrpgCombat;
+import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.mapper.CocCharacterMapper;
+import com.me.galchat.mapper.CocCharacterProfileMapper;
+import com.me.galchat.mapper.CocCharacterSkillMapper;
+import com.me.galchat.mapper.CocCharacterWeaponMapper;
+import com.me.galchat.mapper.DiceRollResultMapper;
+import com.me.galchat.mapper.DiceRollSummaryMapper;
+import com.me.galchat.mapper.GroupChatAgentDecisionMapper;
+import com.me.galchat.mapper.GroupChatMessageMapper;
+import com.me.galchat.mapper.GroupChatReplyStepMapper;
+import com.me.galchat.mapper.GroupChatToolCallMapper;
+import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.mapper.GroupReplyPlanItemMapper;
+import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.GroupTurnCheckpointMapper;
+import com.me.galchat.mapper.TrpgCombatMapper;
+import com.me.galchat.mapper.TrpgSaveRestoreMapper;
+import com.me.galchat.mapper.VectorStoreCleanupMapper;
+import com.me.galchat.service.ITrpgRedisStateService;
+import com.me.galchat.service.ITrpgSaveSnapshotService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+@Service
+@RequiredArgsConstructor
+public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
+
+    private static final Set<String> RESTORABLE_TURN_STATUSES = Set.of(
+            GroupChatConstant.STATUS_PAUSED,
+            GroupChatConstant.STATUS_WAITING_DICE,
+            GroupChatConstant.STATUS_FAILED,
+            GroupChatConstant.STATUS_BLOCKED);
+
+    private final TrpgSaveRestoreMapper restoreMapper;
+    private final GroupConversationMapper conversationMapper;
+    private final GroupReplyPlanMapper planMapper;
+    private final GroupReplyPlanItemMapper planItemMapper;
+    private final CocCharacterMapper characterMapper;
+    private final CocCharacterProfileMapper profileMapper;
+    private final CocCharacterSkillMapper skillMapper;
+    private final CocCharacterWeaponMapper weaponMapper;
+    private final TrpgCombatMapper combatMapper;
+    private final GroupTurnCheckpointMapper checkpointMapper;
+    private final GroupChatTurnMapper turnMapper;
+    private final GroupChatReplyStepMapper stepMapper;
+    private final GroupChatMessageMapper messageMapper;
+    private final GroupChatToolCallMapper toolCallMapper;
+    private final GroupChatAgentDecisionMapper decisionMapper;
+    private final DiceRollSummaryMapper diceSummaryMapper;
+    private final DiceRollResultMapper diceResultMapper;
+    private final ITrpgRedisStateService redisStateService;
+    private final VectorStoreCleanupMapper vectorCleanupMapper;
+
+    @Override
+    @Transactional(readOnly = true)
+    public TrpgSaveSnapshotDTO capture(GroupConversation conversation) {
+        requireTrpgConversation(conversation);
+        Long conversationId = conversation.getId();
+        List<GroupReplyPlan> plans = planMapper.selectList(
+                new LambdaQueryWrapper<GroupReplyPlan>()
+                        .eq(GroupReplyPlan::getConversationId, conversationId)
+                        .orderByAsc(GroupReplyPlan::getId));
+        List<Long> planIds = plans.stream()
+                .map(GroupReplyPlan::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        List<GroupReplyPlanItem> planItems = planIds.isEmpty()
+                ? List.of()
+                : planItemMapper.selectList(
+                        new LambdaQueryWrapper<GroupReplyPlanItem>()
+                                .in(GroupReplyPlanItem::getPlanId, planIds)
+                                .orderByAsc(GroupReplyPlanItem::getId));
+        List<CocCharacter> characters = characterMapper.selectList(
+                new LambdaQueryWrapper<CocCharacter>()
+                        .eq(CocCharacter::getRunId, conversationId)
+                        .orderByAsc(CocCharacter::getId));
+        List<Long> characterIds = characters.stream()
+                .map(CocCharacter::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        List<Long> sceneIds = sceneIds(plans);
+        TrpgSaveSnapshotDTO snapshot = new TrpgSaveSnapshotDTO()
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
+                .setConversationId(conversationId)
+                .setUserWorldId(conversation.getUserWorldId())
+                .setWorldId(conversation.getWorldId())
+                .setModuleId(conversation.getModuleId())
+                .setCursors(normalizeCursors(
+                        restoreMapper.selectCursors(conversationId)))
+                .setConversationState(conversationState(conversation))
+                .setReplyPlans(plans)
+                .setReplyPlanItems(planItems)
+                .setCharacters(characters)
+                .setCharacterQuickNotes(characterQuickNotes(characters))
+                .setCharacterProfiles(characterIds.isEmpty() ? List.of()
+                        : profileMapper.selectList(
+                                new LambdaQueryWrapper<CocCharacterProfile>()
+                                        .in(CocCharacterProfile::getCharacterId, characterIds)
+                                        .orderByAsc(CocCharacterProfile::getId)))
+                .setCharacterSkills(characterIds.isEmpty() ? List.of()
+                        : skillMapper.selectList(
+                                new LambdaQueryWrapper<CocCharacterSkill>()
+                                        .in(CocCharacterSkill::getCharacterId, characterIds)
+                                        .orderByAsc(CocCharacterSkill::getId)))
+                .setCharacterWeapons(characterIds.isEmpty() ? List.of()
+                        : weaponMapper.selectList(
+                                new LambdaQueryWrapper<CocCharacterWeapon>()
+                                        .in(CocCharacterWeapon::getCharacterId, characterIds)
+                                        .orderByAsc(CocCharacterWeapon::getId)))
+                .setCombats(combatMapper.selectList(
+                        new LambdaQueryWrapper<TrpgCombat>()
+                                .eq(TrpgCombat::getConversationId, conversationId)
+                                .orderByAsc(TrpgCombat::getId)))
+                .setRestorableTurns(restorableTurns(conversationId))
+                .setCheckpoint(checkpointMapper.selectById(conversationId))
+                .setRedisState(redisStateService.capture(
+                        conversationId, sceneIds));
+        validate(conversation, snapshot);
+        return snapshot;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void restoreDatabase(
+            GroupConversation conversation, TrpgSaveSnapshotDTO snapshot) {
+        validate(conversation, snapshot);
+        Long conversationId = conversation.getId();
+        TrpgSaveSnapshotDTO.CursorSnapshot cursors = snapshot.getCursors();
+
+        vectorCleanupMapper.deleteGroupTopicsByConversationAfterTopicId(
+                conversationId, cursors.getMaxTopicId());
+        vectorCleanupMapper.deleteWorldEventByConversationAfterLogId(
+                conversationId, cursors.getMaxWorldEventLogId());
+        restoreMapper.deleteAgentDecisionsAfter(
+                conversationId, cursors.getMaxAgentDecisionId());
+        restoreMapper.deleteToolCallsAfter(
+                conversationId, cursors.getMaxToolCallId());
+        restoreMapper.deleteMessagesAfter(
+                conversationId, cursors.getMaxMessageId());
+        restoreMapper.deleteReplyStepsAfter(
+                conversationId, cursors.getMaxReplyStepId());
+        restoreMapper.deleteTurnsAfter(
+                conversationId, cursors.getMaxTurnId());
+        restoreMapper.deleteContextSummariesAfter(
+                conversationId, cursors.getMaxContextSummaryId());
+        restoreMapper.deleteTopicsAfter(
+                conversationId, cursors.getMaxTopicId());
+        restoreMapper.deleteDiceResultsAfter(
+                conversationId,
+                cursors.getMaxDiceSummaryId(),
+                cursors.getMaxDiceResultId());
+        restoreMapper.deleteDiceSummariesAfter(
+                conversationId, cursors.getMaxDiceSummaryId());
+        restoreMapper.deleteWorldEventsAfter(
+                conversationId, cursors.getMaxWorldEventLogId());
+
+        restoreRestorableTurns(snapshot.getRestorableTurns());
+        restorePlans(conversationId, snapshot);
+        restoreCharacters(conversationId, snapshot);
+        restoreCombats(conversationId, snapshot.getCombats());
+        restoreCheckpoint(conversationId, snapshot.getCheckpoint());
+        restoreConversation(conversation, snapshot.getConversationState());
+    }
+
+    @Override
+    public void restoreDerivedState(
+            GroupConversation conversation, TrpgSaveSnapshotDTO snapshot) {
+        requireTrpgConversation(conversation);
+        redisStateService.restore(
+                conversation.getId(), snapshot.getRedisState());
+    }
+
+    private void validate(
+            GroupConversation conversation, TrpgSaveSnapshotDTO snapshot) {
+        requireTrpgConversation(conversation);
+        if (snapshot == null
+                || !Objects.equals(snapshot.getFormatVersion(),
+                TrpgSaveServiceImpl.FORMAT_VERSION)
+                || !Objects.equals(snapshot.getConversationId(), conversation.getId())
+                || !Objects.equals(snapshot.getUserWorldId(), conversation.getUserWorldId())
+                || !Objects.equals(snapshot.getWorldId(), conversation.getWorldId())
+                || !Objects.equals(snapshot.getModuleId(), conversation.getModuleId())) {
+            throw new UserRequestException("跑团存档身份信息不一致");
+        }
+        validateCursors(snapshot.getCursors());
+        List<GroupReplyPlan> plans = safe(snapshot.getReplyPlans());
+        Set<Long> planIds = new HashSet<>();
+        for (GroupReplyPlan plan : plans) {
+            if (plan == null || plan.getId() == null
+                    || !Objects.equals(plan.getConversationId(), conversation.getId())
+                    || !planIds.add(plan.getId())) {
+                throw new UserRequestException("跑团回复计划存档不合法");
+            }
+        }
+        for (GroupReplyPlan plan : plans) {
+            requirePlanReference(plan.getParentPlanId(), planIds);
+            requirePlanReference(plan.getResumePlanId(), planIds);
+            requirePlanReference(plan.getNextPlanId(), planIds);
+        }
+        TrpgSaveSnapshotDTO.ConversationStateSnapshot state =
+                snapshot.getConversationState();
+        if (state == null || state.getActiveReplyPlanId() != null
+                && !planIds.contains(state.getActiveReplyPlanId())) {
+            throw new UserRequestException("跑团活动回复计划存档不合法");
+        }
+        for (GroupReplyPlanItem item : safe(snapshot.getReplyPlanItems())) {
+            if (item == null || item.getId() == null
+                    || !planIds.contains(item.getPlanId())) {
+                throw new UserRequestException("跑团回复计划项目存档不合法");
+            }
+        }
+        Set<Long> characterIds = new HashSet<>();
+        for (CocCharacter character : safe(snapshot.getCharacters())) {
+            if (character == null || character.getId() == null
+                    || !Objects.equals(character.getRunId(), conversation.getId())
+                    || !characterIds.add(character.getId())) {
+                throw new UserRequestException("跑团人物卡存档不合法");
+            }
+        }
+        validateCharacterChildren(snapshot, characterIds);
+        if (!characterIds.containsAll(
+                safeMap(snapshot.getCharacterQuickNotes()).keySet())) {
+            throw new UserRequestException("跑团人物卡速记存档不合法");
+        }
+        for (TrpgCombat combat : safe(snapshot.getCombats())) {
+            if (combat == null || combat.getId() == null
+                    || !Objects.equals(combat.getConversationId(), conversation.getId())) {
+                throw new UserRequestException("跑团战斗存档不合法");
+            }
+        }
+        GroupTurnCheckpoint checkpoint = snapshot.getCheckpoint();
+        if (checkpoint != null
+                && !Objects.equals(checkpoint.getConversationId(), conversation.getId())) {
+            throw new UserRequestException("跑团行动轮检查点存档不合法");
+        }
+        validateRestorableTurns(snapshot, characterIds);
+    }
+
+    private void validateRestorableTurns(
+            TrpgSaveSnapshotDTO snapshot, Set<Long> characterIds) {
+        TrpgSaveSnapshotDTO.CursorSnapshot cursors = snapshot.getCursors();
+        Set<Long> turnIds = new HashSet<>();
+        Set<Long> stepIds = new HashSet<>();
+        Set<Long> messageIds = new HashSet<>();
+        Set<Long> toolCallIds = new HashSet<>();
+        Set<Long> decisionIds = new HashSet<>();
+        Set<Long> diceSummaryIds = new HashSet<>();
+        Set<Long> diceResultIds = new HashSet<>();
+        for (TrpgSaveSnapshotDTO.RestorableTurnSnapshot turnSnapshot
+                : safe(snapshot.getRestorableTurns())) {
+            GroupChatTurn turn = turnSnapshot == null
+                    ? null : turnSnapshot.getTurn();
+            if (turn == null
+                    || !validId(turn.getId(), cursors.getMaxTurnId(), turnIds)
+                    || !Objects.equals(turn.getConversationId(), snapshot.getConversationId())
+                    || !RESTORABLE_TURN_STATUSES.contains(turn.getStatus())) {
+                throw new UserRequestException("跑团可恢复轮次存档不合法");
+            }
+            Set<Long> currentStepIds = new HashSet<>();
+            for (GroupChatReplyStep step : safe(turnSnapshot.getReplySteps())) {
+                if (step == null
+                        || !validId(step.getId(), cursors.getMaxReplyStepId(), stepIds)
+                        || !Objects.equals(step.getTurnId(), turn.getId())) {
+                    throw new UserRequestException("跑团回复步骤存档不合法");
+                }
+                currentStepIds.add(step.getId());
+                Long subjectCharacterId = step.getSubjectCharacterId();
+                if (subjectCharacterId != null
+                        && !characterIds.contains(subjectCharacterId)) {
+                    throw new UserRequestException("跑团回复步骤引用了未知人物卡");
+                }
+            }
+            for (GroupChatMessage message : safe(turnSnapshot.getMessages())) {
+                if (message == null
+                        || !validId(message.getId(), cursors.getMaxMessageId(), messageIds)
+                        || !Objects.equals(message.getConversationId(), snapshot.getConversationId())
+                        || !Objects.equals(message.getTurnId(), turn.getId())
+                        || message.getReplyStepId() != null
+                        && !currentStepIds.contains(message.getReplyStepId())) {
+                    throw new UserRequestException("跑团轮次消息存档不合法");
+                }
+            }
+            Set<Long> currentSummaryIds = new HashSet<>();
+            for (DiceRollSummary summary : safe(turnSnapshot.getDiceSummaries())) {
+                if (summary == null
+                        || !validId(summary.getId(), cursors.getMaxDiceSummaryId(), diceSummaryIds)
+                        || !Objects.equals(summary.getConversationId(), snapshot.getConversationId())) {
+                    throw new UserRequestException("跑团骰点概要存档不合法");
+                }
+                currentSummaryIds.add(summary.getId());
+            }
+            for (GroupChatToolCall toolCall : safe(turnSnapshot.getToolCalls())) {
+                if (toolCall == null
+                        || !validId(toolCall.getId(), cursors.getMaxToolCallId(), toolCallIds)
+                        || !currentStepIds.contains(toolCall.getReplyStepId())
+                        || toolCall.getDiceRollSummaryId() != null
+                        && !currentSummaryIds.contains(toolCall.getDiceRollSummaryId())) {
+                    throw new UserRequestException("跑团工具调用存档不合法");
+                }
+            }
+            for (GroupChatAgentDecision decision
+                    : safe(turnSnapshot.getAgentDecisions())) {
+                if (decision == null
+                        || !validId(decision.getId(), cursors.getMaxAgentDecisionId(), decisionIds)
+                        || !currentStepIds.contains(decision.getReplyStepId())) {
+                    throw new UserRequestException("跑团角色决策存档不合法");
+                }
+            }
+            for (DiceRollResult result : safe(turnSnapshot.getDiceResults())) {
+                if (result == null
+                        || !validId(result.getId(), cursors.getMaxDiceResultId(), diceResultIds)
+                        || !currentSummaryIds.contains(result.getSummaryId())) {
+                    throw new UserRequestException("跑团骰点结果存档不合法");
+                }
+            }
+        }
+    }
+
+    private boolean validId(Long id, Long maxId, Set<Long> ids) {
+        return id != null && id > 0 && id <= maxId && ids.add(id);
+    }
+
+    private void validateCharacterChildren(
+            TrpgSaveSnapshotDTO snapshot, Set<Long> characterIds) {
+        for (CocCharacterProfile profile : safe(snapshot.getCharacterProfiles())) {
+            if (profile == null || profile.getId() == null
+                    || !characterIds.contains(profile.getCharacterId())) {
+                throw new UserRequestException("跑团人物背景存档不合法");
+            }
+        }
+        for (CocCharacterSkill skill : safe(snapshot.getCharacterSkills())) {
+            if (skill == null || skill.getId() == null
+                    || !characterIds.contains(skill.getCharacterId())) {
+                throw new UserRequestException("跑团技能存档不合法");
+            }
+        }
+        for (CocCharacterWeapon weapon : safe(snapshot.getCharacterWeapons())) {
+            if (weapon == null || weapon.getId() == null
+                    || !characterIds.contains(weapon.getCharacterId())) {
+                throw new UserRequestException("跑团武器存档不合法");
+            }
+        }
+    }
+
+    private void validateCursors(TrpgSaveSnapshotDTO.CursorSnapshot cursors) {
+        if (cursors == null) {
+            throw new UserRequestException("跑团存档游标不合法");
+        }
+        Long[] values = {
+                cursors.getMaxMessageId(),
+                cursors.getMaxTurnId(),
+                cursors.getMaxReplyStepId(),
+                cursors.getMaxToolCallId(),
+                cursors.getMaxAgentDecisionId(),
+                cursors.getMaxContextSummaryId(),
+                cursors.getMaxTopicId(),
+                cursors.getMaxDiceSummaryId(),
+                cursors.getMaxDiceResultId(),
+                cursors.getMaxWorldEventLogId()
+        };
+        for (Long value : values) {
+            if (value == null || value < 0) {
+                throw new UserRequestException("跑团存档游标不合法");
+            }
+        }
+    }
+
+    private void requirePlanReference(Long planId, Set<Long> planIds) {
+        if (planId != null && !planIds.contains(planId)) {
+            throw new UserRequestException("跑团回复计划引用不完整");
+        }
+    }
+
+    private void restorePlans(
+            Long conversationId, TrpgSaveSnapshotDTO snapshot) {
+        List<Long> currentPlanIds = planMapper.selectList(
+                        new LambdaQueryWrapper<GroupReplyPlan>()
+                                .eq(GroupReplyPlan::getConversationId, conversationId))
+                .stream().map(GroupReplyPlan::getId).toList();
+        if (!currentPlanIds.isEmpty()) {
+            planItemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
+                    .in(GroupReplyPlanItem::getPlanId, currentPlanIds));
+            planMapper.delete(new LambdaQueryWrapper<GroupReplyPlan>()
+                    .in(GroupReplyPlan::getId, currentPlanIds));
+        }
+        safe(snapshot.getReplyPlans()).forEach(planMapper::insert);
+        safe(snapshot.getReplyPlanItems()).forEach(planItemMapper::insert);
+    }
+
+    private void restoreRestorableTurns(
+            List<TrpgSaveSnapshotDTO.RestorableTurnSnapshot> snapshots) {
+        for (TrpgSaveSnapshotDTO.RestorableTurnSnapshot snapshot
+                : safe(snapshots)) {
+            Long turnId = snapshot.getTurn().getId();
+            List<Long> stepIds = safe(snapshot.getReplySteps()).stream()
+                    .map(GroupChatReplyStep::getId).toList();
+            List<Long> summaryIds = safe(snapshot.getDiceSummaries()).stream()
+                    .map(DiceRollSummary::getId).toList();
+            if (!stepIds.isEmpty()) {
+                decisionMapper.delete(
+                        new LambdaQueryWrapper<GroupChatAgentDecision>()
+                                .in(GroupChatAgentDecision::getReplyStepId, stepIds));
+                toolCallMapper.delete(
+                        new LambdaQueryWrapper<GroupChatToolCall>()
+                                .in(GroupChatToolCall::getReplyStepId, stepIds));
+            }
+            messageMapper.delete(new LambdaQueryWrapper<GroupChatMessage>()
+                    .eq(GroupChatMessage::getTurnId, turnId));
+            stepMapper.delete(new LambdaQueryWrapper<GroupChatReplyStep>()
+                    .eq(GroupChatReplyStep::getTurnId, turnId));
+            if (!summaryIds.isEmpty()) {
+                diceResultMapper.delete(new LambdaQueryWrapper<DiceRollResult>()
+                        .in(DiceRollResult::getSummaryId, summaryIds));
+                diceSummaryMapper.delete(new LambdaQueryWrapper<DiceRollSummary>()
+                        .in(DiceRollSummary::getId, summaryIds));
+            }
+            turnMapper.deleteById(turnId);
+
+            turnMapper.insert(snapshot.getTurn());
+            safe(snapshot.getReplySteps()).forEach(stepMapper::insert);
+            safe(snapshot.getMessages()).forEach(messageMapper::insert);
+            safe(snapshot.getDiceSummaries()).forEach(diceSummaryMapper::insert);
+            safe(snapshot.getDiceResults()).forEach(diceResultMapper::insert);
+            safe(snapshot.getToolCalls()).forEach(toolCallMapper::insert);
+            safe(snapshot.getAgentDecisions()).forEach(decisionMapper::insert);
+        }
+    }
+
+    private void restoreCharacters(
+            Long conversationId, TrpgSaveSnapshotDTO snapshot) {
+        List<Long> currentCharacterIds = characterMapper.selectList(
+                        new LambdaQueryWrapper<CocCharacter>()
+                                .eq(CocCharacter::getRunId, conversationId))
+                .stream().map(CocCharacter::getId).toList();
+        if (!currentCharacterIds.isEmpty()) {
+            profileMapper.delete(new LambdaQueryWrapper<CocCharacterProfile>()
+                    .in(CocCharacterProfile::getCharacterId, currentCharacterIds));
+            skillMapper.delete(new LambdaQueryWrapper<CocCharacterSkill>()
+                    .in(CocCharacterSkill::getCharacterId, currentCharacterIds));
+            weaponMapper.delete(new LambdaQueryWrapper<CocCharacterWeapon>()
+                    .in(CocCharacterWeapon::getCharacterId, currentCharacterIds));
+            characterMapper.delete(new LambdaQueryWrapper<CocCharacter>()
+                    .in(CocCharacter::getId, currentCharacterIds));
+        }
+        Map<Long, String> quickNotes = safeMap(
+                snapshot.getCharacterQuickNotes());
+        for (CocCharacter character : safe(snapshot.getCharacters())) {
+            character.setQuickNotes(quickNotes.get(character.getId()));
+            characterMapper.insert(character);
+        }
+        safe(snapshot.getCharacterProfiles()).forEach(profileMapper::insert);
+        safe(snapshot.getCharacterSkills()).forEach(skillMapper::insert);
+        safe(snapshot.getCharacterWeapons()).forEach(weaponMapper::insert);
+    }
+
+    private void restoreCombats(Long conversationId, List<TrpgCombat> combats) {
+        combatMapper.delete(new LambdaQueryWrapper<TrpgCombat>()
+                .eq(TrpgCombat::getConversationId, conversationId));
+        safe(combats).forEach(combatMapper::insert);
+    }
+
+    private void restoreCheckpoint(
+            Long conversationId, GroupTurnCheckpoint checkpoint) {
+        checkpointMapper.deleteById(conversationId);
+        if (checkpoint != null) {
+            checkpointMapper.insert(checkpoint);
+        }
+    }
+
+    private void restoreConversation(
+            GroupConversation conversation,
+            TrpgSaveSnapshotDTO.ConversationStateSnapshot state) {
+        conversation.setActiveReplyPlanId(state.getActiveReplyPlanId())
+                .setTitle(state.getTitle())
+                .setSummary(state.getSummary())
+                .setStatus(state.getStatus())
+                .setVersion(state.getVersion())
+                .setUpdatedAt(state.getUpdatedAt())
+                .setClosedAt(state.getClosedAt());
+        conversationMapper.updateById(conversation);
+    }
+
+    private TrpgSaveSnapshotDTO.ConversationStateSnapshot conversationState(
+            GroupConversation conversation) {
+        return new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
+                .setActiveReplyPlanId(conversation.getActiveReplyPlanId())
+                .setTitle(conversation.getTitle())
+                .setSummary(conversation.getSummary())
+                .setStatus(conversation.getStatus())
+                .setVersion(conversation.getVersion())
+                .setUpdatedAt(conversation.getUpdatedAt())
+                .setClosedAt(conversation.getClosedAt());
+    }
+
+    private List<Long> sceneIds(List<GroupReplyPlan> plans) {
+        return plans.stream()
+                .filter(plan -> GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                        plan.getSource()))
+                .map(GroupReplyPlan::getContextId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    private List<TrpgSaveSnapshotDTO.RestorableTurnSnapshot> restorableTurns(
+            Long conversationId) {
+        List<GroupChatTurn> turns = turnMapper.selectList(
+                new LambdaQueryWrapper<GroupChatTurn>()
+                        .eq(GroupChatTurn::getConversationId, conversationId)
+                        .in(GroupChatTurn::getStatus, RESTORABLE_TURN_STATUSES)
+                        .orderByAsc(GroupChatTurn::getId));
+        if (turns.isEmpty()) {
+            return List.of();
+        }
+        List<Long> turnIds = turns.stream().map(GroupChatTurn::getId).toList();
+        List<GroupChatReplyStep> steps = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .in(GroupChatReplyStep::getTurnId, turnIds)
+                        .orderByAsc(GroupChatReplyStep::getId));
+        List<GroupChatMessage> messages = messageMapper.selectList(
+                new LambdaQueryWrapper<GroupChatMessage>()
+                        .in(GroupChatMessage::getTurnId, turnIds)
+                        .orderByAsc(GroupChatMessage::getId));
+        List<Long> stepIds = steps.stream()
+                .map(GroupChatReplyStep::getId).toList();
+        List<GroupChatToolCall> toolCalls = stepIds.isEmpty() ? List.of()
+                : toolCallMapper.selectList(
+                        new LambdaQueryWrapper<GroupChatToolCall>()
+                                .in(GroupChatToolCall::getReplyStepId, stepIds)
+                                .orderByAsc(GroupChatToolCall::getId));
+        List<GroupChatAgentDecision> decisions = stepIds.isEmpty() ? List.of()
+                : decisionMapper.selectList(
+                        new LambdaQueryWrapper<GroupChatAgentDecision>()
+                                .in(GroupChatAgentDecision::getReplyStepId, stepIds)
+                                .orderByAsc(GroupChatAgentDecision::getId));
+        List<Long> diceSummaryIds = toolCalls.stream()
+                .map(GroupChatToolCall::getDiceRollSummaryId)
+                .filter(Objects::nonNull)
+                .distinct().toList();
+        List<DiceRollSummary> diceSummaries = diceSummaryIds.isEmpty()
+                ? List.of() : diceSummaryMapper.selectList(
+                        new LambdaQueryWrapper<DiceRollSummary>()
+                                .in(DiceRollSummary::getId, diceSummaryIds)
+                                .eq(DiceRollSummary::getConversationId, conversationId)
+                                .orderByAsc(DiceRollSummary::getId));
+        Set<Long> capturedSummaryIds = diceSummaries.stream()
+                .map(DiceRollSummary::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        List<DiceRollResult> diceResults = capturedSummaryIds.isEmpty()
+                ? List.of() : diceResultMapper.selectList(
+                        new LambdaQueryWrapper<DiceRollResult>()
+                                .in(DiceRollResult::getSummaryId, capturedSummaryIds)
+                                .orderByAsc(DiceRollResult::getId));
+        return turns.stream().map(turn -> {
+            List<GroupChatReplyStep> turnSteps = steps.stream()
+                    .filter(step -> Objects.equals(step.getTurnId(), turn.getId()))
+                    .toList();
+            Set<Long> turnStepIds = turnSteps.stream()
+                    .map(GroupChatReplyStep::getId)
+                    .collect(java.util.stream.Collectors.toSet());
+            List<GroupChatToolCall> turnToolCalls = toolCalls.stream()
+                    .filter(call -> turnStepIds.contains(call.getReplyStepId()))
+                    .toList();
+            Set<Long> turnSummaryIds = turnToolCalls.stream()
+                    .map(GroupChatToolCall::getDiceRollSummaryId)
+                    .filter(Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toSet());
+            return new TrpgSaveSnapshotDTO.RestorableTurnSnapshot()
+                    .setTurn(turn)
+                    .setReplySteps(turnSteps)
+                    .setMessages(messages.stream()
+                            .filter(message -> Objects.equals(
+                                    message.getTurnId(), turn.getId()))
+                            .toList())
+                    .setToolCalls(turnToolCalls)
+                    .setAgentDecisions(decisions.stream()
+                            .filter(decision -> turnStepIds.contains(
+                                    decision.getReplyStepId()))
+                            .toList())
+                    .setDiceSummaries(diceSummaries.stream()
+                            .filter(summary -> turnSummaryIds.contains(summary.getId()))
+                            .toList())
+                    .setDiceResults(diceResults.stream()
+                            .filter(result -> turnSummaryIds.contains(result.getSummaryId()))
+                            .toList());
+        }).toList();
+    }
+
+    private Map<Long, String> characterQuickNotes(
+            List<CocCharacter> characters) {
+        Map<Long, String> result = new LinkedHashMap<>();
+        for (CocCharacter character : characters) {
+            if (character.getId() != null && character.getQuickNotes() != null) {
+                result.put(character.getId(), character.getQuickNotes());
+            }
+        }
+        return Map.copyOf(result);
+    }
+
+    private TrpgSaveSnapshotDTO.CursorSnapshot normalizeCursors(
+            TrpgSaveSnapshotDTO.CursorSnapshot cursors) {
+        if (cursors != null) {
+            return cursors;
+        }
+        return new TrpgSaveSnapshotDTO.CursorSnapshot()
+                .setMaxMessageId(0L)
+                .setMaxTurnId(0L)
+                .setMaxReplyStepId(0L)
+                .setMaxToolCallId(0L)
+                .setMaxAgentDecisionId(0L)
+                .setMaxContextSummaryId(0L)
+                .setMaxTopicId(0L)
+                .setMaxDiceSummaryId(0L)
+                .setMaxDiceResultId(0L)
+                .setMaxWorldEventLogId(0L);
+    }
+
+    private void requireTrpgConversation(GroupConversation conversation) {
+        if (conversation == null || conversation.getId() == null
+                || !GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) {
+            throw new UserRequestException("跑团存档仅支持TRPG群聊");
+        }
+    }
+
+    private <T> List<T> safe(List<T> values) {
+        return values == null ? List.of() : values;
+    }
+
+    private <K, V> Map<K, V> safeMap(Map<K, V> values) {
+        return values == null ? Map.of() : values;
+    }
+}

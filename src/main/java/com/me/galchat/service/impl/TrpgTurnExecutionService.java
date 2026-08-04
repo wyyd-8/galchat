@@ -9,7 +9,6 @@ import com.me.galchat.domain.dto.GroupEndExplorationDTO;
 import com.me.galchat.domain.dto.GroupTurnContinueDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
-import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.DiceRollSummary;
@@ -23,7 +22,6 @@ import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
 import com.me.galchat.groupchat.decision.GroupAgentDecisionStore;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
-import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
@@ -56,12 +54,14 @@ public class TrpgTurnExecutionService {
     private final TrpgSceneSelectionStore sceneSelectionStore;
     private final TrpgParticipantService participantService;
     private final GroupAgentDecisionStore decisionStore;
-    private final GroupChatToolCallMapper toolCallMapper;
     private final DiceRollSummaryMapper diceRollSummaryMapper;
     private final com.me.galchat.groupchat.dice.DiceRollMessageCodec
             diceMessageCodec;
     private final TrpgCombatLifecycleService combatLifecycleService;
     private final GroupReplyPlanMapper replyPlanMapper;
+    private final GroupTurnCheckpointService checkpointService;
+    private final TrpgUnconsciousRecoveryService
+            unconsciousRecoveryService;
 
     public Flux<GroupChatEvent> continueTurn(
             Long conversationId,
@@ -162,12 +162,14 @@ public class TrpgTurnExecutionService {
             TrpgSceneSelectionStore sceneSelectionStore,
             TrpgParticipantService participantService,
             GroupAgentDecisionStore decisionStore,
-            GroupChatToolCallMapper toolCallMapper,
             DiceRollSummaryMapper diceRollSummaryMapper,
             com.me.galchat.groupchat.dice.DiceRollMessageCodec
                     diceMessageCodec,
             TrpgCombatLifecycleService combatLifecycleService,
-            GroupReplyPlanMapper replyPlanMapper) {
+            GroupReplyPlanMapper replyPlanMapper,
+            GroupTurnCheckpointService checkpointService,
+            TrpgUnconsciousRecoveryService
+                    unconsciousRecoveryService) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.planResolver = planResolver;
@@ -183,11 +185,13 @@ public class TrpgTurnExecutionService {
         this.sceneSelectionStore = sceneSelectionStore;
         this.participantService = participantService;
         this.decisionStore = decisionStore;
-        this.toolCallMapper = toolCallMapper;
         this.diceRollSummaryMapper = diceRollSummaryMapper;
         this.diceMessageCodec = diceMessageCodec;
         this.combatLifecycleService = combatLifecycleService;
         this.replyPlanMapper = replyPlanMapper;
+        this.checkpointService = checkpointService;
+        this.unconsciousRecoveryService =
+                unconsciousRecoveryService;
     }
 
     public Flux<GroupChatEvent> retry(
@@ -209,15 +213,17 @@ public class TrpgTurnExecutionService {
                         conversationId, turnId);
                 GroupChatReplyStep failedStep =
                         requireRetryableStep(turnId, stepId);
-                transactionTemplate.executeWithoutResult(status ->
-                        restoreFailedStep(turn, failedStep));
+                boolean wholeTurnRestarted = Boolean.TRUE.equals(
+                        transactionTemplate.execute(status ->
+                                restoreFailedStep(turn, failedStep)));
                 List<GroupChatReplyStep> remaining =
                         stepMapper.selectList(
                                 new LambdaQueryWrapper<
                                         GroupChatReplyStep>()
                                         .eq(GroupChatReplyStep::getTurnId,
                                                 turnId)
-                                        .ge(GroupChatReplyStep::getStepNo,
+                                        .ge(!wholeTurnRestarted,
+                                                GroupChatReplyStep::getStepNo,
                                                 failedStep.getStepNo())
                                         .eq(GroupChatReplyStep::getStatus,
                                                 GroupChatConstant
@@ -454,25 +460,30 @@ public class TrpgTurnExecutionService {
         return step;
     }
 
-    private void restoreFailedStep(
+    private boolean restoreFailedStep(
             GroupChatTurn turn, GroupChatReplyStep failedStep) {
+        boolean restored = checkpointService.restore(
+                turn, failedStep);
+        if (!restored) {
+            List<GroupChatReplyStep> allSteps = stepMapper.selectList(
+                    new LambdaQueryWrapper<GroupChatReplyStep>()
+                            .eq(GroupChatReplyStep::getTurnId,
+                                    turn.getId())
+                            .orderByAsc(GroupChatReplyStep::getStepNo));
+            if (allSteps != null) {
+                for (GroupChatReplyStep step : allSteps) {
+                    decisionStore.deleteByReplyStepId(step.getId());
+                    combatLifecycleService.clearControlMarkersForRetry(
+                            step.getId());
+                }
+            }
+            sceneSelectionStore.clear(turn.getConversationId());
+            return true;
+        }
         decisionStore.deleteByReplyStepId(failedStep.getId());
         combatLifecycleService.clearControlMarkersForRetry(
                 failedStep.getId());
-        toolCallMapper.delete(
-                new LambdaQueryWrapper<GroupChatToolCall>()
-                        .eq(GroupChatToolCall::getReplyStepId,
-                                failedStep.getId()));
-        if (failedStep.getOutputMessageId() != null) {
-            messageMapper.deleteById(
-                    failedStep.getOutputMessageId());
-        }
         LocalDateTime now = LocalDateTime.now();
-        failedStep.setOutputMessageId(null)
-                .setStatus(GroupChatConstant.STATUS_PENDING)
-                .setErrorMessage(null)
-                .setUpdatedAt(now);
-        stepMapper.updateById(failedStep);
         List<GroupChatReplyStep> blockedTail =
                 stepMapper.selectList(
                         new LambdaQueryWrapper<
@@ -493,9 +504,13 @@ public class TrpgTurnExecutionService {
                     .setUpdatedAt(now);
             stepMapper.updateById(blocked);
         }
-        turn.setStatus(GroupChatConstant.STATUS_RUNNING)
-                .setUpdatedAt(now);
-        turnMapper.updateById(turn);
+        if (!GroupChatConstant.STATUS_WAITING_DICE.equals(
+                turn.getStatus())) {
+            turn.setStatus(GroupChatConstant.STATUS_RUNNING)
+                    .setUpdatedAt(now);
+            turnMapper.updateById(turn);
+        }
+        return false;
     }
 
     public GroupCurrentTurnVO current(Long conversationId) {
@@ -803,6 +818,9 @@ public class TrpgTurnExecutionService {
         turn.setStatus(GroupChatConstant.STATUS_RUNNING)
                 .setUpdatedAt(now);
         turnMapper.updateById(turn);
+        checkpointService.recordBoundary(
+                turn, userStep,
+                GroupTurnCheckpointService.COMPLETED);
         return message;
     }
 
@@ -1012,6 +1030,24 @@ public class TrpgTurnExecutionService {
                 return executeScheduledSteps(
                         conversation, turn, scheduled, index + 1);
             }
+            TrpgUnconsciousRecoveryService.Execution recovery =
+                    unconsciousRecoveryService.handle(
+                            conversation, turn, next);
+            if (recovery != null) {
+                if (recovery.outcome()
+                        == TrpgUnconsciousRecoveryService.Outcome.PAUSED) {
+                    return Flux.concat(
+                            Flux.fromIterable(recovery.events()),
+                            Flux.just(pausedEvent(conversation, turn)));
+                }
+                if (recovery.outcome()
+                        == TrpgUnconsciousRecoveryService.Outcome.SKIPPED
+                        || recovery.outcome()
+                        == TrpgUnconsciousRecoveryService.Outcome.COMPLETED) {
+                    return executeScheduledSteps(
+                            conversation, turn, scheduled, index + 1);
+                }
+            }
             if (GroupChatConstant.ACTOR_USER.equals(
                     next.getSpeakerType())) {
                 return waitForUser(conversation, turn, next);
@@ -1132,6 +1168,7 @@ public class TrpgTurnExecutionService {
                 turn.setStatus(GroupChatConstant.STATUS_COMPLETED)
                         .setUpdatedAt(LocalDateTime.now());
                 turnMapper.updateById(turn);
+                checkpointService.clear(conversation.getId());
             });
             return Flux.just(GroupChatEvent.builder()
                     .eventType(GroupChatConstant.EVENT_TURN_COMPLETED)

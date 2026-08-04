@@ -44,6 +44,15 @@
         DELETE FROM world_event_log
         WHERE user_world_id = #{userWorldId}
           AND id &gt; #{maxWorldEventLogId}
+          AND (
+              conversation_id IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM group_conversation conversation
+                  WHERE conversation.id = world_event_log.conversation_id
+                    AND conversation.mode = 'chat'
+              )
+          )
     </delete>
 
     <delete id="deleteGroupMessagesAfter">
@@ -51,6 +60,7 @@
         USING group_conversation conversation
         WHERE message.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND message.id &gt; #{maxGroupMessageId}
     </delete>
 
@@ -61,17 +71,7 @@
           AND step.turn_id = turn_row.id
           AND turn_row.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
-          AND step.id &gt; #{maxGroupReplyStepId}
-    </delete>
-
-    <delete id="deleteGroupAgentDecisionsAfter">
-        DELETE FROM group_chat_agent_decision decision
-        USING group_chat_reply_step step, group_chat_turn turn_row,
-              group_conversation conversation
-        WHERE decision.reply_step_id = step.id
-          AND step.turn_id = turn_row.id
-          AND turn_row.conversation_id = conversation.id
-          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND step.id &gt; #{maxGroupReplyStepId}
     </delete>
 
@@ -81,6 +81,7 @@
         WHERE step.turn_id = turn_row.id
           AND turn_row.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND step.id &gt; #{maxGroupReplyStepId}
     </delete>
 
@@ -89,6 +90,7 @@
         USING group_conversation conversation
         WHERE turn_row.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND turn_row.id &gt; #{maxGroupTurnId}
     </delete>
 
@@ -97,6 +99,7 @@
         USING group_conversation conversation
         WHERE summary.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND summary.id &gt; #{maxGroupContextSummaryId}
     </delete>
 
@@ -105,6 +108,7 @@
         USING group_conversation conversation
         WHERE topic.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND topic.id &gt; #{maxGroupTopicId}
     </delete>
 
@@ -114,6 +118,7 @@
         WHERE item.plan_id = plan.id
           AND plan.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND conversation.id &gt; #{maxGroupConversationId}
     </delete>
 
@@ -122,6 +127,7 @@
         USING group_conversation conversation
         WHERE plan.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND conversation.id &gt; #{maxGroupConversationId}
     </delete>
 
@@ -130,12 +136,14 @@
         USING group_conversation conversation
         WHERE member.conversation_id = conversation.id
           AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
           AND conversation.id &gt; #{maxGroupConversationId}
     </delete>
 
     <delete id="deleteGroupConversationsAfter">
         DELETE FROM group_conversation
         WHERE user_world_id = #{userWorldId}
+          AND mode = 'chat'
           AND id &gt; #{maxGroupConversationId}
     </delete>
 

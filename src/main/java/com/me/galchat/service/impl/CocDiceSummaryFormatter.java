@@ -124,6 +124,18 @@ public class CocDiceSummaryFormatter {
                 case FUMBLE -> "大失败";
             };
         }
+        if (DiceRollConstant.TYPE_UNCONSCIOUS_RECOVERY_CON.equals(
+                resolution.getType())) {
+            Map<String, Object> outcome = resolution.getOutcome();
+            Map<String, Object> effect = resolution.getEffect();
+            if (outcome == null || effect == null) {
+                return "";
+            }
+            boolean awake = !booleanValue(effect, "unconscious");
+            return stringValue(outcome, "characterName")
+                    + "CON检定" + (awake
+                    ? "成功，脱离昏迷" : "失败，仍处于昏迷");
+        }
         if (DiceRollConstant.TYPE_SAN_LOSS.equals(resolution.getType())) {
             Map<String, Object> effect = resolution.getEffect();
             if (effect == null) {
@@ -146,6 +158,23 @@ public class CocDiceSummaryFormatter {
             }
             if (booleanValue(effect, "unconscious")) {
                 text.append("；陷入昏迷");
+            }
+            return text.toString();
+        }
+        if (DiceRollConstant.TYPE_HEALING.equals(resolution.getType())) {
+            Map<String, Object> effect = resolution.getEffect();
+            if (effect == null) {
+                return "";
+            }
+            StringBuilder text = new StringBuilder()
+                    .append(stringValue(resolution.getRule(), "characterName"))
+                    .append("生命+")
+                    .append(intValue(effect, "hpGain"));
+            if (Boolean.TRUE.equals(effect.get("majorWoundChanged"))) {
+                text.append("；解除重伤");
+            }
+            if (Boolean.TRUE.equals(effect.get("unconsciousChanged"))) {
+                text.append("；脱离昏迷");
             }
             return text.toString();
         }

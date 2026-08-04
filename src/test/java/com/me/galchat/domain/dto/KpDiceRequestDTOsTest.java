@@ -26,6 +26,13 @@ class KpDiceRequestDTOsTest {
         assertThat(undocumentedComponents).isEmpty();
     }
 
+    @Test
+    void healingRequestExposesARecoveryModeChoice() {
+        assertThat(KpDiceRequestDTOs.Healing.class.getRecordComponents())
+                .extracting(component -> component.getName())
+                .containsExactly("reason", "sourceMode", "mode", "targets");
+    }
+
     private boolean lacksDescription(Field field) {
         ToolParam toolParam = field.getAnnotation(ToolParam.class);
         return toolParam == null || toolParam.description().isBlank();

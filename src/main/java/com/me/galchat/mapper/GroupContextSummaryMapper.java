@@ -12,6 +12,7 @@ public interface GroupContextSummaryMapper extends BaseMapper<GroupContextSummar
             FROM group_context_summary summary
             JOIN group_conversation conversation ON conversation.id = summary.conversation_id
             WHERE conversation.user_world_id = #{userWorldId}
+              AND conversation.mode = 'chat'
             """)
     Long selectMaxIdByUserWorldId(@Param("userWorldId") Long userWorldId);
 }

@@ -18,11 +18,19 @@
     </delete>
 
     <delete id="deleteGroupTopicsAfterId">
-        DELETE FROM public.group_topic_vector_store
-        WHERE metadata::jsonb @> CONCAT(
+        DELETE FROM public.group_topic_vector_store vector
+        WHERE vector.metadata::jsonb @> CONCAT(
             '{"userWorldId":', #{userWorldId}, '}'
         )::jsonb
-          AND (metadata::jsonb ->> 'groupTopicId')::bigint &gt; #{maxGroupTopicId}
+          AND (vector.metadata::jsonb ->> 'groupTopicId')::bigint &gt; #{maxGroupTopicId}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM group_chat_topic topic
+              JOIN group_conversation conversation
+                ON conversation.id = topic.conversation_id
+              WHERE topic.id = (vector.metadata::jsonb ->> 'groupTopicId')::bigint
+                AND conversation.mode = 'trpg'
+          )
     </delete>
 
     <delete id="deleteGroupTopicsByConversation">
@@ -40,6 +48,15 @@
           AND (metadata::jsonb ->> 'endSequence')::bigint &gt; #{thresholdEndSequence}
     </delete>
 
+    <delete id="deleteGroupTopicsByConversationAfterTopicId">
+        DELETE FROM public.group_topic_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+          AND (metadata::jsonb -&gt;&gt; 'groupTopicId')::bigint
+              &gt; #{maxGroupTopicId}
+    </delete>
+
     <delete id="deleteWorldEventByUserWorldId">
         DELETE FROM public.world_event_vector_store
         WHERE metadata::jsonb @> CONCAT(
@@ -48,11 +65,19 @@
     </delete>
 
     <delete id="deleteWorldEventByUserWorldIdAfterLogId">
-        DELETE FROM public.world_event_vector_store
-        WHERE metadata::jsonb @> CONCAT(
+        DELETE FROM public.world_event_vector_store vector
+        WHERE vector.metadata::jsonb @> CONCAT(
             '{"userWorldId":', #{userWorldId}, '}'
         )::jsonb
-          AND (metadata::jsonb ->> 'worldEventLogId')::bigint &gt; #{worldEventLogId}
+          AND (vector.metadata::jsonb ->> 'worldEventLogId')::bigint &gt; #{worldEventLogId}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM world_event_log event
+              JOIN group_conversation conversation
+                ON conversation.id = event.conversation_id
+              WHERE event.id = (vector.metadata::jsonb ->> 'worldEventLogId')::bigint
+                AND conversation.mode = 'trpg'
+          )
     </delete>
 
     <delete id="deleteWorldEventByLogId">
@@ -60,5 +85,16 @@
         WHERE metadata::jsonb @> CONCAT(
             '{"userWorldId":', #{userWorldId}, ',"worldEventLogId":', #{worldEventLogId}, '}'
         )::jsonb
+    </delete>
+
+    <delete id="deleteWorldEventByConversationAfterLogId">
+        DELETE FROM public.world_event_vector_store vector
+        WHERE EXISTS (
+            SELECT 1
+            FROM world_event_log event
+            WHERE event.id = (vector.metadata::jsonb -&gt;&gt; 'worldEventLogId')::bigint
+              AND event.conversation_id = #{conversationId}
+              AND event.id &gt; #{maxWorldEventLogId}
+        )
     </delete>
 </mapper>

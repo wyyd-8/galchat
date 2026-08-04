@@ -23,5 +23,11 @@ public interface ICocDiceOrchestrationService {
     KpDiceToolResult rollDamage(
             Long conversationId, Long runId, KpDiceRequestDTOs.Damage request);
 
+    KpDiceToolResult rollHealing(
+            Long conversationId, Long runId, KpDiceRequestDTOs.Healing request);
+
+    KpDiceToolResult requestUnconsciousRecovery(
+            Long conversationId, Long runId, Long cardId);
+
     DiceRollProgressVO rollPlayerResult(Long resultId);
 }

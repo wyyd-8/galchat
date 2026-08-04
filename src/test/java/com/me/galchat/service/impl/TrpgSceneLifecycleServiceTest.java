@@ -44,7 +44,8 @@ class TrpgSceneLifecycleServiceTest {
                         progressStore,
                         mock(TrpgSceneSummaryService.class),
                         mock(GroupReplyPlanService.class),
-                        mock(TrpgChildScenePlanService.class));
+                        mock(TrpgChildScenePlanService.class),
+                        mock(TrpgTemporaryInsanityService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE)
@@ -94,6 +95,8 @@ class TrpgSceneLifecycleServiceTest {
                 mock(TrpgSceneSummaryService.class);
         GroupReplyPlanService replyPlanService =
                 mock(GroupReplyPlanService.class);
+        TrpgTemporaryInsanityService insanityService =
+                mock(TrpgTemporaryInsanityService.class);
         TrpgSceneLifecycleService service =
                 new TrpgSceneLifecycleService(
                         conversationService,
@@ -104,7 +107,8 @@ class TrpgSceneLifecycleServiceTest {
                         mock(GroupTurnRecoveryService.class),
                         progressStore, summaryService,
                         replyPlanService,
-                        mock(TrpgChildScenePlanService.class));
+                        mock(TrpgChildScenePlanService.class),
+                        insanityService);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(10L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -120,9 +124,11 @@ class TrpgSceneLifecycleServiceTest {
                 GroupChatConstant.PLAN_SOURCE_SCENE)).isTrue();
 
         var ordered = org.mockito.Mockito.inOrder(
-                summaryService, replyPlanService, progressStore);
+                summaryService, replyPlanService,
+                insanityService, progressStore);
         ordered.verify(summaryService).summarize(7L, 21L, 10L);
         ordered.verify(replyPlanService).finishActiveUnderLock(conversation);
+        ordered.verify(insanityService).advanceAfterLargeScene(7L);
         ordered.verify(progressStore).clear(7L, 21L);
     }
 
@@ -137,6 +143,8 @@ class TrpgSceneLifecycleServiceTest {
                 mock(GroupReplyPlanService.class);
         TrpgChildScenePlanService childPlanService =
                 mock(TrpgChildScenePlanService.class);
+        TrpgTemporaryInsanityService insanityService =
+                mock(TrpgTemporaryInsanityService.class);
         TrpgSceneLifecycleService service =
                 new TrpgSceneLifecycleService(
                         mock(GroupConversationService.class),
@@ -147,7 +155,8 @@ class TrpgSceneLifecycleServiceTest {
                         mock(GroupTurnRecoveryService.class),
                         progressStore, summaryService,
                         replyPlanService,
-                        childPlanService);
+                        childPlanService,
+                        insanityService);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(12L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -171,6 +180,7 @@ class TrpgSceneLifecycleServiceTest {
                 conversation, child);
         ordered.verify(progressStore).clear(7L, 22L);
         org.mockito.Mockito.verifyNoInteractions(replyPlanService);
+        org.mockito.Mockito.verifyNoInteractions(insanityService);
     }
 
     private GroupReplyPlanItem item(Long actorId) {

@@ -9,7 +9,12 @@ import java.util.List;
 
 public interface GroupConversationMapper extends BaseMapper<GroupConversation> {
 
-    @Select("SELECT COALESCE(MAX(id), 0) FROM group_conversation WHERE user_world_id = #{userWorldId}")
+    @Select("""
+            SELECT COALESCE(MAX(id), 0)
+            FROM group_conversation
+            WHERE user_world_id = #{userWorldId}
+              AND mode = 'chat'
+            """)
     Long selectMaxIdByUserWorldId(@Param("userWorldId") Long userWorldId);
 
     @Select("""

@@ -19,6 +19,8 @@ public class GroupTurnPlanResolver {
     private final TrpgSceneLifecycleService sceneLifecycleService;
     private final TrpgRunLifecycleService runLifecycleService;
     private final TrpgCombatLifecycleService combatLifecycleService;
+    private final TrpgChildSceneCommandService
+            childSceneCommandService;
 
     public ResolvedTurnPlan resolve(
             GroupConversation conversation, GroupModeRuntime runtime) {
@@ -62,6 +64,10 @@ public class GroupTurnPlanResolver {
             GroupConversation conversation,
             com.me.galchat.domain.po.GroupChatTurn turn) {
         if (combatLifecycleService.finalizeStartAfterTurn(
+                conversation, turn)) {
+            return;
+        }
+        if (childSceneCommandService.finalizeStartAfterTurn(
                 conversation, turn)) {
             return;
         }

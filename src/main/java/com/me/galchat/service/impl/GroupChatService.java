@@ -72,6 +72,7 @@ public class GroupChatService {
     private final TrpgSceneSelectionService sceneSelectionService;
     private final GroupAgentDecisionStore decisionStore;
     private final TrpgCombatLifecycleService combatLifecycleService;
+    private final GroupTurnCheckpointService checkpointService;
 
     @Autowired
     public GroupChatService(GroupConversationService conversationService,
@@ -92,7 +93,9 @@ public class GroupChatService {
                                     sceneSelectionService,
                             GroupAgentDecisionStore decisionStore,
                             TrpgCombatLifecycleService
-                                    combatLifecycleService) {
+                                    combatLifecycleService,
+                            GroupTurnCheckpointService
+                                    checkpointService) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.turnPlanResolver = turnPlanResolver;
@@ -110,6 +113,7 @@ public class GroupChatService {
         this.sceneSelectionService = sceneSelectionService;
         this.decisionStore = decisionStore;
         this.combatLifecycleService = combatLifecycleService;
+        this.checkpointService = checkpointService;
     }
 
     public Flux<GroupChatEvent> chat(Long conversationId, GroupChatRequestDTO request) {
@@ -301,6 +305,10 @@ public class GroupChatService {
             if (shouldSkipStep(step)) {
                 return Flux.empty();
             }
+            if (GroupChatConstant.MODE_TRPG.equals(
+                    conversation.getMode())) {
+                checkpointService.initializeStep(turn, step);
+            }
             GroupContextMaterial context = runtime.contextPolicy().load(conversation, action);
             GroupModelInvocation invocation = runtime.agentPolicy().prepare(conversation, action, context);
             String speakerName = runtime.agentPolicy()
@@ -425,6 +433,9 @@ public class GroupChatService {
                                         GroupChatConstant.STATUS_COMPLETED)
                                 .setUpdatedAt(now);
                         stepMapper.updateById(step);
+                        checkpointService.recordBoundary(
+                                turn, step,
+                                GroupTurnCheckpointService.COMPLETED);
                     });
                     return Flux.empty();
                 });
@@ -545,6 +556,9 @@ public class GroupChatService {
                     .setStatus(GroupChatConstant.STATUS_COMPLETED)
                     .setUpdatedAt(now);
             stepMapper.updateById(step);
+            checkpointService.recordBoundary(
+                    turn, step,
+                    GroupTurnCheckpointService.COMPLETED);
             return message;
         });
     }
@@ -862,6 +876,14 @@ public class GroupChatService {
                         turn.setStatus(pausedStatus)
                                 .setUpdatedAt(LocalDateTime.now());
                         turnMapper.updateById(turn);
+                        checkpointService.recordBoundary(
+                                turn, step,
+                                GroupChatConstant.STATUS_WAITING_DICE
+                                        .equals(pausedStatus)
+                                        ? GroupTurnCheckpointService
+                                                .WAITING_DICE
+                                        : GroupTurnCheckpointService
+                                                .PAUSED);
                         return;
                     }
                     updateStepStatus(step,
@@ -883,6 +905,12 @@ public class GroupChatService {
                                             LocalDateTime.now());
                             turnMapper.updateById(turn);
                         }
+                    }
+                    if (GroupChatConstant.MODE_TRPG.equals(
+                            conversation.getMode())) {
+                        checkpointService.recordBoundary(
+                                turn, step,
+                                GroupTurnCheckpointService.COMPLETED);
                     }
                 }));
     }

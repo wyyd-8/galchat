@@ -116,6 +116,7 @@ class GroupModeRuntimeTest {
                 cardService,
                 new CharacterCardContextFormatter(),
                 mock(KpDiceTools.class),
+                mock(com.me.galchat.tool.KpPushedCheckTools.class),
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),

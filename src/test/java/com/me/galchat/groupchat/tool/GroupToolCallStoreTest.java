@@ -2,6 +2,7 @@ package com.me.galchat.groupchat.tool;
 
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
+import com.me.galchat.service.impl.GroupTurnCheckpointService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -28,7 +29,8 @@ class GroupToolCallStoreTest {
     void savesToolCallAndItsResponseInOneModelStep() {
         GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
         GroupToolCallStore store = new GroupToolCallStore(
-                mapper, JsonMapper.builder().build());
+                mapper, JsonMapper.builder().build(),
+                mock(GroupTurnCheckpointService.class));
         when(mapper.nextToolStepNo(41L)).thenReturn(3);
         doAnswer(invocation -> {
             invocation.<GroupChatToolCall>getArgument(0).setId(9L);
@@ -68,7 +70,8 @@ class GroupToolCallStoreTest {
     void bindsDiceSummaryByReplyStepAndToolCallId() {
         GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
         GroupToolCallStore store = new GroupToolCallStore(
-                mapper, JsonMapper.builder().build());
+                mapper, JsonMapper.builder().build(),
+                mock(GroupTurnCheckpointService.class));
 
         store.bindDiceSummary(41L, "call-1", 501L);
 
@@ -79,7 +82,8 @@ class GroupToolCallStoreTest {
     void locatesFollowUpOnlyWithinRequestedConversation() {
         GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
         GroupToolCallStore store = new GroupToolCallStore(
-                mapper, JsonMapper.builder().build());
+                mapper, JsonMapper.builder().build(),
+                mock(GroupTurnCheckpointService.class));
         when(mapper.findLatestDiceSummaryId(7L, Set.of("requestCheck")))
                 .thenReturn(501L);
 
@@ -92,8 +96,10 @@ class GroupToolCallStoreTest {
     @Test
     void directDiceResponseBindsSummaryWhileSavingToolResult() {
         GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
+        GroupTurnCheckpointService checkpointService =
+                mock(GroupTurnCheckpointService.class);
         GroupToolCallStore store = new GroupToolCallStore(
-                mapper, JsonMapper.builder().build());
+                mapper, JsonMapper.builder().build(), checkpointService);
         when(mapper.nextToolStepNo(41L)).thenReturn(1);
         doAnswer(invocation -> {
             invocation.<GroupChatToolCall>getArgument(0).setId(9L);
@@ -126,13 +132,15 @@ class GroupToolCallStoreTest {
                 (GroupChatToolCall call) ->
                         Long.valueOf(501L).equals(call.getDiceRollSummaryId())
                                 && call.getToolResult().contains("生命-4")));
+        verify(checkpointService).recordToolCommitted(41L, 9L);
     }
 
     @Test
     void mapsDiceSummariesByReplyStepForHistoryReload() {
         GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
         GroupToolCallStore store = new GroupToolCallStore(
-                mapper, JsonMapper.builder().build());
+                mapper, JsonMapper.builder().build(),
+                mock(GroupTurnCheckpointService.class));
         when(mapper.selectList(any())).thenReturn(List.of(
                 new GroupChatToolCall()
                         .setReplyStepId(41L)

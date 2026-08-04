@@ -33,6 +33,8 @@ public final class GroupChatConstant {
     public static final String ACTION_COMBAT_REACTION_ROUTE = "combat_reaction_route";
     public static final String ACTION_COMBAT_DEFENSE = "combat_defense";
     public static final String ACTION_COMBAT_ADJUDICATE = "combat_adjudicate";
+    public static final String ACTION_COMBAT_UNCONSCIOUS_RECOVERY =
+            "combat_unconscious_recovery";
     public static final String ACTION_TRPG_SCENE_SELECTION = "trpg_scene_selection";
 
     public static final String TOPIC_BOUNDARY_SEMANTIC = "semantic";

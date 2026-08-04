@@ -38,6 +38,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -284,6 +285,74 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         changes.put(attribute,
                 new KpCharacterAttributeDTOs.ValueChange(before, after));
         return after;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void rollbackBasicAttributeAdjustment(
+            Long runId,
+            KpCharacterAttributeDTOs.Result executedResult) {
+        if (executedResult == null
+                || executedResult.changes() == null
+                || executedResult.changes().isEmpty()) {
+            throw new IllegalStateException("基础属性调整结果不完整，无法回滚");
+        }
+        CocCharacter character = requireCharacterByName(
+                runId, executedResult.characterName());
+        for (Map.Entry<String, KpCharacterAttributeDTOs.ValueChange> entry
+                : executedResult.changes().entrySet()) {
+            KpCharacterAttributeDTOs.ValueChange change = entry.getValue();
+            Integer current = basicAttribute(character, entry.getKey());
+            if (change == null
+                    || !Objects.equals(current, change.after())) {
+                throw new IllegalStateException(
+                        "人物卡" + entry.getKey()
+                                + "已发生后续变化，无法安全回滚");
+            }
+        }
+        executedResult.changes().forEach((attribute, change) ->
+                setBasicAttribute(character, attribute, change.before()));
+        CharacterCardRules.DamageBuild damageBuild =
+                CharacterCardRules.deriveDamageBuild(
+                        character.getStr(), character.getSiz());
+        character.setDamageBonus(damageBuild.damageBonus())
+                .setBuild(damageBuild.build())
+                .setUpdatedAt(java.time.LocalDateTime.now());
+        if (characterMapper.updateById(character) == 0) {
+            throw new IllegalStateException("人物卡基础属性回滚失败");
+        }
+    }
+
+    private Integer basicAttribute(
+            CocCharacter character, String attribute) {
+        return switch (attribute) {
+            case "STR" -> character.getStr();
+            case "CON" -> character.getCon();
+            case "SIZ" -> character.getSiz();
+            case "DEX" -> character.getDex();
+            case "APP" -> character.getApp();
+            case "INT" -> character.getIntValue();
+            case "POW" -> character.getPow();
+            case "EDU" -> character.getEdu();
+            default -> throw new IllegalStateException(
+                    "未知基础属性" + attribute + "，无法回滚");
+        };
+    }
+
+    private void setBasicAttribute(
+            CocCharacter character, String attribute, int value) {
+        switch (attribute) {
+            case "STR" -> character.setStr(value);
+            case "CON" -> character.setCon(value);
+            case "SIZ" -> character.setSiz(value);
+            case "DEX" -> character.setDex(value);
+            case "APP" -> character.setApp(value);
+            case "INT" -> character.setIntValue(value);
+            case "POW" -> character.setPow(value);
+            case "EDU" -> character.setEdu(value);
+            default -> throw new IllegalStateException(
+                    "未知基础属性" + attribute + "，无法回滚");
+        }
     }
 
     private CocCharacter requireCharacterByName(

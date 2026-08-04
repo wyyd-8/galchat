@@ -20,6 +20,8 @@ public interface ICharacterCardService {
     KpCharacterAttributeDTOs.Result adjustBasicAttributes(
             Long runId, String characterName,
             KpCharacterAttributeDTOs.Adjustments adjustments);
+    void rollbackBasicAttributeAdjustment(
+            Long runId, KpCharacterAttributeDTOs.Result executedResult);
     List<CocDiceCharacterVO> listDiceCharacters(Long runId);
     CocCharacter lockDiceCharacter(Long runId, Long cardId);
     void updateDiceCharacter(CocCharacter character);

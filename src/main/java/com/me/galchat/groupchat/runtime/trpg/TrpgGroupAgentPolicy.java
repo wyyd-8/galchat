@@ -16,6 +16,7 @@ import com.me.galchat.service.impl.TrpgChildSceneCommandService;
 import com.me.galchat.service.impl.TrpgInvestigatorContextAssembler;
 import com.me.galchat.tool.KpChildSceneTools;
 import com.me.galchat.tool.KpDiceTools;
+import com.me.galchat.tool.KpPushedCheckTools;
 import com.me.galchat.tool.InvestigatorSceneTools;
 import com.me.galchat.tool.KpSceneTools;
 import com.me.galchat.tool.KpRunTools;
@@ -43,6 +44,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final ICharacterCardService characterCardService;
     private final CharacterCardContextFormatter characterCardFormatter;
     private final KpDiceTools kpDiceTools;
+    private final KpPushedCheckTools kpPushedCheckTools;
     private final TrpgSceneSelectionTools sceneSelectionTools;
     private final KpSceneSelectionTools kpSceneSelectionTools;
     private final KpModuleTools kpModuleTools;
@@ -64,6 +66,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                                 ICharacterCardService characterCardService,
                                 CharacterCardContextFormatter characterCardFormatter,
                                 KpDiceTools kpDiceTools,
+                                KpPushedCheckTools kpPushedCheckTools,
                                 TrpgSceneSelectionTools sceneSelectionTools,
                                 KpSceneSelectionTools
                                         kpSceneSelectionTools,
@@ -89,6 +92,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         this.characterCardService = characterCardService;
         this.characterCardFormatter = characterCardFormatter;
         this.kpDiceTools = kpDiceTools;
+        this.kpPushedCheckTools = kpPushedCheckTools;
         this.sceneSelectionTools = sceneSelectionTools;
         this.kpSceneSelectionTools = kpSceneSelectionTools;
         this.kpModuleTools = kpModuleTools;
@@ -196,6 +200,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "。" + subjectHint
                         + (combatAttack || combatDefense
                         ? "选择公开上下文中的目标并描述行动；不要在此步骤裁定成败，也不要掷骰。"
+                        + (combatAttack
+                        ? " 在规则允许的范围内，不要尝试攻击昏迷/濒死的调查员。"
+                        : "")
                         : "根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。")
                         + (scenePhase
                         ? """
@@ -237,7 +244,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         List<Object> tools;
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
             List<Object> sceneTools = tools(
-                    kpDiceTools, kpModuleTools, kpSceneTools,
+                    kpDiceTools, kpPushedCheckTools, kpModuleTools, kpSceneTools,
                     kpRunTools, kpCombatTools);
             if (scenePhase) {
                 List<Object> dynamicTools = new ArrayList<>(sceneTools);

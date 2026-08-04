@@ -3,6 +3,7 @@ package com.me.galchat.service.impl;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
@@ -10,23 +11,28 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
+import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TrpgChildSceneCommandServiceTest {
 
     @Test
-    void allowsAllActiveInvestigatorsToEnterDescribedDescendant() {
+    void requestingChildSceneDoesNotActivateItBeforeKpTurnCompletes() {
         Fixture fixture = fixture();
 
         String result = fixture.service().startChildScene(
@@ -34,11 +40,10 @@ class TrpgChildSceneCommandServiceTest {
 
         assertThat(result).isEqualTo(
                 "已创建子场景“阁楼”，调查员亨利、艾琳将进入该场景。");
-        verify(fixture.planService()).startChildUnderLock(
-                fixture.conversation(),
-                fixture.parent(),
-                fixture.attic(),
-                fixture.investigatorItems());
+        assertThat(fixture.conversation().getActiveReplyPlanId())
+                .isEqualTo(fixture.parent().getId());
+        verify(fixture.planMapper(), never())
+                .insert(any(GroupReplyPlan.class));
     }
 
     @Test
@@ -61,23 +66,75 @@ class TrpgChildSceneCommandServiceTest {
                 fixture.investigatorItems().get(1));
     }
 
+    @Test
+    void activatesRecordedChildSceneAfterKpTurnCompletes() {
+        Fixture fixture = fixture();
+        when(fixture.stepMapper().selectList(any()))
+                .thenReturn(List.of(fixture.step()));
+        when(fixture.toolCallMapper().selectList(any()))
+                .thenReturn(List.of(new GroupChatToolCall()
+                        .setReplyStepId(fixture.step().getId())
+                        .setToolName("startChildScene")
+                        .setToolArguments("""
+                                {"childSceneName":"阁楼","investigatorNames":["亨利","艾琳"]}
+                                """)
+                        .setToolResult("已创建子场景")));
+        when(fixture.planMapper().insert(any(GroupReplyPlan.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupReplyPlan>getArgument(0)
+                            .setId(41L);
+                    return 1;
+                });
+
+        boolean activated = fixture.service()
+                .finalizeStartAfterTurn(
+                        fixture.conversation(), fixture.turn());
+
+        assertThat(activated).isTrue();
+        assertThat(fixture.conversation().getActiveReplyPlanId())
+                .isEqualTo(41L);
+    }
+
+    @Test
+    void rejectsSecondValidChildSceneRequestFromTheSameKpStep() {
+        Fixture fixture = fixture();
+        when(fixture.toolCallMapper().selectList(any()))
+                .thenReturn(List.of(new GroupChatToolCall()
+                        .setReplyStepId(fixture.step().getId())
+                        .setToolName("startChildScene")
+                        .setToolArguments("""
+                                {"childSceneName":"阁楼","investigatorNames":["亨利"]}
+                                """)
+                        .setToolResult("已创建子场景")));
+
+        assertThatThrownBy(() -> fixture.service().startChildScene(
+                7L, 51L, "阁楼", List.of("艾琳")))
+                .hasMessageContaining("同一回复步骤")
+                .hasMessageContaining("子场景");
+    }
+
     private Fixture fixture() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupChatReplyStepMapper stepMapper =
                 mock(GroupChatReplyStepMapper.class);
+        GroupChatToolCallMapper toolCallMapper =
+                mock(GroupChatToolCallMapper.class);
         GroupChatTurnMapper turnMapper =
                 mock(GroupChatTurnMapper.class);
         GroupReplyPlanMapper planMapper =
                 mock(GroupReplyPlanMapper.class);
         GroupReplyPlanItemMapper itemMapper =
                 mock(GroupReplyPlanItemMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
         CocModuleLocationMapper locationMapper =
                 mock(CocModuleLocationMapper.class);
         TrpgParticipantService participantService =
                 mock(TrpgParticipantService.class);
         TrpgChildScenePlanService planService =
-                mock(TrpgChildScenePlanService.class);
+                new TrpgChildScenePlanService(
+                        planMapper, itemMapper, conversationMapper);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(5L)
                 .setActiveReplyPlanId(31L)
@@ -98,14 +155,16 @@ class TrpgChildSceneCommandServiceTest {
                 item(GroupChatConstant.ACTOR_CHARACTER, 9L, 2));
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(stepMapper.selectById(51L)).thenReturn(
-                new GroupChatReplyStep().setId(51L).setTurnId(61L)
-                        .setSpeakerType(GroupChatConstant.ACTOR_KP));
-        when(turnMapper.selectById(61L)).thenReturn(
-                new GroupChatTurn().setId(61L)
-                        .setConversationId(7L).setPlanId(31L)
-                        .setPlanSource(
-                                GroupChatConstant.PLAN_SOURCE_SCENE));
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(51L).setTurnId(61L)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        GroupChatTurn turn = new GroupChatTurn().setId(61L)
+                .setConversationId(7L).setPlanId(31L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE);
+        when(stepMapper.selectById(51L)).thenReturn(step);
+        when(turnMapper.selectById(61L)).thenReturn(turn);
         when(planMapper.selectById(31L)).thenReturn(parent);
         when(itemMapper.selectList(any())).thenReturn(
                 new java.util.ArrayList<>() {{
@@ -131,9 +190,11 @@ class TrpgChildSceneCommandServiceTest {
                 new TrpgChildSceneCommandService(
                         conversationService, stepMapper, turnMapper,
                         planMapper, itemMapper, locationMapper,
-                        participantService, planService);
+                        participantService, planService,
+                        toolCallMapper, new ObjectMapper());
         return new Fixture(
-                service, planService, itemMapper, conversation,
+                service, stepMapper, toolCallMapper, planMapper,
+                itemMapper, conversation, step, turn,
                 parent, attic, investigatorItems);
     }
 
@@ -154,9 +215,13 @@ class TrpgChildSceneCommandServiceTest {
 
     private record Fixture(
             TrpgChildSceneCommandService service,
-            TrpgChildScenePlanService planService,
+            GroupChatReplyStepMapper stepMapper,
+            GroupChatToolCallMapper toolCallMapper,
+            GroupReplyPlanMapper planMapper,
             GroupReplyPlanItemMapper itemMapper,
             GroupConversation conversation,
+            GroupChatReplyStep step,
+            GroupChatTurn turn,
             GroupReplyPlan parent,
             CocModuleLocation attic,
             List<GroupReplyPlanItem> investigatorItems) {

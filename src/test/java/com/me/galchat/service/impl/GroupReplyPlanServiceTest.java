@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -32,56 +33,86 @@ import static org.mockito.Mockito.when;
 class GroupReplyPlanServiceTest {
 
     @Test
-    void trpgPlanAcceptsOneImplicitKpIdentityWithNullActorId() {
+    void trpgPlanStructureAcceptsImplicitKpIdentityWithNullActorId() {
         Fixture fixture = new Fixture();
-        when(fixture.conversationService.requireActive(7L))
-                .thenReturn(activeConversation(GroupChatConstant.MODE_TRPG, null));
+        GroupConversation conversation = activeConversation(
+                GroupChatConstant.MODE_TRPG, null);
 
-        fixture.service.replace(7L, sceneRequest(planActor(GroupChatConstant.ACTOR_KP, null)));
+        assertThatCode(() -> fixture.service.validateStructure(
+                conversation,
+                sceneRequest(planActor(
+                        GroupChatConstant.ACTOR_KP, null))))
+                .doesNotThrowAnyException();
 
-        verify(fixture.itemMapper).insert(org.mockito.ArgumentMatchers.argThat((GroupReplyPlanItem item) ->
-                GroupChatConstant.ACTOR_KP.equals(item.getActorType())
-                        && item.getActorId() == null));
     }
 
     @Test
     void normalChatAndNonNullKpIdsAreRejected() {
         Fixture fixture = new Fixture();
-        when(fixture.conversationService.requireActive(7L))
-                .thenReturn(activeConversation(GroupChatConstant.MODE_CHAT, null));
+        GroupConversation normalChat = activeConversation(
+                GroupChatConstant.MODE_CHAT, null);
 
-        assertThatThrownBy(() -> fixture.service.replace(
-                7L, userRequest(planActor(GroupChatConstant.ACTOR_KP, null))))
+        assertThatThrownBy(() -> fixture.service.validateStructure(
+                normalChat,
+                userRequest(planActor(
+                        GroupChatConstant.ACTOR_KP, null))))
                 .hasMessageContaining("TRPG");
 
-        when(fixture.conversationService.requireActive(7L))
-                .thenReturn(activeConversation(GroupChatConstant.MODE_TRPG, null));
-        assertThatThrownBy(() -> fixture.service.replace(
-                7L, sceneRequest(planActor(GroupChatConstant.ACTOR_KP, 9L))))
+        GroupConversation trpg = activeConversation(
+                GroupChatConstant.MODE_TRPG, null);
+        assertThatThrownBy(() -> fixture.service.validateStructure(
+                trpg,
+                sceneRequest(planActor(
+                        GroupChatConstant.ACTOR_KP, 9L))))
                 .hasMessageContaining("KP");
     }
 
     @Test
-    void publicReplaceCannotCreateCombatPlan() {
+    void publicReplaceCannotMutateTrpgSceneLifecycle() {
         Fixture fixture = new Fixture();
-        GroupConversation conversation = new GroupConversation()
-                .setId(7L)
-                .setMode(GroupChatConstant.MODE_TRPG)
-                .setStatus(GroupChatConstant.STATUS_ACTIVE)
-                .setActiveReplyPlanId(10L);
-        GroupReplyPlan exploration = new GroupReplyPlan()
-                .setId(10L)
-                .setConversationId(7L)
-                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
-                .setContextId(100L);
-        when(fixture.conversationService.requireActive(7L)).thenReturn(conversation);
-        when(fixture.planMapper.selectById(10L)).thenReturn(exploration);
-        when(fixture.itemMapper.selectList(any())).thenReturn(List.of());
-        assertThatThrownBy(() -> fixture.service.replace(7L, combatRequest()))
-                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
-                .hasMessageContaining("KP")
-                .hasMessageContaining("战斗");
-        verify(fixture.planMapper, never()).insert(any(GroupReplyPlan.class));
+        when(fixture.conversationService.requireActive(7L))
+                .thenReturn(activeConversation(
+                        GroupChatConstant.MODE_TRPG, null));
+
+        assertThatThrownBy(() -> fixture.service.replace(
+                7L, sceneRequest(
+                        planActor(GroupChatConstant.ACTOR_KP, null))))
+                .hasMessageContaining("TRPG")
+                .hasMessageContaining("生命周期");
+    }
+
+    @Test
+    void publicFinishCannotMutateTrpgSceneLifecycle() {
+        Fixture fixture = new Fixture();
+        GroupConversation conversation = activeConversation(
+                GroupChatConstant.MODE_TRPG, 10L);
+        when(fixture.conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(fixture.planMapper.selectById(10L)).thenReturn(
+                plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null));
+
+        assertThatThrownBy(() -> fixture.service.finishActive(7L))
+                .hasMessageContaining("TRPG")
+                .hasMessageContaining("生命周期");
+        assertThat(conversation.getActiveReplyPlanId()).isEqualTo(10L);
+    }
+
+    @Test
+    void publicAdvanceCannotMutateTrpgSceneLifecycle() {
+        Fixture fixture = new Fixture();
+        GroupConversation conversation = activeConversation(
+                GroupChatConstant.MODE_TRPG, 10L);
+        when(fixture.conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(fixture.planMapper.selectById(10L)).thenReturn(
+                plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null));
+        when(fixture.itemMapper.selectList(any())).thenReturn(List.of(
+                item(11L, 10L, "scene:1", 1, 9L),
+                item(12L, 10L, "scene:2", 2, 8L)));
+
+        assertThatThrownBy(() -> fixture.service.advanceGroup(7L))
+                .hasMessageContaining("TRPG")
+                .hasMessageContaining("生命周期");
     }
 
     @Test
@@ -209,43 +240,6 @@ class GroupReplyPlanServiceTest {
         verify(fixture.itemMapper, never()).updateById(any(GroupReplyPlanItem.class));
     }
 
-    @Test
-    void advancingSceneDeletesOnlyCurrentGroup() {
-        Fixture fixture = new Fixture();
-        GroupConversation conversation = activeConversation(GroupChatConstant.MODE_TRPG, 10L);
-        GroupReplyPlan scene = plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null);
-        GroupReplyPlanItem current = item(11L, 10L, "scene:1", 1, 9L);
-        GroupReplyPlanItem future = item(12L, 10L, "scene:2", 2, 8L);
-        when(fixture.conversationService.requireActive(7L)).thenReturn(conversation);
-        when(fixture.planMapper.selectById(10L)).thenReturn(scene);
-        when(fixture.itemMapper.selectList(any()))
-                .thenReturn(List.of(current, future), List.of(future));
-
-        var result = fixture.service.advanceGroup(7L);
-
-        assertThat(result.getGroups()).extracting(com.me.galchat.domain.vo.GroupReplyPlanVO.Group::getKey)
-                .containsExactly("scene:2");
-        verify(fixture.itemMapper).delete(any());
-        verify(fixture.planMapper, never()).deleteById(10L);
-    }
-
-    @Test
-    void publicAdvanceCannotManipulateCombatPlan() {
-        Fixture fixture = new Fixture();
-        GroupConversation conversation = activeConversation(GroupChatConstant.MODE_TRPG, 20L);
-        GroupReplyPlan combat = plan(20L, GroupChatConstant.PLAN_SOURCE_COMBAT, 10L);
-        GroupReplyPlan scene = plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null);
-        when(fixture.conversationService.requireActive(7L)).thenReturn(conversation);
-        when(fixture.planMapper.selectById(20L)).thenReturn(combat);
-        when(fixture.itemMapper.selectList(any()))
-                .thenReturn(List.of(item(21L, 20L, "round:1", 1, 9L)), List.of(
-                        item(11L, 10L, "scene:1", 1, 9L)));
-
-        assertThatThrownBy(() -> fixture.service.advanceGroup(7L))
-                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
-                .hasMessageContaining("战斗");
-        verify(fixture.planMapper, never()).deleteById(20L);
-    }
 
     @Test
     void userPlanCannotAdvance() {
@@ -269,7 +263,8 @@ class GroupReplyPlanServiceTest {
                 .thenReturn(plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null));
         when(fixture.itemMapper.selectList(any())).thenReturn(List.of());
 
-        var result = fixture.service.finishActive(7L);
+        var result = fixture.service.finishActiveUnderLock(
+                conversation);
 
         assertThat(result).isNull();
         assertThat(conversation.getActiveReplyPlanId()).isNull();
@@ -291,7 +286,8 @@ class GroupReplyPlanServiceTest {
                 List.of(),
                 List.of(item(12L, 11L, "scene:101", 1, 8L)));
 
-        var result = fixture.service.finishActive(7L);
+        var result = fixture.service.finishActiveUnderLock(
+                conversation);
 
         assertThat(result).isNotNull();
         assertThat(result.getId()).isEqualTo(11L);
@@ -316,7 +312,8 @@ class GroupReplyPlanServiceTest {
         when(fixture.planMapper.selectById(11L))
                 .thenReturn(null);
 
-        assertThatThrownBy(() -> fixture.service.finishActive(7L))
+        assertThatThrownBy(() -> fixture.service
+                .finishActiveUnderLock(conversation))
                 .isInstanceOf(
                         com.me.galchat.exception.UserRequestException.class)
                 .hasMessageContaining("下一场景");
@@ -326,31 +323,33 @@ class GroupReplyPlanServiceTest {
     @Test
     void rejectsPlanSourceThatDoesNotMatchConversationMode() {
         Fixture fixture = new Fixture();
-        when(fixture.conversationService.requireActive(7L))
-                .thenReturn(activeConversation(GroupChatConstant.MODE_TRPG, null));
+        GroupConversation trpg = activeConversation(
+                GroupChatConstant.MODE_TRPG, null);
 
-        assertThatThrownBy(() -> fixture.service.replace(7L, userRequest()))
+        assertThatThrownBy(() -> fixture.service.validateStructure(
+                trpg, userRequest()))
                 .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
                 .hasMessageContaining("USER");
 
-        when(fixture.conversationService.requireActive(7L))
-                .thenReturn(activeConversation(GroupChatConstant.MODE_CHAT, null));
-        assertThatThrownBy(() -> fixture.service.replace(7L, combatRequest()))
+        GroupConversation normalChat = activeConversation(
+                GroupChatConstant.MODE_CHAT, null);
+        assertThatThrownBy(() -> fixture.service.validateStructure(
+                normalChat, combatRequest()))
                 .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
-                .hasMessageContaining("KP")
-                .hasMessageContaining("战斗");
+                .hasMessageContaining("普通群聊");
     }
 
     @Test
     void sceneAndCombatPlansRequireContextId() {
         Fixture fixture = new Fixture();
-        when(fixture.conversationService.requireActive(7L))
-                .thenReturn(activeConversation(GroupChatConstant.MODE_TRPG, null));
+        GroupConversation trpg = activeConversation(
+                GroupChatConstant.MODE_TRPG, null);
         GroupReplyPlanDTO request = sceneRequest(
                 planActor(GroupChatConstant.ACTOR_KP, null));
         request.setContextId(null);
 
-        assertThatThrownBy(() -> fixture.service.replace(7L, request))
+        assertThatThrownBy(() -> fixture.service.validateStructure(
+                trpg, request))
                 .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
                 .hasMessageContaining("contextId");
     }

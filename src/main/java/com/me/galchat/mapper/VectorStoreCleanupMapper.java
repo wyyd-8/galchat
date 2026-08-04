@@ -21,6 +21,10 @@ public interface VectorStoreCleanupMapper {
     int deleteGroupTopicsByConversationAfterEnd(@Param("conversationId") Long conversationId,
                                                 @Param("thresholdEndSequence") Long thresholdEndSequence);
 
+    int deleteGroupTopicsByConversationAfterTopicId(
+            @Param("conversationId") Long conversationId,
+            @Param("maxGroupTopicId") Long maxGroupTopicId);
+
     int deleteWorldEventByUserWorldId(@Param("userWorldId") Long userWorldId);
 
     int deleteWorldEventByUserWorldIdAfterLogId(@Param("userWorldId") Long userWorldId,
@@ -28,4 +32,8 @@ public interface VectorStoreCleanupMapper {
 
     int deleteWorldEventByLogId(@Param("userWorldId") Long userWorldId,
                                 @Param("worldEventLogId") Long worldEventLogId);
+
+    int deleteWorldEventByConversationAfterLogId(
+            @Param("conversationId") Long conversationId,
+            @Param("maxWorldEventLogId") Long maxWorldEventLogId);
 }

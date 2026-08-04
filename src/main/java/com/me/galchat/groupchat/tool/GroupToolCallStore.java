@@ -7,6 +7,7 @@ import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.service.DiceFollowUpLocator;
+import com.me.galchat.service.impl.GroupTurnCheckpointService;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -24,17 +25,22 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @Component
 public class GroupToolCallStore implements DiceFollowUpLocator {
 
     private final GroupChatToolCallMapper mapper;
     private final ObjectMapper objectMapper;
+    private final GroupTurnCheckpointService checkpointService;
 
     public GroupToolCallStore(
-            GroupChatToolCallMapper mapper, ObjectMapper objectMapper) {
+            GroupChatToolCallMapper mapper,
+            ObjectMapper objectMapper,
+            GroupTurnCheckpointService checkpointService) {
         this.mapper = mapper;
         this.objectMapper = objectMapper;
+        this.checkpointService = checkpointService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -65,10 +71,39 @@ public class GroupToolCallStore implements DiceFollowUpLocator {
             return;
         }
         saveResponses(insertedByCallId, result.conversationHistory());
+        insertedByCallId.values().stream()
+                .filter(call -> call.getDiceRollSummaryId() != null)
+                .filter(call -> call.getToolResult() != null)
+                .map(GroupChatToolCall::getId)
+                .filter(java.util.Objects::nonNull)
+                .max(Long::compareTo)
+                .ifPresent(toolCallId ->
+                        checkpointService.recordToolCommitted(
+                                replyStepId, toolCallId));
     }
 
     public void bindDiceSummary(Long replyStepId, String toolCallId, Long diceRollSummaryId) {
         mapper.bindDiceSummary(replyStepId, toolCallId, diceRollSummaryId);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void saveSystemDice(
+            Long replyStepId, KpDiceToolResult result) {
+        if (replyStepId == null || result == null
+                || result.summary() == null
+                || result.summary().getId() == null) {
+            throw new UserRequestException("系统掷骰结果缺少步骤或概要");
+        }
+        Integer next = mapper.nextToolStepNo(replyStepId);
+        GroupChatToolCall row = new GroupChatToolCall()
+                .setReplyStepId(replyStepId)
+                .setToolStepNo(next == null ? 1 : next)
+                .setToolCallId("system-recovery-" + UUID.randomUUID())
+                .setToolName("systemUnconsciousRecoveryCon")
+                .setToolArguments("{}")
+                .setToolResult(writeToolResult(result))
+                .setDiceRollSummaryId(result.summary().getId());
+        mapper.insert(row);
     }
 
     public Map<Long, Long> diceSummaryIdsByReplyStepIds(
@@ -140,6 +175,14 @@ public class GroupToolCallStore implements DiceFollowUpLocator {
             return result.summary().getId();
         } catch (JacksonException exception) {
             throw new UserRequestException("掷骰工具返回结果无法解析");
+        }
+    }
+
+    private String writeToolResult(KpDiceToolResult result) {
+        try {
+            return objectMapper.writeValueAsString(result);
+        } catch (JacksonException exception) {
+            throw new UserRequestException("系统掷骰结果无法序列化");
         }
     }
 }

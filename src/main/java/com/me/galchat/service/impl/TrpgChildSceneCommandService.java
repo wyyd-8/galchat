@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
@@ -13,6 +14,7 @@ import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
+import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
@@ -20,6 +22,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -43,6 +47,11 @@ public class TrpgChildSceneCommandService {
     private final CocModuleLocationMapper locationMapper;
     private final TrpgParticipantService participantService;
     private final TrpgChildScenePlanService childPlanService;
+    private final GroupChatToolCallMapper toolCallMapper;
+    private final ObjectMapper objectMapper;
+
+    private static final String START_CHILD_SCENE_TOOL =
+            "startChildScene";
 
     @Transactional(rollbackFor = Exception.class)
     public String startChildScene(
@@ -52,6 +61,15 @@ public class TrpgChildSceneCommandService {
             List<String> investigatorNames) {
         SceneExecution execution = requireKpSceneExecution(
                 conversationId, replyStepId);
+        boolean alreadyRequested = recordedStartCalls(replyStepId)
+                .stream()
+                .map(call -> readPreparedStart(
+                        execution, call.getToolArguments()))
+                .anyMatch(java.util.Objects::nonNull);
+        if (alreadyRequested) {
+            throw new UserRequestException(
+                    "同一回复步骤不能重复创建子场景");
+        }
         CocModuleLocation location = requireDescendantLocation(
                 execution.conversation(),
                 execution.plan().getContextId(),
@@ -59,15 +77,57 @@ public class TrpgChildSceneCommandService {
         Selected selected = selectItems(
                 execution, investigatorNames,
                 GroupChatConstant.PARTICIPANT_ACTIVE);
-        childPlanService.startChildUnderLock(
-                execution.conversation(),
-                execution.plan(),
-                location,
-                selected.items());
         return "已创建子场景“" + location.getName()
                 + "”，调查员"
                 + String.join("、", selected.names())
                 + "将进入该场景。";
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public boolean finalizeStartAfterTurn(
+            GroupConversation conversation,
+            GroupChatTurn completedTurn) {
+        if (conversation == null || completedTurn == null
+                || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                completedTurn.getPlanSource())) {
+            return false;
+        }
+        List<GroupChatReplyStep> completedKpSteps =
+                stepMapper.selectList(
+                        new LambdaQueryWrapper<GroupChatReplyStep>()
+                                .eq(GroupChatReplyStep::getTurnId,
+                                        completedTurn.getId())
+                                .eq(GroupChatReplyStep::getSpeakerType,
+                                        GroupChatConstant.ACTOR_KP)
+                                .eq(GroupChatReplyStep::getStatus,
+                                        GroupChatConstant
+                                                .STATUS_COMPLETED)
+                                .orderByAsc(
+                                        GroupChatReplyStep::getStepNo));
+        for (GroupChatReplyStep step : completedKpSteps) {
+            SceneExecution execution;
+            try {
+                execution = requireKpSceneExecution(
+                        conversation, step, completedTurn);
+            } catch (UserRequestException ignored) {
+                continue;
+            }
+            for (GroupChatToolCall call : recordedStartCalls(
+                    step.getId())) {
+                PreparedChildStart prepared = readPreparedStart(
+                        execution, call.getToolArguments());
+                if (prepared == null) {
+                    continue;
+                }
+                childPlanService.startChildUnderLock(
+                        execution.conversation(),
+                        execution.plan(),
+                        prepared.location(),
+                        prepared.selected().items());
+                return true;
+            }
+        }
+        return false;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -136,6 +196,15 @@ public class TrpgChildSceneCommandService {
         GroupChatReplyStep step = stepMapper.selectById(replyStepId);
         GroupChatTurn turn = step == null
                 ? null : turnMapper.selectById(step.getTurnId());
+        return requireKpSceneExecution(conversation, step, turn);
+    }
+
+    private SceneExecution requireKpSceneExecution(
+            GroupConversation conversation,
+            GroupChatReplyStep step,
+            GroupChatTurn turn) {
+        Long conversationId = conversation == null
+                ? null : conversation.getId();
         if (step == null || turn == null
                 || !conversationId.equals(turn.getConversationId())
                 || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
@@ -153,6 +222,40 @@ public class TrpgChildSceneCommandService {
         }
         return new SceneExecution(
                 conversation, step, turn, plan);
+    }
+
+    private List<GroupChatToolCall> recordedStartCalls(
+            Long replyStepId) {
+        return toolCallMapper.selectList(
+                new LambdaQueryWrapper<GroupChatToolCall>()
+                        .eq(GroupChatToolCall::getReplyStepId,
+                                replyStepId)
+                        .eq(GroupChatToolCall::getToolName,
+                                START_CHILD_SCENE_TOOL)
+                        .isNotNull(GroupChatToolCall::getToolResult)
+                        .orderByAsc(GroupChatToolCall::getId));
+    }
+
+    private PreparedChildStart readPreparedStart(
+            SceneExecution execution,
+            String toolArguments) {
+        try {
+            ChildSceneStartArguments arguments =
+                    objectMapper.readValue(
+                            toolArguments,
+                            ChildSceneStartArguments.class);
+            CocModuleLocation location = requireDescendantLocation(
+                    execution.conversation(),
+                    execution.plan().getContextId(),
+                    arguments.childSceneName());
+            Selected selected = selectItems(
+                    execution,
+                    arguments.investigatorNames(),
+                    GroupChatConstant.PARTICIPANT_ACTIVE);
+            return new PreparedChildStart(location, selected);
+        } catch (JacksonException | UserRequestException ignored) {
+            return null;
+        }
     }
 
     private GroupReplyPlan requireActiveScene(
@@ -320,6 +423,16 @@ public class TrpgChildSceneCommandService {
             GroupChatReplyStep step,
             GroupChatTurn turn,
             GroupReplyPlan plan) {
+    }
+
+    private record ChildSceneStartArguments(
+            String childSceneName,
+            List<String> investigatorNames) {
+    }
+
+    private record PreparedChildStart(
+            CocModuleLocation location,
+            Selected selected) {
     }
 
     private record Selected(

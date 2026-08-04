@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.me.galchat.mapper.TrpgSaveRestoreMapper">
+
+    <delete id="deleteAgentDecisionsAfter">
+        DELETE FROM group_chat_agent_decision decision
+        USING group_chat_reply_step step, group_chat_turn turn_row
+        WHERE decision.reply_step_id = step.id
+          AND step.turn_id = turn_row.id
+          AND turn_row.conversation_id = #{conversationId}
+          AND decision.id &gt; #{maxId}
+    </delete>
+
+    <delete id="deleteToolCallsAfter">
+        DELETE FROM group_chat_tool_call tool_call
+        USING group_chat_reply_step step, group_chat_turn turn_row
+        WHERE tool_call.reply_step_id = step.id
+          AND step.turn_id = turn_row.id
+          AND turn_row.conversation_id = #{conversationId}
+          AND tool_call.id &gt; #{maxId}
+    </delete>
+
+    <delete id="deleteMessagesAfter">
+        DELETE FROM group_chat_message
+        WHERE conversation_id = #{conversationId}
+          AND id &gt; #{maxId}
+    </delete>
+
+    <delete id="deleteReplyStepsAfter">
+        DELETE FROM group_chat_reply_step step
+        USING group_chat_turn turn_row
+        WHERE step.turn_id = turn_row.id
+          AND turn_row.conversation_id = #{conversationId}
+          AND step.id &gt; #{maxId}
+    </delete>
+
+    <delete id="deleteTurnsAfter">
+        DELETE FROM group_chat_turn
+        WHERE conversation_id = #{conversationId}
+          AND id &gt; #{maxId}
+    </delete>
+
+    <delete id="deleteContextSummariesAfter">
+        DELETE FROM group_context_summary
+        WHERE conversation_id = #{conversationId}
+          AND id &gt; #{maxId}
+    </delete>
+
+    <delete id="deleteTopicsAfter">
+        DELETE FROM group_chat_topic
+        WHERE conversation_id = #{conversationId}
+          AND id &gt; #{maxId}
+    </delete>
+
+    <delete id="deleteDiceResultsAfter">
+        DELETE FROM dice_roll_result result
+        USING dice_roll_summary summary
+        WHERE result.summary_id = summary.id
+          AND summary.conversation_id = #{conversationId}
+          AND (summary.id &gt; #{maxSummaryId}
+               OR result.id &gt; #{maxResultId})
+    </delete>
+
+    <delete id="deleteDiceSummariesAfter">
+        DELETE FROM dice_roll_summary
+        WHERE conversation_id = #{conversationId}
+          AND id &gt; #{maxId}
+    </delete>
+
+    <delete id="deleteWorldEventsAfter">
+        DELETE FROM world_event_log
+        WHERE conversation_id = #{conversationId}
+          AND id &gt; #{maxId}
+    </delete>
+</mapper>

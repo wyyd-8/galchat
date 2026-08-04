@@ -6,12 +6,10 @@ import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
 import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.domain.po.GroupChatMessage;
-import com.me.galchat.domain.po.GroupChatAgentDecision;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTopic;
 import com.me.galchat.domain.po.GroupChatTurn;
-import com.me.galchat.domain.po.TrpgCombat;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.Data;
@@ -58,8 +56,6 @@ public class UserWorldSaveSnapshotDTO {
     private List<GroupConversationTurnsSnapshot> recentGroupTurnsByConversation;
 
     private List<GroupConversationPlanSnapshot> conversationPlans;
-
-    private List<TrpgCombat> combats;
 
     private WorldEventLog lastWorldEventLog;
 
@@ -114,7 +110,6 @@ public class UserWorldSaveSnapshotDTO {
         private GroupChatTurn turn;
         private List<GroupChatMessage> messages;
         private List<GroupChatReplyStep> replySteps;
-        private List<GroupChatAgentDecision> decisions;
         private List<GroupChatToolCall> toolCalls;
         private List<UserCharacterFavorLog> favorLogs;
     }
@@ -130,11 +125,7 @@ public class UserWorldSaveSnapshotDTO {
     @Accessors(chain = true)
     public static class ReplyPlanSnapshot {
         private String source;
-        private Long contextId;
         private List<ReplyPlanGroupSnapshot> groups;
-        private ReplyPlanSnapshot parentPlan;
-        private ReplyPlanSnapshot resumePlan;
-        private ReplyPlanSnapshot nextPlan;
     }
 
     @Data
@@ -152,7 +143,5 @@ public class UserWorldSaveSnapshotDTO {
         private Integer order;
         private String actorType;
         private Long actorId;
-        private Long subjectCharacterId;
-        private String participantStatus;
     }
 }

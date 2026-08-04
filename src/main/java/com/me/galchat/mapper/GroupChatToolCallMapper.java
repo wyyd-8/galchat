@@ -3,12 +3,30 @@ package com.me.galchat.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.util.Set;
 
 public interface GroupChatToolCallMapper extends BaseMapper<GroupChatToolCall> {
+
+    @Delete("""
+            DELETE FROM group_chat_tool_call
+            WHERE reply_step_id = #{replyStepId}
+              AND id > #{toolCallId}
+            """)
+    int deleteAfterCheckpoint(
+            @Param("replyStepId") Long replyStepId,
+            @Param("toolCallId") Long toolCallId);
+
+    @Select("""
+            SELECT COALESCE(MAX(id), 0)
+            FROM group_chat_tool_call
+            WHERE reply_step_id = #{replyStepId}
+            """)
+    Long selectMaxIdByReplyStepId(
+            @Param("replyStepId") Long replyStepId);
 
     @Select("""
             SELECT COALESCE(MAX(tool_step_no), 0) + 1

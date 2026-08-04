@@ -13,6 +13,7 @@ public interface GroupChatReplyStepMapper extends BaseMapper<GroupChatReplyStep>
             JOIN group_chat_turn turn_row ON turn_row.id = step.turn_id
             JOIN group_conversation conversation ON conversation.id = turn_row.conversation_id
             WHERE conversation.user_world_id = #{userWorldId}
+              AND conversation.mode = 'chat'
             """)
     Long selectMaxIdByUserWorldId(@Param("userWorldId") Long userWorldId);
 

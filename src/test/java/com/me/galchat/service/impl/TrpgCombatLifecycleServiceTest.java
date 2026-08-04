@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
+import java.lang.reflect.Method;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,6 +28,76 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TrpgCombatLifecycleServiceTest {
+
+    @Test
+    void npcAttackRouteAllowsAnUnconsciousOrDyingInvestigatorTarget() {
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        var objectMapper = JsonMapper.builder().build();
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupReplyPlanService.class),
+                        planMapper,
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class),
+                        stepMapper,
+                        mock(GroupChatMessageMapper.class),
+                        characterMapper,
+                        combatMapper,
+                        objectMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setActiveReplyPlanId(10L);
+        GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep route = new GroupChatReplyStep()
+                .setId(42L)
+                .setTurnId(30L)
+                .setStepNo(2)
+                .setSubjectCharacterId(72L)
+                .setActionType(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        var participants = objectMapper.createArrayNode();
+        participants.addObject().put("characterId", 71L)
+                .put("name", "林恩");
+        participants.addObject().put("characterId", 72L)
+                .put("name", "食尸鬼");
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                        .setContextId(200L));
+        when(combatMapper.selectById(200L)).thenReturn(
+                new TrpgCombat().setId(200L).setConversationId(7L)
+                        .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
+                        .setParticipants(participants));
+        when(characterMapper.selectById(71L)).thenReturn(
+                card(71L, "PLAYER", null, "林恩", 50)
+                        .setUnconscious(true)
+                        .setDying(true));
+        when(characterMapper.selectById(72L)).thenReturn(
+                card(72L, "NPC", null, "食尸鬼", 60));
+        GroupChatReplyStep defense = new GroupChatReplyStep()
+                .setId(43L)
+                .setTurnId(30L)
+                .setStepNo(3)
+                .setItemOrder(3)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_DEFENSE)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(stepMapper.selectList(any())).thenReturn(List.of(defense));
+
+        var decision = service.completeReactionRoute(
+                conversation, turn, route,
+                "{\"targetName\":\"林恩\",\"insertDefense\":false}");
+
+        assertThat(decision.targetCharacterId()).isEqualTo(71L);
+        assertThat(decision.targetName()).isEqualTo("林恩");
+        assertThat(decision.insertDefense()).isFalse();
+        assertThat(defense.getSubjectCharacterId()).isEqualTo(71L);
+        assertThat(defense.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_CANCELLED);
+    }
 
     @Test
     void investigatorFirstOnlyChangesFirstRoundAndNpcUsesKpController() {
@@ -70,7 +141,8 @@ class TrpgCombatLifecycleServiceTest {
                 .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
                 .setStatus(GroupChatConstant.STATUS_COMPLETED);
         CocCharacter slowPlayer = card(
-                71L, "PLAYER", null, "林恩", 40);
+                71L, "PLAYER", null, "林恩", 40)
+                .setUnconscious(true);
         CocCharacter fastNpc = card(
                 72L, "NPC", null, "食尸鬼", 90);
         CocCharacter bot = card(
@@ -123,6 +195,54 @@ class TrpgCombatLifecycleServiceTest {
                 .containsExactly(GroupChatConstant.ACTOR_KP, null);
     }
 
+    @Test
+    void enteringDyingCancelsTheCharactersWholePendingSlot() throws Exception {
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        TrpgCombatLifecycleService service = new TrpgCombatLifecycleService(
+                mock(GroupConversationService.class),
+                mock(GroupReplyPlanService.class),
+                mock(GroupReplyPlanMapper.class),
+                turnMapper,
+                mock(GroupChatToolCallMapper.class),
+                stepMapper,
+                mock(GroupChatMessageMapper.class),
+                mock(CocCharacterMapper.class),
+                mock(TrpgCombatMapper.class),
+                JsonMapper.builder().build());
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L)
+                .setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        when(turnMapper.selectList(any())).thenReturn(List.of(turn));
+        List<GroupChatReplyStep> steps = List.of(
+                combatStep(41L, 1,
+                        GroupChatConstant.ACTION_COMBAT_ATTACK, 71L),
+                combatStep(42L, 2,
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 71L),
+                combatStep(43L, 3,
+                        GroupChatConstant.ACTION_COMBAT_DEFENSE, null),
+                combatStep(44L, 4,
+                        GroupChatConstant.ACTION_COMBAT_ADJUDICATE, 71L),
+                combatStep(45L, 5,
+                        GroupChatConstant.ACTION_COMBAT_ATTACK, 72L));
+        when(stepMapper.selectList(any())).thenReturn(steps);
+
+        Method method = service.getClass().getMethod(
+                "forfeitCurrentRoundSlot", Long.class, Long.class);
+        method.invoke(service, 7L, 71L);
+
+        assertThat(steps.subList(0, 4))
+                .extracting(GroupChatReplyStep::getStatus)
+                .containsOnly(GroupChatConstant.STATUS_CANCELLED);
+        assertThat(steps.get(4).getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_PENDING);
+        verify(stepMapper, org.mockito.Mockito.times(4))
+                .updateById(any(GroupChatReplyStep.class));
+    }
+
     private CocCharacter card(
             Long id, String actorType, Long participantId,
             String name, int dex) {
@@ -132,5 +252,17 @@ class TrpgCombatLifecycleServiceTest {
                 .setParticipantId(participantId)
                 .setName(name).setDex(dex)
                 .setHpCurrent(10).setSanCurrent(50);
+    }
+
+    private GroupChatReplyStep combatStep(
+            Long id, int itemOrder, String actionType, Long characterId) {
+        return new GroupChatReplyStep()
+                .setId(id)
+                .setTurnId(30L)
+                .setItemOrder(itemOrder)
+                .setStepNo(itemOrder)
+                .setActionType(actionType)
+                .setSubjectCharacterId(characterId)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
     }
 }

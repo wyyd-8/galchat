@@ -156,6 +156,35 @@ class CocDiceSummaryFormatterTest {
                 .isEqualTo("林恩生命-6；受到重伤；CON检定失败，陷入昏迷");
     }
 
+    @Test
+    void healingRoundReportsActualHpGain() {
+        DiceRollResult healing = new DiceRollResult()
+                .setId(71L)
+                .setRoundNo(1)
+                .setDisplayOrder(1)
+                .setResultData(new DiceRollResultVO("1D6", List.of(), 6))
+                .setResolutionData(DiceResolutionDataVO.pending(
+                        "HEALING",
+                        null,
+                        Map.of(
+                                "runId", 5L,
+                                "cardId", 101L,
+                                "characterName", "林恩"))
+                        .setOutcome(Map.of(
+                                "characterName", "林恩",
+                                "rawHealing", 6))
+                        .setEffect(Map.of(
+                                "hpBefore", 8,
+                                "hpAfter", 10,
+                                "hpGain", 2,
+                                "dyingBefore", false,
+                                "dying", false)))
+                .setResolvedAt(LocalDateTime.now());
+
+        assertThat(formatter.formatRound(List.of(healing)))
+                .isEqualTo("林恩生命+2");
+    }
+
     private DiceRollResult check(
             Long id, int round, int order, String name, String category, Integer roll) {
         Map<String, Object> rule = new LinkedHashMap<>();

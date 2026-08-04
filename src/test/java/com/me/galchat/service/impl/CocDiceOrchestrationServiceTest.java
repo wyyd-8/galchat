@@ -4,6 +4,8 @@ import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocPercentileModifier;
 import com.me.galchat.constant.DamageSourceMode;
 import com.me.galchat.constant.DiceRollConstant;
+import com.me.galchat.constant.HealingSourceMode;
+import com.me.galchat.constant.HealingMode;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.domain.po.DiceRollResult;
@@ -49,6 +51,7 @@ class CocDiceOrchestrationServiceTest {
     private DiceFollowUpLocator followUps;
     private DiceRandomSource randomSource;
     private DiceMessageRoundAppender messageRoundAppender;
+    private TrpgCombatLifecycleService combatLifecycleService;
     private CocDiceOrchestrationService service;
 
     @BeforeEach
@@ -59,6 +62,7 @@ class CocDiceOrchestrationServiceTest {
         followUps = mock(DiceFollowUpLocator.class);
         randomSource = mock(DiceRandomSource.class);
         messageRoundAppender = mock(DiceMessageRoundAppender.class);
+        combatLifecycleService = mock(TrpgCombatLifecycleService.class);
         service = new CocDiceOrchestrationService(
                 internal,
                 cards,
@@ -66,7 +70,8 @@ class CocDiceOrchestrationServiceTest {
                 followUps,
                 new CocDiceSummaryFormatter(),
                 randomSource,
-                messageRoundAppender);
+                messageRoundAppender,
+                combatLifecycleService);
         when(conversations.requireActive(7L))
                 .thenReturn(new GroupConversation().setId(7L).setStatus("active"));
     }
@@ -653,6 +658,282 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
+    void majorWoundCharacterReachingZeroStartsDying() {
+        CocDiceCharacterVO targetCard = card(12L, 88L, "陈默", 45);
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(targetCard);
+        when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
+            List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+            DiceRollResultCreateDTO draft = drafts.getFirst();
+            DiceRollResult result = new DiceRollResult()
+                    .setId(501L)
+                    .setSummaryId(111L)
+                    .setCharacterId(draft.getCharacterId())
+                    .setRoundNo(1)
+                    .setDisplayOrder(1)
+                    .setResultData(new DiceRollResultVO("4", List.of(), 4))
+                    .setResolutionData(draft.getResolutionData());
+            return new DiceRollAggregate(
+                    new DiceRollSummary()
+                            .setId(111L)
+                            .setConversationId(7L)
+                            .setRoundCount(1)
+                            .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                    List.of(result));
+        });
+        CocCharacter locked = damageCard(12L, "陈默")
+                .setHpCurrent(4)
+                .setMajorWound(true)
+                .setDying(false);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        service.rollDamage(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Damage(
+                        "持续失血",
+                        DamageSourceMode.STANDALONE,
+                        List.of(new KpDiceRequestDTOs.DamageTarget(
+                                "陈默", null, "4"))));
+
+        assertThat(locked.getHpCurrent()).isZero();
+        assertThat(locked.getUnconscious()).isTrue();
+        assertThat(locked.getDying()).isTrue();
+        verify(combatLifecycleService)
+                .forfeitCurrentRoundSlot(7L, 12L);
+    }
+
+    @Test
+    void standaloneHealingClampsAppliedHpAtMaximum() {
+        CocDiceCharacterVO targetCard = card(12L, 88L, "陈默", 45);
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(targetCard);
+        when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
+            List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+            DiceRollResultCreateDTO draft = drafts.getFirst();
+            DiceRollResult result = new DiceRollResult()
+                    .setId(501L)
+                    .setSummaryId(111L)
+                    .setCharacterId(draft.getCharacterId())
+                    .setRoundNo(1)
+                    .setDisplayOrder(1)
+                    .setResultData(new DiceRollResultVO("4", List.of(), 4))
+                    .setResolutionData(draft.getResolutionData());
+            return new DiceRollAggregate(
+                    new DiceRollSummary()
+                            .setId(111L)
+                            .setConversationId(7L)
+                            .setRoundCount(1)
+                            .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                    List.of(result));
+        });
+        CocCharacter locked = damageCard(12L, "陈默")
+                .setHpCurrent(8);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        KpDiceToolResult result = service.rollHealing(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Healing(
+                        "包扎伤口",
+                        HealingSourceMode.STANDALONE,
+                        HealingMode.OTHER,
+                        List.of(new KpDiceRequestDTOs.HealingTarget(
+                                "陈默", null, "4"))));
+
+        assertThat(locked.getHpCurrent()).isEqualTo(10);
+        assertThat(result.semanticResult()).isEqualTo("陈默生命+2");
+        assertThat(result.results()).singleElement().satisfies(healing ->
+                assertThat(healing.getResolution().getEffect())
+                        .containsEntry("hpBefore", 8)
+                        .containsEntry("hpAfter", 10)
+                        .containsEntry("hpGain", 2));
+    }
+
+    @Test
+    void healingAboveZeroStopsDyingButKeepsUnconsciousAndMajorWound() {
+        CocDiceCharacterVO targetCard = card(12L, 88L, "陈默", 45);
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(targetCard);
+        stubCreate(7L);
+        CocCharacter locked = damageCard(12L, "陈默")
+                .setHpCurrent(0)
+                .setMajorWound(true)
+                .setUnconscious(true)
+                .setDying(true);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        service.rollHealing(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Healing(
+                        "急救止血",
+                        HealingSourceMode.STANDALONE,
+                        HealingMode.OTHER,
+                        List.of(new KpDiceRequestDTOs.HealingTarget(
+                                "陈默", null, "1"))));
+
+        assertThat(locked.getHpCurrent()).isEqualTo(10);
+        assertThat(locked.getDying()).isFalse();
+        assertThat(locked.getUnconscious()).isTrue();
+        assertThat(locked.getMajorWound()).isTrue();
+    }
+
+    @Test
+    void firstAidHealingClearsInjuryStatuses() {
+        when(cards.requireDiceCharacter(5L, "陈默"))
+                .thenReturn(card(12L, 88L, "陈默", 45));
+        stubCreate(7L);
+        CocCharacter locked = damageCard(12L, "陈默")
+                .setHpCurrent(5)
+                .setMajorWound(true)
+                .setUnconscious(true);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        KpDiceToolResult result = service.rollHealing(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Healing(
+                        "急救处理",
+                        HealingSourceMode.STANDALONE,
+                        HealingMode.FIRST_AID,
+                        List.of(new KpDiceRequestDTOs.HealingTarget(
+                                "陈默", null, "1"))));
+
+        assertThat(locked.getMajorWound()).isFalse();
+        assertThat(locked.getUnconscious()).isFalse();
+        assertThat(result.semanticResult())
+                .isEqualTo("陈默生命+5；解除重伤；脱离昏迷");
+        assertThat(result.results()).singleElement().satisfies(healing ->
+                assertThat(healing.getResolution().getEffect())
+                        .containsEntry("majorWoundBefore", true)
+                        .containsEntry("majorWound", false)
+                        .containsEntry("majorWoundChanged", true)
+                        .containsEntry("unconsciousBefore", true)
+                        .containsEntry("unconscious", false)
+                        .containsEntry("unconsciousChanged", true));
+    }
+
+    @Test
+    void medicineHealingClearsOnlyMajorWound() {
+        when(cards.requireDiceCharacter(5L, "陈默"))
+                .thenReturn(card(12L, 88L, "陈默", 45));
+        stubCreate(7L);
+        CocCharacter locked = damageCard(12L, "陈默")
+                .setHpCurrent(5)
+                .setMajorWound(true)
+                .setUnconscious(true);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        KpDiceToolResult result = service.rollHealing(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Healing(
+                        "医学治疗",
+                        HealingSourceMode.STANDALONE,
+                        HealingMode.MEDICINE,
+                        List.of(new KpDiceRequestDTOs.HealingTarget(
+                                "陈默", null, "1"))));
+
+        assertThat(locked.getMajorWound()).isFalse();
+        assertThat(locked.getUnconscious()).isTrue();
+        assertThat(result.semanticResult())
+                .isEqualTo("陈默生命+5；解除重伤");
+    }
+
+    @Test
+    void healingRequiresARecoveryMode() {
+        assertThatThrownBy(() -> service.rollHealing(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Healing(
+                        "来源不明的治疗",
+                        HealingSourceMode.STANDALONE,
+                        null,
+                        List.of(new KpDiceRequestDTOs.HealingTarget(
+                                "陈默", null, "1")))))
+                .hasMessageContaining("恢复方式不能为空");
+
+        verify(cards, never()).requireDiceCharacter(any(), any());
+        verify(internal, never()).createDiceRoll(any(), any(), any());
+    }
+
+    @Test
+    void followUpHealingAppendsToSuccessfulSingleCheck() {
+        when(followUps.requireLatestSummaryId(
+                7L,
+                Set.of(
+                        DiceRollConstant.TOOL_REQUEST_CHECK,
+                        DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK)))
+                .thenReturn(101L);
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        DiceRollResult source = resolvedCheck(
+                201L, 101L, 1, "林恩", 11L, 70, "SUCCESS");
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(source));
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
+                    List<DiceRollResult> results = materialize(101L, 2, drafts);
+                    results.getFirst().setResultData(
+                            new DiceRollResultVO("3", List.of(), 3));
+                    return results;
+                });
+        when(cards.requireDiceCharacter(5L, "陈默"))
+                .thenReturn(card(12L, 88L, "陈默", 45));
+        CocCharacter locked = damageCard(12L, "陈默").setHpCurrent(4);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        KpDiceToolResult result = service.rollHealing(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Healing(
+                        "急救伤口",
+                        HealingSourceMode.FOLLOW_UP,
+                        HealingMode.OTHER,
+                        List.of(new KpDiceRequestDTOs.HealingTarget(
+                                "陈默", "林恩", "3"))));
+
+        assertThat(result.summary().getId()).isEqualTo(101L);
+        assertThat(result.summary().getRoundCount()).isEqualTo(2);
+        assertThat(locked.getHpCurrent()).isEqualTo(7);
+        assertThat(result.results()).singleElement().satisfies(healing -> {
+            assertThat(healing.getRoundNo()).isEqualTo(2);
+            assertThat(healing.getResolution().getSourceResultId())
+                    .isEqualTo(201L);
+        });
+    }
+
+    @Test
+    void followUpHealingRejectsFailedSingleCheck() {
+        when(followUps.requireLatestSummaryId(eq(7L), any()))
+                .thenReturn(101L);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(
+                new DiceRollSummary()
+                        .setId(101L)
+                        .setConversationId(7L)
+                        .setRoundCount(1)
+                        .setStatus(DiceRollConstant.STATUS_COMPLETED));
+        when(internal.listResultEntities(101L)).thenReturn(List.of(
+                resolvedCheck(201L, 101L, 1, "林恩", 11L, 70, "FAILURE")));
+
+        assertThatThrownBy(() -> service.rollHealing(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Healing(
+                        "急救伤口",
+                        HealingSourceMode.FOLLOW_UP,
+                        HealingMode.OTHER,
+                        List.of(new KpDiceRequestDTOs.HealingTarget(
+                                "陈默", "林恩", "1")))))
+                .hasMessageContaining("前置检定未成功");
+
+        verify(internal, never()).appendDiceRollRound(any(), any(), any());
+        verify(cards, never()).requireDiceCharacter(any(), any());
+    }
+
+    @Test
     void followUpDamageRequiresAWinningOrSuccessfulSource() {
         when(followUps.requireLatestSummaryId(
                 eq(7L), any())).thenReturn(101L);
@@ -827,6 +1108,45 @@ class CocDiceOrchestrationServiceTest {
         assertThat(card.getUnconscious()).isTrue();
         assertThat(progress.summary().getTotalResult())
                 .isEqualTo("林恩生命-6；受到重伤；CON检定失败，陷入昏迷");
+    }
+
+    @Test
+    void unconsciousPlayerRecoveryCreatesPendingConDie() {
+        CocCharacter card = damageCard(11L, "林恩")
+                .setActorType("PLAYER")
+                .setUnconscious(true);
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(card);
+        stubCreate(7L);
+
+        KpDiceToolResult result = service.requestUnconsciousRecovery(
+                7L, 5L, 11L);
+
+        assertThat(result.summary().getStatus())
+                .isEqualTo(DiceRollConstant.STATUS_PENDING);
+        assertThat(result.results()).singleElement().satisfies(die -> {
+            assertThat(die.getResolution().getType())
+                    .isEqualTo("UNCONSCIOUS_RECOVERY_CON");
+            assertThat(die.getResultData().getResult()).isNull();
+        });
+        assertThat(card.getUnconscious()).isTrue();
+    }
+
+    @Test
+    void unconsciousAgentRecoverySettlesAndWakesWithoutAnotherAgentTurn() {
+        CocCharacter card = damageCard(12L, "陈默")
+                .setActorType("BOT")
+                .setParticipantId(88L)
+                .setUnconscious(true);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(card);
+        stubCreate(7L);
+
+        KpDiceToolResult result = service.requestUnconsciousRecovery(
+                7L, 5L, 12L);
+
+        assertThat(result.summary().getStatus())
+                .isEqualTo(DiceRollConstant.STATUS_COMPLETED);
+        assertThat(result.semanticResult()).isEqualTo("陈默CON检定成功，脱离昏迷");
+        assertThat(card.getUnconscious()).isFalse();
     }
 
     private void stubCreate(Long conversationId) {

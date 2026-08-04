@@ -27,11 +27,6 @@ public interface UserWorldSaveRestoreMapper {
     int deleteGroupToolCallsAfter(@Param("userWorldId") Long userWorldId,
                                   @Param("maxGroupReplyStepId") Long maxGroupReplyStepId);
 
-    int deleteGroupAgentDecisionsAfter(
-            @Param("userWorldId") Long userWorldId,
-            @Param("maxGroupReplyStepId")
-            Long maxGroupReplyStepId);
-
     int deleteGroupReplyStepsAfter(@Param("userWorldId") Long userWorldId,
                                    @Param("maxGroupReplyStepId") Long maxGroupReplyStepId);
 

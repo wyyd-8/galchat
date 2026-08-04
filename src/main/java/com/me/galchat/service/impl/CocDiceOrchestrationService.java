@@ -5,6 +5,8 @@ import com.me.galchat.constant.CocCheckOutcome;
 import com.me.galchat.constant.CocPercentileModifier;
 import com.me.galchat.constant.DamageSourceMode;
 import com.me.galchat.constant.DiceRollConstant;
+import com.me.galchat.constant.HealingSourceMode;
+import com.me.galchat.constant.HealingMode;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.domain.po.CocCharacter;
@@ -53,6 +55,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
     private final CocDiceSummaryFormatter summaryFormatter;
     private final DiceRandomSource randomSource;
     private final DiceMessageRoundAppender messageRoundAppender;
+    private final TrpgCombatLifecycleService combatLifecycleService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -329,6 +332,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                         "角色“" + card.name() + "”的CON值无效");
             }
             Map<String, Object> rule = new LinkedHashMap<>();
+            rule.put("conversationId", conversationId);
             rule.put("runId", runId);
             rule.put("cardId", card.cardId());
             rule.put("characterName", card.name());
@@ -367,6 +371,135 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         List<DiceRollResult> returned = new ArrayList<>(damageResults);
         returned.addAll(conResults);
         return toolResult(summary, returned);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KpDiceToolResult rollHealing(
+            Long conversationId, Long runId, KpDiceRequestDTOs.Healing request) {
+        requireContext(conversationId, runId);
+        requireRequest(request, request == null ? null : request.reason());
+        if (request.sourceMode() == null) {
+            throw new UserRequestException("回血来源模式不能为空");
+        }
+        if (request.mode() == null) {
+            throw new UserRequestException("恢复方式不能为空");
+        }
+        HealingSourceMode sourceMode = request.sourceMode();
+        List<KpDiceRequestDTOs.HealingTarget> targets =
+                requireHealingTargets(request.targets(), sourceMode);
+
+        DiceRollSummary summary;
+        List<DiceRollResult> existing;
+        if (sourceMode == HealingSourceMode.FOLLOW_UP) {
+            Long summaryId = followUpLocator.requireLatestSummaryId(
+                    conversationId,
+                    Set.of(
+                            DiceRollConstant.TOOL_REQUEST_CHECK,
+                            DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK));
+            summary = internalService.requireSummaryForUpdate(summaryId);
+            requireConversation(summary, conversationId);
+            if (!DiceRollConstant.STATUS_COMPLETED.equals(summary.getStatus())) {
+                throw new UserRequestException("前置检定尚未完成");
+            }
+            existing = safeResults(internalService.listResultEntities(summaryId));
+        } else {
+            summary = null;
+            existing = List.of();
+        }
+
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>(targets.size());
+        for (int index = 0; index < targets.size(); index++) {
+            KpDiceRequestDTOs.HealingTarget target = targets.get(index);
+            requireFormula(target.formula(), "回血公式不能为空");
+            DiceRollResult source = sourceMode == HealingSourceMode.FOLLOW_UP
+                    ? requireSuccessfulHealingSource(
+                    existing, target.sourceCharacterName().trim())
+                    : null;
+            CocDiceCharacterVO card = characterCardService.requireDiceCharacter(
+                    runId, target.targetCharacterName().trim());
+
+            Map<String, Object> rule = new LinkedHashMap<>();
+            rule.put("runId", runId);
+            rule.put("cardId", card.cardId());
+            rule.put("characterName", card.name());
+            rule.put("mode", request.mode().name());
+            rule.put("sourceCharacterName", trimToNull(
+                    target.sourceCharacterName()));
+
+            DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+            draft.setCharacterId(card.participantId());
+            draft.setDisplayOrder(index + 1);
+            draft.setDisplayType(DiceRollConstant.TYPE_HEALING);
+            draft.setReason(request.reason().trim());
+            draft.setFormula(target.formula().trim());
+            draft.setResolutionData(DiceResolutionDataVO.pending(
+                    DiceRollConstant.TYPE_HEALING,
+                    source == null ? null : source.getId(),
+                    rule));
+            drafts.add(draft);
+        }
+
+        List<DiceRollResult> healingResults;
+        if (sourceMode == HealingSourceMode.STANDALONE) {
+            DiceRollAggregate aggregate = internalService.createDiceRoll(
+                    conversationId, request.reason().trim(), drafts);
+            summary = aggregate.summary();
+            healingResults = aggregate.results();
+        } else {
+            int fallbackRound = summary.getRoundCount() + 1;
+            healingResults = internalService.appendDiceRollRound(
+                    conversationId, summary.getId(), drafts);
+            updateRoundCountFromCreated(summary, healingResults, fallbackRound);
+        }
+        settleAlreadyRolled(healingResults);
+        refreshSummary(summary, mergeResults(existing, healingResults));
+        return toolResult(summary, healingResults);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KpDiceToolResult requestUnconsciousRecovery(
+            Long conversationId, Long runId, Long cardId) {
+        requireContext(conversationId, runId);
+        CocCharacter card = characterCardService.lockDiceCharacter(
+                runId, cardId);
+        if (card == null || !Boolean.TRUE.equals(card.getUnconscious())
+                || Boolean.TRUE.equals(card.getDying())
+                || Boolean.TRUE.equals(card.getDead())) {
+            throw new UserRequestException("角色当前不能进行昏迷恢复检定");
+        }
+        if (card.getCon() == null || card.getCon() < 1
+                || card.getCon() > 100) {
+            throw new UserRequestException("角色卡CON值无效");
+        }
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("runId", runId);
+        rule.put("cardId", card.getId());
+        rule.put("characterName", card.getName());
+        rule.put("targetValue", card.getCon());
+
+        DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+        Long automaticRoller = switch (Objects.toString(
+                card.getActorType(), "")) {
+            case "PLAYER" -> null;
+            case "BOT" -> Objects.requireNonNullElse(
+                    card.getParticipantId(), card.getId());
+            case "NPC" -> card.getId();
+            default -> throw new UserRequestException(
+                    "不支持的人物卡控制类型");
+        };
+        draft.setCharacterId(automaticRoller);
+        draft.setDisplayOrder(1);
+        draft.setDisplayType(
+                DiceRollConstant.TYPE_UNCONSCIOUS_RECOVERY_CON);
+        draft.setReason(card.getName() + "尝试脱离昏迷");
+        draft.setFormula("1D100");
+        draft.setResolutionData(DiceResolutionDataVO.pending(
+                DiceRollConstant.TYPE_UNCONSCIOUS_RECOVERY_CON,
+                null, rule));
+        return createAndSettle(
+                conversationId, draft.getReason(), List.of(draft));
     }
 
     @Override
@@ -446,18 +579,22 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 .filter(result -> result.getResultData() != null
                         && result.getResultData().getResult() != null)
                 .toList();
-        List<DiceRollResult> damage = rolled.stream()
-                .filter(result -> DiceRollConstant.TYPE_DAMAGE.equals(
-                        resolution(result).getType()))
+        List<DiceRollResult> hpChanges = rolled.stream()
+                .filter(result -> {
+                    String type = resolution(result).getType();
+                    return DiceRollConstant.TYPE_DAMAGE.equals(type)
+                            || DiceRollConstant.TYPE_HEALING.equals(type);
+                })
                 .sorted(Comparator.comparing(result ->
                         longValue(resolution(result).getRule(), "cardId")))
                 .toList();
-        for (DiceRollResult result : damage) {
+        for (DiceRollResult result : hpChanges) {
             settleResult(result);
         }
         for (DiceRollResult result : rolled) {
-            if (DiceRollConstant.TYPE_DAMAGE.equals(
-                    resolution(result).getType())) {
+            String type = resolution(result).getType();
+            if (DiceRollConstant.TYPE_DAMAGE.equals(type)
+                    || DiceRollConstant.TYPE_HEALING.equals(type)) {
                 continue;
             }
             settleResult(result);
@@ -478,8 +615,13 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             settleInsanityDie(result, resolution);
         } else if (DiceRollConstant.TYPE_DAMAGE.equals(type)) {
             settleDamageResult(result, resolution);
+        } else if (DiceRollConstant.TYPE_HEALING.equals(type)) {
+            settleHealingResult(result, resolution);
         } else if (DiceRollConstant.TYPE_MAJOR_WOUND_CON.equals(type)) {
             settleMajorWoundConResult(result, resolution);
+        } else if (DiceRollConstant.TYPE_UNCONSCIOUS_RECOVERY_CON.equals(
+                type)) {
+            settleUnconsciousRecoveryResult(result, resolution);
         } else {
             throw new UserRequestException("暂不支持该掷骰结算类型：" + type);
         }
@@ -571,13 +713,29 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 rawDamage, card.getHpCurrent(), card.getHpMax());
         boolean majorBefore = Boolean.TRUE.equals(card.getMajorWound());
         boolean unconsciousBefore = Boolean.TRUE.equals(card.getUnconscious());
+        boolean dyingBefore = Boolean.TRUE.equals(card.getDying());
+        boolean deadBefore = Boolean.TRUE.equals(card.getDead());
         boolean majorAfter = majorBefore || damage.majorWound();
-        boolean unconsciousAfter = unconsciousBefore || damage.hpAfter() == 0;
+        boolean deadAfter = deadBefore || rawDamage > card.getHpMax();
+        boolean dyingAfter = !deadAfter && (dyingBefore
+                || damage.hpAfter() == 0 && majorAfter);
+        boolean unconsciousAfter = unconsciousBefore
+                || damage.hpAfter() == 0 || dyingAfter || deadAfter;
         card.setHpCurrent(damage.hpAfter())
                 .setMajorWound(majorAfter)
                 .setUnconscious(unconsciousAfter)
+                .setDying(dyingAfter)
+                .setDead(deadAfter)
                 .setUpdatedAt(LocalDateTime.now());
         characterCardService.updateDiceCharacter(card);
+        if ((!dyingBefore && dyingAfter) || (!deadBefore && deadAfter)) {
+            Object savedConversationId = rule.get("conversationId");
+            Long conversationId = savedConversationId instanceof Number number
+                    ? number.longValue()
+                    : longValue(rule, "runId");
+            combatLifecycleService.forfeitCurrentRoundSlot(
+                    conversationId, card.getId());
+        }
 
         String characterName = stringValue(rule, "characterName");
         Map<String, Object> outcome = new LinkedHashMap<>();
@@ -594,6 +752,69 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         effect.put("majorWoundChanged", !majorBefore && majorAfter);
         effect.put("unconsciousBefore", unconsciousBefore);
         effect.put("unconscious", unconsciousAfter);
+        effect.put("dyingBefore", dyingBefore);
+        effect.put("dying", dyingAfter);
+        effect.put("deadBefore", deadBefore);
+        effect.put("dead", deadAfter);
+        resolution.setEffect(effect);
+    }
+
+    private void settleHealingResult(
+            DiceRollResult result, DiceResolutionDataVO resolution) {
+        int rawHealing = requireRoll(result);
+        if (rawHealing < 0) {
+            throw new UserRequestException("回血不能为负数");
+        }
+        Map<String, Object> rule = resolution.getRule();
+        CocCharacter card = characterCardService.lockDiceCharacter(
+                longValue(rule, "runId"), longValue(rule, "cardId"));
+        if (card == null || Boolean.TRUE.equals(card.getDead())) {
+            throw new UserRequestException("死亡角色不能恢复生命");
+        }
+        if (card.getHpCurrent() == null || card.getHpMax() == null
+                || card.getHpMax() < 1 || card.getHpCurrent() < 0
+                || card.getHpCurrent() > card.getHpMax()) {
+            throw new UserRequestException("角色卡生命值不存在或范围无效");
+        }
+        int hpBefore = card.getHpCurrent();
+        int hpAfter = Math.min(card.getHpMax(), hpBefore + rawHealing);
+        int hpGain = hpAfter - hpBefore;
+        HealingMode mode = HealingMode.valueOf(stringValue(rule, "mode"));
+        boolean majorWoundBefore = Boolean.TRUE.equals(card.getMajorWound());
+        boolean unconsciousBefore = Boolean.TRUE.equals(card.getUnconscious());
+        boolean dyingBefore = Boolean.TRUE.equals(card.getDying());
+        boolean majorWoundAfter = switch (mode) {
+            case FIRST_AID, MEDICINE -> false;
+            case OTHER -> majorWoundBefore;
+        };
+        boolean unconsciousAfter = mode == HealingMode.FIRST_AID
+                ? false : unconsciousBefore;
+        boolean dyingAfter = dyingBefore && hpAfter == 0;
+        card.setHpCurrent(hpAfter)
+                .setMajorWound(majorWoundAfter)
+                .setUnconscious(unconsciousAfter)
+                .setDying(dyingAfter)
+                .setUpdatedAt(LocalDateTime.now());
+        characterCardService.updateDiceCharacter(card);
+
+        String characterName = stringValue(rule, "characterName");
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("characterName", characterName);
+        outcome.put("rawHealing", rawHealing);
+        resolution.setOutcome(outcome);
+        Map<String, Object> effect = new LinkedHashMap<>();
+        effect.put("hpBefore", hpBefore);
+        effect.put("hpAfter", hpAfter);
+        effect.put("hpGain", hpGain);
+        effect.put("majorWoundBefore", majorWoundBefore);
+        effect.put("majorWound", majorWoundAfter);
+        effect.put("majorWoundChanged", majorWoundBefore != majorWoundAfter);
+        effect.put("unconsciousBefore", unconsciousBefore);
+        effect.put("unconscious", unconsciousAfter);
+        effect.put("unconsciousChanged", unconsciousBefore != unconsciousAfter);
+        effect.put("dyingBefore", dyingBefore);
+        effect.put("dying", dyingAfter);
+        effect.put("dyingChanged", dyingBefore != dyingAfter);
         resolution.setEffect(effect);
     }
 
@@ -624,6 +845,36 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         effect.put("unconsciousBefore", unconsciousBefore);
         effect.put("unconscious", unconsciousAfter);
         resolution.setEffect(effect);
+    }
+
+    private void settleUnconsciousRecoveryResult(
+            DiceRollResult result, DiceResolutionDataVO resolution) {
+        Map<String, Object> rule = resolution.getRule();
+        CocDiceRules.CheckResolution check = CocDiceRules.resolveCheck(
+                requireRoll(result),
+                intValue(rule, "targetValue"),
+                CocCheckDifficulty.REGULAR);
+        CocCharacter card = characterCardService.lockDiceCharacter(
+                longValue(rule, "runId"), longValue(rule, "cardId"));
+        if (card == null || Boolean.TRUE.equals(card.getDying())
+                || Boolean.TRUE.equals(card.getDead())) {
+            throw new UserRequestException("角色当前不能进行昏迷恢复检定");
+        }
+        boolean unconsciousBefore = Boolean.TRUE.equals(
+                card.getUnconscious());
+        boolean success = check.outcome() == CocCheckOutcome.SUCCESS
+                || check.outcome() == CocCheckOutcome.CRITICAL_SUCCESS;
+        boolean unconsciousAfter = unconsciousBefore && !success;
+        card.setUnconscious(unconsciousAfter)
+                .setUpdatedAt(LocalDateTime.now());
+        characterCardService.updateDiceCharacter(card);
+
+        resolution.setOutcome(new LinkedHashMap<>(Map.of(
+                "characterName", stringValue(rule, "characterName"),
+                "category", check.outcome().name())));
+        resolution.setEffect(new LinkedHashMap<>(Map.of(
+                "unconsciousBefore", unconsciousBefore,
+                "unconscious", unconsciousAfter)));
     }
 
     private List<DiceRollResult> appendTemporaryInsanityRoundIfNeeded(
@@ -1010,6 +1261,53 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             }
         }
         return List.copyOf(targets);
+    }
+
+    private List<KpDiceRequestDTOs.HealingTarget> requireHealingTargets(
+            List<KpDiceRequestDTOs.HealingTarget> targets,
+            HealingSourceMode sourceMode) {
+        if (targets == null || targets.isEmpty()) {
+            throw new UserRequestException("回血目标不能为空");
+        }
+        Set<String> targetNames = new HashSet<>();
+        for (KpDiceRequestDTOs.HealingTarget target : targets) {
+            if (target == null
+                    || !StringUtils.hasText(target.targetCharacterName())
+                    || !StringUtils.hasText(target.formula())) {
+                throw new UserRequestException("回血目标和公式不能为空");
+            }
+            if (!targetNames.add(target.targetCharacterName().trim())) {
+                throw new UserRequestException("同一轮不能重复选择回血目标");
+            }
+            boolean hasSource = StringUtils.hasText(target.sourceCharacterName());
+            if (sourceMode == HealingSourceMode.STANDALONE && hasSource) {
+                throw new UserRequestException("无来源回血不能指定前置来源角色");
+            }
+            if (sourceMode == HealingSourceMode.FOLLOW_UP && !hasSource) {
+                throw new UserRequestException("后续回血必须指定前置来源角色");
+            }
+        }
+        return List.copyOf(targets);
+    }
+
+    private DiceRollResult requireSuccessfulHealingSource(
+            List<DiceRollResult> existing, String sourceName) {
+        DiceRollResult source = safeResults(existing).stream()
+                .filter(result -> DiceRollConstant.TYPE_CHECK.equals(
+                        resolution(result).getType()))
+                .filter(result -> sourceName.equals(
+                        ruleString(result, "characterName")))
+                .max(Comparator.comparing(
+                        DiceRollResult::getRoundNo,
+                        Comparator.nullsFirst(Integer::compareTo)))
+                .orElseThrow(() -> new UserRequestException(
+                        "找不到来源角色“" + sourceName + "”的前置单次检定"));
+        String category = outcomeString(source, "category");
+        if (!CocCheckOutcome.CRITICAL_SUCCESS.name().equals(category)
+                && !CocCheckOutcome.SUCCESS.name().equals(category)) {
+            throw new UserRequestException("前置检定未成功，不能结算回血");
+        }
+        return source;
     }
 
     private void validateDamageSources(

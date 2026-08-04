@@ -82,6 +82,8 @@ class GroupChatServiceTest {
                 mock(GroupChatReplyStepMapper.class);
         GroupAgentDecisionStore decisionStore =
                 mock(GroupAgentDecisionStore.class);
+        GroupTurnCheckpointService checkpointService =
+                mock(GroupTurnCheckpointService.class);
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupChatService service = new GroupChatService(
@@ -101,7 +103,8 @@ class GroupChatServiceTest {
                 emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 decisionStore,
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                checkpointService);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -178,6 +181,10 @@ class GroupChatServiceTest {
                                         && GroupChatConstant.STATUS_COMPLETED
                                         .equals(message.getStatus())));
         verify(model).stream(any(Prompt.class));
+        verify(checkpointService).initializeStep(turn, step);
+        verify(checkpointService).recordBoundary(
+                turn, step,
+                GroupTurnCheckpointService.COMPLETED);
     }
 
     @Test
@@ -202,7 +209,8 @@ class GroupChatServiceTest {
                 JsonMapper.builder().build(), emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -247,7 +255,8 @@ class GroupChatServiceTest {
                 JsonMapper.builder().build(), emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -417,7 +426,8 @@ class GroupChatServiceTest {
                 emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -505,7 +515,8 @@ class GroupChatServiceTest {
                 emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(7L)
                 .setStatus(GroupChatConstant.STATUS_RUNNING);
@@ -554,7 +565,8 @@ class GroupChatServiceTest {
                 emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
         GroupChatReplyStep scheduled =
                 new GroupChatReplyStep().setId(41L)
                         .setStatus(GroupChatConstant.STATUS_PENDING);
@@ -589,7 +601,8 @@ class GroupChatServiceTest {
                 emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
 
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(1L).setWorldId(2L)
@@ -707,7 +720,8 @@ class GroupChatServiceTest {
                 emptyMaterialFeed(),
                 selectionService,
                 mock(GroupAgentDecisionStore.class),
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -809,7 +823,8 @@ class GroupChatServiceTest {
                 JsonMapper.builder().build(), emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
@@ -864,7 +879,8 @@ class GroupChatServiceTest {
                 emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 decisionStore,
-                mock(TrpgCombatLifecycleService.class));
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         when(conversationService.requireAuthorized(7L))

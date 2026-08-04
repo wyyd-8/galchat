@@ -49,19 +49,6 @@ public class KpDiceTools {
     }
 
     @Tool(
-            name = "requestPushedCheck",
-            description = "为最近一次兼容且失败的普通检定追加孤注一掷轮。",
-            returnDirect = true)
-    public KpDiceToolResult requestPushedCheck(
-            @ToolParam(description = "孤注一掷原因和需要重掷的角色名")
-            KpDiceRequestDTOs.Pushed request,
-            ToolContext context) {
-        KpExecutionContext kp = requireKpContext(context);
-        return orchestrationService.requestPushedCheck(
-                kp.conversationId(), kp.runId(), request);
-    }
-
-    @Tool(
             name = "requestSanCheck",
             description = "按角色当前SAN发起理智检定；本工具不自动扣除理智。",
             returnDirect = true)
@@ -89,7 +76,8 @@ public class KpDiceTools {
 
     @Tool(
             name = "rollDamage",
-            description = "结算独立伤害，或为最近一次成功的攻击/对抗检定追加伤害轮。",
+            description = "结算独立伤害，或为最近一次成功的攻击/对抗检定追加伤害轮。"
+                    + "KP手动从伤害公式中扣除目标护甲；后端不会自动扣除护甲。",
             returnDirect = true)
     public KpDiceToolResult rollDamage(
             @ToolParam(description = "伤害原因、来源模式、来源角色、目标角色与表达式")
@@ -97,6 +85,21 @@ public class KpDiceTools {
             ToolContext context) {
         KpExecutionContext kp = requireKpContext(context);
         return orchestrationService.rollDamage(
+                kp.conversationId(), kp.runId(), request);
+    }
+
+    @Tool(
+            name = "rollHealing",
+            description = "结算无来源回血，或为最近一次成功的单次检定追加回血轮。"
+                    + "急救可解除昏迷和重伤，医学可解除重伤。"
+                    + "无特殊情况时，一个大场景内每种恢复生命方法对同一目标只能使用一次。",
+            returnDirect = true)
+    public KpDiceToolResult rollHealing(
+            @ToolParam(description = "回血原因、来源模式、恢复方式、来源角色、目标角色与表达式")
+            KpDiceRequestDTOs.Healing request,
+            ToolContext context) {
+        KpExecutionContext kp = requireKpContext(context);
+        return orchestrationService.rollHealing(
                 kp.conversationId(), kp.runId(), request);
     }
 

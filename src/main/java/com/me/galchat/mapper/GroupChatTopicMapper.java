@@ -12,6 +12,7 @@ public interface GroupChatTopicMapper extends BaseMapper<GroupChatTopic> {
             FROM group_chat_topic topic
             JOIN group_conversation conversation ON conversation.id = topic.conversation_id
             WHERE conversation.user_world_id = #{userWorldId}
+              AND conversation.mode = 'chat'
             """)
     Long selectMaxIdByUserWorldId(@Param("userWorldId") Long userWorldId);
 }

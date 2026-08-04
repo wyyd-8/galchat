@@ -3,6 +3,8 @@ package com.me.galchat.domain.dto;
 import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocPercentileModifier;
 import com.me.galchat.constant.DamageSourceMode;
+import com.me.galchat.constant.HealingSourceMode;
+import com.me.galchat.constant.HealingMode;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.util.List;
@@ -85,6 +87,28 @@ public final class KpDiceRequestDTOs {
                     required = false)
             String sourceCharacterName,
             @ToolParam(description = "对该目标执行的伤害表达式，例如1D6或1D8+2")
+            String formula) {
+    }
+
+    public record Healing(
+            @ToolParam(description = "恢复生命的原因，会作为掷骰概要或新增掷骰轮的展示文本")
+            String reason,
+            @ToolParam(description = "回血来源模式：STANDALONE无来源回血，FOLLOW_UP单次检定成功后的回血")
+            HealingSourceMode sourceMode,
+            @ToolParam(description = "恢复方式：FIRST_AID急救、MEDICINE医学、OTHER其他来源")
+            HealingMode mode,
+            @ToolParam(description = "本轮各回血角色、可选前置来源角色及对应回血表达式")
+            List<HealingTarget> targets) {
+    }
+
+    public record HealingTarget(
+            @ToolParam(description = "恢复生命的角色名，必须与当前跑团中的角色卡名称一致")
+            String targetCharacterName,
+            @ToolParam(
+                    description = "FOLLOW_UP时必填，填写完成前置单次检定的角色名；STANDALONE时必须省略",
+                    required = false)
+            String sourceCharacterName,
+            @ToolParam(description = "对该目标执行的回血表达式，例如1或1D3")
             String formula) {
     }
 }

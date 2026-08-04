@@ -35,6 +35,7 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
+import java.util.Map;
 
 class CharacterCardServiceImplTest {
 
@@ -318,6 +319,56 @@ class CharacterCardServiceImplTest {
                         null, null, null, null)))
                 .isInstanceOf(UserRequestException.class)
                 .hasMessage("至少需要提供一个基础属性修正值");
+        org.mockito.Mockito.verify(characterMapper,
+                org.mockito.Mockito.never())
+                .updateById(any(CocCharacter.class));
+    }
+
+    @Test
+    void rollsBackARecordedBasicAttributeAdjustment() {
+        CocCharacter card = characterWithAllAttributes(50)
+                .setId(71L).setRunId(5L).setName("林恩")
+                .setStr(90).setSiz(90)
+                .setDamageBonus("+1D6").setBuild(2);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(characterMapper.updateById(card)).thenReturn(1);
+        KpCharacterAttributeDTOs.Result executed =
+                new KpCharacterAttributeDTOs.Result(
+                        "林恩",
+                        Map.of(
+                                "STR", new KpCharacterAttributeDTOs.ValueChange(50, 90),
+                                "SIZ", new KpCharacterAttributeDTOs.ValueChange(50, 90)),
+                        "+1D6",
+                        2);
+
+        service.rollbackBasicAttributeAdjustment(5L, executed);
+
+        assertThat(card.getStr()).isEqualTo(50);
+        assertThat(card.getSiz()).isEqualTo(50);
+        assertThat(card.getDamageBonus()).isEqualTo("0");
+        assertThat(card.getBuild()).isZero();
+        verify(characterMapper).updateById(card);
+    }
+
+    @Test
+    void refusesAttributeRollbackWhenCurrentValueNoLongerMatchesRecordedAfter() {
+        CocCharacter card = characterWithAllAttributes(50)
+                .setId(71L).setRunId(5L).setName("林恩")
+                .setStr(80);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        KpCharacterAttributeDTOs.Result executed =
+                new KpCharacterAttributeDTOs.Result(
+                        "林恩",
+                        Map.of("STR",
+                                new KpCharacterAttributeDTOs.ValueChange(50, 90)),
+                        "+1D4",
+                        1);
+
+        assertThatThrownBy(() -> service.rollbackBasicAttributeAdjustment(
+                5L, executed))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("STR")
+                .hasMessageContaining("无法安全回滚");
         org.mockito.Mockito.verify(characterMapper,
                 org.mockito.Mockito.never())
                 .updateById(any(CocCharacter.class));

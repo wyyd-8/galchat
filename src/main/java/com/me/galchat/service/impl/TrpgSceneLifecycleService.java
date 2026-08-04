@@ -37,6 +37,7 @@ public class TrpgSceneLifecycleService {
     private final TrpgSceneSummaryService summaryService;
     private final GroupReplyPlanService replyPlanService;
     private final TrpgChildScenePlanService childScenePlanService;
+    private final TrpgTemporaryInsanityService temporaryInsanityService;
 
     public List<GroupActionSpec> remainingActions(
             Long conversationId,
@@ -153,7 +154,12 @@ public class TrpgSceneLifecycleService {
             childScenePlanService.finishChildUnderLock(
                     conversation, plan);
         } else {
-            replyPlanService.finishActiveUnderLock(conversation);
+            var nextPlan = replyPlanService.finishActiveUnderLock(
+                    conversation);
+            if (nextPlan == null) {
+                temporaryInsanityService.advanceAfterLargeScene(
+                        conversation.getId());
+            }
         }
         progressStore.clear(conversation.getId(), sceneId);
         return true;

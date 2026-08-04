@@ -10,11 +10,17 @@ import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.CharacterCardContextFormatter;
 import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.tool.KpDiceTools;
+import com.me.galchat.tool.KpPushedCheckTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.tool.annotation.Tool;
 
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -29,6 +35,8 @@ class TrpgGroupAgentPolicyTest {
         ICharacterCardService cardService = mock(ICharacterCardService.class);
         CharacterCardContextFormatter formatter = new CharacterCardContextFormatter();
         KpDiceTools kpDiceTools = mock(KpDiceTools.class);
+        KpPushedCheckTools kpPushedCheckTools =
+                mock(KpPushedCheckTools.class);
         com.me.galchat.tool.KpModuleTools kpModuleTools =
                 mock(com.me.galchat.tool.KpModuleTools.class);
         com.me.galchat.tool.KpSceneTools kpSceneTools =
@@ -48,6 +56,7 @@ class TrpgGroupAgentPolicyTest {
         TrpgGroupAgentPolicy policy =
                 new TrpgGroupAgentPolicy(
                         client, contextAssembler, cardService, formatter, kpDiceTools,
+                        kpPushedCheckTools,
                         mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                         mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                         kpModuleTools,
@@ -86,8 +95,42 @@ class TrpgGroupAgentPolicyTest {
         assertThat(policy.actorName(5L, kp)).isEqualTo("KP");
         assertThat(invocation.tools())
                 .containsExactly(
-                        kpDiceTools, kpModuleTools,
+                        kpDiceTools, kpPushedCheckTools, kpModuleTools,
                         kpSceneTools, kpRunTools, kpCombatTools);
+        assertThat(exposedToolNames(invocation.tools()))
+                .contains("requestPushedCheck");
+
+        var combatInvocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_COMBAT_ADJUDICATE,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        "combat:1",
+                        "战斗裁定",
+                        1,
+                        1),
+                new GroupContextMaterial(List.of()));
+        assertThat(exposedToolNames(combatInvocation.tools()))
+                .doesNotContain("requestPushedCheck");
+
+        var npcAttack = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_COMBAT_ATTACK,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        71L,
+                        "combat:1",
+                        "战斗攻击",
+                        1,
+                        1),
+                new GroupContextMaterial(List.of()));
+        assertThat(npcAttack.prompt().getInstructions().getLast().getText())
+                .contains("在规则允许的范围内")
+                .contains("不要尝试攻击")
+                .contains("昏迷")
+                .contains("濒死");
         org.mockito.Mockito.verify(contextWindowService)
                 .recordPrompt(
                         org.mockito.ArgumentMatchers.eq(7L),
@@ -116,6 +159,7 @@ class TrpgGroupAgentPolicyTest {
                 cardService,
                 new CharacterCardContextFormatter(),
                 mock(KpDiceTools.class),
+                mock(KpPushedCheckTools.class),
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
@@ -184,6 +228,7 @@ class TrpgGroupAgentPolicyTest {
                 cardService,
                 new CharacterCardContextFormatter(),
                 mock(KpDiceTools.class),
+                mock(KpPushedCheckTools.class),
                 selectionTools,
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
@@ -239,6 +284,7 @@ class TrpgGroupAgentPolicyTest {
                 cardService,
                 new CharacterCardContextFormatter(),
                 mock(KpDiceTools.class),
+                mock(KpPushedCheckTools.class),
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 selectionTools,
                 moduleTools,
@@ -292,6 +338,7 @@ class TrpgGroupAgentPolicyTest {
                 cardService,
                 new CharacterCardContextFormatter(),
                 mock(KpDiceTools.class),
+                mock(KpPushedCheckTools.class),
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
@@ -343,6 +390,7 @@ class TrpgGroupAgentPolicyTest {
                 cardService,
                 new CharacterCardContextFormatter(),
                 mock(KpDiceTools.class),
+                mock(KpPushedCheckTools.class),
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
@@ -386,5 +434,25 @@ class TrpgGroupAgentPolicyTest {
                 10, 10, 54, 60, 55, 0,
                 false, false, false, false,
                 false, null, null);
+    }
+
+    private Set<String> exposedToolNames(List<Object> tools) {
+        Set<String> names = new LinkedHashSet<>();
+        for (Object toolObject : tools) {
+            List<Class<?>> hierarchy = new ArrayList<>();
+            for (Class<?> type = toolObject.getClass(); type != null;
+                 type = type.getSuperclass()) {
+                hierarchy.add(type);
+            }
+            for (Class<?> type : hierarchy) {
+                for (Method method : type.getDeclaredMethods()) {
+                    Tool tool = method.getAnnotation(Tool.class);
+                    if (tool != null) {
+                        names.add(tool.name());
+                    }
+                }
+            }
+        }
+        return names;
     }
 }

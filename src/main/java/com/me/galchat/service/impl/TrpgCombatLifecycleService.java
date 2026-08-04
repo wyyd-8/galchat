@@ -534,6 +534,67 @@ public class TrpgCombatLifecycleService {
                 conversation, nextRound, currentOrder(combat));
     }
 
+    /**
+     * Permanently removes a character's still-pending active slot from the
+     * current combat round. Cancelled steps are deliberately never restored;
+     * a later recovery only affects the next round generated from card state.
+     */
+    @Transactional
+    public void forfeitCurrentRoundSlot(
+            Long conversationId, Long characterId) {
+        if (conversationId == null || characterId == null) {
+            return;
+        }
+        List<GroupChatTurn> turns = turnMapper.selectList(
+                new LambdaQueryWrapper<GroupChatTurn>()
+                        .eq(GroupChatTurn::getConversationId, conversationId)
+                        .eq(GroupChatTurn::getPlanSource,
+                                GroupChatConstant.PLAN_SOURCE_COMBAT)
+                        .in(GroupChatTurn::getStatus, List.of(
+                                GroupChatConstant.STATUS_RUNNING,
+                                GroupChatConstant.STATUS_WAITING_INPUT,
+                                GroupChatConstant.STATUS_WAITING_DICE,
+                                GroupChatConstant.STATUS_PAUSED))
+                        .orderByDesc(GroupChatTurn::getId)
+                        .last("limit 1"));
+        if (turns == null || turns.isEmpty()) {
+            return;
+        }
+        List<GroupChatReplyStep> steps = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId,
+                                turns.getFirst().getId())
+                        .orderByAsc(GroupChatReplyStep::getItemOrder));
+        if (steps == null || steps.isEmpty()) {
+            return;
+        }
+        GroupChatReplyStep attack = steps.stream()
+                .filter(step -> GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
+                        step.getActionType()))
+                .filter(step -> Objects.equals(
+                        characterId, step.getSubjectCharacterId()))
+                .filter(step -> GroupChatConstant.STATUS_PENDING.equals(
+                        step.getStatus()))
+                .findFirst()
+                .orElse(null);
+        if (attack == null || attack.getItemOrder() == null) {
+            return;
+        }
+        int first = attack.getItemOrder();
+        LocalDateTime now = LocalDateTime.now();
+        steps.stream()
+                .filter(step -> step.getItemOrder() != null
+                        && step.getItemOrder() >= first
+                        && step.getItemOrder() < first + 4)
+                .filter(step -> GroupChatConstant.STATUS_PENDING.equals(
+                        step.getStatus()))
+                .forEach(step -> {
+                    step.setStatus(GroupChatConstant.STATUS_CANCELLED)
+                            .setUpdatedAt(now);
+                    stepMapper.updateById(step);
+                });
+    }
+
     @Transactional
     public MarkFinishedResult requestFinish(
             Long conversationId,
@@ -666,8 +727,6 @@ public class TrpgCombatLifecycleService {
         return cards.stream()
                 .filter(card -> ids.contains(card.getId()))
                 .filter(card -> !Boolean.TRUE.equals(card.getDead()))
-                .filter(card -> !Boolean.TRUE.equals(
-                        card.getUnconscious()))
                 .filter(card -> !Boolean.TRUE.equals(card.getDying()))
                 .sorted(order)
                 .map(card -> toPlanItem(card, 0))

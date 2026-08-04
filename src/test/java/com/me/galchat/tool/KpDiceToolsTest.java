@@ -22,18 +22,54 @@ import static org.mockito.Mockito.verify;
 class KpDiceToolsTest {
 
     @Test
-    void exposesExactlySixReturnDirectDiceTools() {
+    void exposesSixCombatSafeReturnDirectDiceTools() {
         List<Method> toolMethods = Arrays.stream(KpDiceTools.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(Tool.class))
                 .toList();
 
         assertThat(toolMethods)
                 .extracting(method -> method.getAnnotation(Tool.class).name())
-                .containsExactlyInAnyOrderElementsOf(
-                        DiceRollConstant.KP_STATE_TOOL_NAMES);
+                .containsExactlyInAnyOrder(
+                        DiceRollConstant.TOOL_REQUEST_CHECK,
+                        DiceRollConstant.TOOL_REQUEST_OPPOSED_CHECK,
+                        DiceRollConstant.TOOL_REQUEST_SAN_CHECK,
+                        "rollSanLoss",
+                        "rollDamage",
+                        "rollHealing");
         assertThat(toolMethods)
                 .allSatisfy(method -> assertThat(
                         method.getAnnotation(Tool.class).returnDirect()).isTrue());
+    }
+
+    @Test
+    void damageAndHealingToolsExposeSimplifiedTableRules() {
+        Tool damage = tool("rollDamage");
+        Tool healing = tool("rollHealing");
+
+        assertThat(damage.description())
+                .contains("KP手动")
+                .contains("护甲")
+                .contains("不会自动扣除");
+        assertThat(healing.description())
+                .contains("急救", "解除昏迷", "解除重伤")
+                .contains("医学", "解除重伤")
+                .contains("一个大场景")
+                .contains("每种恢复生命方法", "一次");
+    }
+
+    @Test
+    void pushedCheckIsAnIndependentExplorationOnlyTool() {
+        List<Method> toolMethods = Arrays.stream(
+                        KpPushedCheckTools.class.getDeclaredMethods())
+                .filter(method -> method.isAnnotationPresent(Tool.class))
+                .toList();
+
+        assertThat(toolMethods).singleElement().satisfies(method -> {
+            Tool tool = method.getAnnotation(Tool.class);
+            assertThat(tool.name()).isEqualTo(
+                    DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK);
+            assertThat(tool.returnDirect()).isTrue();
+        });
     }
 
     @Test
@@ -75,5 +111,14 @@ class KpDiceToolsTest {
         tools.requestSanCheck(request, context);
 
         verify(orchestration).requestSanCheck(7L, 7L, request);
+    }
+
+    private Tool tool(String name) {
+        return Arrays.stream(KpDiceTools.class.getDeclaredMethods())
+                .map(method -> method.getAnnotation(Tool.class))
+                .filter(java.util.Objects::nonNull)
+                .filter(tool -> name.equals(tool.name()))
+                .findFirst()
+                .orElseThrow();
     }
 }

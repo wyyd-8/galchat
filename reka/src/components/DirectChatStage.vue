@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ArrowLeft, BrainCircuit, LoaderCircle, RotateCcw, Send, Settings2 } from '@lucide/vue'
+import { ArrowLeft, BrainCircuit, History, LoaderCircle, RotateCcw, Send, Settings2 } from '@lucide/vue'
 import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport } from 'reka-ui'
 import type { Character, DirectMessage, UserWorld } from '@/api/types'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = defineProps<{ world: UserWorld; character: Character; messages: DirectMessage[]; loading: { history: boolean; sending: boolean; withdrawing: boolean }; canWithdraw: boolean }>()
-const emit = defineEmits<{ back: []; send: []; withdraw: []; edit: []; focus: []; composition: [value: boolean, input: string] }>()
+const props = defineProps<{ world: UserWorld; character: Character; messages: DirectMessage[]; loading: { history: boolean; sending: boolean; withdrawing: boolean }; canWithdraw: boolean; hasOlderMessages: boolean }>()
+const emit = defineEmits<{ back: []; send: []; withdraw: []; loadEarlier: []; edit: []; focus: []; composition: [value: boolean, input: string] }>()
 const composing = ref(false)
 const conversationalMessages = computed(() => props.messages.filter((item) => item.role === 'user' || item.role === 'assistant').length)
 function bindScroller(element: unknown) { scroller.value = element instanceof HTMLElement ? element : null }
@@ -28,7 +28,8 @@ function keydown(event: KeyboardEvent) {
     <div class="direct-chat-layout">
       <section class="chat-main">
         <ScrollAreaRoot class="message-scroll"><ScrollAreaViewport :ref="bindScroller" class="message-viewport">
-          <div v-if="loading.history" class="chat-loading"><LoaderCircle class="spin" :size="22" />载入消息</div>
+          <div v-if="loading.history && !messages.length" class="chat-loading"><LoaderCircle class="spin" :size="22" />载入消息</div>
+          <button v-else-if="hasOlderMessages" class="load-earlier-button" :disabled="loading.history" @click="emit('loadEarlier')"><LoaderCircle v-if="loading.history" class="spin" :size="14" /><History v-else :size="14" />加载更早记录</button>
           <div v-else-if="!messages.length" class="empty-chat"><BrainCircuit :size="30" /><h2>和 {{ character.characterName }} 开始对话</h2><p>角色会结合世界背景、历史记忆和好感度回应。</p></div>
           <template v-for="message in messages" :key="message.id">
             <CollapsibleRoot v-if="message.role === 'thinking'" class="direct-thinking"><CollapsibleTrigger class="reasoning-trigger">思考过程</CollapsibleTrigger><CollapsibleContent class="reasoning-content">{{ message.content }}</CollapsibleContent></CollapsibleRoot>

@@ -68,7 +68,8 @@ class GroupConversationServiceTest {
                 new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         when(moduleLockService.tryReadLock(3L)).thenReturn(
                 new CocModuleLockService.OwnedLock(mock(RLock.class), 1L));
-        when(moduleMapper.selectById(3L)).thenReturn(new CocModule().setId(3L));
+        when(moduleMapper.selectById(3L)).thenReturn(
+                new CocModule().setId(3L).setVisible(true));
         org.mockito.Mockito.doAnswer(invocation -> {
             ((GroupConversation) invocation.getArgument(0)).setId(7L);
             return 1;
@@ -190,6 +191,46 @@ class GroupConversationServiceTest {
         assertThatThrownBy(() -> service.create(request))
                 .isInstanceOf(UserRequestException.class)
                 .hasMessageContaining("模组不存在");
+        verify(conversationMapper, never()).insert(any(GroupConversation.class));
+    }
+
+    @Test
+    void createTrpgConversationRejectsHiddenModule() {
+        GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
+        IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
+        IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
+        CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
+        CocModuleLockService moduleLockService = mock(CocModuleLockService.class);
+        GroupConversationService service = new GroupConversationService(
+                conversationMapper,
+                mock(GroupChatMemberMapper.class),
+                mock(GroupChatMessageMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                worldService,
+                characterService,
+                lockService,
+                moduleMapper,
+                moduleLockService,
+                mock(CocModuleCharacterInstantiationService.class));
+        when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
+                new UserWorldPrefix().setId(1L).setWorldId(10L));
+        when(lockService.tryWorldLock(1L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        when(moduleLockService.tryReadLock(3L)).thenReturn(
+                new CocModuleLockService.OwnedLock(mock(RLock.class), 1L));
+        when(moduleMapper.selectById(3L)).thenReturn(
+                new CocModule().setId(3L).setVisible(false));
+        GroupConversationCreateDTO request = new GroupConversationCreateDTO();
+        request.setUserWorldId(1L);
+        request.setMode(GroupChatConstant.MODE_TRPG);
+        request.setModuleId(3L);
+        request.setCharacterIds(List.of(11L));
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("模组不存在或不可选");
         verify(conversationMapper, never()).insert(any(GroupConversation.class));
     }
 

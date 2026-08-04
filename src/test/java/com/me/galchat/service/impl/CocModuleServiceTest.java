@@ -29,6 +29,36 @@ import static org.mockito.Mockito.when;
 class CocModuleServiceTest {
 
     @Test
+    void listVisibleReturnsOnlySelectableModules() {
+        CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
+        CocModuleService service = serviceWith(moduleMapper);
+        CocModule visible = new CocModule()
+                .setId(3L)
+                .setName("闹鬼")
+                .setVisible(true);
+        CocModule hidden = new CocModule()
+                .setId(2L)
+                .setName("未公开模组")
+                .setVisible(false);
+        when(moduleMapper.selectList(any())).thenReturn(
+                java.util.List.of(visible, hidden));
+
+        assertThat(service.listVisible()).containsExactly(visible);
+    }
+
+    @Test
+    void getVisibleRejectsHiddenModule() {
+        CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
+        CocModuleService service = serviceWith(moduleMapper);
+        when(moduleMapper.selectById(3L)).thenReturn(
+                new CocModule().setId(3L).setVisible(false));
+
+        assertThatThrownBy(() -> service.getVisible(3L))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("模组不存在或不可选");
+    }
+
+    @Test
     void createStoresCharacterCardsInInputOrderWithoutBusinessValidation() {
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleCharacterMapper moduleCharacterMapper =
@@ -148,5 +178,17 @@ class CocModuleServiceTest {
         verify(materialMapper, never()).delete(any());
         verify(moduleMapper, never()).deleteById(3L);
         verify(lockService).unlock(any(CocModuleLockService.OwnedLock.class));
+    }
+
+    private CocModuleService serviceWith(CocModuleMapper moduleMapper) {
+        return new CocModuleService(
+                moduleMapper,
+                mock(CocModuleContextMapper.class),
+                mock(CocModuleLocationMapper.class),
+                mock(CocModuleClueMapper.class),
+                mock(CocModuleMaterialMapper.class),
+                mock(GroupConversationMapper.class),
+                mock(CocModuleLockService.class),
+                mock(CocModuleCharacterMapper.class));
     }
 }

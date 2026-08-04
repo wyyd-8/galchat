@@ -85,8 +85,10 @@ public class GroupConversationService {
                     throw new UserRequestException("当前模组正在删除，请稍后再创建跑团");
                 }
                 unlockModuleAfterTransaction = registerUnlockAfterTransaction(moduleLock);
-                if (moduleMapper.selectById(dto.getModuleId()) == null) {
-                    throw new UserRequestException("模组不存在");
+                var module = moduleMapper.selectById(dto.getModuleId());
+                if (module == null
+                        || !Boolean.TRUE.equals(module.getVisible())) {
+                    throw new UserRequestException("模组不存在或不可选");
                 }
             }
             GroupConversation conversation = createConversation(

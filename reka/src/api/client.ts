@@ -1,6 +1,7 @@
 import type {
-  ApiResult, Character, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, Conversation, CurrentTurn, GroupChatEvent, GroupMessage, ReplyPlan,
-  Session, UserInfo, UserToken, UserWorld, WorldArchive, WorldArchiveResult, WorldDetail, WorldSave, WorldTemplate,
+  ApiResult, Character, CharacterCard, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn,
+  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, Session, TrpgSave, UserInfo, UserToken,
+  UserWorld, WorldArchive, WorldArchiveResult, WorldDetail, WorldSave, WorldTemplate,
 } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -72,6 +73,7 @@ export const api = {
   updatePassword: (payload: { email: string; newPassword: string; verificationCode: string }) => request<void>('/user/password', { method: 'PUT', body: body(payload) }),
 
   worldTemplates: () => request<WorldTemplate[]>('/world/templates'),
+  worldTemplate: (id: number) => request<WorldTemplate>(`/world/templates/${id}`),
   myWorldTemplate: (id: number) => request<WorldTemplate>(`/world/templates/my/${id}`),
   createWorldTemplate: (payload: WorldTemplate) => request<void>('/world/templates', { method: 'POST', body: body(payload) }),
   updateWorldTemplate: (id: number, payload: WorldTemplate) => request<void>(`/world/templates/my/${id}`, { method: 'PUT', body: body(payload) }),
@@ -99,17 +101,38 @@ export const api = {
   myCharacterTemplate: (worldId: number, characterId: number) => request<CharacterTemplate>(`/character/templates/my/${worldId}/${characterId}`),
   updateCharacterTemplate: (worldId: number, characterId: number, payload: CharacterTemplate) => request<void>(`/character/templates/my/${worldId}/${characterId}`, { method: 'PUT', body: body(payload) }),
 
-  history: (worldId: number, characterId: number, size = 30) => request<ChatHistory[]>(`/history?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId), size: String(size) })}`),
+  cocModules: () => request<CocModule[]>('/coc-modules'),
+  cocModule: (id: number) => request<CocModule>(`/coc-modules/${id}`),
+
+  history: (worldId: number, characterId: number, size = 30, beforeId?: number) => request<ChatHistory[]>(`/history?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId), size: String(size), ...(beforeId ? { id: String(beforeId) } : {}) })}`),
   withdrawMessage: (worldId: number, characterId: number) => request<void>(`/history/withdraw?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId) })}`, { method: 'POST' }),
 
-  conversations: (worldId: number) => request<Conversation[]>(`/group-chat/conversations?userWorldId=${worldId}`),
-  createConversation: (payload: { userWorldId: number; mode: string; title: string; opening?: string; characterIds: number[] }) => request<Conversation>('/group-chat/conversations', { method: 'POST', body: body(payload) }),
-  endConversation: (id: number, ending?: string) => request<Conversation>(`/group-chat/conversations/${id}/end`, { method: 'POST', body: body({ ending }) }),
+  conversations: (worldId: number, status?: 'active' | 'closed') => request<Conversation[]>(`/group-chat/conversations?${new URLSearchParams({ userWorldId: String(worldId), ...(status ? { status } : {}) })}`),
+  conversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}`),
+  createConversation: (payload: { userWorldId: number; moduleId?: number; mode: string; title: string; characterIds: number[] }) => request<Conversation>('/group-chat/conversations', { method: 'POST', body: body(payload) }),
+  closeConversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}/close`, { method: 'POST' }),
+  contextWindow: (id: number) => request<ContextWindowUsage | null>(`/group-chat/conversations/${id}/context-window`),
   groupMessages: (id: number, beforeId?: number, size = 50) => request<GroupMessage[]>(`/group-chat/conversations/${id}/messages?size=${size}${beforeId ? `&beforeId=${beforeId}` : ''}`),
+  withdrawGroupTurn: (id: number) => request<void>(`/group-chat/conversations/${id}/withdraw`, { method: 'POST' }),
   replyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`),
   saveReplyPlan: (id: number, plan: ReplyPlan) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
   finishReplyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),
+  advanceReplyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan/advance`, { method: 'POST' }),
   currentTurn: (id: number) => request<CurrentTurn | null>(`/group-chat/conversations/${id}/turns/current`),
+
+  characterCard: (runId: number, participantId?: number) => request<CharacterCard | null>(`/character-cards?${new URLSearchParams({ runId: String(runId), ...(participantId ? { participantId: String(participantId) } : {}) })}`),
+  characterCardById: (id: number) => request<CharacterCard>(`/character-cards/${id}`),
+  createCharacterCard: (payload: { runId: number; participantId?: number; characterText: string }) => request<CharacterCard>('/character-cards', { method: 'POST', body: body(payload) }),
+  deleteCharacterCard: (id: number) => request<void>(`/character-cards/${id}`, { method: 'DELETE' }),
+  rollCharacterLuck: (id: number) => request<DiceResult>(`/character-cards/${id}/luck`, { method: 'POST' }),
+
+  diceSummary: (id: number) => request<DiceRollSummary>(`/dice-rolls/${id}`),
+  diceResults: (id: number) => request<DiceRollDetail[]>(`/dice-rolls/${id}/results`),
+  rollDiceResult: (id: number) => request<DiceRollProgress>(`/dice-roll-results/${id}/roll`, { method: 'POST' }),
+
+  trpgSave: (id: number) => request<TrpgSave | null>(`/trpg-saves/${id}`),
+  saveTrpg: (id: number, remark: string) => request<TrpgSave>(`/trpg-saves/${id}`, { method: 'POST', body: body({ remark }) }),
+  loadTrpg: (id: number) => request<void>(`/trpg-saves/${id}/load`, { method: 'POST' }),
 }
 
 export async function streamChat(payload: ChatMessagePayload, onMessage: (message: ChatFlux) => void) {
@@ -172,8 +195,6 @@ async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: 
 }
 
 export const streamTrpgTurn = {
-  start: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/turns/start`, { clientRequestId }, onEvent),
   continue: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
     streamGroupTurn(`/group-chat/conversations/${id}/turns/continue`, { clientRequestId }, onEvent),
   message: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) =>

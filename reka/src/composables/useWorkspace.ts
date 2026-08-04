@@ -1,7 +1,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { api, clearSession, currentSession, saveSession, streamGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
 import type {
-  Character, CharacterTemplate, Conversation, CurrentTurn, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem,
+  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem,
   UserInfo, UserWorld, WorldDetail, WorldSave, WorldTemplate,
 } from '@/api/types'
 import { errorMessage, notify } from './useNotice'
@@ -18,6 +18,7 @@ export function useWorkspace() {
   const selectedWorldId = ref<number | null>(null)
   const characters = ref<Character[]>([])
   const characterTemplates = ref<CharacterTemplate[]>([])
+  const modules = ref<CocModule[]>([])
   const details = ref<WorldDetail[]>([])
   const worldSave = ref<WorldSave | null>(null)
   const conversations = ref<Conversation[]>([])
@@ -29,6 +30,8 @@ export function useWorkspace() {
   const messageInput = ref('')
   const messageScroller = ref<HTMLElement | null>(null)
   const currentTurn = ref<CurrentTurn | null>(null)
+  const latestDiceRoll = ref<DiceRollAggregate | null>(null)
+  const hasOlderGroupMessages = ref(false)
 
   const isLoggedIn = computed(() => Boolean(session.token && session.id))
   const selectedWorld = computed(() => worlds.value.find((item) => item.id === selectedWorldId.value) || null)
@@ -50,14 +53,15 @@ export function useWorkspace() {
   }
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
-    conversations.value = []; messages.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null
+    conversations.value = []; messages.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; modules.value = []
+    latestDiceRoll.value = null; hasOlderGroupMessages.value = false
   }
   function logout() { clearSession(); Object.assign(session, currentSession()); userInfo.value = null; resetWorkspace() }
 
   async function boot() {
     if (!isLoggedIn.value) return
     loading.boot = true
-    try { await Promise.all([loadWorlds(), loadTemplates(), loadUserInfo()]) } catch (error) { notify('无法载入工作区', errorMessage(error), 'danger') }
+    try { await Promise.all([loadWorlds(), loadTemplates(), loadModules(), loadUserInfo()]) } catch (error) { notify('无法载入工作区', errorMessage(error), 'danger') }
     finally { loading.boot = false }
   }
   async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) {
@@ -69,6 +73,7 @@ export function useWorkspace() {
   async function changePassword(payload: { email: string; newPassword: string; verificationCode: string }) { await api.updatePassword(payload); notify('密码已更新', '', 'success') }
 
   async function loadTemplates() { templates.value = await api.worldTemplates() }
+  async function loadModules() { modules.value = await api.cocModules() }
   async function loadWorlds() {
     if (!session.id) return
     loading.worlds = true
@@ -144,19 +149,21 @@ export function useWorkspace() {
     notify('角色模板已保存', '', 'success')
   }
 
-  async function createConversation(payload: { mode: 'chat' | 'trpg'; title: string; opening?: string; characterIds: number[] }) {
+  async function createConversation(payload: { mode: 'chat' | 'trpg'; title: string; moduleId?: number; characterIds: number[] }) {
     if (!selectedWorldId.value) return
     const created = await api.createConversation({ ...payload, userWorldId: selectedWorldId.value })
     conversations.value = await api.conversations(selectedWorldId.value); participantIds.value = [...payload.characterIds]
     await selectConversation(created.id); notify('群聊已建立', created.title, 'success')
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; currentTurn.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; currentTurn.value = null; latestDiceRoll.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
-      const [history, plan, turn] = await Promise.all([
-        api.groupMessages(id), api.replyPlan(id), api.currentTurn(id),
+      const [conversationDetail, history, plan, turn] = await Promise.all([
+        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id),
       ])
+      conversations.value = conversations.value.map((item) => item.id === id ? { ...item, ...conversationDetail } : item)
       messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
+      hasOlderGroupMessages.value = history.length === 50
       replyPlan.value = plan || freshPlan()
       currentTurn.value = turn
       participantIds.value = [...new Set(replyPlan.value.groups
@@ -168,9 +175,29 @@ export function useWorkspace() {
     } catch (error) { notify('群聊加载失败', errorMessage(error), 'danger') }
     finally { loading.chat = false }
   }
-  async function endConversation(ending?: string) {
+  async function closeConversation() {
     if (!selectedConversationId.value || !selectedWorldId.value) return
-    await api.endConversation(selectedConversationId.value, ending); conversations.value = await api.conversations(selectedWorldId.value); notify('群聊已结束', '', 'success')
+    await api.closeConversation(selectedConversationId.value); conversations.value = await api.conversations(selectedWorldId.value); notify('会话已关闭并生成总结', '', 'success')
+  }
+  async function loadOlderGroupMessages() {
+    if (!selectedConversationId.value || !hasOlderGroupMessages.value || loading.chat) return
+    const beforeId = messages.value.filter((item) => item.id > 0).reduce((minimum, item) => Math.min(minimum, item.id), Number.POSITIVE_INFINITY)
+    if (!Number.isFinite(beforeId)) return
+    loading.chat = true
+    try {
+      const older = await api.groupMessages(selectedConversationId.value, beforeId, 50)
+      const known = new Set(messages.value.map((item) => item.id))
+      messages.value = [...older.filter((item) => !known.has(item.id)), ...messages.value].sort((a, b) => a.sequenceNo - b.sequenceNo)
+      hasOlderGroupMessages.value = older.length === 50
+    } finally { loading.chat = false }
+  }
+  async function withdrawGroupTurn() {
+    if (!selectedConversationId.value) return
+    await api.withdrawGroupTurn(selectedConversationId.value)
+    const history = await api.groupMessages(selectedConversationId.value)
+    messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
+    hasOlderGroupMessages.value = history.length === 50
+    notify('已撤回最近一轮群聊', '', 'success')
   }
   async function savePlan() {
     if (!selectedConversationId.value) return
@@ -180,6 +207,11 @@ export function useWorkspace() {
     if (!groups.length) throw new Error('回复顺序至少保留一位角色')
     replyPlan.value = await api.saveReplyPlan(selectedConversationId.value, { ...replyPlan.value, source: 'USER', groups })
     notify('回复顺序已保存', '', 'success')
+  }
+  async function advancePlan() {
+    if (!selectedConversationId.value) return
+    replyPlan.value = await api.advanceReplyPlan(selectedConversationId.value)
+    notify('已推进到下一回复分组', '', 'success')
   }
   function movePlanItem(from: number, to: number) {
     const items = replyPlan.value.groups[0]?.items; if (!items || from === to || to < 0 || to >= items.length) return
@@ -193,6 +225,7 @@ export function useWorkspace() {
 
   function applyEvent(event: GroupChatEvent) {
     const step = event.replyStepId
+    if (event.eventType === 'dice_roll.created' && event.diceRoll) latestDiceRoll.value = event.diceRoll
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
       const existing = messages.value.find((item) => item.replyStepId === step)
@@ -354,11 +387,12 @@ export function useWorkspace() {
   window.addEventListener(UNAUTHORIZED_EVENT, logout)
   onMounted(boot)
   return {
-    session, loading, userInfo, worlds, templates, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
+    session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
     conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlan, participantIds, messageInput, messageScroller, currentTurn,
+    latestDiceRoll, hasOlderGroupMessages,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
-    loadWorlds, loadTemplates, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
-    reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, endConversation,
-    savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep,
+    loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
+    reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,
+    loadOlderGroupMessages, withdrawGroupTurn, savePlan, advancePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep,
   }
 }

@@ -1,7 +1,7 @@
 export interface ApiResult<T> { code: number; msg: string; data?: T }
 export interface Session { token: string; id: number | null; username: string }
 export interface UserToken { token: string; id: number; username: string }
-export interface UserInfo { id: number; username: string; email?: string; birthday?: string; createTime?: string }
+export interface UserInfo { id: number; username: string; email?: string; birthday?: string; diceSkin?: string; createTime?: string }
 
 export interface WorldTemplate {
   id?: number; name: string; image?: string; author?: string; background?: string; authorId?: number; visible?: boolean
@@ -33,6 +33,11 @@ export interface CharacterTemplate {
   cocPlayStyle?: string; favorability?: Record<string, string>; initFavor?: number
 }
 
+export interface CocModule {
+  id: number; name: string; author?: string; era?: string; introduction: string; investigatorCreation?: string
+  coverUrl?: string; playerCount?: string; estimatedDuration?: string; visible: boolean; createdAt?: string; updatedAt?: string
+}
+
 export interface ChatHistory {
   id?: number; userWorldId?: number; characterId?: number; content?: string; type?: string
   userMessageId?: number; stepNo?: number; timestamp?: string
@@ -43,15 +48,15 @@ export interface ChatMessagePayload {
 }
 export interface ChatFlux { type: string; content?: string }
 export interface DirectMessage {
-  id: string; role: 'user' | 'assistant' | 'thinking' | 'tool'; content: string; time?: string; complete?: boolean
+  id: string; historyId?: number; role: 'user' | 'assistant' | 'thinking' | 'tool'; content: string; time?: string; complete?: boolean
 }
 
 export type ConversationMode = 'chat' | 'trpg'
 export type ConversationStatus = 'active' | 'closed'
 export interface Conversation {
-  id: number; userWorldId: number; worldId: number; activeReplyPlanId?: number; mode: ConversationMode
-  title: string; opening?: string; summary?: string; status: ConversationStatus; version?: number
-  createdAt?: string; updatedAt?: string; endedAt?: string
+  id: number; userWorldId: number; worldId: number; moduleId?: number; activeReplyPlanId?: number; mode: ConversationMode
+  title: string; summary?: string; status: ConversationStatus; version?: number
+  createdAt?: string; updatedAt?: string; closedAt?: string; lastChatContent?: string; lastChatTime?: string
 }
 export interface GroupMessage {
   id: number; conversationId: number; turnId?: number; replyStepId?: number
@@ -61,9 +66,10 @@ export interface GroupMessage {
 }
 export interface GroupSpeaker { type: string; id?: number; name?: string; avatar?: string }
 export interface GroupChatEvent {
-  eventType: 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
+  eventType: 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
   actionType?: string; groupName?: string; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string
+  diceRoll?: DiceRollAggregate
   sceneOptions?: Record<string, string>; autoSelected?: boolean
   sceneChoice?: { optionNo?: string; controllerName?: string; investigatorName?: string; locationName?: string; randomized?: boolean }
 }
@@ -76,4 +82,43 @@ export interface ReplyPlanItem { id?: number; order: number; actorType: string; 
 export interface ReplyPlanGroup { key: string; name: string; order: number; items: ReplyPlanItem[] }
 export interface ReplyPlan {
   id?: number; source: 'USER' | 'SCENE' | 'COMBAT'; contextId?: number; resumePlanId?: number; groups: ReplyPlanGroup[]
+}
+
+export interface ContextWindowUsage {
+  characterCount: number; softLimit: number; ratio: number; updatedAt: string
+}
+
+export interface CocCharacter {
+  id: number; runId: number; actorType: 'PLAYER' | 'BOT'; participantId?: number; name: string; playerName?: string
+  image?: string; occupation?: string; sex?: string; age?: number; era?: string; birthplace?: string; residence?: string
+  str: number; con: number; siz: number; dex: number; app: number; intValue: number; pow: number; edu: number
+  damageBonus?: string; build?: number; mov?: number; hpCurrent?: number; hpMax?: number; sanCurrent?: number; sanMax?: number
+  mpCurrent?: number; mpMax?: number; luckCurrent?: number; armor?: number; majorWound?: boolean; unconscious?: boolean
+  dying?: boolean; dead?: boolean; temporaryInsanity?: boolean; temporaryInsanityPhase?: string
+}
+export interface CocSkill { id: number; characterId: number; displayName: string; category?: string; specialization?: string; baseValue?: number; value: number; isCustom?: boolean }
+export interface CocWeapon { id: number; characterId: number; name: string; skillName?: string; damage?: string; range?: string; attacksPerRound?: string; ammoCapacity?: number; remainingAmmo?: number; malfunction?: string; isBroken?: boolean; notes?: string }
+export interface CocProfile {
+  appearance?: string; ideology?: string; significantPeople?: string; meaningfulLocations?: string; treasuredPossessions?: string
+  traits?: string; injuriesAndScars?: string; phobiasAndManias?: string; equipmentText?: string; assetsText?: string
+  spendingLevel?: string; cash?: string; notes?: string
+}
+export interface CharacterCard { character: CocCharacter; skills: CocSkill[]; weapons: CocWeapon[]; profile?: CocProfile }
+
+export interface DiceValue { sides: number; value?: number; role?: string; selected: boolean }
+export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number }
+export interface DiceResult { formula: string; modules: DiceModule[]; result?: number }
+export interface DiceResolution { type?: string; sourceResultId?: number; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
+export interface DiceRollSummary { id: number; conversationId: number; reason?: string; totalResult?: string; roundCount?: number; status: string; createdAt?: string; updatedAt?: string }
+export interface DiceRollDetail { id: number; summaryId: number; characterId?: number; roundNo?: number; displayOrder?: number; displayType?: string; reason?: string; resultData?: DiceResult; resolution?: DiceResolution; resolvedAt?: string; createdAt?: string; updatedAt?: string }
+export interface DiceRollProgress { summary: DiceRollSummary; rolledResult: DiceRollDetail; createdResults: DiceRollDetail[] }
+export interface DiceRollAggregate { summary: DiceRollSummary; results: DiceRollDetail[]; semanticResult?: string }
+
+export interface TrpgSaveInvestigator {
+  characterId: number; name: string; hpCurrent?: number; hpMax?: number; sanCurrent?: number; sanMax?: number
+  mpCurrent?: number; mpMax?: number; unconscious?: boolean; dying?: boolean; dead?: boolean
+}
+export interface TrpgSave {
+  id: number; conversationId: number; conversationTitle?: string; remark?: string; savedAt?: string; formatVersion?: number
+  activePlanSource?: string; activeSceneId?: number; investigators: TrpgSaveInvestigator[]
 }

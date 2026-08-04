@@ -232,10 +232,16 @@ public class GroupTurnCheckpointService {
             return;
         }
         for (GroupChatToolCall call : calls) {
+            String toolResult = call.getToolResult();
+            // Successful adjustments are JSON objects; tool failures are text.
+            if (toolResult == null
+                    || !toolResult.stripLeading().startsWith("{")) {
+                continue;
+            }
             KpCharacterAttributeDTOs.Result result;
             try {
                 result = objectMapper.readValue(
-                        call.getToolResult(),
+                        toolResult,
                         KpCharacterAttributeDTOs.Result.class);
             } catch (JacksonException exception) {
                 throw new IllegalStateException(

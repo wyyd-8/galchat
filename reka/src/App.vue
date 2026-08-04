@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Download, ImageUp, Pencil, Plus, Trash2 } from '@lucide/vue'
+import { Download, ImageUp, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import AppSidebar from '@/components/AppSidebar.vue'
 import AuthDialog from '@/components/AuthDialog.vue'
 import DirectChatStage from '@/components/DirectChatStage.vue'
 import GroupChatStage from '@/components/GroupChatStage.vue'
+import TrpgToolsDialog from '@/components/TrpgToolsDialog.vue'
 import WorldHome from '@/components/WorldHome.vue'
 import WorldLibrary from '@/components/WorldLibrary.vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
@@ -22,7 +23,7 @@ const workspace = useWorkspace()
 const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters })
 const authOpen = ref(!workspace.isLoggedIn.value)
 const view = ref<'library' | 'world' | 'group' | 'direct'>('library')
-const dialogs = reactive({ world: false, template: false, conversation: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, account: false, password: false, end: false })
+const dialogs = reactive({ world: false, template: false, templatePreview: false, conversation: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, end: false, trpgTools: false })
 const busy = ref(false)
 const uploading = ref<'world' | 'character' | null>(null)
 const templateMode = ref<'create' | 'edit'>('create')
@@ -30,7 +31,7 @@ const characterTemplateMode = ref<'create' | 'edit'>('create')
 const editingCharacterTemplateId = ref<number | null>(null)
 const worldForm = reactive({ worldId: '', name: '', acitvePushStatus: true, dailyCompanionMode: true, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
 const templateForm = reactive<WorldTemplate>({ name: '', author: '', image: '', background: '', visible: true })
-const conversationForm = reactive({ title: '', mode: 'chat' as 'chat' | 'trpg', opening: '', characterIds: [] as number[] })
+const conversationForm = reactive({ title: '', mode: 'chat' as 'chat' | 'trpg', moduleId: '', characterIds: [] as number[] })
 const characterChoice = ref('')
 const characterPrompt = ref('')
 const characterTemplateForm = reactive<CharacterTemplate>({ name: '', image: '', background: '', personality: '', cocPlayStyle: '', initFavor: 0, favorability: {} })
@@ -40,11 +41,13 @@ const characterEditForm = reactive({ prompt: '', favor: 0 })
 const settingsForm = reactive({ name: '', acitvePushStatus: false, favorSystemStatus: 'NORMAL', eotDetectionStatus: true })
 const detailForm = reactive<WorldDetail>({ about: '', details: '' })
 const saveRemark = ref('')
-const accountForm = reactive({ username: '', email: '', birthday: '' })
+const accountForm = reactive({ username: '', email: '', birthday: '', diceSkin: '' })
 const passwordForm = reactive({ email: '', newPassword: '', confirmPassword: '', code: '' })
-const ending = ref('')
+const selectedTemplatePreview = ref<WorldTemplate | null>(null)
 
 const availableTemplates = computed(() => workspace.characterTemplates.value.filter((template) => template.id && !workspace.characters.value.some((character) => character.characterId === template.id)))
+const selectedConversationFormModule = computed(() => workspace.modules.value.find((item) => item.id === Number(conversationForm.moduleId)) || null)
+const selectedConversationModule = computed(() => workspace.modules.value.find((item) => item.id === workspace.selectedConversation.value?.moduleId) || null)
 const selectedCharacter = computed(() => workspace.characters.value.find((item) => item.characterId === selectedCharacterId.value) || null)
 const templateDialogTitle = computed(() => templateMode.value === 'edit' ? '修改世界模板' : '创建世界模板')
 const characterTemplateDialogTitle = computed(() => characterTemplateMode.value === 'edit' ? '修改角色模板' : '创建角色模板')
@@ -54,8 +57,8 @@ watch(() => worldForm.thinkStatus, (thinking) => { if (thinking) worldForm.eotDe
 
 async function run(action: () => Promise<unknown>, close?: keyof typeof dialogs) {
   busy.value = true
-  try { await action(); if (close) dialogs[close] = false }
-  catch (error) { notify('操作失败', errorMessage(error), 'danger') }
+  try { await action(); if (close) dialogs[close] = false; return true }
+  catch (error) { notify('操作失败', errorMessage(error), 'danger'); return false }
   finally { busy.value = false }
 }
 async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) { await run(async () => { await workspace.authenticate(payload); authOpen.value = false }) }
@@ -65,12 +68,20 @@ async function selectWorld(id: number) { direct.close(); await workspace.selectW
 async function selectConversation(id: number) { direct.close(); await workspace.selectConversation(id); view.value = 'group' }
 async function openDirectChat(id: number) { await direct.selectCharacter(id); view.value = 'direct' }
 function closeDirectChat() { direct.close(); view.value = 'world' }
+async function restoreTrpg() { const id = workspace.selectedConversationId.value; if (id) await workspace.selectConversation(id) }
 
 function openNewWorld() {
   Object.assign(worldForm, { worldId: '', name: '', acitvePushStatus: true, dailyCompanionMode: true, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
   dialogs.world = true
 }
-function openNewConversation() { Object.assign(conversationForm, { title: '', mode: 'chat', opening: '', characterIds: [] }); dialogs.conversation = true }
+async function openTemplatePreview(id: number) {
+  await run(async () => { selectedTemplatePreview.value = await api.worldTemplate(id); dialogs.templatePreview = true })
+}
+function createFromPreview() {
+  const id = selectedTemplatePreview.value?.id; if (!id) return
+  openNewWorld(); worldForm.worldId = String(id); dialogs.templatePreview = false
+}
+function openNewConversation() { Object.assign(conversationForm, { title: '', mode: 'chat', moduleId: '', characterIds: [] }); dialogs.conversation = true }
 function openAddCharacter() { characterChoice.value = ''; characterPrompt.value = ''; dialogs.character = true }
 function openCharacter(id: number) {
   const item = workspace.characters.value.find((character) => character.characterId === id); if (!item) return
@@ -131,7 +142,7 @@ async function exportWorld() {
   const id = workspace.selectedWorldId.value; if (!id) return
   await run(async () => { const text = await api.exportWorld(id); const blob = new Blob([text], { type: 'application/json' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${workspace.selectedWorld.value?.name || 'galchat-world'}.json`; link.click(); URL.revokeObjectURL(link.href) })
 }
-async function openAccount() { await run(async () => { await workspace.loadUserInfo(); const info = workspace.userInfo.value; Object.assign(accountForm, { username: info?.username || '', email: info?.email || '', birthday: info?.birthday || '' }); dialogs.account = true }) }
+async function openAccount() { await run(async () => { await workspace.loadUserInfo(); const info = workspace.userInfo.value; Object.assign(accountForm, { username: info?.username || '', email: info?.email || '', birthday: info?.birthday || '', diceSkin: info?.diceSkin || '' }); dialogs.account = true }) }
 async function openPassword() { await run(async () => { await workspace.loadUserInfo(); Object.assign(passwordForm, { email: workspace.userInfo.value?.email || '', newPassword: '', confirmPassword: '', code: '' }); dialogs.password = true }) }
 async function sendPasswordCode() { await run(async () => { await api.sendPasswordCode(passwordForm.email); notify('验证码已发送', '', 'success') }) }
 async function changePassword() {
@@ -144,10 +155,10 @@ async function changePassword() {
   <div v-if="workspace.isLoggedIn.value" class="app-shell">
     <AppSidebar :session="workspace.session" :worlds="workspace.worlds.value" :conversations="workspace.conversations.value" :selected-world-id="workspace.selectedWorldId.value" :selected-conversation-id="workspace.selectedConversationId.value" :loading="workspace.loading.worlds" @home="home" @select-world="selectWorld" @select-conversation="selectConversation" @new-world="openNewWorld" @new-conversation="openNewConversation" @account="openAccount" @password="openPassword" @logout="logout" />
     <div class="app-content">
-      <WorldLibrary v-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" @select="selectWorld" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
-      <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="run(workspace.loadSnapshot)" @settings="openSettings" />
-      <DirectChatStage v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
-      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:scroller="workspace.messageScroller.value" :conversation="workspace.selectedConversation.value" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @send="workspace.sendMessage" @start-turn="workspace.startTrpgTurn" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @retry="workspace.retryStep" @end="dialogs.end = true" />
+      <WorldLibrary v-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
+      <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
+      <DirectChatStage v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
+      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:scroller="workspace.messageScroller.value" :conversation="workspace.selectedConversation.value" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @advance-plan="run(workspace.advancePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="dialogs.trpgTools = true" @send="workspace.sendMessage" @start-turn="workspace.startTrpgTurn" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @retry="workspace.retryStep" @end="dialogs.end = true" />
     </div>
   </div>
   <div v-else class="signed-out"><span class="brand-glyph large">✦</span><h1>GalChat</h1><p>一个安静的角色与群像叙事工作台。</p><button class="button primary" @click="authOpen = true">登录或注册</button></div>
@@ -164,9 +175,14 @@ async function changePassword() {
     <template #footer><button class="button ghost" @click="dialogs.template = false">取消</button><button class="button primary" :disabled="!templateForm.name || !templateForm.background || busy" @click="run(saveTemplate, 'template')">{{ templateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.conversation" title="建立群聊" description="故事模块已由群聊取代；单聊仍从角色卡进入。" size="lg">
-    <div class="form-stack"><div class="field"><span>模式</span><div class="segmented"><button :class="{ active: conversationForm.mode === 'chat' }" @click="conversationForm.mode = 'chat'">普通群聊</button><button :class="{ active: conversationForm.mode === 'trpg' }" @click="conversationForm.mode = 'trpg'">跑团</button></div></div><label class="field"><span>标题</span><input v-model.trim="conversationForm.title" placeholder="例如：深夜图书馆" /></label><label class="field"><span>开场叙述</span><textarea v-model.trim="conversationForm.opening" rows="4" /></label><div class="field"><span>参与角色</span><div class="check-grid"><label v-for="item in workspace.characters.value" :key="item.characterId" class="check-card"><input v-model="conversationForm.characterIds" type="checkbox" :value="item.characterId" /><span class="reply-avatar" :style="item.characterImage ? { backgroundImage: `url(${item.characterImage})` } : {}">{{ item.characterImage ? '' : item.characterName.slice(0,1) }}</span><strong>{{ item.characterName }}</strong></label></div></div></div>
-    <template #footer><button class="button ghost" @click="dialogs.conversation = false">取消</button><button class="button primary" :disabled="!conversationForm.title || !conversationForm.characterIds.length || busy" @click="run(() => workspace.createConversation({ ...conversationForm }), 'conversation').then(() => view = 'group')">进入群聊</button></template>
+  <BaseDialog v-model="dialogs.templatePreview" :title="selectedTemplatePreview?.name || '世界模板'" :description="selectedTemplatePreview?.author ? `作者：${selectedTemplatePreview.author}` : '匿名创作者'" size="lg">
+    <div v-if="selectedTemplatePreview" class="template-preview"><div class="template-preview-cover" :style="selectedTemplatePreview.image ? { backgroundImage: `url(${selectedTemplatePreview.image})` } : {}" /><div><span class="eyebrow">{{ selectedTemplatePreview.visible === false ? 'PRIVATE TEMPLATE' : 'PUBLIC TEMPLATE' }}</span><p>{{ selectedTemplatePreview.background || '尚未填写世界背景。' }}</p></div></div>
+    <template #footer><button class="button ghost" @click="dialogs.templatePreview = false">关闭</button><button class="button primary" @click="createFromPreview"><Plus :size="16" />使用此模板</button></template>
+  </BaseDialog>
+
+  <BaseDialog v-model="dialogs.conversation" title="建立群聊" description="普通群聊可自由编排回复；跑团会按模组和行动轮推进。" size="lg">
+    <div class="form-stack"><div class="field"><span>模式</span><div class="segmented"><button :class="{ active: conversationForm.mode === 'chat' }" @click="conversationForm.mode = 'chat'">普通群聊</button><button :class="{ active: conversationForm.mode === 'trpg' }" @click="conversationForm.mode = 'trpg'">跑团</button></div></div><label class="field"><span>标题</span><input v-model.trim="conversationForm.title" placeholder="例如：深夜图书馆" /></label><label v-if="conversationForm.mode === 'trpg'" class="field"><span>跑团模组</span><select v-model="conversationForm.moduleId"><option value="">请选择可用模组</option><option v-for="item in workspace.modules.value" :key="item.id" :value="String(item.id)">{{ item.name }}{{ item.era ? ` · ${item.era}` : '' }}</option></select><small v-if="selectedConversationFormModule">{{ selectedConversationFormModule.author || '佚名作者' }} · {{ selectedConversationFormModule.playerCount || '人数不限' }} · {{ selectedConversationFormModule.estimatedDuration || '时长未标注' }}<br />{{ selectedConversationFormModule.introduction }}</small><small v-else-if="!workspace.modules.value.length">当前没有可选的公开模组。</small></label><div class="field"><span>参与角色</span><div class="check-grid"><label v-for="item in workspace.characters.value" :key="item.characterId" class="check-card"><input v-model="conversationForm.characterIds" type="checkbox" :value="item.characterId" /><span class="reply-avatar" :style="item.characterImage ? { backgroundImage: `url(${item.characterImage})` } : {}">{{ item.characterImage ? '' : item.characterName.slice(0,1) }}</span><strong>{{ item.characterName }}</strong></label></div></div></div>
+    <template #footer><button class="button ghost" @click="dialogs.conversation = false">取消</button><button class="button primary" :disabled="!conversationForm.title || !conversationForm.characterIds.length || (conversationForm.mode === 'trpg' && !Number(conversationForm.moduleId)) || busy" @click="run(() => workspace.createConversation({ title: conversationForm.title, mode: conversationForm.mode, moduleId: conversationForm.mode === 'trpg' ? Number(conversationForm.moduleId) : undefined, characterIds: conversationForm.characterIds }), 'conversation').then((success) => { if (success) view = 'group' })">进入群聊</button></template>
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.character" title="添加角色" description="选择角色模板，并填写该角色需要记住的用户信息。">
@@ -189,8 +205,13 @@ async function changePassword() {
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.save" title="保存世界快照"><label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="4" placeholder="记录此刻发生了什么" /></label><template #footer><button class="button ghost" @click="dialogs.save = false">取消</button><button class="button primary" @click="run(() => workspace.saveSnapshot(saveRemark), 'save')">保存</button></template></BaseDialog>
-  <BaseDialog v-model="dialogs.account" title="账号资料"><div class="form-stack"><label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label><label class="field"><span>邮箱</span><input v-model="accountForm.email" disabled /></label><label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label></div><template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template></BaseDialog>
+  <BaseDialog v-model="dialogs.worldLoad" title="确认读取世界存档" description="读档会回滚角色、聊天、好感和世界事件，并删除存档点之后的进度。">
+    <div class="restore-summary"><strong>{{ workspace.worldSave.value?.remark || '未填写存档备注' }}</strong><span>{{ workspace.worldSave.value?.savedAt || '未知存档时间' }}</span><p>这项操作不可撤销，请确认当前进度已不再需要。</p></div>
+    <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.loadSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
+  </BaseDialog>
+  <BaseDialog v-model="dialogs.account" title="账号资料"><div class="form-stack"><label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label><label class="field"><span>邮箱</span><input v-model="accountForm.email" disabled /></label><label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label><label class="field"><span>骰子皮肤标识</span><input v-model.trim="accountForm.diceSkin" maxlength="50" placeholder="例如 galaxy-blue" /></label></div><template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.password" title="修改密码"><div class="form-stack"><label class="field"><span>邮箱</span><input v-model="passwordForm.email" disabled /></label><label class="field"><span>验证码</span><div class="field-inline"><input v-model.trim="passwordForm.code" /><button class="button secondary" @click="sendPasswordCode">发送验证码</button></div></label><label class="field"><span>新密码</span><input v-model="passwordForm.newPassword" type="password" /></label><label class="field"><span>确认新密码</span><input v-model="passwordForm.confirmPassword" type="password" /></label></div><template #footer><button class="button primary" :disabled="!passwordForm.code || !passwordForm.newPassword || !passwordForm.confirmPassword" @click="run(changePassword, 'password')">更新密码</button></template></BaseDialog>
-  <BaseDialog v-model="dialogs.end" title="结束群聊" description="群聊记录会保留，但不能继续发送消息。"><label class="field"><span>结束语</span><textarea v-model.trim="ending" rows="4" /></label><template #footer><button class="button ghost" @click="dialogs.end = false">取消</button><button class="button danger" @click="run(() => workspace.endConversation(ending), 'end')">确认结束</button></template></BaseDialog>
+  <BaseDialog v-model="dialogs.end" title="关闭会话" description="服务端会生成会话总结并将状态设为已关闭，之后不能继续发送消息。"><template #footer><button class="button ghost" @click="dialogs.end = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.closeConversation, 'end')">确认关闭</button></template></BaseDialog>
+  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :characters="workspace.characters.value" :latest-dice-roll="workspace.latestDiceRoll.value" @restored="restoreTrpg" />
   <NoticeToast />
 </template>

@@ -3,7 +3,7 @@ import { ArrowRight, BookOpen, Import, Plus, Sparkles } from '@lucide/vue'
 import type { UserWorld, WorldTemplate } from '@/api/types'
 
 defineProps<{ worlds: UserWorld[]; templates: WorldTemplate[]; loading: boolean }>()
-const emit = defineEmits<{ select: [id: number]; createWorld: []; createTemplate: []; importWorld: [file: File] }>()
+const emit = defineEmits<{ select: [id: number]; previewTemplate: [id: number]; createWorld: []; createTemplate: []; importWorld: [file: File] }>()
 function pick(event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (file) emit('importWorld', file) }
 </script>
 
@@ -25,7 +25,7 @@ function pick(event: Event) { const file = (event.target as HTMLInputElement).fi
     </section>
     <section class="content-section muted-section">
       <div class="section-title"><div><span class="eyebrow">DISCOVER</span><h2>世界模板</h2></div><button class="button ghost" @click="emit('createTemplate')"><Plus :size="16" />创建模板</button></div>
-      <div class="template-strip"><article v-for="template in templates.slice(0, 6)" :key="template.id" class="template-card"><div class="template-cover" :style="template.image ? { backgroundImage: `url(${template.image})` } : {}" /><small>{{ template.author || '匿名创作者' }}</small><h3>{{ template.name }}</h3><p>{{ template.background || '尚未填写世界背景。' }}</p></article></div>
+      <div class="template-strip"><button v-for="template in templates.slice(0, 6)" :key="template.id" class="template-card" :disabled="!template.id" @click="template.id && emit('previewTemplate', template.id)"><div class="template-cover" :style="template.image ? { backgroundImage: `url(${template.image})` } : {}" /><small>查看世界模板</small><h3>{{ template.name }}</h3><p>查看作者、背景与公开信息</p></button></div>
     </section>
   </main>
 </template>

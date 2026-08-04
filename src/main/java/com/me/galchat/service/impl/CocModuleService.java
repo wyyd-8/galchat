@@ -46,6 +46,27 @@ public class CocModuleService {
     private final CocModuleLockService lockService;
     private final CocModuleCharacterMapper moduleCharacterMapper;
 
+    public List<CocModule> listVisible() {
+        return moduleMapper.selectList(
+                        new LambdaQueryWrapper<CocModule>()
+                                .eq(CocModule::getVisible, true)
+                                .orderByDesc(CocModule::getId))
+                .stream()
+                .filter(module -> Boolean.TRUE.equals(module.getVisible()))
+                .toList();
+    }
+
+    public CocModule getVisible(Long moduleId) {
+        if (moduleId == null) {
+            throw new UserRequestException("模组id不能为空");
+        }
+        CocModule module = moduleMapper.selectById(moduleId);
+        if (module == null || !Boolean.TRUE.equals(module.getVisible())) {
+            throw new UserRequestException("模组不存在或不可选");
+        }
+        return module;
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public CocModule create(CocModuleCreateDTO request) {
         validateCreate(request);

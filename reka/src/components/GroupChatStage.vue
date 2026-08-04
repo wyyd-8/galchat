@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronDown, CircleStop, Footprints, GripVertical, LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, Save, Send, Trash2, UsersRound } from '@lucide/vue'
+import { Archive, ChevronDown, CircleStop, Footprints, GripVertical, History, LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, RotateCcw, Save, Send, StepForward, Trash2, UsersRound } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
@@ -9,14 +9,15 @@ import type { Character, Conversation, CurrentTurn, GroupMessage, ReplyPlan } fr
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = defineProps<{ conversation: Conversation; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; sending: boolean; loading: boolean }>()
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; end: [] }>()
+const props = defineProps<{ conversation: Conversation; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>()
+const emit = defineEmits<{ back: []; savePlan: []; advancePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
 const items = computed(() => props.replyPlan.groups[0]?.items || [])
 const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && props.currentTurn.inputType === 'message'))
 const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
+const canEditPlan = computed(() => props.conversation.mode === 'chat' && props.replyPlan.source === 'USER')
 function character(id?: number) { return props.characters.find((item) => item.characterId === id) }
 function drop(index: number) { if (draggedIndex.value !== null) emit('movePlanItem', draggedIndex.value, index); draggedIndex.value = null }
 function addActor() { const id = Number(addActorId.value); if (id) { emit('addPlanItem', id); addActorId.value = '' } }
@@ -26,11 +27,12 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
 
 <template>
   <main class="chat-page">
-    <header class="chat-header"><div><button class="text-button" @click="emit('back')">{{ conversation.mode === 'trpg' ? '跑团房间' : '群聊房间' }}</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已结束' }}</span><button v-if="conversation.status === 'active'" class="button ghost danger-text" @click="emit('end')"><CircleStop :size="16" />结束群聊</button></div></header>
+    <header class="chat-header"><div><button class="text-button" @click="emit('back')">{{ conversation.mode === 'trpg' ? '跑团房间' : '群聊房间' }}</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已关闭' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button v-if="conversation.mode === 'chat' && conversation.status === 'active'" class="button ghost" :disabled="sending" @click="emit('withdraw')"><RotateCcw :size="16" />撤回一轮</button><button v-if="conversation.status === 'active'" class="button ghost danger-text" @click="emit('end')"><CircleStop :size="16" />关闭会话</button></div></header>
     <div class="chat-layout">
       <section class="chat-main">
         <ScrollAreaRoot class="message-scroll"><ScrollAreaViewport :ref="bindScroller" class="message-viewport">
-          <div v-if="loading" class="chat-loading"><LoaderCircle class="spin" :size="22" />载入消息</div>
+          <div v-if="loading && !messages.length" class="chat-loading"><LoaderCircle class="spin" :size="22" />载入消息</div>
+          <button v-else-if="hasOlderMessages" class="load-earlier-button" :disabled="loading" @click="emit('loadEarlier')"><LoaderCircle v-if="loading" class="spin" :size="14" /><History v-else :size="14" />加载更早记录</button>
           <div v-else-if="!messages.length" class="empty-chat"><MessageSquareText :size="30" /><h2>对话从这里开始</h2><p>输入一句话，角色会按照右侧安排依次回应。</p></div>
           <article v-for="message in messages" :key="message.id" class="chat-message" :class="[message.speakerType, message.messageKind]">
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>
@@ -64,14 +66,14 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
         <div class="reply-panel-title"><span><UsersRound :size="18" /><strong>回复编排</strong></span><button class="icon-button subtle" @click="planOpen = !planOpen"><ChevronDown :size="17" :class="{ rotated: !planOpen }" /></button></div>
         <p>从上到下依次回复。拖动调整，点击移除。</p>
         <div v-show="planOpen" class="reply-plan-list">
-          <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}-${item.subjectCharacterId}`" class="reply-plan-item" :draggable="replyPlan.source !== 'COMBAT'" :class="{ running: item.status === 'running', done: item.status === 'completed' }" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
-            <GripVertical v-if="replyPlan.source !== 'COMBAT'" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="character(item.actorId)?.characterImage ? { backgroundImage: `url(${character(item.actorId)?.characterImage})` } : {}">{{ character(item.actorId)?.characterImage ? '' : (character(item.actorId)?.characterName || (item.actorType === 'kp' ? 'KP' : '?')).slice(0, 1) }}</span><span class="reply-name">{{ character(item.actorId)?.characterName || (item.actorType === 'kp' ? `KP · NPC #${item.subjectCharacterId}` : `角色 #${item.actorId}`) }}<small>{{ item.status === 'running' ? '回复中' : item.status === 'completed' ? '本轮已完成' : '等待回复' }}</small></span><button v-if="replyPlan.source !== 'COMBAT'" class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
+          <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}-${item.subjectCharacterId}`" class="reply-plan-item" :draggable="canEditPlan" :class="{ running: item.status === 'running', done: item.status === 'completed' }" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
+            <GripVertical v-if="canEditPlan" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="character(item.actorId)?.characterImage ? { backgroundImage: `url(${character(item.actorId)?.characterImage})` } : {}">{{ character(item.actorId)?.characterImage ? '' : (character(item.actorId)?.characterName || (item.actorType === 'kp' ? 'KP' : '?')).slice(0, 1) }}</span><span class="reply-name">{{ character(item.actorId)?.characterName || (item.actorType === 'kp' ? `KP · NPC #${item.subjectCharacterId}` : `角色 #${item.actorId}`) }}<small>{{ item.status === 'running' ? '回复中' : item.status === 'completed' ? '本轮已完成' : '等待回复' }}</small></span><button v-if="canEditPlan" class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
           </div>
           <div v-if="!items.length" class="plan-empty">暂无回复角色</div>
         </div>
-        <div v-if="replyPlan.source !== 'COMBAT'" class="add-plan-row"><select v-model="addActorId" :disabled="!availableCharacters.length"><option value="">{{ availableCharacters.length ? '添加参与角色' : '没有可添加角色' }}</option><option v-for="item in availableCharacters" :key="item.characterId" :value="String(item.characterId)">{{ item.characterName }}</option></select><button class="icon-button bordered" :disabled="!addActorId" @click="addActor"><Plus :size="17" /></button></div>
-        <button v-if="replyPlan.source !== 'COMBAT'" class="button secondary save-plan" :disabled="!items.length || sending" @click="emit('savePlan')"><Save :size="16" />保存回复顺序</button>
-        <div class="panel-note"><strong>当前规则</strong><span>每位角色依次生成，后一位能看到前一位刚完成的回复。</span></div>
+        <div v-if="canEditPlan" class="add-plan-row"><select v-model="addActorId" :disabled="!availableCharacters.length"><option value="">{{ availableCharacters.length ? '添加参与角色' : '没有可添加角色' }}</option><option v-for="item in availableCharacters" :key="item.characterId" :value="String(item.characterId)">{{ item.characterName }}</option></select><button class="icon-button bordered" :disabled="!addActorId" @click="addActor"><Plus :size="17" /></button></div>
+        <div v-if="canEditPlan" class="plan-actions"><button class="button secondary save-plan" :disabled="!items.length || sending" @click="emit('savePlan')"><Save :size="16" />保存顺序</button><button class="button ghost" :disabled="sending" @click="emit('advancePlan')"><StepForward :size="16" />推进分组</button></div>
+        <div class="panel-note"><strong>当前规则</strong><span>{{ conversation.mode === 'trpg' ? '跑团回复计划由场景和战斗流程维护，只在这里查看。' : '每位角色依次生成，后一位能看到前一位刚完成的回复。' }}</span></div>
       </aside>
     </div>
   </main>

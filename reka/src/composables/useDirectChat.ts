@@ -21,6 +21,7 @@ export function useDirectChat(context: DirectChatContext) {
   const input = ref('')
   const scroller = ref<HTMLElement | null>(null)
   const loading = reactive({ history: false, sending: false, withdrawing: false })
+  const hasOlderMessages = ref(false)
   const selectedCharacter = computed(() => context.characters.value.find((item) => item.characterId === selectedCharacterId.value) || null)
   const canWithdraw = computed(() => {
     if (loading.history || loading.sending || loading.withdrawing) return false
@@ -49,7 +50,7 @@ export function useDirectChat(context: DirectChatContext) {
   function historyMessages(item: ChatHistory): DirectMessage[] {
     const role = roleOf(item); const content = replacePronouns(item.content || (role === 'tool' ? '调用了工具' : ''), role)
     const parts = context.world.value?.thinkStatus === false ? splitContent(content) : [content]
-    return parts.map((part, index) => ({ id: `history-${item.id || Date.now()}-${index}`, role, content: part, time: formatTime(item.timestamp) }))
+    return parts.map((part, index) => ({ id: `history-${item.id || Date.now()}-${index}`, historyId: item.id, role, content: part, time: formatTime(item.timestamp) }))
   }
   function payload(message = ''): ChatMessagePayload | null {
     const world = context.world.value; const character = selectedCharacter.value
@@ -66,12 +67,26 @@ export function useDirectChat(context: DirectChatContext) {
     try {
       const history = await api.history(world.id, id)
       messages.value = history.flatMap(historyMessages)
+      hasOlderMessages.value = history.length === 30
       if (world.thinkStatus === false) void ensureSocket(world.id).catch(() => undefined)
       await scrollToBottom()
     } catch (error) { notify('单聊记录加载失败', errorMessage(error), 'danger') }
     finally { loading.history = false }
   }
-  function close() { selectedCharacterId.value = null; messages.value = []; input.value = ''; closeSocket() }
+  async function loadEarlier() {
+    const world = context.world.value; const character = selectedCharacter.value
+    if (!world || !character || !hasOlderMessages.value || loading.history) return
+    const beforeId = messages.value.reduce((minimum, item) => item.historyId ? Math.min(minimum, item.historyId) : minimum, Number.POSITIVE_INFINITY)
+    if (!Number.isFinite(beforeId)) return
+    loading.history = true
+    try {
+      const history = await api.history(world.id, character.characterId, 30, beforeId)
+      messages.value = [...history.flatMap(historyMessages), ...messages.value]
+      hasOlderMessages.value = history.length === 30
+    } catch (error) { notify('更早记录加载失败', errorMessage(error), 'danger') }
+    finally { loading.history = false }
+  }
+  function close() { selectedCharacterId.value = null; messages.value = []; input.value = ''; hasOlderMessages.value = false; closeSocket() }
   function closeSocket() {
     connecting = null; socketWorldId = null; lastTypingKey = null
     if (socket) { socket.close(); socket = null }
@@ -178,5 +193,5 @@ export function useDirectChat(context: DirectChatContext) {
   }
 
   onUnmounted(closeSocket)
-  return { selectedCharacterId, selectedCharacter, messages, input, scroller, loading, canWithdraw, selectCharacter, close, send, withdraw, focus, setComposing }
+  return { selectedCharacterId, selectedCharacter, messages, input, scroller, loading, canWithdraw, hasOlderMessages, selectCharacter, loadEarlier, close, send, withdraw, focus, setComposing }
 }

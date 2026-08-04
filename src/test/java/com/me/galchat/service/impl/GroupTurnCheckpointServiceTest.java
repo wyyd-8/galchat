@@ -293,6 +293,79 @@ class GroupTurnCheckpointServiceTest {
                 .isEqualTo(new KpCharacterAttributeDTOs.ValueChange(50, 60));
     }
 
+    @Test
+    void skipsFailedAttributeToolResponseDuringRecovery() {
+        Fixture fixture = fixture(GroupTurnCheckpointService.STEP_START);
+        GroupChatToolCall failedAdjustment = new GroupChatToolCall()
+                .setId(10L)
+                .setReplyStepId(103L)
+                .setToolName("adjustBasicAttributes")
+                .setToolResult("Error invoking tool: 人物卡不存在");
+        when(fixture.toolCallMapper().selectList(
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(failedAdjustment));
+
+        boolean restored = fixture.service().restore(
+                fixture.turn(), fixture.step());
+
+        assertThat(restored).isTrue();
+        verifyNoInteractions(fixture.characterCardService());
+        verify(fixture.toolCallMapper())
+                .deleteAfterCheckpoint(103L, 9L);
+    }
+
+    @Test
+    void skipsFailedAttributeResponseAndStillRollsBackSuccessfulOne() {
+        Fixture fixture = fixture(GroupTurnCheckpointService.STEP_START);
+        GroupChatToolCall failedAdjustment = new GroupChatToolCall()
+                .setId(11L)
+                .setReplyStepId(103L)
+                .setToolName("adjustBasicAttributes")
+                .setToolResult("Error invoking tool: 修正值无效");
+        GroupChatToolCall successfulAdjustment = new GroupChatToolCall()
+                .setId(10L)
+                .setReplyStepId(103L)
+                .setToolName("adjustBasicAttributes")
+                .setToolResult("""
+                        {"characterName":"林恩",
+                         "changes":{"STR":{"before":50,"after":60}},
+                         "damageBonus":"0","build":0}
+                        """);
+        when(fixture.toolCallMapper().selectList(
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(
+                        failedAdjustment, successfulAdjustment));
+
+        fixture.service().restore(fixture.turn(), fixture.step());
+
+        ArgumentCaptor<KpCharacterAttributeDTOs.Result> result =
+                ArgumentCaptor.forClass(
+                        KpCharacterAttributeDTOs.Result.class);
+        verify(fixture.characterCardService())
+                .rollbackBasicAttributeAdjustment(
+                        org.mockito.ArgumentMatchers.eq(7L),
+                        result.capture());
+        assertThat(result.getValue().characterName()).isEqualTo("林恩");
+    }
+
+    @Test
+    void malformedJsonAttributeRecordStillAbortsRecovery() {
+        Fixture fixture = fixture(GroupTurnCheckpointService.STEP_START);
+        GroupChatToolCall malformedAdjustment = new GroupChatToolCall()
+                .setId(10L)
+                .setReplyStepId(103L)
+                .setToolName("adjustBasicAttributes")
+                .setToolResult("{\"characterName\":\"林恩\"");
+        when(fixture.toolCallMapper().selectList(
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(malformedAdjustment));
+
+        assertThatThrownBy(() -> fixture.service().restore(
+                fixture.turn(), fixture.step()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("基础属性调整记录无法解析，已中止重试");
+    }
+
     private Fixture fixture(String checkpointType) {
         GroupTurnCheckpointMapper checkpointMapper =
                 mock(GroupTurnCheckpointMapper.class);

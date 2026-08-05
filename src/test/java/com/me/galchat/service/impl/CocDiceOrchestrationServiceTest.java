@@ -1327,6 +1327,7 @@ class CocDiceOrchestrationServiceTest {
             Long cardId, Long participantId, String name, int checkValue) {
         return new CocDiceCharacterVO(
                 cardId,
+                participantId == null ? "PLAYER" : "BOT",
                 participantId,
                 name,
                 Map.of("侦查", checkValue),

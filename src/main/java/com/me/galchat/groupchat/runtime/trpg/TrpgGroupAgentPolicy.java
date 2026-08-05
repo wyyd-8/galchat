@@ -24,6 +24,7 @@ import com.me.galchat.tool.KpWaitingInvestigatorTools;
 import com.me.galchat.tool.TrpgSceneSelectionTools;
 import com.me.galchat.tool.KpSceneSelectionTools;
 import com.me.galchat.tool.KpModuleTools;
+import com.me.galchat.tool.KpSkillRuleTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -48,6 +49,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final TrpgSceneSelectionTools sceneSelectionTools;
     private final KpSceneSelectionTools kpSceneSelectionTools;
     private final KpModuleTools kpModuleTools;
+    private final KpSkillRuleTools kpSkillRuleTools;
     private final InvestigatorSceneTools investigatorSceneTools;
     private final KpSceneTools kpSceneTools;
     private final KpRunTools kpRunTools;
@@ -71,6 +73,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                                 KpSceneSelectionTools
                                         kpSceneSelectionTools,
                                 KpModuleTools kpModuleTools,
+                                KpSkillRuleTools kpSkillRuleTools,
                                 InvestigatorSceneTools investigatorSceneTools,
                                 KpSceneTools kpSceneTools,
                                 KpRunTools kpRunTools,
@@ -96,6 +99,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         this.sceneSelectionTools = sceneSelectionTools;
         this.kpSceneSelectionTools = kpSceneSelectionTools;
         this.kpModuleTools = kpModuleTools;
+        this.kpSkillRuleTools = kpSkillRuleTools;
         this.investigatorSceneTools = investigatorSceneTools;
         this.kpSceneTools = kpSceneTools;
         this.kpRunTools = kpRunTools;
@@ -135,6 +139,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         boolean combatRoute =
                 GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE
                         .equals(action.actionType());
+        boolean combatPhase = combatAttack || combatDefense
+                || combatAdjudicate || combatRoute
+                || GroupChatConstant.ACTION_TRPG_COMBAT
+                .equals(action.actionType());
         String phase = selectionPhase ? "选景"
                 : sceneIntro ? "场景引入"
                 : combatAttack ? "战斗攻击"
@@ -145,11 +153,24 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 ? "战斗" : "场景探索";
         List<CocDiceCharacterVO> cards = characterCardService.listDiceCharacters(
                 conversation.getId());
+        List<CocDiceCharacterVO> investigatorCards = cards.stream()
+                .filter(card -> "PLAYER".equals(card.actorType())
+                        || "BOT".equals(card.actorType()))
+                .toList();
+        String investigatorCardContext =
+                characterCardFormatter.format(investigatorCards);
         List<Message> messages = new ArrayList<>();
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
-            String cardContext = characterCardFormatter.format(cards);
+            List<CocDiceCharacterVO> npcCards = cards.stream()
+                    .filter(card -> "NPC".equals(card.actorType()))
+                    .toList();
             messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, actor) + "\n"
-                    + cardContext + """
+                    + investigatorCardContext + "\n"
+                    + characterCardFormatter.formatNpcs(npcCards)
+                    + TrpgRulePrompts.residentRules()
+                    + TrpgRulePrompts.skillIndex()
+                    + (combatPhase ? TrpgRulePrompts.combatRules() : "")
+                    + """
 
                     你是当前 TRPG 群聊唯一的KP，当前阶段是%s。KP不是可见的调查员。
                     你负责描述场景、裁定规则并在需要时发起掷骰；不得替用户决定调查员行动。
@@ -160,10 +181,12 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         } else {
             messages.add(new SystemMessage(
                     investigatorContextAssembler.format(
-                            conversation, action) + """
+                            conversation, action) + "\n"
+                    + investigatorCardContext
+                    + TrpgRulePrompts.investigatorResidentRules()
+                    + """
 
                     你正在 TRPG 群聊中扮演%s，当前阶段是%s。
-                    只能基于可见场景事实行动；不得替其他角色或用户决定行动，不得把推测写成已确认事实。
                     不得输出隐藏思考过程。
                     """.formatted(name, phase)));
         }
@@ -239,7 +262,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         ? "你是本轮首位提案者。根据当前可见局面首先提出一个具体可执行的计划；"
                         + "你只有先发言权，不能替其他调查员决定是否参加或如何行动。"
                         : "你是本轮后续调查员。阅读本轮此前的提案，可以支持、补充、修改、反对或提出替代计划，"
-                        + "也可以提出能够同时进行的其他行动；不得假设尚未经过KP裁定的行动已经成功。";
+                        + "也可以只表达认同，或提出能够同时进行的其他行动；"
+                        + "不得假设尚未经过KP裁定的行动已经成功。";
                 messages.add(new UserMessage("现在轮到" + name + "执行当前" + phase
                         + "行动。" + sceneParticipation
                         + "决策必须先于行动，并严格使用以下格式，标签外不得输出正文：\n"
@@ -259,7 +283,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         List<Object> tools;
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
             List<Object> sceneTools = tools(
-                    kpDiceTools, kpPushedCheckTools, kpModuleTools, kpSceneTools,
+                    kpDiceTools, kpPushedCheckTools, kpModuleTools,
+                    kpSkillRuleTools, kpSceneTools,
                     kpRunTools, kpCombatTools);
             if (scenePhase) {
                 List<Object> dynamicTools = new ArrayList<>(sceneTools);
@@ -280,11 +305,12 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     : scenePhase
                     ? sceneTools
                     : combatAdjudicate
-                    ? tools(kpDiceTools, kpModuleTools, kpRunTools,
-                            kpCombatTools)
+                    ? tools(kpDiceTools, kpModuleTools, kpSkillRuleTools,
+                            kpRunTools, kpCombatTools)
                     : combatAttack || combatDefense || combatRoute
                     ? List.of()
-                    : tools(kpDiceTools, kpModuleTools, kpRunTools);
+                    : tools(kpDiceTools, kpModuleTools, kpSkillRuleTools,
+                            kpRunTools);
         } else {
             tools = selectionPhase
                     ? List.of(sceneSelectionTools)

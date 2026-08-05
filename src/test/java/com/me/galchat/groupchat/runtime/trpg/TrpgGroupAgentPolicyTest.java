@@ -39,6 +39,8 @@ class TrpgGroupAgentPolicyTest {
                 mock(KpPushedCheckTools.class);
         com.me.galchat.tool.KpModuleTools kpModuleTools =
                 mock(com.me.galchat.tool.KpModuleTools.class);
+        com.me.galchat.tool.KpSkillRuleTools kpSkillRuleTools =
+                mock(com.me.galchat.tool.KpSkillRuleTools.class);
         com.me.galchat.tool.KpSceneTools kpSceneTools =
                 mock(com.me.galchat.tool.KpSceneTools.class);
         com.me.galchat.tool.KpRunTools kpRunTools =
@@ -51,7 +53,10 @@ class TrpgGroupAgentPolicyTest {
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
         when(contextAssembler.baseSystemPrompt(conversation, kp)).thenReturn("仅世界提示词");
-        when(cardService.listDiceCharacters(7L)).thenReturn(List.of(card("林恩", null)));
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of(
+                card("林恩", null),
+                card("艾琳", 9L),
+                npcCard("食尸鬼")));
 
         TrpgGroupAgentPolicy policy =
                 new TrpgGroupAgentPolicy(
@@ -60,6 +65,7 @@ class TrpgGroupAgentPolicyTest {
                         mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                         mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                         kpModuleTools,
+                        kpSkillRuleTools,
                         mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                         kpSceneTools,
                         kpRunTools,
@@ -87,7 +93,16 @@ class TrpgGroupAgentPolicyTest {
 
         assertThat(invocation.prompt().getInstructions().getFirst().getText())
                 .contains("仅世界提示词")
-                .contains("林恩")
+                .contains("<investigator-card name=\"林恩\"")
+                .contains("<investigator-card name=\"艾琳\"")
+                .contains("<npc-card name=\"食尸鬼\"")
+                .doesNotContain("<investigator-card name=\"食尸鬼\"")
+                .contains("基础游戏循环")
+                .contains("<kp-skill-index>")
+                .contains("- 侦查：")
+                .contains("- 格斗:斧：")
+                .contains("skillNames只能使用下列准确技能名")
+                .doesNotContain("完整战斗循环")
                 .contains("KP不是可见的调查员")
                 .contains("最多调用一个会改变状态的掷骰工具")
                 .contains("本次响应会暂停")
@@ -100,9 +115,10 @@ class TrpgGroupAgentPolicyTest {
         assertThat(invocation.tools())
                 .containsExactly(
                         kpDiceTools, kpPushedCheckTools, kpModuleTools,
-                        kpSceneTools, kpRunTools, kpCombatTools);
+                        kpSkillRuleTools, kpSceneTools, kpRunTools,
+                        kpCombatTools);
         assertThat(exposedToolNames(invocation.tools()))
-                .contains("requestPushedCheck");
+                .contains("requestPushedCheck", "readSkillRules");
 
         var combatInvocation = policy.prepare(
                 conversation,
@@ -116,7 +132,12 @@ class TrpgGroupAgentPolicyTest {
                         1),
                 new GroupContextMaterial(List.of()));
         assertThat(exposedToolNames(combatInvocation.tools()))
+                .contains("readSkillRules")
                 .doesNotContain("requestPushedCheck");
+        assertThat(combatInvocation.prompt().getInstructions()
+                .getFirst().getText())
+                .contains("基础游戏循环")
+                .contains("完整战斗循环");
 
         var npcAttack = policy.prepare(
                 conversation,
@@ -167,6 +188,7 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
@@ -236,6 +258,7 @@ class TrpgGroupAgentPolicyTest {
                 selectionTools,
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
@@ -292,6 +315,7 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 selectionTools,
                 moduleTools,
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 runTools,
@@ -333,7 +357,18 @@ class TrpgGroupAgentPolicyTest {
     void investigatorSceneActionReceivesOnlySceneLifecycleTool() {
         ICharacterCardService cardService =
                 mock(ICharacterCardService.class);
-        when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of(
+                card("林恩", null),
+                card("艾琳", 9L),
+                npcCard("食尸鬼")));
+        com.me.galchat.service.impl.TrpgInvestigatorContextAssembler
+                investigatorAssembler = mock(
+                com.me.galchat.service.impl
+                        .TrpgInvestigatorContextAssembler.class);
+        when(investigatorAssembler.format(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn("<controlled-investigator>艾琳</controlled-investigator>");
         com.me.galchat.tool.InvestigatorSceneTools sceneTools =
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class);
         TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
@@ -346,11 +381,12 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
                 sceneTools,
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
                 mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                investigatorAssembler,
                 mock(com.me.galchat.tool.KpCombatTools.class),
                 mock(com.me.galchat.service.impl
                         .TrpgCombatLifecycleService.class),
@@ -375,6 +411,18 @@ class TrpgGroupAgentPolicyTest {
                 new GroupContextMaterial(List.of()));
 
         assertThat(invocation.tools()).containsExactly(sceneTools);
+        assertThat(invocation.prompt().getInstructions().getFirst().getText())
+                .contains("<investigator-card name=\"林恩\"")
+                .contains("<investigator-card name=\"艾琳\"")
+                .doesNotContain("食尸鬼")
+                .doesNotContain("<npc-cards>")
+                .contains("<investigator-resident-rules>")
+                .contains("以角色本身的性格为准")
+                .contains("KP 决定是否检定")
+                .contains("不要为了使用最高数值而扭曲行动")
+                .contains("结束探索只结束自己的主动行动")
+                .contains("重伤但清醒时仍可行动")
+                .doesNotContain("<kp-resident-rules>");
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("<decision>")
                 .contains("</decision>")
@@ -399,6 +447,7 @@ class TrpgGroupAgentPolicyTest {
         assertThat(contributor.prompt().getInstructions().getLast().getText())
                 .contains("本轮后续调查员")
                 .contains("支持、补充、修改、反对或提出替代计划")
+                .contains("也可以只表达认同")
                 .contains("不得假设尚未经过KP裁定的行动已经成功");
     }
 
@@ -417,6 +466,7 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
@@ -453,8 +503,17 @@ class TrpgGroupAgentPolicyTest {
 
     private CocDiceCharacterVO card(String name, Long participantId) {
         return new CocDiceCharacterVO(
-                71L, participantId, name, Map.of("CON", 55),
+                71L, participantId == null ? "PLAYER" : "BOT",
+                participantId, name, Map.of("CON", 55),
                 10, 10, 54, 60, 55, 0,
+                false, false, false, false,
+                false, null, null);
+    }
+
+    private CocDiceCharacterVO npcCard(String name) {
+        return new CocDiceCharacterVO(
+                81L, "NPC", null, name, Map.of("DEX", 60),
+                12, 12, 0, 0, 50, 1,
                 false, false, false, false,
                 false, null, null);
     }

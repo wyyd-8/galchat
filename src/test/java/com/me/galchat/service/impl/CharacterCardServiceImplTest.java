@@ -25,6 +25,7 @@ import com.me.galchat.utils.CurrentHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -223,6 +224,22 @@ class CharacterCardServiceImplTest {
                 .containsEntry("SAN", 63)
                 .containsEntry("理智", 63)
                 .containsEntry("侦查", 70);
+    }
+
+    @Test
+    void diceCharacterSummaryPreservesActorTypeForPromptVisibility() {
+        CocCharacter npc = new CocCharacter()
+                .setId(81L)
+                .setRunId(5L)
+                .setActorType("NPC")
+                .setName("食尸鬼");
+        when(characterMapper.selectList(any())).thenReturn(List.of(npc));
+        when(skillMapper.selectList(any())).thenReturn(List.of());
+
+        String json = JsonMapper.builder().build()
+                .writeValueAsString(service.listDiceCharacters(5L));
+
+        assertThat(json).contains("\"actorType\":\"NPC\"");
     }
 
     @Test

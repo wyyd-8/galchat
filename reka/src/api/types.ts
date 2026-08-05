@@ -111,6 +111,12 @@ export interface CocProfile {
   spendingLevel?: string; cash?: string; notes?: string
 }
 export interface CharacterCard { character: CocCharacter; skills: CocSkill[]; weapons: CocWeapon[]; profile?: CocProfile }
+export interface InvestigatorCardSummary {
+  cardId: number; actorType: 'PLAYER' | 'BOT'; participantId?: number; name: string; checkValues: Record<string, number>
+  hpCurrent?: number; hpMax?: number; sanCurrent?: number; sanMax?: number; con?: number; armor?: number
+  majorWound?: boolean; unconscious?: boolean; dying?: boolean; dead?: boolean; temporaryInsanity?: boolean
+  temporaryInsanityPhase?: string; temporaryInsanityRemainingHours?: number
+}
 
 export interface DiceValue { sides: number; value?: number; role?: string; selected: boolean }
 export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number }

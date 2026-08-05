@@ -15,7 +15,7 @@ class CharacterCardContextFormatterTest {
     @Test
     void formatsStoredInsanityCodeAsReadableCardContext() {
         CocDiceCharacterVO card = new CocDiceCharacterVO(
-                71L, null, "林恩", Map.of("CON", 55),
+                71L, "PLAYER", null, "林恩", Map.of("CON", 55),
                 10, 10, 54, 60, 55, 0,
                 false, false, false, false,
                 true, "9:037", 4);
@@ -32,7 +32,7 @@ class CharacterCardContextFormatterTest {
     @Test
     void invalidLegacyInsanityCodeUsesStableFallback() {
         CocDiceCharacterVO card = new CocDiceCharacterVO(
-                71L, null, "林恩", Map.of(),
+                71L, "PLAYER", null, "林恩", Map.of(),
                 10, 10, 54, 60, 55, 0,
                 false, false, false, false,
                 true, "legacy", 2);

@@ -1,5 +1,5 @@
 import type {
-  ApiResult, Character, CharacterCard, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn,
+  ApiResult, Character, CharacterCard, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, Session, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
@@ -127,7 +127,7 @@ export const api = {
   advanceReplyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan/advance`, { method: 'POST' }),
   currentTurn: (id: number) => request<CurrentTurn | null>(`/group-chat/conversations/${id}/turns/current`),
 
-  characterCard: (runId: number, participantId?: number) => request<CharacterCard | null>(`/character-cards?${new URLSearchParams({ runId: String(runId), ...(participantId ? { participantId: String(participantId) } : {}) })}`),
+  investigatorCards: (runId: number) => request<InvestigatorCardSummary[]>(`/character-cards/investigators?${new URLSearchParams({ runId: String(runId) })}`),
   characterCardById: (id: number) => request<CharacterCard>(`/character-cards/${id}`),
   createCharacterCard: (payload: { runId: number; participantId?: number; characterText: string }) => request<CharacterCard>('/character-cards', { method: 'POST', body: body(payload) }),
   deleteCharacterCard: (id: number) => request<void>(`/character-cards/${id}`, { method: 'DELETE' }),

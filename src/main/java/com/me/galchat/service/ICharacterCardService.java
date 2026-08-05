@@ -13,7 +13,7 @@ public interface ICharacterCardService {
     CharacterCardVO create(CharacterCardCreateDTO createDTO);
     void delete(Long id);
     CharacterCardVO getById(Long id);
-    CharacterCardVO getByRunIdAndParticipantId(Long runId, Long participantId);
+    List<CocDiceCharacterVO> listInvestigatorCards(Long runId);
     DiceRollResultVO rollLuck(Long id);
     CocDiceCharacterVO requireDiceCharacter(Long runId, String characterName);
     void updateQuickNotes(Long runId, String characterName, String quickNotes);

@@ -36,10 +36,9 @@ public class CharacterCardController {
         return Result.success(characterCardService.getById(id));
     }
 
-    @GetMapping
-    public Result getByRunIdAndParticipantId(@RequestParam Long runId,
-                                             @RequestParam(required = false) Long participantId) {
-        return Result.success(characterCardService.getByRunIdAndParticipantId(runId, participantId));
+    @GetMapping("/investigators")
+    public Result listInvestigators(@RequestParam Long runId) {
+        return Result.success(characterCardService.listInvestigatorCards(runId));
     }
 
     @PostMapping("/{id}/luck")

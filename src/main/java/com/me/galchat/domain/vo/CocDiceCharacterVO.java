@@ -4,6 +4,7 @@ import java.util.Map;
 
 public record CocDiceCharacterVO(
         Long cardId,
+        String actorType,
         Long participantId,
         String name,
         Map<String, Integer> checkValues,

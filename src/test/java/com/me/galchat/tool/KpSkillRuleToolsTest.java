@@ -1,0 +1,72 @@
+package com.me.galchat.tool;
+
+import com.me.galchat.constant.ChatToolContextConstant;
+import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.exception.UserAuthException;
+import com.me.galchat.exception.UserRequestException;
+import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.ai.support.ToolCallbacks;
+
+import java.util.Map;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+class KpSkillRuleToolsTest {
+
+    @Test
+    void modelSchemaExposesOnlySkillNames() {
+        String schema = ToolCallbacks.from(
+                        new KpSkillRuleTools())[0]
+                .getToolDefinition().inputSchema();
+
+        assertThat(schema)
+                .contains("\"skillNames\"")
+                .doesNotContain("reason", "scene", "characterName");
+    }
+
+    @Test
+    void kpReceivesDescriptionsFromTheInMemoryMapInRequestOrder() {
+        KpSkillRuleTools tools = new KpSkillRuleTools();
+
+        Map<String, String> result = tools.readSkillRules(
+                List.of(" 侦查 ", "格斗:刀剑", "侦查"),
+                context(GroupChatConstant.ACTOR_KP));
+
+        assertThat(result).containsOnlyKeys("侦查", "格斗:刀剑");
+        assertThat(result.get("侦查")).contains("技能：侦查");
+        assertThat(result.get("格斗:刀剑"))
+                .contains("技能：格斗:刀剑");
+    }
+
+    @Test
+    void unknownAndBlankSkillNamesAreRejected() {
+        KpSkillRuleTools tools = new KpSkillRuleTools();
+
+        assertThatThrownBy(() -> tools.readSkillRules(
+                List.of("观察"), context(GroupChatConstant.ACTOR_KP)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("观察")
+                .hasMessageContaining("技能清单");
+        assertThatThrownBy(() -> tools.readSkillRules(
+                List.of("  "), context(GroupChatConstant.ACTOR_KP)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("技能名称");
+    }
+
+    @Test
+    void nonKpIsRejected() {
+        KpSkillRuleTools tools = new KpSkillRuleTools();
+
+        assertThatThrownBy(() -> tools.readSkillRules(
+                List.of("侦查"),
+                context(GroupChatConstant.ACTOR_CHARACTER)))
+                .isInstanceOf(UserAuthException.class);
+    }
+
+    private ToolContext context(String actorType) {
+        return new ToolContext(Map.of(
+                ChatToolContextConstant.ACTOR_TYPE_KEY, actorType));
+    }
+}

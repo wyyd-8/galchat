@@ -12,16 +12,33 @@ import java.util.StringJoiner;
 public class CharacterCardContextFormatter {
 
     public String format(List<CocDiceCharacterVO> cards) {
+        return format(cards, "investigator-cards", "investigator-card", true);
+    }
+
+    public String formatNpcs(List<CocDiceCharacterVO> cards) {
+        return format(cards, "npc-cards", "npc-card", false);
+    }
+
+    private String format(
+            List<CocDiceCharacterVO> cards,
+            String containerName,
+            String cardName,
+            boolean includeParticipant) {
         if (cards == null || cards.isEmpty()) {
-            return "<investigator-cards />";
+            return "<" + containerName + " />";
         }
-        StringBuilder result = new StringBuilder("<investigator-cards>");
+        StringBuilder result = new StringBuilder("<")
+                .append(containerName).append(">");
         for (CocDiceCharacterVO card : cards) {
-            result.append("\n<investigator-card name=\"")
-                    .append(escape(card.name()))
-                    .append("\" participant-id=\"")
-                    .append(card.participantId() == null ? "player" : card.participantId())
-                    .append("\">");
+            result.append("\n<").append(cardName).append(" name=\"")
+                    .append(escape(card.name())).append('"');
+            if (includeParticipant) {
+                result.append(" participant-id=\"")
+                        .append(card.participantId() == null
+                                ? "player" : card.participantId())
+                        .append('"');
+            }
+            result.append('>');
             result.append("\nHP：").append(value(card.hpCurrent())).append('/')
                     .append(value(card.hpMax()));
             result.append("；SAN：").append(value(card.sanCurrent())).append('/')
@@ -30,9 +47,10 @@ public class CharacterCardContextFormatter {
             result.append("；护甲：").append(value(card.armor()));
             appendCheckValues(result, card.checkValues());
             appendStatuses(result, card);
-            result.append("\n</investigator-card>");
+            result.append("\n</").append(cardName).append('>');
         }
-        return result.append("\n</investigator-cards>").toString();
+        return result.append("\n</").append(containerName).append('>')
+                .toString();
     }
 
     private void appendCheckValues(StringBuilder result, Map<String, Integer> checkValues) {

@@ -50,11 +50,11 @@ async function execute(action: () => Promise<void>) {
 }
 async function loadCard() {
   confirmDelete.value = false
-  try { card.value = await api.characterCard(props.conversation.id, selectedParticipantId.value) }
-  catch (error) {
-    if (errorMessage(error).includes('人物卡不存在')) { card.value = null; return }
-    throw error
-  }
+  const summaries = await api.investigatorCards(props.conversation.id)
+  const summary = summaries.find((item) => selectedParticipantId.value
+    ? item.actorType === 'BOT' && item.participantId === selectedParticipantId.value
+    : item.actorType === 'PLAYER')
+  card.value = summary ? await api.characterCardById(summary.cardId) : null
 }
 async function refreshOverview() {
   const [usageResult, saveResult] = await Promise.all([

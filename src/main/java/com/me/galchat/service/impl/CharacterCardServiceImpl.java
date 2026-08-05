@@ -131,24 +131,11 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     }
 
     @Override
-    public CharacterCardVO getByRunIdAndParticipantId(Long runId, Long participantId) {
-        if (runId == null) {
-            throw new UserRequestException("runId不能为空");
-        }
-        LambdaQueryWrapper<CocCharacter> query = new LambdaQueryWrapper<CocCharacter>()
-                .eq(CocCharacter::getRunId, runId);
-        if (participantId == null) {
-            query.isNull(CocCharacter::getParticipantId)
-                    .eq(CocCharacter::getActorType, "PLAYER");
-        } else {
-            query.eq(CocCharacter::getParticipantId, participantId)
-                    .eq(CocCharacter::getActorType, "BOT");
-        }
-        CocCharacter character = characterMapper.selectOne(query);
-        if (character == null) {
-            throw new UserRequestException("人物卡不存在");
-        }
-        return build(character);
+    public List<CocDiceCharacterVO> listInvestigatorCards(Long runId) {
+        return listDiceCharacters(runId).stream()
+                .filter(card -> "PLAYER".equals(card.actorType())
+                        || "BOT".equals(card.actorType()))
+                .toList();
     }
 
     @Override
@@ -457,6 +444,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         }
         return new CocDiceCharacterVO(
                 character.getId(),
+                character.getActorType(),
                 character.getParticipantId(),
                 character.getName(),
                 Collections.unmodifiableMap(checkValues),

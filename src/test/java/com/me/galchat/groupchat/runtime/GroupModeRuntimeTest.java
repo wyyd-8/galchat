@@ -120,6 +120,7 @@ class GroupModeRuntimeTest {
                 mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpSceneSelectionTools.class),
                 mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),

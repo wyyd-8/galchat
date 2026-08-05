@@ -28,8 +28,8 @@ class CocDiceSummaryFormatterTest {
 
     @Test
     void opposedRoundReturnsWinnerInsteadOfInternalSuccessRanks() {
-        DiceRollResult lynn = opposed(1L, 1, "林恩", 70, 35, "林恩");
-        DiceRollResult chen = opposed(2L, 2, "陈默", 45, 40, "林恩");
+        DiceRollResult lynn = opposed(1L, 1, "林恩", 70, 35, "SUCCESS", "林恩");
+        DiceRollResult chen = opposed(2L, 2, "陈默", 45, 40, "SUCCESS", "林恩");
 
         assertThat(formatter.formatRound(List.of(lynn, chen)))
                 .isEqualTo("林恩获胜")
@@ -38,10 +38,30 @@ class CocDiceSummaryFormatterTest {
 
     @Test
     void opposedRoundReturnsDrawWhenNoTieWinnerWasDeclared() {
-        DiceRollResult lynn = opposed(1L, 1, "林恩", 60, 30, null);
-        DiceRollResult chen = opposed(2L, 2, "陈默", 60, 30, null);
+        DiceRollResult lynn = opposed(1L, 1, "林恩", 60, 30, "SUCCESS", null);
+        DiceRollResult chen = opposed(2L, 2, "陈默", 60, 30, "SUCCESS", null);
 
         assertThat(formatter.formatRound(List.of(lynn, chen))).isEqualTo("平局");
+    }
+
+    @Test
+    void opposedRoundReturnsEveryFailureInsteadOfAWinnerWhenAllFail() {
+        DiceRollResult lynn = opposed(1L, 1, "林恩", 60, 80, "FAILURE", null);
+        DiceRollResult chen = opposed(2L, 2, "陈默", 40, 96, "FUMBLE", null);
+
+        assertThat(formatter.formatRound(List.of(lynn, chen)))
+                .isEqualTo("林恩失败；陈默大失败")
+                .doesNotContain("获胜", "平局");
+    }
+
+    @Test
+    void opposedRoundAppendsCriticalAndFumbleToTheOriginalWinnerResult() {
+        DiceRollResult lynn = opposed(
+                1L, 1, "林恩", 60, 1, "CRITICAL_SUCCESS", null);
+        DiceRollResult chen = opposed(2L, 2, "陈默", 40, 96, "FUMBLE", null);
+
+        assertThat(formatter.formatRound(List.of(lynn, chen)))
+                .isEqualTo("林恩获胜；林恩大成功；陈默大失败");
     }
 
     @Test
@@ -212,7 +232,13 @@ class CocDiceSummaryFormatterTest {
     }
 
     private DiceRollResult opposed(
-            Long id, int order, String name, int target, int roll, String tieWinner) {
+            Long id,
+            int order,
+            String name,
+            int target,
+            int roll,
+            String category,
+            String tieWinner) {
         Map<String, Object> rule = new LinkedHashMap<>();
         rule.put("cardId", id + 100);
         rule.put("characterName", name);
@@ -231,7 +257,7 @@ class CocDiceSummaryFormatterTest {
                         "OPPOSED_CHECK", null, rule)
                         .setOutcome(Map.of(
                                 "characterName", name,
-                                "category", "SUCCESS")))
+                                "category", category)))
                 .setResolvedAt(LocalDateTime.now());
     }
 }

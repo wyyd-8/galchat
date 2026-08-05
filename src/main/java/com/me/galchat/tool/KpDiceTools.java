@@ -37,7 +37,7 @@ public class KpDiceTools {
 
     @Tool(
             name = "requestOpposedCheck",
-            description = "发起至少两名角色的对抗检定；后端直接给出胜者或平局。",
+            description = "发起至少两名角色的对抗检定；后端直接给出胜者、平局或全员失败结果。",
             returnDirect = true)
     public KpDiceToolResult requestOpposedCheck(
             @ToolParam(description = "对抗原因、角色检定项和可选平局胜者")

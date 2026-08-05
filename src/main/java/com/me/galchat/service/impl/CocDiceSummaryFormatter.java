@@ -103,7 +103,37 @@ public class CocDiceSummaryFormatter {
                 requireResolution(results.getFirst()).getRule().get("tieWinnerCharacterName"));
         CocDiceRules.OpposedResolution resolution =
                 CocDiceRules.resolveOpposed(candidates, tieWinner);
-        return resolution.draw() ? "平局" : resolution.winner() + "获胜";
+        if (resolution.winner() == null && !resolution.draw()) {
+            return results.stream()
+                    .map(this::formatOpposedFailure)
+                    .collect(Collectors.joining("；"));
+        }
+        List<String> formatted = new ArrayList<>();
+        formatted.add(resolution.draw() ? "平局" : resolution.winner() + "获胜");
+        results.stream()
+                .map(this::formatOpposedExceptionalOutcome)
+                .filter(Objects::nonNull)
+                .forEach(formatted::add);
+        return String.join("；", formatted);
+    }
+
+    private String formatOpposedFailure(DiceRollResult result) {
+        Map<String, Object> outcome = requireResolution(result).getOutcome();
+        String name = stringValue(outcome, "characterName");
+        CocCheckOutcome category = CocCheckOutcome.valueOf(
+                stringValue(outcome, "category"));
+        return name + (category == CocCheckOutcome.FUMBLE ? "大失败" : "失败");
+    }
+
+    private String formatOpposedExceptionalOutcome(DiceRollResult result) {
+        Map<String, Object> outcome = requireResolution(result).getOutcome();
+        CocCheckOutcome category = CocCheckOutcome.valueOf(
+                stringValue(outcome, "category"));
+        return switch (category) {
+            case CRITICAL_SUCCESS -> stringValue(outcome, "characterName") + "大成功";
+            case FUMBLE -> stringValue(outcome, "characterName") + "大失败";
+            case SUCCESS, FAILURE -> null;
+        };
     }
 
     private String formatIndividual(DiceRollResult result) {

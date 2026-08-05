@@ -39,6 +39,19 @@ class CocDiceRulesTest {
     }
 
     @Test
+    void opposedCheckHasNoWinnerWhenEveryCandidateFails() {
+        var allFailed = List.of(
+                new CocDiceRules.OpposedCandidate("林恩", 60, 80),
+                new CocDiceRules.OpposedCandidate("陈默", 40, 96));
+
+        CocDiceRules.OpposedResolution resolution =
+                CocDiceRules.resolveOpposed(allFailed, null);
+
+        assertThat(resolution.winner()).isNull();
+        assertThat(resolution.draw()).isFalse();
+    }
+
+    @Test
     void sanLossFormulaUsesOnlyCollapsedSuccessOrFailureBranch() {
         assertThat(CocDiceRules.selectSanLossFormula(
                 CocCheckOutcome.CRITICAL_SUCCESS, "0", "1D6")).isEqualTo("0");

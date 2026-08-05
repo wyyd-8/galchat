@@ -60,6 +60,10 @@ public final class CocDiceRules {
                 .reversed()).toList();
 
         RankedCandidate first = ranked.getFirst();
+        if (first.rank() == CheckRank.FAILURE
+                || first.rank() == CheckRank.FUMBLE) {
+            return new OpposedResolution(null, false, first.rank());
+        }
         List<RankedCandidate> tied = ranked.stream()
                 .filter(candidate -> candidate.rank() == first.rank())
                 .filter(candidate -> candidate.candidate().target() == first.candidate().target())

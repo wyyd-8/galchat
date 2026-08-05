@@ -2,6 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.me.galchat.mapper.VectorStoreCleanupMapper">
 
+    <delete id="deleteWorldDetailsByWorldId">
+        DELETE FROM public.world_detail_vector_store
+        WHERE metadata::jsonb @> CONCAT('{"worldId":', #{worldId}, '}')::jsonb
+    </delete>
+
     <delete id="deleteChatHistoryByConversation">
         DELETE FROM public.chat_history_vector_store
         WHERE metadata::jsonb @> CONCAT(

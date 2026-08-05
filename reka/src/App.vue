@@ -12,7 +12,10 @@ import WorldLibrary from '@/components/WorldLibrary.vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import NoticeToast from '@/components/ui/NoticeToast.vue'
 import { api, uploadImage } from '@/api/client'
-import type { CharacterTemplate, UserInfo, UserWorld, WorldArchive, WorldDetail, WorldTemplate } from '@/api/types'
+import type {
+  CharacterTemplate, UserInfo, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldDetail,
+  WorldTemplate, WorldTemplateUsage,
+} from '@/api/types'
 import { useDirectChat } from '@/composables/useDirectChat'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
@@ -23,7 +26,7 @@ const workspace = useWorkspace()
 const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters })
 const authOpen = ref(!workspace.isLoggedIn.value)
 const view = ref<'library' | 'world' | 'group' | 'direct'>('library')
-const dialogs = reactive({ world: false, template: false, templatePreview: false, conversation: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, end: false, trpgTools: false })
+const dialogs = reactive({ world: false, template: false, templatePreview: false, templateDelete: false, templateReplaceConfirm: false, conversation: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, end: false, trpgTools: false })
 const busy = ref(false)
 const uploading = ref<'world' | 'character' | null>(null)
 const templateMode = ref<'create' | 'edit'>('create')
@@ -52,6 +55,9 @@ const saveRemark = ref('')
 const accountForm = reactive({ username: '', email: '', birthday: '', diceSkin: '' })
 const passwordForm = reactive({ email: '', newPassword: '', confirmPassword: '', code: '' })
 const selectedTemplatePreview = ref<WorldTemplate | null>(null)
+const selectedTemplateUsage = ref<WorldTemplateUsage | null>(null)
+const pendingTemplateReplacement = ref<WorldArchive | null>(null)
+const templateReplacementReport = ref<WorldArchiveReplaceResult | null>(null)
 
 const availableTemplates = computed(() => workspace.characterTemplates.value.filter((template) => template.id && !workspace.characters.value.some((character) => character.characterId === template.id)))
 const selectedConversationFormModule = computed(() => workspace.modules.value.find((item) => item.id === Number(conversationForm.moduleId)) || null)
@@ -68,6 +74,9 @@ const settingsDialogClass = computed(() => settingsTab.value === 'lore' && detai
 const characterDialogClass = computed(() => characterPickerPhase.value === 'closed'
   ? 'character-dialog'
   : `character-dialog character-dialog-${characterPickerPhase.value}`)
+const ownsSelectedTemplate = computed(() => Boolean(
+  selectedTemplatePreview.value?.authorId && selectedTemplatePreview.value.authorId === workspace.session.id,
+))
 
 let characterPickerTransition = 0
 
@@ -91,8 +100,17 @@ async function authenticate(payload: { mode: 'login' | 'register'; email: string
 function logout() { direct.close(); workspace.logout() }
 function home() { direct.close(); workspace.selectedWorldId.value = null; workspace.selectedConversationId.value = null; view.value = 'library' }
 async function selectWorld(id: number) { direct.close(); await workspace.selectWorld(id); view.value = 'world' }
-async function selectConversation(id: number) { direct.close(); await workspace.selectConversation(id); view.value = 'group' }
-async function openDirectChat(id: number) { await direct.selectCharacter(id); view.value = 'direct' }
+async function selectConversation(id: number) {
+  direct.close()
+  const loadingConversation = workspace.selectConversation(id)
+  view.value = 'group'
+  await loadingConversation
+}
+async function openDirectChat(id: number) {
+  const loadingConversation = direct.selectCharacter(id)
+  view.value = 'direct'
+  await loadingConversation
+}
 function closeDirectChat() { direct.close(); view.value = 'world' }
 async function restoreTrpg() { const id = workspace.selectedConversationId.value; if (id) await workspace.selectConversation(id) }
 
@@ -101,7 +119,11 @@ function openNewWorld() {
   dialogs.world = true
 }
 async function openTemplatePreview(id: number) {
-  await run(async () => { selectedTemplatePreview.value = await api.worldTemplate(id); dialogs.templatePreview = true })
+  await run(async () => {
+    selectedTemplatePreview.value = await api.worldTemplate(id)
+    selectedTemplateUsage.value = ownsSelectedTemplate.value ? await api.worldTemplateUsage(id) : null
+    dialogs.templatePreview = true
+  })
 }
 function createFromPreview() {
   const id = selectedTemplatePreview.value?.id; if (!id) return
@@ -249,6 +271,74 @@ async function handleImage(event: Event, target: 'world' | 'character') {
   finally { uploading.value = null }
 }
 async function importWorld(file: File) { await run(async () => { const archive = JSON.parse(await file.text()) as WorldArchive; const result = await api.importWorld(archive); await workspace.loadTemplates(); notify('模板导入完成', `${result.name} · ${result.characterCount} 位角色`, 'success') }) }
+async function finishTemplateReplacement(result: WorldArchiveReplaceResult) {
+  await workspace.loadTemplates()
+  selectedTemplatePreview.value = await api.worldTemplate(result.worldId)
+  selectedTemplateUsage.value = await api.worldTemplateUsage(result.worldId)
+  notify('世界模板已替换', `${result.matchedCharacterCount} 位角色已更新，${result.addedCharacterCount} 位角色已新增`, 'success')
+}
+async function replaceTemplateFromFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !selectedTemplatePreview.value?.id || !ownsSelectedTemplate.value) return
+  await run(async () => {
+    const archive = JSON.parse(await file.text()) as WorldArchive
+    const result = await api.replaceWorldTemplate(selectedTemplatePreview.value!.id!, archive)
+    if (result.confirmationRequired) {
+      pendingTemplateReplacement.value = archive
+      templateReplacementReport.value = result
+      dialogs.templatePreview = false
+      dialogs.templateReplaceConfirm = true
+      return
+    }
+    await finishTemplateReplacement(result)
+  })
+}
+async function confirmTemplateReplacement() {
+  const id = selectedTemplatePreview.value?.id
+  const archive = pendingTemplateReplacement.value
+  if (!id || !archive) return
+  const success = await run(async () => {
+    const result = await api.replaceWorldTemplate(id, archive, true)
+    await finishTemplateReplacement(result)
+  })
+  if (success) {
+    dialogs.templateReplaceConfirm = false
+    dialogs.templatePreview = true
+    pendingTemplateReplacement.value = null
+    templateReplacementReport.value = null
+  }
+}
+function cancelTemplateReplacement() {
+  dialogs.templateReplaceConfirm = false
+  dialogs.templatePreview = true
+  pendingTemplateReplacement.value = null
+  templateReplacementReport.value = null
+}
+function openTemplateDeleteConfirmation() {
+  dialogs.templatePreview = false
+  dialogs.templateDelete = true
+}
+function cancelTemplateDelete() {
+  dialogs.templateDelete = false
+  dialogs.templatePreview = true
+}
+async function deleteSelectedTemplate() {
+  const id = selectedTemplatePreview.value?.id
+  if (!id || !selectedTemplateUsage.value?.deletable) return
+  const success = await run(async () => {
+    await api.deleteWorldTemplate(id)
+    await workspace.loadTemplates()
+    notify('世界模板已删除', selectedTemplatePreview.value?.name || '', 'success')
+  })
+  if (success) {
+    dialogs.templateDelete = false
+    dialogs.templatePreview = false
+    selectedTemplatePreview.value = null
+    selectedTemplateUsage.value = null
+  }
+}
 async function exportWorld() {
   const id = workspace.selectedWorldId.value; if (!id) return
   await run(async () => { const text = await api.exportWorld(id); const blob = new Blob([text], { type: 'application/json' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${workspace.selectedWorld.value?.name || 'galchat-world'}.json`; link.click(); URL.revokeObjectURL(link.href) })
@@ -287,8 +377,75 @@ async function changePassword() {
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.templatePreview" :title="selectedTemplatePreview?.name || '世界模板'" :description="selectedTemplatePreview?.author ? `作者：${selectedTemplatePreview.author}` : '匿名创作者'" size="lg">
-    <div v-if="selectedTemplatePreview" class="template-preview"><div class="template-preview-cover" :style="selectedTemplatePreview.image ? { backgroundImage: `url(${selectedTemplatePreview.image})` } : {}" /><div><span class="eyebrow">{{ selectedTemplatePreview.visible === false ? '私有模板' : '公开模板' }}</span><p>{{ selectedTemplatePreview.background || '尚未填写世界背景。' }}</p></div></div>
-    <template #footer><button class="button ghost" @click="dialogs.templatePreview = false">关闭</button><button class="button primary" @click="createFromPreview"><Plus :size="16" />使用此模板</button></template>
+    <div v-if="selectedTemplatePreview" class="template-preview">
+      <div class="template-preview-cover" :style="selectedTemplatePreview.image ? { backgroundImage: `url(${selectedTemplatePreview.image})` } : {}" />
+      <div>
+        <span class="eyebrow">{{ selectedTemplatePreview.visible === false ? '私有模板' : '公开模板' }}</span>
+        <p>{{ selectedTemplatePreview.background || '尚未填写世界背景。' }}</p>
+        <small v-if="ownsSelectedTemplate && selectedTemplateUsage && !selectedTemplateUsage.deletable" class="template-usage-note">
+          已有 {{ selectedTemplateUsage.associatedWorldCount }} 个世界使用此模板，因此不能删除；仍可通过名称匹配安全替换。
+        </small>
+      </div>
+    </div>
+    <template #footer>
+      <div v-if="ownsSelectedTemplate" class="template-owner-actions">
+        <button
+          class="button ghost danger-text"
+          :disabled="!selectedTemplateUsage?.deletable || busy"
+          @click="openTemplateDeleteConfirmation"
+        >
+          <Trash2 :size="16" />删除模板
+        </button>
+        <label class="button secondary file-button" :class="{ disabled: busy }">
+          <RotateCcw :size="16" />上传并替换
+          <input type="file" accept="application/json,.json" :disabled="busy" @change="replaceTemplateFromFile" />
+        </label>
+      </div>
+      <div class="dialog-inline-actions">
+        <button class="button ghost" @click="dialogs.templatePreview = false">关闭</button>
+        <button class="button primary" @click="createFromPreview"><Plus :size="16" />使用此模板</button>
+      </div>
+    </template>
+  </BaseDialog>
+
+  <BaseDialog
+    v-model="dialogs.templateDelete"
+    title="删除世界模板"
+    description="模板、世界设定、角色模板和世界设定向量都会被永久删除。"
+  >
+    <div class="destructive-confirmation">
+      <strong>确认删除“{{ selectedTemplatePreview?.name }}”？</strong>
+      <p>当前模板没有关联世界。删除完成后无法恢复，也不能再使用它创建世界。</p>
+    </div>
+    <template #footer>
+      <button class="button ghost" :disabled="busy" @click="cancelTemplateDelete">取消</button>
+      <button class="button danger" :disabled="busy" @click="deleteSelectedTemplate"><Trash2 :size="16" />确认删除</button>
+    </template>
+  </BaseDialog>
+
+  <BaseDialog
+    v-model="dialogs.templateReplaceConfirm"
+    title="角色匹配度过低"
+    description="后端没有修改任何数据。确认后才会执行替换。"
+    size="lg"
+  >
+    <div v-if="templateReplacementReport" class="replacement-report">
+      <section class="replacement-rate">
+        <span>角色匹配度</span>
+        <strong>{{ Math.round(templateReplacementReport.matchRate * 100) }}%</strong>
+        <small>低于 50%，请确认上传的确实是这个世界模板的新版本。</small>
+      </section>
+      <div class="replacement-groups">
+        <section><strong>将更新 · {{ templateReplacementReport.matchedCharacterCount }}</strong><p>{{ templateReplacementReport.matchedCharacterNames.join('、') || '无' }}</p></section>
+        <section><strong>将新增 · {{ templateReplacementReport.addedCharacterCount }}</strong><p>{{ templateReplacementReport.addedCharacterNames.join('、') || '无' }}</p></section>
+        <section><strong>保持不变 · {{ templateReplacementReport.unchangedCharacterCount }}</strong><p>{{ templateReplacementReport.unchangedCharacterNames.join('、') || '无' }}</p></section>
+      </div>
+      <p class="replacement-warning">继续后会完整替换世界基本信息和世界设定；同名角色保留原 ID 并更新，缺失角色不会改变。</p>
+    </div>
+    <template #footer>
+      <button class="button ghost" :disabled="busy" @click="cancelTemplateReplacement">取消</button>
+      <button class="button danger" :disabled="busy" @click="confirmTemplateReplacement"><RotateCcw :size="16" />仍然替换</button>
+    </template>
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.conversation" title="建立会话" description="普通群聊可自由编排回复；CoC 跑团会按模组和行动轮推进。" size="lg">

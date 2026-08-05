@@ -23,6 +23,13 @@ export interface WorldArchive {
   characters?: Array<CharacterTemplate>
 }
 export interface WorldArchiveResult { worldId: number; name: string; detailCount: number; characterCount: number }
+export interface WorldTemplateUsage { associatedWorldCount: number; deletable: boolean }
+export interface WorldArchiveReplaceResult {
+  worldId: number; name: string; detailCount: number; characterCount: number
+  matchedCharacterCount: number; addedCharacterCount: number; unchangedCharacterCount: number
+  matchRate: number; confirmationRequired: boolean; replaced: boolean
+  matchedCharacterNames: string[]; addedCharacterNames: string[]; unchangedCharacterNames: string[]
+}
 
 export interface Character {
   userWorldId: number; characterId: number; characterName: string; characterImage?: string

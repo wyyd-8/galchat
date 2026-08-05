@@ -53,10 +53,10 @@ export function useDirectChat(context: DirectChatContext) {
     if (!world?.id || !world.worldId || !character) return null
     return { type: 'chat', worldId: world.worldId, userWorldId: world.id, characterId: character.characterId, message }
   }
-  async function scrollToBottom() { await nextTick(); scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior: 'smooth' }) }
+  async function scrollToBottom(behavior: ScrollBehavior = 'auto') { await nextTick(); scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior }) }
 
   async function selectCharacter(id: number) {
-    selectedCharacterId.value = id; input.value = ''; messages.value = []; closeSocket()
+    selectedCharacterId.value = id; input.value = ''; messages.value = []; hasOlderMessages.value = false; closeSocket()
     const world = context.world.value
     if (!world) return
     loading.history = true
@@ -65,7 +65,7 @@ export function useDirectChat(context: DirectChatContext) {
       messages.value = history.flatMap(historyMessages)
       hasOlderMessages.value = history.length === 30
       if (world.thinkStatus === false) void ensureSocket(world.id).catch(() => undefined)
-      await scrollToBottom()
+      await scrollToBottom('auto')
     } catch (error) { notify('单聊记录加载失败', errorMessage(error), 'danger') }
     finally { loading.history = false }
   }
@@ -74,11 +74,17 @@ export function useDirectChat(context: DirectChatContext) {
     if (!world || !character || !hasOlderMessages.value || loading.history) return
     const beforeId = messages.value.reduce((minimum, item) => item.historyId ? Math.min(minimum, item.historyId) : minimum, Number.POSITIVE_INFINITY)
     if (!Number.isFinite(beforeId)) return
+    const viewport = scroller.value
+    const previousHeight = viewport?.scrollHeight ?? 0
     loading.history = true
     try {
       const history = await api.history(world.id, character.characterId, 30, beforeId)
+      if (world.id !== context.world.value?.id || character.characterId !== selectedCharacterId.value) return
+      const previousTop = viewport?.scrollTop ?? 0
       messages.value = [...history.flatMap(historyMessages), ...messages.value]
       hasOlderMessages.value = history.length === 30
+      await nextTick()
+      if (viewport && scroller.value === viewport) viewport.scrollTop = previousTop + viewport.scrollHeight - previousHeight
     } catch (error) { notify('更早记录加载失败', errorMessage(error), 'danger') }
     finally { loading.history = false }
   }
@@ -166,7 +172,10 @@ export function useDirectChat(context: DirectChatContext) {
           } else if (chunk.type === 'tool') {
             assistant = null; messages.value.push({ id: `tool-${Date.now()}-${Math.random()}`, role: 'tool', content: chunk.content || '调用了工具' })
           } else if (chunk.type === 'response' || chunk.type === 'reponse') {
-            if (!assistant) { assistant = { id: `assistant-${Date.now()}-${Math.random()}`, role: 'assistant', content: '' }; messages.value.push(assistant) }
+            if (!assistant) {
+              messages.value.push({ id: `assistant-${Date.now()}-${Math.random()}`, role: 'assistant', content: '' })
+              assistant = messages.value.at(-1)!
+            }
             assistant.content += chunk.content || ''; received ||= Boolean(chunk.content?.trim())
           }
           void scrollToBottom()

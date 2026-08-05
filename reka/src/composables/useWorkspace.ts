@@ -156,7 +156,7 @@ export function useWorkspace() {
     await selectConversation(created.id); notify(payload.mode === 'trpg' ? 'CoC 跑团已建立' : '普通群聊已建立', created.title, 'success')
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; currentTurn.value = null; latestDiceRoll.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; latestDiceRoll.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
       const [conversationDetail, history, plan, turn] = await Promise.all([
         api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id),
@@ -169,7 +169,7 @@ export function useWorkspace() {
       participantIds.value = [...new Set(replyPlan.value.groups
         .flatMap((group) => group.items.map((item) => item.actorId))
         .filter((id): id is number => typeof id === 'number'))]
-      await scrollToBottom()
+      await scrollToBottom('auto')
     } catch (error) { notify('会话加载失败', errorMessage(error), 'danger') }
     finally { loading.chat = false }
   }
@@ -179,14 +179,21 @@ export function useWorkspace() {
   }
   async function loadOlderGroupMessages() {
     if (!selectedConversationId.value || !hasOlderGroupMessages.value || loading.chat) return
+    const conversationId = selectedConversationId.value
     const beforeId = messages.value.filter((item) => item.id > 0).reduce((minimum, item) => Math.min(minimum, item.id), Number.POSITIVE_INFINITY)
     if (!Number.isFinite(beforeId)) return
+    const viewport = messageScroller.value
+    const previousHeight = viewport?.scrollHeight ?? 0
     loading.chat = true
     try {
-      const older = await api.groupMessages(selectedConversationId.value, beforeId, 50)
+      const older = await api.groupMessages(conversationId, beforeId, 50)
+      if (conversationId !== selectedConversationId.value) return
+      const previousTop = viewport?.scrollTop ?? 0
       const known = new Set(messages.value.map((item) => item.id))
       messages.value = [...older.filter((item) => !known.has(item.id)), ...messages.value].sort((a, b) => a.sequenceNo - b.sequenceNo)
       hasOlderGroupMessages.value = older.length === 50
+      await nextTick()
+      if (viewport && messageScroller.value === viewport) viewport.scrollTop = previousTop + viewport.scrollHeight - previousHeight
     } finally { loading.chat = false }
   }
   async function withdrawGroupTurn() {
@@ -375,7 +382,7 @@ export function useWorkspace() {
     }
     finally { loading.sending = false; await scrollToBottom() }
   }
-  async function scrollToBottom() { await nextTick(); messageScroller.value?.scrollTo({ top: messageScroller.value.scrollHeight, behavior: 'smooth' }) }
+  async function scrollToBottom(behavior: ScrollBehavior = 'auto') { await nextTick(); messageScroller.value?.scrollTo({ top: messageScroller.value.scrollHeight, behavior }) }
 
   window.addEventListener(UNAUTHORIZED_EVENT, logout)
   onMounted(boot)

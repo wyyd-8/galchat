@@ -2,4 +2,22 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.me.galchat.mapper.WorldTemplateMapper">
 
+    <select id="selectAccessibleByIdForCreate" resultType="com.me.galchat.domain.po.WorldTemplate">
+        SELECT id, name, image, author, background, author_id, visible
+        FROM world_template
+        WHERE id = #{id}
+          AND (visible IS DISTINCT FROM FALSE OR author_id = #{userId})
+        FOR KEY SHARE
+    </select>
+
+    <delete id="deleteOwnedTemplateIfUnused">
+        DELETE FROM world_template template
+        WHERE template.id = #{id}
+          AND template.author_id = #{authorId}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM user_world_prefix user_world
+              WHERE user_world.world_id = template.id
+          )
+    </delete>
 </mapper>

@@ -1,7 +1,8 @@
 import type {
   ApiResult, Character, CharacterCard, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, Session, TrpgSave, UserInfo, UserToken,
-  UserWorld, WorldArchive, WorldArchiveResult, WorldDetail, WorldSave, WorldTemplate,
+  UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
+  WorldTemplate, WorldTemplateUsage,
 } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
@@ -87,6 +88,12 @@ export const api = {
   deleteWorldDetail: (worldId: number, detailId: number) => request<void>(`/world/templates/${worldId}/${detailId}`, { method: 'DELETE' }),
   exportWorld: async (id: number) => (await raw(`/world/templates/my/${id}/export`)).text(),
   importWorld: (payload: WorldArchive) => request<WorldArchiveResult>('/world/import', { method: 'POST', body: body(payload) }),
+  worldTemplateUsage: (id: number) => request<WorldTemplateUsage>(`/world/templates/${id}/usage`),
+  replaceWorldTemplate: (id: number, payload: WorldArchive, confirmLowMatch = false) =>
+    request<WorldArchiveReplaceResult>(`/world/templates/${id}/replace?confirmLowMatch=${confirmLowMatch}`, {
+      method: 'PUT', body: body(payload),
+    }),
+  deleteWorldTemplate: (id: number) => request<void>(`/world/templates/${id}`, { method: 'DELETE' }),
   worldSave: (id: number) => request<WorldSave | null>(`/world-saves/${id}`),
   saveWorld: (id: number, remark: string) => request<WorldSave>(`/world-saves/${id}`, { method: 'POST', body: body({ remark }) }),
   loadWorld: (id: number) => request<void>(`/world-saves/${id}/load`, { method: 'POST' }),

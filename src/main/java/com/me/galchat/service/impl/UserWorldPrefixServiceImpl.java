@@ -54,8 +54,9 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void createUserWorld(Long userId, UserWorldPrefix userWorldPrefix) {
-        WorldTemplate template = worldTemplateService.getWorldTemplateById(userId, userWorldPrefix.getWorldId());
+        WorldTemplate template = worldTemplateService.getWorldTemplateForCreate(userId, userWorldPrefix.getWorldId());
         UserWorldPrefix newUserWorld = new UserWorldPrefix()
                 .setUserId(userId)
                 .setWorldId(template.getId())

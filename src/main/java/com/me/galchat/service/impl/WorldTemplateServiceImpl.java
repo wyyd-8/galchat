@@ -49,6 +49,15 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
     }
 
     @Override
+    public WorldTemplate getWorldTemplateForCreate(Long userId, Long id) {
+        WorldTemplate template = baseMapper.selectAccessibleByIdForCreate(id, userId);
+        if (template == null) {
+            throw new UserRequestException("世界模板不存在");
+        }
+        return template;
+    }
+
+    @Override
     public WorldTemplate getOwnWorldTemplate(Long userId, Long id) {
         WorldTemplate template = getById(id);
         if (template == null) {

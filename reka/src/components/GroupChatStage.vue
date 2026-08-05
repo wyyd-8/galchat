@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Archive, ChevronDown, CircleStop, Footprints, GripVertical, History, LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, RotateCcw, Save, Send, Trash2, UsersRound } from '@lucide/vue'
 import {
-  CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport,
+  CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
 import type { Character, Conversation, CurrentTurn, GroupMessage, ReplyPlan } from '@/api/types'
@@ -14,6 +14,10 @@ const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, 
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
+const reasoningOpen = reactive<Record<number, boolean>>({})
+const reasoningPhase = new Map<number, 'thinking' | 'main' | 'idle'>()
+const lastScrollTop = ref(0)
+const initialScrollPending = ref(true)
 const items = computed(() => props.replyPlan.groups[0]?.items || [])
 const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && props.currentTurn.inputType === 'message'))
 const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
@@ -37,11 +41,55 @@ const composerPlaceholder = computed(() => {
   if (props.currentTurn?.inputType === 'dice') return '请在跑团工具中完成待处理投骰'
   return '等待当前行动轮推进'
 })
+let latestScrollFrame = 0
+
+watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(message.replyStepId && props.reasoning[message.replyStepId])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
+watch(() => props.conversation.id, () => { lastScrollTop.value = 0; initialScrollPending.value = true }, { immediate: true })
+watch(() => props.loading, (loading) => {
+  if (!loading && initialScrollPending.value) { initialScrollPending.value = false; scrollToLatest() }
+}, { immediate: true, flush: 'post' })
+watch(() => `${props.sending}:${props.messages.map((message) => `${message.id}:${message.content.length}:${message.decisionContent?.length || 0}:${message.replyStepId ? props.reasoning[message.replyStepId]?.length || 0 : 0}`).join('|')}`, () => {
+  if (props.sending) scrollToLatest()
+}, { flush: 'post' })
+watch(() => props.sending, (sending, wasSending) => { if (!sending && wasSending) scrollToLatest() }, { flush: 'post' })
+onBeforeUnmount(() => cancelAnimationFrame(latestScrollFrame))
+
+function syncReasoningState() {
+  props.messages.forEach((message) => {
+    const step = message.replyStepId
+    if (!step || !props.reasoning[step]) return
+    const phase = message.status === 'streaming' && !message.content.trim() ? 'thinking' : message.content.trim() ? 'main' : 'idle'
+    const previous = reasoningPhase.get(step)
+    if (!previous) reasoningOpen[step] = phase === 'thinking'
+    else if (previous === 'thinking' && phase !== 'thinking') reasoningOpen[step] = false
+    reasoningPhase.set(step, phase)
+  })
+}
+
 function character(id?: number) { return props.characters.find((item) => item.characterId === id) }
 function drop(index: number) { if (draggedIndex.value !== null) emit('movePlanItem', draggedIndex.value, index); draggedIndex.value = null }
 function addActor() { const id = Number(addActorId.value); if (id) { emit('addPlanItem', id); addActorId.value = '' } }
 function keydown(event: KeyboardEvent) { if (!event.isComposing && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); emit('send') } }
-function bindScroller(element: unknown) { scroller.value = element instanceof HTMLElement ? element : null }
+function scrollToLatest() {
+  void nextTick(() => {
+    cancelAnimationFrame(latestScrollFrame)
+    latestScrollFrame = requestAnimationFrame(() => {
+      const viewport = scroller.value
+      if (viewport) viewport.scrollTop = viewport.scrollHeight
+    })
+  })
+}
+function bindScroller(element: unknown) {
+  scroller.value = element instanceof HTMLElement ? element : null
+  lastScrollTop.value = scroller.value?.scrollTop ?? 0
+}
+function handleScroll(event: Event) {
+  const viewport = event.currentTarget as HTMLElement
+  const currentTop = viewport.scrollTop
+  const movingUp = currentTop < lastScrollTop.value
+  lastScrollTop.value = currentTop
+  if (movingUp && currentTop <= 32 && props.hasOlderMessages && !props.loading) emit('loadEarlier')
+}
 </script>
 
 <template>
@@ -49,7 +97,7 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
     <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已关闭' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button v-if="conversation.mode === 'chat' && conversation.status === 'active'" class="button ghost" :disabled="sending" @click="emit('withdraw')"><RotateCcw :size="16" />撤回一轮</button><button v-if="conversation.status === 'active'" class="button ghost danger-text" @click="emit('end')"><CircleStop :size="16" />关闭会话</button></div></header>
     <div class="chat-layout">
       <section class="chat-main">
-        <ScrollAreaRoot class="message-scroll"><ScrollAreaViewport :ref="bindScroller" class="message-viewport">
+        <div class="message-scroll"><div :ref="bindScroller" class="message-viewport" @scroll="handleScroll"><div>
           <div v-if="loading && !messages.length" class="chat-loading"><LoaderCircle class="spin" :size="22" />载入消息</div>
           <button v-else-if="hasOlderMessages" class="load-earlier-button" :disabled="loading" @click="emit('loadEarlier')"><LoaderCircle v-if="loading" class="spin" :size="14" /><History v-else :size="14" />加载更早记录</button>
           <div v-else-if="!messages.length" class="empty-chat"><MessageSquareText :size="30" /><h2>{{ conversation.mode === 'trpg' ? '跑团尚未开始' : '对话从这里开始' }}</h2><p>{{ emptyDescription }}</p></div>
@@ -57,7 +105,7 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>
             <div class="message-content">
               <div class="message-meta"><strong>{{ message.speakerType === 'user' ? '你' : message.speakerType === 'narrator' ? '叙事' : message.speakerType === 'kp' ? (message.speakerName || 'KP') : message.speakerName || character(message.speakerId)?.characterName || '角色' }}</strong><span v-if="message.status === 'streaming'" class="typing-dot">正在回应</span><span v-if="message.status === 'failed'" class="failed-label">生成失败</span></div>
-              <CollapsibleRoot v-if="message.replyStepId && reasoning[message.replyStepId]" class="reasoning-block">
+              <CollapsibleRoot v-if="message.replyStepId && reasoning[message.replyStepId]" v-model:open="reasoningOpen[message.replyStepId]" class="reasoning-block">
                 <CollapsibleTrigger class="reasoning-trigger">思考过程 <ChevronDown :size="14" /></CollapsibleTrigger>
                 <CollapsibleContent class="reasoning-content">{{ reasoning[message.replyStepId] }}</CollapsibleContent>
               </CollapsibleRoot>
@@ -66,7 +114,7 @@ function bindScroller(element: unknown) { scroller.value = element instanceof HT
               <button v-if="conversation.mode === 'trpg' && message.speakerType === 'character' && message.status === 'failed'" class="retry-step-button" :disabled="sending" @click="emit('retry', message)"><RefreshCw :size="13" />重试该角色行动</button>
             </div>
           </article>
-        </ScrollAreaViewport><ScrollAreaScrollbar orientation="vertical" class="scrollbar"><ScrollAreaThumb class="scrollbar-thumb" /></ScrollAreaScrollbar></ScrollAreaRoot>
+        </div></div></div>
         <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'selection'" class="scene-selection-panel">
           <strong>选择调查地点</strong><span>{{ currentTurn.sceneName || 'KP 已给出本轮可选地点' }}</span>
           <div class="scene-selection-options"><button v-for="[number, name] in selectionOptions" :key="number" class="button secondary" :disabled="sending" @click="emit('selectScene', number)"><b>{{ number }}</b>{{ name }}</button></div>

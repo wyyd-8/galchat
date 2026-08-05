@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface VectorStoreCleanupMapper {
 
+    int deleteWorldDetailsByWorldId(@Param("worldId") Long worldId);
+
     int deleteChatHistoryByConversation(@Param("userWorldId") Long userWorldId,
                                         @Param("characterId") Long characterId);
 

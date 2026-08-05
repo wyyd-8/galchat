@@ -99,7 +99,7 @@ SSE 接口返回 `Content-Type: text/event-stream`，每个事件的 `data:` 是
 
 注册验证码目前仅允许形如 `8位学号@bjtu.edu.cn` 的校园邮箱，有效期 5 分钟；同一邮箱 1 分钟内不能重复发送。验证码连续校验失败过多时会冻结 30 分钟。
 
-## 3. 世界模板、用户世界与归档（15 个）
+## 3. 世界模板、用户世界与归档（18 个）
 
 | 方法与路径 | 请求 | `data` | 说明 |
 | --- | --- | --- | --- |
@@ -110,6 +110,9 @@ SSE 接口返回 `Content-Type: text/event-stream`，每个事件的 `data:` 是
 | `PUT /world/templates/my/{userWorldId}` | `WorldTemplateRequest` | 无 | 更新本人世界模板 |
 | `GET /world/templates/my/{userWorldId}/export` | 无 | 原始 JSON 文件 | 导出世界模板、详情和角色模板；不使用 `Result` 包装 |
 | `POST /world/import` | `WorldArchive` | `WorldArchiveImportResult` | 导入世界包并创建新的世界模板 |
+| `GET /world/templates/{id}/usage` | 路径 `id` | `WorldTemplateUsage` | 作者查询模板关联世界数量及当前是否可删除 |
+| `PUT /world/templates/{id}/replace?confirmLowMatch=false` | `WorldArchive` | `WorldArchiveReplaceResult` | 作者按角色名称替换模板；低匹配率时先返回确认要求而不写数据 |
+| `DELETE /world/templates/{id}` | 路径 `id` | 无 | 作者删除零关联世界的模板，并清理详情、角色和详情向量 |
 | `GET /world/templates/{worldId}/details` | 路径 `worldId` | `WorldDetail[]` | 查询世界详情条目 |
 | `POST /world/templates/{worldId}/details` | `WorldDetailRequest` | 无 | 给本人模板新增详情并更新向量数据 |
 | `DELETE /world/templates/{worldId}/{detailId}` | 路径 ID | 无 | 删除本人模板的详情条目并清理向量数据 |
@@ -178,6 +181,10 @@ SSE 接口返回 `Content-Type: text/event-stream`，每个事件的 `data:` 是
 ```
 
 当前只支持 `formatVersion = 1`；世界 `name/background`、每个详情的 `details` 和每个角色的 `name` 必须非空。导入结果字段为 `worldId`、`name`、`detailCount`、`characterCount`。导出响应带 `Content-Disposition: attachment; filename="galchat-world-{userWorldId}.json"`。
+
+模板替换按裁剪后的角色名匹配，英文大小写不敏感；重名会被拒绝。匹配角色保留原角色模板 ID 并完整更新，上传文件中的额外角色会新增，缺失的旧角色保持不变。匹配率按“匹配旧角色数 / 原模板角色总数”计算；原模板无角色时为 100%。低于 50% 且未传 `confirmLowMatch=true` 时，响应的 `confirmationRequired=true`、`replaced=false`，不会修改任何数据。替换不会改写已有用户世界的名称和封面。
+
+`WorldArchiveReplaceResult` 还会返回 `matchedCharacterCount/addedCharacterCount/unchangedCharacterCount/matchRate` 以及三类角色名称列表，供客户端展示确认信息。模板删除使用事务内条件删除；只要存在任意 `user_world_prefix.world_id` 关联就会拒绝。
 
 ## 4. 角色模板与用户角色（9 个）
 

@@ -21,6 +21,7 @@ public class GroupTurnPlanResolver {
     private final TrpgCombatLifecycleService combatLifecycleService;
     private final TrpgChildSceneCommandService
             childSceneCommandService;
+    private final TrpgProposalOrderService proposalOrderService;
 
     public ResolvedTurnPlan resolve(
             GroupConversation conversation, GroupModeRuntime runtime) {
@@ -41,6 +42,8 @@ public class GroupTurnPlanResolver {
                     conversation.getId(),
                     selection.contextId(),
                     actions);
+            actions = proposalOrderService.orderForTurn(
+                    conversation, actions);
         }
         return new ResolvedTurnPlan(
                 selection.source(),
@@ -63,6 +66,8 @@ public class GroupTurnPlanResolver {
     public void onTurnCompleted(
             GroupConversation conversation,
             com.me.galchat.domain.po.GroupChatTurn turn) {
+        proposalOrderService.onTurnCompleted(
+                conversation, turn);
         if (combatLifecycleService.finalizeStartAfterTurn(
                 conversation, turn)) {
             return;

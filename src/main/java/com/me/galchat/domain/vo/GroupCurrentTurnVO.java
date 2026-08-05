@@ -10,6 +10,7 @@ public record GroupCurrentTurnVO(
         String status,
         Long stepId,
         String actionType,
+        Integer itemOrder,
         String inputType,
         String sceneName,
         boolean waitingForUser,

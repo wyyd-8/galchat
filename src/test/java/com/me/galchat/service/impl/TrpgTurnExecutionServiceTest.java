@@ -10,6 +10,7 @@ import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.GroupChatEvent;
+import com.me.galchat.domain.vo.GroupCurrentTurnVO;
 import com.me.galchat.groupchat.decision.GroupAgentDecisionStore;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
@@ -970,6 +971,61 @@ class TrpgTurnExecutionServiceTest {
                                 message.getContent().contains("结束当前场景探索")
                                         && "end-1".equals(
                                         message.getClientRequestId())));
+    }
+
+    @Test
+    void currentTurnExposesTheWaitingInvestigatorsProposalOrder() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversationService,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class),
+                turnMapper,
+                stepMapper,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                mock(GroupChatService.class),
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L)
+                .setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(102L)
+                .setTurnId(101L)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setItemOrder(1)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(turnMapper.selectList(any())).thenReturn(List.of(turn));
+        when(stepMapper.selectList(any())).thenReturn(List.of(step));
+
+        GroupCurrentTurnVO current = service.current(7L);
+
+        assertThat(current.itemOrder()).isEqualTo(1);
     }
 
     @Test

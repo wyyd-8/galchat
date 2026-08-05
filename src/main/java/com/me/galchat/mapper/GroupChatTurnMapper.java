@@ -34,4 +34,22 @@ public interface GroupChatTurnMapper extends BaseMapper<GroupChatTurn> {
             """)
     Long countNonTerminalByConversationId(@Param("conversationId") Long conversationId);
 
+    @Select("""
+            SELECT COALESCE(MAX(turn_row.id), 0)
+            FROM group_chat_turn turn_row
+            WHERE turn_row.conversation_id = #{conversationId}
+              AND turn_row.plan_source = 'SCENE'
+              AND turn_row.status = 'completed'
+              AND EXISTS (
+                    SELECT 1
+                    FROM group_chat_reply_step step
+                    WHERE step.turn_id = turn_row.id
+                      AND step.action_type = 'trpg_scene'
+                      AND step.speaker_type IN ('user', 'character')
+                      AND step.status = 'completed'
+              )
+            """)
+    Long selectLatestCompletedSceneProposalTurnId(
+            @Param("conversationId") Long conversationId);
+
 }

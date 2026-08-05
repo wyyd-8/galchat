@@ -399,6 +399,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `status` | string | 如 `running/waiting_input/paused/waiting_dice/failed/blocked` |
 | `stepId` | integer/null | 当前步骤 ID |
 | `actionType` | string/null | 当前动作类型 |
+| `itemOrder` | integer/null | 当前步骤在本轮计划中的顺序；探索场景中为 `1` 表示当前调查员是首位提案者 |
 | `inputType` | string/null | `message/selection/continue/dice` |
 | `sceneName` | string/null | 当前分组/场景名 |
 | `waitingForUser` | boolean | 是否在等待用户调查员输入 |

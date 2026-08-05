@@ -21,6 +21,9 @@ const initialScrollPending = ref(true)
 const items = computed(() => props.replyPlan.groups[0]?.items || [])
 const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && props.currentTurn.inputType === 'message'))
 const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
+const sceneProposalRole = computed(() => props.currentTurn?.waitingForUser && props.currentTurn.actionType === 'trpg_scene'
+  ? (props.currentTurn.itemOrder === 1 ? 'lead' : 'contributor')
+  : null)
 const canEditPlan = computed(() => props.conversation.mode === 'chat' && props.replyPlan.source === 'USER')
 const emptyDescription = computed(() => props.conversation.mode === 'trpg'
   ? '先在跑团工具中确认玩家与 AI 调查员人物卡，再开始行动轮。'
@@ -36,6 +39,8 @@ const turnButtonLabel = computed(() => {
 })
 const composerPlaceholder = computed(() => {
   if (props.conversation.status !== 'active') return '这个会话已经关闭'
+  if (waitingForMessage.value && sceneProposalRole.value === 'lead') return '提出一个具体、可执行的场景计划…'
+  if (waitingForMessage.value && sceneProposalRole.value === 'contributor') return '回应已有计划，或提出补充与替代方案…'
   if (waitingForMessage.value) return props.conversation.mode === 'trpg' ? '输入玩家调查员的行动…' : '输入群聊消息…'
   if (props.currentTurn?.inputType === 'selection') return '请从上方选择调查地点'
   if (props.currentTurn?.inputType === 'dice') return '请在跑团工具中完成待处理投骰'
@@ -118,6 +123,10 @@ function handleScroll(event: Event) {
         <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'selection'" class="scene-selection-panel">
           <strong>选择调查地点</strong><span>{{ currentTurn.sceneName || 'KP 已给出本轮可选地点' }}</span>
           <div class="scene-selection-options"><button v-for="[number, name] in selectionOptions" :key="number" class="button secondary" :disabled="sending" @click="emit('selectScene', number)"><b>{{ number }}</b>{{ name }}</button></div>
+        </div>
+        <div v-if="sceneProposalRole" class="scene-selection-panel">
+          <strong>{{ sceneProposalRole === 'lead' ? '你是本轮首位提案者' : '回应本轮共同计划' }}</strong>
+          <span>{{ sceneProposalRole === 'lead' ? '请先提出一个具体、可执行的计划；其他调查员随后可以补充或提出替代方案。' : '你可以支持、补充、修改或反对已有计划，也可以提出替代方案。' }}</span>
         </div>
         <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType === 'combat_defense'" class="scene-selection-panel">
           <strong>轮到你防守</strong><span>{{ currentTurn.sceneName || '请选择闪避、反击或 KP 给出的其他合法反应' }}</span>

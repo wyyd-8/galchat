@@ -92,6 +92,10 @@ class TrpgGroupAgentPolicyTest {
                 .contains("最多调用一个会改变状态的掷骰工具")
                 .contains("本次响应会暂停")
                 .contains("恢复同一步骤");
+        assertThat(invocation.prompt().getInstructions().getLast().getText())
+                .contains("共同场景提案")
+                .contains("统一裁定")
+                .contains("不要按调查员逐条机械回复");
         assertThat(policy.actorName(5L, kp)).isEqualTo("KP");
         assertThat(invocation.tools())
                 .containsExactly(
@@ -376,7 +380,26 @@ class TrpgGroupAgentPolicyTest {
                 .contains("</decision>")
                 .contains("<action>")
                 .contains("</action>")
-                .contains("决策必须先于行动");
+                .contains("决策必须先于行动")
+                .contains("本轮首位提案者")
+                .contains("首先提出一个具体可执行的计划")
+                .contains("不能替其他调查员决定");
+
+        var contributor = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_TRPG_SCENE,
+                        GroupChatConstant.ACTOR_CHARACTER,
+                        10L,
+                        "scene:1",
+                        "场景",
+                        1,
+                        2),
+                new GroupContextMaterial(List.of()));
+        assertThat(contributor.prompt().getInstructions().getLast().getText())
+                .contains("本轮后续调查员")
+                .contains("支持、补充、修改、反对或提出替代计划")
+                .contains("不得假设尚未经过KP裁定的行动已经成功");
     }
 
     @Test

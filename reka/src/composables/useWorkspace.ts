@@ -261,7 +261,8 @@ export function useWorkspace() {
     } else if (event.eventType === 'turn.waiting_input' && event.turnId && event.replyStepId) {
       currentTurn.value = {
         turnId: event.turnId, status: 'waiting_input', stepId: event.replyStepId,
-        actionType: event.actionType, inputType: event.actionType === 'trpg_scene_selection' ? 'selection' : 'message',
+        actionType: event.actionType, itemOrder: event.itemOrder,
+        inputType: event.actionType === 'trpg_scene_selection' ? 'selection' : 'message',
         sceneName: event.groupName, waitingForUser: true, sceneOptions: event.sceneOptions || {},
       }
     } else if (event.eventType === 'turn.paused' && event.turnId) {

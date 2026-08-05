@@ -30,7 +30,8 @@ class GroupTurnPlanResolverTest {
                 mock(TrpgSceneLifecycleService.class),
                 mock(TrpgRunLifecycleService.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(TrpgChildSceneCommandService.class));
+                mock(TrpgChildSceneCommandService.class),
+                mock(TrpgProposalOrderService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -66,7 +67,8 @@ class GroupTurnPlanResolverTest {
                 mock(TrpgSceneLifecycleService.class),
                 mock(TrpgRunLifecycleService.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(TrpgChildSceneCommandService.class));
+                mock(TrpgChildSceneCommandService.class),
+                mock(TrpgProposalOrderService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -88,7 +90,8 @@ class GroupTurnPlanResolverTest {
                 lifecycleService,
                 mock(TrpgRunLifecycleService.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(TrpgChildSceneCommandService.class));
+                mock(TrpgChildSceneCommandService.class),
+                mock(TrpgProposalOrderService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
 
@@ -113,7 +116,8 @@ class GroupTurnPlanResolverTest {
                 sceneLifecycle,
                 runLifecycle,
                 mock(TrpgCombatLifecycleService.class),
-                mock(TrpgChildSceneCommandService.class));
+                mock(TrpgChildSceneCommandService.class),
+                mock(TrpgProposalOrderService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         when(runLifecycle.finalizeAfterTurn(conversation))
@@ -137,13 +141,16 @@ class GroupTurnPlanResolverTest {
                 mock(GroupReplyPlanService.class);
         TrpgSceneLifecycleService sceneLifecycle =
                 mock(TrpgSceneLifecycleService.class);
+        TrpgProposalOrderService proposalOrder =
+                mock(TrpgProposalOrderService.class);
         GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
                 replyPlanService,
                 mock(TrpgSceneSelectionService.class),
                 sceneLifecycle,
                 mock(TrpgRunLifecycleService.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(TrpgChildSceneCommandService.class));
+                mock(TrpgChildSceneCommandService.class),
+                proposalOrder);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -171,6 +178,9 @@ class GroupTurnPlanResolverTest {
         when(sceneLifecycle.remainingActions(
                 7L, 100L, List.of(ended, kp)))
                 .thenReturn(List.of(kp));
+        when(proposalOrder.orderForTurn(
+                conversation, List.of(kp)))
+                .thenReturn(List.of(kp));
 
         var result = resolver.resolve(conversation, runtime);
 
@@ -183,13 +193,16 @@ class GroupTurnPlanResolverTest {
                 mock(TrpgSceneLifecycleService.class);
         TrpgChildSceneCommandService childSceneCommandService =
                 mock(TrpgChildSceneCommandService.class);
+        TrpgProposalOrderService proposalOrderService =
+                mock(TrpgProposalOrderService.class);
         GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
                 mock(GroupReplyPlanService.class),
                 mock(TrpgSceneSelectionService.class),
                 sceneLifecycle,
                 mock(TrpgRunLifecycleService.class),
                 mock(TrpgCombatLifecycleService.class),
-                childSceneCommandService);
+                childSceneCommandService,
+                proposalOrderService);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         GroupChatTurn turn = new GroupChatTurn()
@@ -200,9 +213,68 @@ class GroupTurnPlanResolverTest {
 
         resolver.onTurnCompleted(conversation, turn);
 
+        verify(proposalOrderService).onTurnCompleted(
+                conversation, turn);
         verify(childSceneCommandService)
                 .finalizeStartAfterTurn(conversation, turn);
         verify(sceneLifecycle, never()).finalizeAfterTurn(
                 conversation, GroupChatConstant.PLAN_SOURCE_SCENE);
+    }
+
+    @Test
+    void sceneTurnUsesGlobalProposalOrderAfterRemovingInactiveActors() {
+        GroupReplyPlanService replyPlanService =
+                mock(GroupReplyPlanService.class);
+        TrpgSceneLifecycleService sceneLifecycle =
+                mock(TrpgSceneLifecycleService.class);
+        TrpgProposalOrderService proposalOrder =
+                mock(TrpgProposalOrderService.class);
+        GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
+                replyPlanService,
+                mock(TrpgSceneSelectionService.class),
+                sceneLifecycle,
+                mock(TrpgRunLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(TrpgChildSceneCommandService.class),
+                proposalOrder);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setActiveReplyPlanId(10L);
+        GroupReplyPlanSelection selection =
+                new GroupReplyPlanSelection(
+                        GroupChatConstant.PLAN_SOURCE_SCENE,
+                        100L, "scene:100", "地下室",
+                        1, List.of());
+        when(replyPlanService.currentGroupForExecution(conversation))
+                .thenReturn(selection);
+        GroupActionSpec user = new GroupActionSpec(
+                GroupChatConstant.ACTION_TRPG_SCENE,
+                GroupChatConstant.ACTOR_USER,
+                71L, "scene:100", "地下室", 1, 1);
+        GroupActionSpec agent = new GroupActionSpec(
+                GroupChatConstant.ACTION_TRPG_SCENE,
+                GroupChatConstant.ACTOR_CHARACTER,
+                8L, "scene:100", "地下室", 1, 2);
+        GroupActionSpec kp = new GroupActionSpec(
+                GroupChatConstant.ACTION_TRPG_SCENE,
+                GroupChatConstant.ACTOR_KP,
+                null, "scene:100", "地下室", 1, 3);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupTurnPolicy turnPolicy = mock(GroupTurnPolicy.class);
+        when(runtime.turnPolicy()).thenReturn(turnPolicy);
+        when(turnPolicy.plan(conversation, selection))
+                .thenReturn(List.of(user, agent, kp));
+        when(sceneLifecycle.remainingActions(
+                7L, 100L, List.of(user, agent, kp)))
+                .thenReturn(List.of(user, agent, kp));
+        when(proposalOrder.orderForTurn(
+                conversation, List.of(user, agent, kp)))
+                .thenReturn(List.of(agent, user, kp));
+
+        var result = resolver.resolve(conversation, runtime);
+
+        assertThat(result.actions())
+                .containsExactly(agent, user, kp);
     }
 }

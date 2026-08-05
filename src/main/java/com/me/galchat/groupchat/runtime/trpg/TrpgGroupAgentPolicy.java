@@ -122,6 +122,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 .equals(action.actionType());
         boolean sceneIntro = GroupChatConstant.ACTION_TRPG_SCENE_INTRO
                 .equals(action.actionType());
+        boolean proposalLead = scenePhase
+                && !GroupChatConstant.ACTOR_KP.equals(actor.type())
+                && Integer.valueOf(1).equals(action.itemOrder());
         boolean combatAttack = GroupChatConstant.ACTION_COMBAT_ATTACK
                 .equals(action.actionType());
         boolean combatDefense = GroupChatConstant.ACTION_COMBAT_DEFENSE
@@ -203,6 +206,11 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + (combatAttack
                         ? " 在规则允许的范围内，不要尝试攻击昏迷/濒死的调查员。"
                         : "")
+                        : scenePhase
+                        ? "把上一次KP公开回复后的全部调查员发言视为一个共同场景提案；"
+                        + "识别其中的联合行动、协助、兼容行动和冲突意图，以整个场景为单位统一裁定，"
+                        + "不要按调查员逐条机械回复。需要掷骰时只调用一个对应工具；"
+                        + "恢复同一步骤后继续处理共同提案中尚未裁定的部分。"
                         : "根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。")
                         + (scenePhase
                         ? """
@@ -226,8 +234,15 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "调用selectExplorationScene并且只传地点编号；工具是returnDirect，"
                         + "调用后立即结束响应，不要再输出自然语言、地点名或JSON。"));
             } else {
+                String sceneParticipation = !scenePhase ? ""
+                        : proposalLead
+                        ? "你是本轮首位提案者。根据当前可见局面首先提出一个具体可执行的计划；"
+                        + "你只有先发言权，不能替其他调查员决定是否参加或如何行动。"
+                        : "你是本轮后续调查员。阅读本轮此前的提案，可以支持、补充、修改、反对或提出替代计划，"
+                        + "也可以提出能够同时进行的其他行动；不得假设尚未经过KP裁定的行动已经成功。";
                 messages.add(new UserMessage("现在轮到" + name + "执行当前" + phase
-                        + "行动。决策必须先于行动，并严格使用以下格式，标签外不得输出正文：\n"
+                        + "行动。" + sceneParticipation
+                        + "决策必须先于行动，并严格使用以下格式，标签外不得输出正文：\n"
                         + "<decision>一个完整自然语言段落，说明重要观察、线索联系、判断和本轮行动意图</decision>\n"
                         + "<action>该角色公开说出的话和采取的行动，不要输出发言者标签</action>\n"
                         + "action必须落实decision中的意图，不得重新选择目标；不得宣布未知事实、"

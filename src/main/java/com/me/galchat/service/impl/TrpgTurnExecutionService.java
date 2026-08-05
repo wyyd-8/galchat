@@ -575,6 +575,7 @@ public class TrpgTurnExecutionService {
                 turn.getStatus(),
                 step == null ? null : step.getId(),
                 step == null ? null : step.getActionType(),
+                step == null ? null : step.getItemOrder(),
                 inputType,
                 step == null ? null : step.getGroupName(),
                 waiting,

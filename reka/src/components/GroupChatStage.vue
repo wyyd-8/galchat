@@ -6,10 +6,12 @@ import {
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
 import type { Character, Conversation, CurrentTurn, GroupMessage, ReplyPlan } from '@/api/types'
+import { replyPlanSignature, shouldShowSavePlan } from './replyPlanState'
+import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = defineProps<{ conversation: Conversation; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>()
+const props = defineProps<{ conversation: Conversation; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>()
 const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
@@ -19,12 +21,20 @@ const reasoningPhase = new Map<number, 'thinking' | 'main' | 'idle'>()
 const lastScrollTop = ref(0)
 const initialScrollPending = ref(true)
 const items = computed(() => props.replyPlan.groups[0]?.items || [])
+const loadedPlanSignature = ref('')
 const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && props.currentTurn.inputType === 'message'))
 const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
 const sceneProposalRole = computed(() => props.currentTurn?.waitingForUser && props.currentTurn.actionType === 'trpg_scene'
   ? (props.currentTurn.itemOrder === 1 ? 'lead' : 'contributor')
   : null)
 const canEditPlan = computed(() => props.conversation.mode === 'chat' && props.replyPlan.source === 'USER')
+const showSavePlan = computed(() => shouldShowSavePlan(canEditPlan.value, loadedPlanSignature.value, items.value))
+const replyTurnPhaseLabels = { starting: '准备回复', running: '回复进行中', completed: '本轮已完成', failed: '本轮失败' } as const
+const replyActorPhaseLabels: Record<ReplyActorPhase, string> = { waiting: '等待中', replying: '回复中', completed: '已完成', failed: '失败' }
+const replyTurnActors = computed(() => {
+  const state = props.replyTurnState
+  return state ? items.value.map((item) => ({ item, phase: replyActorPhase(state, item, props.messages) })) : []
+})
 const emptyDescription = computed(() => props.conversation.mode === 'trpg'
   ? '先在跑团工具中确认玩家与 AI 调查员人物卡，再开始行动轮。'
   : '输入消息后，角色会按照右侧保存的顺序依次回应。')
@@ -49,6 +59,7 @@ const composerPlaceholder = computed(() => {
 let latestScrollFrame = 0
 
 watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(message.replyStepId && props.reasoning[message.replyStepId])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
+watch(() => props.replyPlan, (plan) => { loadedPlanSignature.value = replyPlanSignature(plan.groups[0]?.items || []) }, { immediate: true, flush: 'sync' })
 watch(() => props.conversation.id, () => { lastScrollTop.value = 0; initialScrollPending.value = true }, { immediate: true })
 watch(() => props.loading, (loading) => {
   if (!loading && initialScrollPending.value) { initialScrollPending.value = false; scrollToLatest() }
@@ -148,7 +159,14 @@ function handleScroll(event: Event) {
           <div v-if="!items.length" class="plan-empty">暂无回复角色</div>
         </div>
         <div v-if="canEditPlan" class="add-plan-row"><select v-model="addActorId" :disabled="!availableCharacters.length"><option value="">{{ availableCharacters.length ? '添加参与角色' : '没有可添加角色' }}</option><option v-for="item in availableCharacters" :key="item.characterId" :value="String(item.characterId)">{{ item.characterName }}</option></select><button class="icon-button bordered" :disabled="!addActorId" @click="addActor"><Plus :size="17" /></button></div>
-        <div v-if="canEditPlan" class="plan-actions"><button class="button secondary save-plan" :disabled="!items.length || sending" @click="emit('savePlan')"><Save :size="16" />保存顺序</button></div>
+        <div v-if="showSavePlan" class="plan-actions"><button class="button secondary save-plan" :disabled="!items.length || sending" @click="emit('savePlan')"><Save :size="16" />保存顺序</button></div>
+        <section v-if="conversation.mode === 'chat' && replyTurnState" class="reply-turn-status" :class="replyTurnState.phase">
+          <header><span><strong>当前回复状态</strong><small>{{ replyTurnState.turnId ? `Turn #${replyTurnState.turnId}` : '正在创建 Turn' }}</small></span><em>{{ replyTurnPhaseLabels[replyTurnState.phase] }}</em></header>
+          <div class="reply-turn-actors">
+            <div v-for="actor in replyTurnActors" :key="`${actor.item.actorType}-${actor.item.actorId}`" class="reply-turn-actor" :class="actor.phase"><i /><span>{{ character(actor.item.actorId)?.characterName || `角色 #${actor.item.actorId}` }}</span><small>{{ replyActorPhaseLabels[actor.phase] }}</small></div>
+          </div>
+          <p v-if="replyTurnState.error">{{ replyTurnState.error }}</p>
+        </section>
         <div class="panel-note"><strong>执行规则</strong><span>{{ conversation.mode === 'trpg' ? '场景与战斗会自动维护行动顺序，公共界面不能手动修改。' : '角色依次生成回复，后一位可以看到本轮前面角色刚完成的内容。' }}</span></div>
       </aside>
     </div>

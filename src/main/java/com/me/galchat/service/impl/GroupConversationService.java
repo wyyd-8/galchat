@@ -244,7 +244,12 @@ public class GroupConversationService {
         GroupConversation conversation = requireAuthorized(conversationId);
         List<GroupChatMessage> messages = messageMapper
                 .selectLatestCompletedByConversationIds(List.of(conversationId));
-        return toVO(conversation, messages.isEmpty() ? null : messages.getFirst());
+        return toVO(conversation, messages.isEmpty() ? null : messages.getFirst())
+                .setCharacterIds(listMembers(conversationId).stream()
+                        .filter(member -> GroupChatConstant.ACTOR_CHARACTER.equals(
+                                member.getActorType()))
+                        .map(GroupChatMember::getActorId)
+                        .toList());
     }
 
     public void checkReplyMember(Long conversationId, String speakerType, Long speakerId, boolean force) {

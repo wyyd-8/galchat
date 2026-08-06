@@ -4,6 +4,8 @@ import type {
   Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem,
   UserInfo, UserWorld, WorldDetail, WorldSave, WorldTemplate,
 } from '@/api/types'
+import { beginReplyTurn, updateReplyTurn, type ReplyTurnState } from '@/components/replyTurnStatus'
+import { decodeParticipantIds, encodeParticipantIds, resolveParticipantIds } from '@/components/trpgSetupState'
 import { errorMessage, notify } from './useNotice'
 
 let tempMessageId = -1
@@ -30,6 +32,7 @@ export function useWorkspace() {
   const messageInput = ref('')
   const messageScroller = ref<HTMLElement | null>(null)
   const currentTurn = ref<CurrentTurn | null>(null)
+  const replyTurnState = ref<ReplyTurnState | null>(null)
   const latestDiceRoll = ref<DiceRollAggregate | null>(null)
   const hasOlderGroupMessages = ref(false)
 
@@ -53,7 +56,7 @@ export function useWorkspace() {
   }
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
-    conversations.value = []; messages.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; modules.value = []
+    conversations.value = []; messages.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; replyTurnState.value = null; modules.value = []
     latestDiceRoll.value = null; hasOlderGroupMessages.value = false
   }
   function logout() { clearSession(); Object.assign(session, currentSession()); userInfo.value = null; resetWorkspace() }
@@ -152,11 +155,15 @@ export function useWorkspace() {
   async function createConversation(payload: { mode: 'chat' | 'trpg'; title: string; moduleId?: number; characterIds: number[] }) {
     if (!selectedWorldId.value) return
     const created = await api.createConversation({ ...payload, userWorldId: selectedWorldId.value })
+    if (payload.mode === 'trpg') {
+      localStorage.setItem(`galchat:trpg-participants:${created.id}`, encodeParticipantIds(payload.characterIds))
+    }
     conversations.value = await api.conversations(selectedWorldId.value); participantIds.value = [...payload.characterIds]
     await selectConversation(created.id); notify(payload.mode === 'trpg' ? 'CoC 跑团已建立' : '普通群聊已建立', created.title, 'success')
+    return created
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; latestDiceRoll.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; replyTurnState.value = null; latestDiceRoll.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
       const [conversationDetail, history, plan, turn] = await Promise.all([
         api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id),
@@ -166,9 +173,25 @@ export function useWorkspace() {
       hasOlderGroupMessages.value = history.length === 50
       replyPlan.value = plan || freshPlan()
       currentTurn.value = turn
-      participantIds.value = [...new Set(replyPlan.value.groups
-        .flatMap((group) => group.items.map((item) => item.actorId))
+      const plannedParticipantIds = [...new Set(replyPlan.value.groups
+        .flatMap((group) => group.items
+          .filter((item) => item.actorType === 'character')
+          .map((item) => item.actorId))
         .filter((id): id is number => typeof id === 'number'))]
+      if (conversationDetail.mode === 'trpg') {
+        const storageKey = `galchat:trpg-participants:${conversationDetail.id}`
+        const rememberedParticipantIds = decodeParticipantIds(localStorage.getItem(storageKey))
+        participantIds.value = resolveParticipantIds(
+          conversationDetail.characterIds,
+          rememberedParticipantIds,
+          plannedParticipantIds,
+        )
+        if (conversationDetail.characterIds !== undefined || (!rememberedParticipantIds.length && plannedParticipantIds.length)) {
+          localStorage.setItem(storageKey, encodeParticipantIds(participantIds.value))
+        }
+      } else {
+        participantIds.value = plannedParticipantIds
+      }
       await scrollToBottom('auto')
     } catch (error) { notify('会话加载失败', errorMessage(error), 'danger') }
     finally { loading.chat = false }
@@ -202,6 +225,7 @@ export function useWorkspace() {
     const history = await api.groupMessages(selectedConversationId.value)
     messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
     hasOlderGroupMessages.value = history.length === 50
+    replyTurnState.value = null
     notify('已撤回最近一轮群聊', '', 'success')
   }
   async function savePlan() {
@@ -225,6 +249,7 @@ export function useWorkspace() {
 
   function applyEvent(event: GroupChatEvent) {
     const step = event.replyStepId
+    if (selectedConversation.value?.mode === 'chat') replyTurnState.value = updateReplyTurn(replyTurnState.value, event)
     if (event.eventType === 'dice_roll.created' && event.diceRoll) latestDiceRoll.value = event.diceRoll
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
@@ -356,6 +381,7 @@ export function useWorkspace() {
     const originalInput = messageInput.value
     const optimisticId = tempMessageId--
     messageInput.value = ''; loading.sending = true
+    if (conversation.mode === 'chat') replyTurnState.value = beginReplyTurn()
     messages.value.push({ id: optimisticId, conversationId: conversation.id, speakerType: 'user', messageKind: 'dialogue', content,
       sequenceNo: Date.now(), status: 'completed', createdAt: new Date().toISOString() })
     await scrollToBottom()
@@ -378,6 +404,9 @@ export function useWorkspace() {
       } else {
         messages.value = messages.value.filter((message) => message.id !== optimisticId)
         if (!messageInput.value) messageInput.value = originalInput
+        replyTurnState.value = updateReplyTurn(replyTurnState.value, {
+          eventType: 'reply.failed', turnId: replyTurnState.value?.turnId, error: errorMessage(error),
+        })
       }
       notify('消息发送失败', errorMessage(error), 'danger')
     }
@@ -389,7 +418,7 @@ export function useWorkspace() {
   onMounted(boot)
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
-    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlan, participantIds, messageInput, messageScroller, currentTurn,
+    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlan, participantIds, messageInput, messageScroller, currentTurn, replyTurnState,
     latestDiceRoll, hasOlderGroupMessages,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,

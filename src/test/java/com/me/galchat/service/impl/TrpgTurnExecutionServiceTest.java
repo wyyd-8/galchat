@@ -19,6 +19,8 @@ import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.redisson.api.RLock;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -973,8 +975,9 @@ class TrpgTurnExecutionServiceTest {
                                         message.getClientRequestId())));
     }
 
-    @Test
-    void currentTurnExposesTheWaitingInvestigatorsProposalOrder() {
+    @ParameterizedTest
+    @ValueSource(strings = {"chat", "trpg"})
+    void currentTurnExposesReplyOrderForSupportedModes(String mode) {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
@@ -1005,7 +1008,7 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgUnconsciousRecoveryService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
-                .setMode(GroupChatConstant.MODE_TRPG);
+                .setMode(mode);
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(101L)
                 .setConversationId(7L)
@@ -1014,8 +1017,8 @@ class TrpgTurnExecutionServiceTest {
         GroupChatReplyStep step = new GroupChatReplyStep()
                 .setId(102L)
                 .setTurnId(101L)
-                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
-                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setActionType(GroupChatConstant.ACTION_CHAT_REPLY)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
                 .setItemOrder(1)
                 .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
         when(conversationService.requireAuthorized(7L))
@@ -1025,6 +1028,9 @@ class TrpgTurnExecutionServiceTest {
 
         GroupCurrentTurnVO current = service.current(7L);
 
+        assertThat(current.turnId()).isEqualTo(101L);
+        assertThat(current.status())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
         assertThat(current.itemOrder()).isEqualTo(1);
     }
 

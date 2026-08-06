@@ -12,7 +12,7 @@ import com.me.galchat.groupchat.material.MaterialMessageCodec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
-import com.me.galchat.service.IUserCharacterInfoService;
+import com.me.galchat.mapper.UserCharacterInfoMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -31,7 +31,7 @@ public class GroupContextAssembler {
     private final GroupChatMessageMapper messageMapper;
     private final GroupConversationService conversationService;
     private final ChatServiceImpl chatService;
-    private final IUserCharacterInfoService userCharacterInfoService;
+    private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final GroupToolHistoryAssembler toolHistoryAssembler;
     private final GroupDiceMessageFormatter diceMessageFormatter;
     private final MaterialMessageCodec materialMessageCodec;
@@ -41,14 +41,14 @@ public class GroupContextAssembler {
             GroupChatMessageMapper messageMapper,
             GroupConversationService conversationService,
             ChatServiceImpl chatService,
-            IUserCharacterInfoService userCharacterInfoService,
+            UserCharacterInfoMapper userCharacterInfoMapper,
             GroupToolHistoryAssembler toolHistoryAssembler,
             GroupDiceMessageFormatter diceMessageFormatter,
             MaterialMessageCodec materialMessageCodec) {
         this.messageMapper = messageMapper;
         this.conversationService = conversationService;
         this.chatService = chatService;
-        this.userCharacterInfoService = userCharacterInfoService;
+        this.userCharacterInfoMapper = userCharacterInfoMapper;
         this.toolHistoryAssembler = toolHistoryAssembler;
         this.diceMessageFormatter = diceMessageFormatter;
         this.materialMessageCodec = materialMessageCodec;
@@ -166,7 +166,10 @@ public class GroupContextAssembler {
 
     private Map<Long, UserCharacterInfo> characterById(Long userWorldId) {
         Map<Long, UserCharacterInfo> result = new HashMap<>();
-        for (UserCharacterInfo character : userCharacterInfoService.listByUserWorldId(userWorldId)) {
+        List<UserCharacterInfo> characters = userCharacterInfoMapper.selectList(
+                new LambdaQueryWrapper<UserCharacterInfo>()
+                        .eq(UserCharacterInfo::getUserWorldId, userWorldId));
+        for (UserCharacterInfo character : characters) {
             result.putIfAbsent(character.getCharacterId(), character);
         }
         return result;

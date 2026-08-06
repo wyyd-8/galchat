@@ -10,11 +10,12 @@ import com.me.galchat.groupchat.material.MaterialMessageCodec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
 import com.me.galchat.mapper.GroupChatMessageMapper;
-import com.me.galchat.service.IUserCharacterInfoService;
+import com.me.galchat.mapper.UserCharacterInfoMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import reactor.core.scheduler.Schedulers;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -34,15 +35,15 @@ class GroupContextAssemblerTest {
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupConversationService conversationService = mock(GroupConversationService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
-        IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
+        UserCharacterInfoMapper characterMapper = mock(UserCharacterInfoMapper.class);
         GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
         GroupDiceMessageFormatter diceMessageFormatter = mock(GroupDiceMessageFormatter.class);
         GroupContextAssembler assembler = new GroupContextAssembler(messageMapper, conversationService,
-                chatService, characterService, toolHistoryAssembler,
+                chatService, characterMapper, toolHistoryAssembler,
                 diceMessageFormatter, materialMessageCodec());
 
         GroupConversation conversation = new GroupConversation().setId(8L).setUserWorldId(1L).setWorldId(2L);
-        when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
+        when(characterMapper.selectList(any())).thenReturn(List.of(
                 new UserCharacterInfo().setCharacterId(11L).setCharacterName("Alice"),
                 new UserCharacterInfo().setCharacterId(12L).setCharacterName("Bob")));
         when(chatService.buildSystemPrompt(2L, 1L, 11L)).thenReturn("包含用户信息的角色基础提示词");
@@ -74,17 +75,17 @@ class GroupContextAssemblerTest {
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupConversationService conversationService = mock(GroupConversationService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
-        IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
+        UserCharacterInfoMapper characterMapper = mock(UserCharacterInfoMapper.class);
         GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
         GroupDiceMessageFormatter diceMessageFormatter = mock(GroupDiceMessageFormatter.class);
         GroupContextAssembler assembler = new GroupContextAssembler(messageMapper, conversationService,
-                chatService, characterService, toolHistoryAssembler,
+                chatService, characterMapper, toolHistoryAssembler,
                 diceMessageFormatter, materialMessageCodec());
         GroupConversation conversation = new GroupConversation()
                 .setId(8L).setUserWorldId(1L).setWorldId(2L);
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
         GroupActorRef investigator = new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 11L);
-        when(characterService.listByUserWorldId(1L)).thenReturn(List.of(
+        when(characterMapper.selectList(any())).thenReturn(List.of(
                 new UserCharacterInfo().setCharacterId(11L).setCharacterName("Alice")));
         when(messageMapper.selectList(any())).thenReturn(List.of(
                 message(GroupChatConstant.ACTOR_KP, null, "进行侦查检定").setReplyStepId(41L)));
@@ -112,12 +113,12 @@ class GroupContextAssemblerTest {
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupToolHistoryAssembler toolHistoryAssembler = mock(GroupToolHistoryAssembler.class);
         GroupDiceMessageFormatter diceMessageFormatter = mock(GroupDiceMessageFormatter.class);
-        IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
+        UserCharacterInfoMapper characterMapper = mock(UserCharacterInfoMapper.class);
         GroupContextAssembler assembler = new GroupContextAssembler(
                 messageMapper,
                 mock(GroupConversationService.class),
                 mock(ChatServiceImpl.class),
-                characterService,
+                characterMapper,
                 toolHistoryAssembler,
                 diceMessageFormatter,
                 materialMessageCodec());
@@ -129,7 +130,7 @@ class GroupContextAssemblerTest {
                 "{\"summaryId\":501,\"roundNos\":[2]}")
                 .setReplyStepId(41L)
                 .setMessageKind(GroupChatConstant.MESSAGE_DICE_ROLL);
-        when(characterService.listByUserWorldId(1L)).thenReturn(List.of());
+        when(characterMapper.selectList(any())).thenReturn(List.of());
         when(messageMapper.selectList(any())).thenReturn(List.of(diceMessage));
         when(toolHistoryAssembler.beforeMessages(any(), org.mockito.ArgumentMatchers.eq(kp)))
                 .thenReturn(Map.of(41L, List.of()));
@@ -152,13 +153,13 @@ class GroupContextAssemblerTest {
                 mock(GroupChatMessageMapper.class);
         GroupToolHistoryAssembler toolHistoryAssembler =
                 mock(GroupToolHistoryAssembler.class);
-        IUserCharacterInfoService characterService =
-                mock(IUserCharacterInfoService.class);
+        UserCharacterInfoMapper characterMapper =
+                mock(UserCharacterInfoMapper.class);
         GroupContextAssembler assembler = new GroupContextAssembler(
                 messageMapper,
                 mock(GroupConversationService.class),
                 mock(ChatServiceImpl.class),
-                characterService,
+                characterMapper,
                 toolHistoryAssembler,
                 mock(GroupDiceMessageFormatter.class),
                 materialMessageCodec());
@@ -173,7 +174,7 @@ class GroupContextAssemblerTest {
                          "imageUrl":"https://oss.example/image.jpg"}
                         """)
                 .setMessageKind(GroupChatConstant.MESSAGE_MATERIAL);
-        when(characterService.listByUserWorldId(1L))
+        when(characterMapper.selectList(any()))
                 .thenReturn(List.of());
         when(messageMapper.selectList(any()))
                 .thenReturn(List.of(material));
@@ -188,6 +189,51 @@ class GroupContextAssemblerTest {
                 .contains("玛德琳的信", "信中提到酒店")
                 .doesNotContain("materialId")
                 .doesNotContain("https://oss.example/image.jpg");
+    }
+
+    @Test
+    void loadsCharacterRosterOnWorkerThreadWithoutRequestAuthenticationContext() {
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        UserCharacterInfoMapper characterMapper =
+                mock(UserCharacterInfoMapper.class);
+        GroupToolHistoryAssembler toolHistoryAssembler =
+                mock(GroupToolHistoryAssembler.class);
+        GroupContextAssembler assembler = new GroupContextAssembler(
+                messageMapper,
+                mock(GroupConversationService.class),
+                mock(ChatServiceImpl.class),
+                characterMapper,
+                toolHistoryAssembler,
+                mock(GroupDiceMessageFormatter.class),
+                materialMessageCodec());
+        GroupConversation conversation = new GroupConversation()
+                .setId(8L).setUserWorldId(1L);
+        GroupActorRef alice = new GroupActorRef(
+                GroupChatConstant.ACTOR_CHARACTER, 11L);
+        when(characterMapper.selectList(any())).thenReturn(List.of(
+                new UserCharacterInfo()
+                        .setCharacterId(11L)
+                        .setCharacterName("Alice"),
+                new UserCharacterInfo()
+                        .setCharacterId(12L)
+                        .setCharacterName("Bob")));
+        when(messageMapper.selectList(any())).thenReturn(List.of(
+                message(GroupChatConstant.ACTOR_CHARACTER, 12L,
+                        "我也玩过。")));
+        when(toolHistoryAssembler.beforeMessages(any(),
+                org.mockito.ArgumentMatchers.eq(alice)))
+                .thenReturn(Map.of());
+
+        List<Message> context = reactor.core.publisher.Mono
+                .fromCallable(() -> assembler.assembleContextFrom(
+                        conversation, alice, 1L))
+                .subscribeOn(Schedulers.boundedElastic())
+                .block();
+
+        assertThat(context).extracting(Message::getText)
+                .containsExactly("<message speaker=\"Bob\" actor=\"character:12\">\n"
+                        + "我也玩过。\n</message>");
     }
 
     private GroupChatMessage message(String speakerType, Long speakerId, String content) {

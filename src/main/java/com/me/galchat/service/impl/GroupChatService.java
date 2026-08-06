@@ -214,7 +214,8 @@ public class GroupChatService {
                 message.getId(), message.getConversationId(), message.getTurnId(), message.getReplyStepId(),
                 message.getSpeakerType(), message.getSpeakerId(), speakerName(conversation, message),
                 message.getMessageKind(), message.getContent(),
-                decisions.get(message.getReplyStepId()),
+                message.getReplyStepId() == null
+                        ? null : decisions.get(message.getReplyStepId()),
                 message.getSequenceNo(), message.getStatus(), message.getCreatedAt())).toList();
     }
 

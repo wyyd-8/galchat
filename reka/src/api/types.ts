@@ -63,6 +63,7 @@ export type ConversationStatus = 'active' | 'closed'
 export interface Conversation {
   id: number; userWorldId: number; worldId: number; moduleId?: number; activeReplyPlanId?: number; mode: ConversationMode
   title: string; summary?: string; status: ConversationStatus; version?: number
+  characterIds?: number[]
   createdAt?: string; updatedAt?: string; closedAt?: string; lastChatContent?: string; lastChatTime?: string
 }
 export interface GroupMessage {

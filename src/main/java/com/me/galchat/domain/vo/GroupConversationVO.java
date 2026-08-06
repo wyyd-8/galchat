@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.experimental.Accessors;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @Accessors(chain = true)
@@ -25,6 +26,7 @@ public class GroupConversationVO {
     private LocalDateTime closedAt;
     private String lastChatContent;
     private LocalDateTime lastChatTime;
+    private List<Long> characterIds;
 
     public static GroupConversationVO from(GroupConversation conversation) {
         return new GroupConversationVO()

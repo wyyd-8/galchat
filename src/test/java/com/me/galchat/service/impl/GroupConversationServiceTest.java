@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.domain.po.GroupChatMessage;
+import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
@@ -20,6 +21,7 @@ import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -344,5 +346,26 @@ class GroupConversationServiceTest {
         assertThat(result.get(1).getLastChatTime()).isNull();
         verify(worldService).checkUserWorldAuth(1L, false);
         verify(messageMapper).selectLatestCompletedByConversationIds(List.of(2L, 1L));
+    }
+
+    @Test
+    void getIncludesSelectedCharactersBeforeInvestigatorCardsExist() {
+        GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
+        GroupChatMemberMapper memberMapper = mock(GroupChatMemberMapper.class);
+        IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
+        GroupConversationService service = new GroupConversationService(conversationMapper,
+                memberMapper, mock(GroupChatMessageMapper.class), mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class), worldService, mock(IUserCharacterInfoService.class),
+                mock(GroupConversationLockService.class), mock(CocModuleMapper.class),
+                mock(CocModuleLockService.class), mock(CocModuleCharacterInstantiationService.class));
+        when(conversationMapper.selectById(7L)).thenReturn(new GroupConversation()
+                .setId(7L).setUserWorldId(1L).setMode(GroupChatConstant.MODE_TRPG));
+        when(memberMapper.selectList(any())).thenReturn(List.of(
+                new GroupChatMember().setActorType(GroupChatConstant.ACTOR_CHARACTER).setActorId(11L).setPosition(0),
+                new GroupChatMember().setActorType(GroupChatConstant.ACTOR_CHARACTER).setActorId(22L).setPosition(1)));
+
+        String json = JsonMapper.builder().build().writeValueAsString(service.get(7L));
+
+        assertThat(json).contains("\"characterIds\":[11,22]");
     }
 }

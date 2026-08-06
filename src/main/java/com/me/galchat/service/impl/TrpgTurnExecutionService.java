@@ -516,7 +516,6 @@ public class TrpgTurnExecutionService {
     public GroupCurrentTurnVO current(Long conversationId) {
         GroupConversation conversation =
                 conversationService.requireAuthorized(conversationId);
-        requireTrpg(conversation);
         List<GroupChatTurn> turns = turnMapper.selectList(
                 new LambdaQueryWrapper<GroupChatTurn>()
                         .eq(GroupChatTurn::getConversationId,

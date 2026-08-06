@@ -851,6 +851,93 @@ class GroupChatServiceTest {
     }
 
     @Test
+    void historyKeepsUserMessagesWithoutReplyStepDecision() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupAgentDecisionStore decisionStore =
+                mock(GroupAgentDecisionStore.class);
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatService service = new GroupChatService(
+                conversationService,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                runtimeRegistry,
+                messageMapper,
+                mock(GroupChatTurnMapper.class),
+                mock(GroupChatReplyStepMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                mock(TransactionTemplate.class),
+                diceMessageCodec(),
+                JsonMapper.builder().build(),
+                emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                decisionStore,
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setUserWorldId(5L)
+                .setMode(GroupChatConstant.MODE_CHAT);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(runtimeRegistry.require(GroupChatConstant.MODE_CHAT))
+                .thenReturn(runtime);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(agentPolicy.actorName(
+                5L,
+                new GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L)))
+                .thenReturn("爱丽丝");
+        when(messageMapper.selectList(any())).thenReturn(
+                new java.util.ArrayList<>(List.of(
+                        new GroupChatMessage()
+                                .setId(91L)
+                                .setConversationId(7L)
+                                .setTurnId(31L)
+                                .setReplyStepId(41L)
+                                .setSpeakerType(
+                                        GroupChatConstant.ACTOR_CHARACTER)
+                                .setSpeakerId(9L)
+                                .setMessageKind(
+                                        GroupChatConstant.MESSAGE_DIALOGUE)
+                                .setContent("晚上好。")
+                                .setSequenceNo(2L)
+                                .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                                .setCreatedAt(LocalDateTime.of(
+                                        2026, 8, 5, 23, 1)),
+                        new GroupChatMessage()
+                                .setId(90L)
+                                .setConversationId(7L)
+                                .setTurnId(31L)
+                                .setSpeakerType(
+                                        GroupChatConstant.ACTOR_USER)
+                                .setMessageKind(
+                                        GroupChatConstant.MESSAGE_DIALOGUE)
+                                .setContent("你好")
+                                .setSequenceNo(1L)
+                                .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                                .setCreatedAt(LocalDateTime.of(
+                                        2026, 8, 5, 23, 0)))));
+        when(decisionStore.contentByReplyStepIds(List.of(41L)))
+                .thenReturn(java.util.Map.of(
+                        41L, "先回应用户的问候。"));
+
+        List<GroupChatMessageVO> history =
+                service.listHistory(7L, null, 50);
+
+        assertThat(history).extracting(
+                        GroupChatMessageVO::getDecisionContent)
+                .containsExactly(null, "先回应用户的问候。");
+    }
+
+    @Test
     void historyAttachesStoredDecisionToCharacterAction() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);

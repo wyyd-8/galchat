@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocCharacterWeapon;
+import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.mapper.CharacterTemplateMapper;
@@ -26,7 +27,7 @@ import static org.mockito.Mockito.when;
 class TrpgInvestigatorContextAssemblerTest {
 
     @Test
-    void explorationContainsPersonalityBackgroundAndStoredSkillsButNoGear() {
+    void explorationContainsFullOwnedCardIncludingDefaultsWeaponsAndProfile() {
         Fixture fixture = fixture();
 
         String context = fixture.assembler().format(
@@ -39,15 +40,21 @@ class TrpgInvestigatorContextAssemblerTest {
                 .contains("跑团偏好是行动建议，不是必须遵守的规则")
                 .contains("林登")
                 .contains("图书馆使用=70")
-                .doesNotContain("聆听=20")
+                .contains("聆听=20")
                 .contains("相信知识能够解决问题")
+                .contains("我的导师")
+                .contains("关键联结：重要之人 / 我的导师")
+                .contains("左轮手枪")
+                .contains("撬棍和提灯")
+                .contains("资产：旧报社股份")
+                .contains("消费水平：10")
+                .contains("现金：25")
                 .doesNotContain("世界背景秘密")
-                .doesNotContain("左轮手枪")
-                .doesNotContain("撬棍和提灯");
+                .contains("调查记录只供本人使用");
     }
 
     @Test
-    void combatContainsWeaponsAndEquipmentButDropsBackgroundEntries() {
+    void combatAlsoKeepsFullOwnedProfile() {
         Fixture fixture = fixture();
 
         String context = fixture.assembler().format(
@@ -61,7 +68,8 @@ class TrpgInvestigatorContextAssemblerTest {
                 .contains("图书馆使用=70")
                 .contains("左轮手枪")
                 .contains("撬棍和提灯")
-                .doesNotContain("相信知识能够解决问题")
+                .contains("相信知识能够解决问题")
+                .contains("调查记录只供本人使用")
                 .doesNotContain("世界背景秘密");
     }
 
@@ -76,6 +84,8 @@ class TrpgInvestigatorContextAssemblerTest {
                 mock(CocCharacterProfileMapper.class);
         CocCharacterWeaponMapper weaponMapper =
                 mock(CocCharacterWeaponMapper.class);
+        CocSkillDefMapper skillDefMapper =
+                mock(CocSkillDefMapper.class);
         CocCharacter card = new CocCharacter()
                 .setId(51L)
                 .setRunId(5L)
@@ -108,16 +118,33 @@ class TrpgInvestigatorContextAssemblerTest {
         when(profileMapper.selectList(any())).thenReturn(List.of(
                 new CocCharacterProfile()
                         .setIdeology("相信知识能够解决问题")
-                        .setEquipmentText("撬棍和提灯")));
+                        .setSignificantPeople("我的导师")
+                        .setKeyConnectionCategory("重要之人")
+                        .setKeyConnectionText("我的导师")
+                        .setEquipmentText("撬棍和提灯")
+                        .setAssetsText("旧报社股份")
+                        .setSpendingLevel("10")
+                        .setCash("25")
+                        .setNotes("调查记录只供本人使用")));
         when(weaponMapper.selectList(any())).thenReturn(List.of(
                 new CocCharacterWeapon()
                         .setName("左轮手枪")
                         .setDamage("1d10")));
+        CocSkillDef libraryUse = new CocSkillDef();
+        libraryUse.setId(1L);
+        libraryUse.setName("图书馆使用");
+        libraryUse.setBaseValue(20);
+        CocSkillDef listen = new CocSkillDef();
+        listen.setId(2L);
+        listen.setName("聆听");
+        listen.setBaseValue(20);
+        when(skillDefMapper.selectList(null)).thenReturn(List.of(
+                libraryUse, listen));
         return new Fixture(
                 new TrpgInvestigatorContextAssembler(
                         characterMapper, templateMapper, skillMapper,
                         profileMapper, weaponMapper,
-                        mock(CocSkillDefMapper.class),
+                        skillDefMapper,
                         new CharacterSkillResolver()),
                 new GroupConversation()
                         .setId(7L)

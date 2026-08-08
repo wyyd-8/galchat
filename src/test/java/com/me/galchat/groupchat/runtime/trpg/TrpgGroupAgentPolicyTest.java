@@ -396,9 +396,22 @@ class TrpgGroupAgentPolicyTest {
         ICharacterCardService cardService =
                 mock(ICharacterCardService.class);
         when(cardService.listDiceCharacters(7L)).thenReturn(List.of(
-                card("林恩", null),
-                card("艾琳", 9L),
+                card(71L, "林恩", null),
+                card(72L, "艾琳", 9L),
                 npcCard("食尸鬼")));
+        when(cardService.getById(71L)).thenReturn(new CharacterCardVO(
+                new CocCharacter().setId(71L).setName("林恩")
+                        .setParticipantId(null)
+                        .setStr(45).setDex(60)
+                        .setHpCurrent(10).setHpMax(10)
+                        .setSanCurrent(54).setSanMax(60),
+                List.of(
+                        new CocCharacterSkill().setDisplayName("聆听")
+                                .setBaseValue(20).setValue(20),
+                        new CocCharacterSkill().setDisplayName("图书馆使用")
+                                .setBaseValue(20).setValue(70)),
+                List.of(),
+                new CocCharacterProfile().setNotes("队友私密档案")));
         com.me.galchat.service.impl.TrpgInvestigatorContextAssembler
                 investigatorAssembler = mock(
                 com.me.galchat.service.impl
@@ -450,8 +463,11 @@ class TrpgGroupAgentPolicyTest {
 
         assertThat(invocation.tools()).containsExactly(sceneTools);
         assertThat(invocation.prompt().getInstructions().getFirst().getText())
-                .contains("<investigator-card name=\"林恩\"")
-                .contains("<investigator-card name=\"艾琳\"")
+                .contains("<controlled-investigator>艾琳</controlled-investigator>")
+                .contains("<other-investigator name=\"林恩\"")
+                .contains("STR=45", "DEX=60", "图书馆使用=70")
+                .doesNotContain("<other-investigator name=\"艾琳\"")
+                .doesNotContain("聆听=20", "队友私密档案")
                 .doesNotContain("食尸鬼")
                 .doesNotContain("<npc-cards>")
                 .contains("<investigator-resident-rules>")
@@ -543,8 +559,13 @@ class TrpgGroupAgentPolicyTest {
     }
 
     private CocDiceCharacterVO card(String name, Long participantId) {
+        return card(71L, name, participantId);
+    }
+
+    private CocDiceCharacterVO card(
+            Long cardId, String name, Long participantId) {
         return new CocDiceCharacterVO(
-                71L, participantId == null ? "PLAYER" : "BOT",
+                cardId, participantId == null ? "PLAYER" : "BOT",
                 participantId, name, Map.of("CON", 55),
                 10, 10, 54, 60, 55, 0,
                 false, false, false, false,

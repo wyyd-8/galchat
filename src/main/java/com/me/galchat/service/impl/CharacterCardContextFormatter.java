@@ -46,6 +46,103 @@ public class CharacterCardContextFormatter {
         return result.append("\n</npc-state-changes>").toString();
     }
 
+    public String formatOtherInvestigators(List<CharacterCardVO> cards) {
+        if (cards == null || cards.isEmpty()) {
+            return "<other-investigators />";
+        }
+        StringBuilder result = new StringBuilder("<other-investigators>");
+        for (CharacterCardVO card : cards) {
+            if (card == null || card.getCharacter() == null) {
+                continue;
+            }
+            appendOtherInvestigator(result, card);
+        }
+        if (result.length() == "<other-investigators>".length()) {
+            return "<other-investigators />";
+        }
+        return result.append("\n</other-investigators>").toString();
+    }
+
+    private void appendOtherInvestigator(
+            StringBuilder result, CharacterCardVO card) {
+        CocCharacter character = card.getCharacter();
+        result.append("\n<other-investigator name=\"")
+                .append(escape(character.getName())).append('"');
+        if (character.getParticipantId() != null) {
+            result.append(" participant-id=\"")
+                    .append(character.getParticipantId()).append('"');
+        }
+        result.append('>');
+        result.append("\n属性：");
+        appendCanonicalAttributes(result, character);
+        result.append("\n资源：HP=")
+                .append(pair(character.getHpCurrent(), character.getHpMax()))
+                .append("，SAN=")
+                .append(pair(character.getSanCurrent(), character.getSanMax()))
+                .append("，MP=")
+                .append(pair(character.getMpCurrent(), character.getMpMax()))
+                .append("，幸运=").append(value(character.getLuckCurrent()))
+                .append("，护甲=").append(value(character.getArmor()));
+        appendConfiguredSkills(result, card.getSkills());
+        appendCharacterStatuses(result, character);
+        result.append("\n</other-investigator>");
+    }
+
+    private void appendCanonicalAttributes(
+            StringBuilder result, CocCharacter character) {
+        result.append("STR=").append(value(character.getStr()))
+                .append("，CON=").append(value(character.getCon()))
+                .append("，SIZ=").append(value(character.getSiz()))
+                .append("，DEX=").append(value(character.getDex()))
+                .append("，APP=").append(value(character.getApp()))
+                .append("，INT=").append(value(character.getIntValue()))
+                .append("，POW=").append(value(character.getPow()))
+                .append("，EDU=").append(value(character.getEdu()));
+    }
+
+    private void appendConfiguredSkills(
+            StringBuilder result, List<CocCharacterSkill> skills) {
+        if (skills == null || skills.isEmpty()) {
+            return;
+        }
+        StringJoiner values = new StringJoiner("，");
+        skills.stream()
+                .filter(skill -> StringUtils.hasText(skill.getDisplayName()))
+                .filter(skill -> skill.getValue() != null)
+                .filter(skill -> Boolean.TRUE.equals(skill.getIsCustom())
+                        || skill.getBaseValue() == null
+                        || skill.getValue() > skill.getBaseValue())
+                .sorted(java.util.Comparator.comparing(
+                        CocCharacterSkill::getDisplayName,
+                        String.CASE_INSENSITIVE_ORDER))
+                .forEach(skill -> values.add(
+                        escape(skill.getDisplayName().trim())
+                                + "=" + skill.getValue()));
+        if (values.length() > 0) {
+            result.append("\n技能：").append(values);
+        }
+    }
+
+    private void appendCharacterStatuses(
+            StringBuilder result, CocCharacter character) {
+        StringJoiner statuses = new StringJoiner("；");
+        addStatus(statuses, character.getMajorWound(), "重伤");
+        addStatus(statuses, character.getUnconscious(), "昏迷");
+        addStatus(statuses, character.getDying(), "濒死");
+        addStatus(statuses, character.getDead(), "死亡");
+        addStatus(statuses, character.getTemporaryInsanity(), "临时疯狂");
+        if (statuses.length() > 0) {
+            result.append("\n状态：").append(statuses);
+        }
+    }
+
+    private void addStatus(
+            StringJoiner statuses, Boolean enabled, String name) {
+        if (Boolean.TRUE.equals(enabled)) {
+            statuses.add(name);
+        }
+    }
+
     public String formatActiveNpcs(List<CharacterCardVO> cards) {
         if (cards == null || cards.isEmpty()) {
             return "";
@@ -286,6 +383,10 @@ public class CharacterCardContextFormatter {
 
     private String value(Integer value) {
         return value == null ? "未知" : value.toString();
+    }
+
+    private String pair(Integer current, Integer maximum) {
+        return value(current) + "/" + value(maximum);
     }
 
     private String escape(String value) {

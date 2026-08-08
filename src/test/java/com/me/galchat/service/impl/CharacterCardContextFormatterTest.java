@@ -1,5 +1,9 @@
 package com.me.galchat.service.impl;
 
+import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.CocCharacterProfile;
+import com.me.galchat.domain.po.CocCharacterSkill;
+import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import org.junit.jupiter.api.Test;
 
@@ -67,5 +71,41 @@ class CharacterCardContextFormatterTest {
                 .doesNotContain("乔瑟夫·特纳：HP")
                 .doesNotContain("检定值")
                 .doesNotContain("DEX=", "斗殴=");
+    }
+
+    @Test
+    void otherInvestigatorsUseCanonicalAttributesAndConfiguredSkillsWithoutProfile() {
+        CocCharacter teammate = new CocCharacter()
+                .setId(72L).setParticipantId(10L).setName("林恩")
+                .setStr(45).setCon(55).setSiz(50).setDex(60)
+                .setApp(50).setIntValue(70).setPow(55).setEdu(65)
+                .setHpCurrent(9).setHpMax(11)
+                .setSanCurrent(48).setSanMax(55)
+                .setMpCurrent(8).setMpMax(11)
+                .setLuckCurrent(40).setArmor(0);
+        CharacterCardVO card = new CharacterCardVO(
+                teammate,
+                List.of(
+                        new CocCharacterSkill().setDisplayName("聆听")
+                                .setBaseValue(20).setValue(20)
+                                .setIsCustom(false),
+                        new CocCharacterSkill().setDisplayName("图书馆使用")
+                                .setBaseValue(20).setValue(70)
+                                .setIsCustom(false),
+                        new CocCharacterSkill().setDisplayName("地方传说")
+                                .setBaseValue(0).setValue(5)
+                                .setIsCustom(true)),
+                List.of(),
+                new CocCharacterProfile().setNotes("不应泄露的队友档案"));
+
+        String text = formatter.formatOtherInvestigators(List.of(card));
+
+        assertThat(text)
+                .contains("<other-investigator name=\"林恩\"")
+                .contains("STR=45", "DEX=60")
+                .contains("图书馆使用=70", "地方传说=5")
+                .doesNotContain("力量=", "敏捷=")
+                .doesNotContain("聆听=20")
+                .doesNotContain("不应泄露的队友档案");
     }
 }

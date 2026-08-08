@@ -158,10 +158,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 .filter(card -> "PLAYER".equals(card.actorType())
                         || "BOT".equals(card.actorType()))
                 .toList();
-        String investigatorCardContext =
-                characterCardFormatter.format(investigatorCards);
         List<Message> messages = new ArrayList<>();
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
+            String investigatorCardContext =
+                    characterCardFormatter.format(investigatorCards);
             List<CocDiceCharacterVO> npcCards = cards.stream()
                     .filter(card -> "NPC".equals(card.actorType()))
                     .toList();
@@ -188,10 +188,19 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     不得输出隐藏思考过程。
                     """.formatted(phase)));
         } else {
+            List<CharacterCardVO> otherInvestigatorCards =
+                    investigatorCards.stream()
+                            .filter(card -> !isControlledInvestigator(
+                                    card, action))
+                            .map(card -> characterCardService.getById(
+                                    card.cardId()))
+                            .filter(java.util.Objects::nonNull)
+                            .toList();
             messages.add(new SystemMessage(
                     investigatorContextAssembler.format(
                             conversation, action) + "\n"
-                    + investigatorCardContext
+                    + characterCardFormatter.formatOtherInvestigators(
+                            otherInvestigatorCards)
                     + TrpgRulePrompts.investigatorResidentRules()
                     + """
 
@@ -349,6 +358,18 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             }
         }
         return List.copyOf(result);
+    }
+
+    private boolean isControlledInvestigator(
+            CocDiceCharacterVO card, GroupActionSpec action) {
+        if (GroupChatConstant.ACTOR_USER.equals(action.actorType())) {
+            return "PLAYER".equals(card.actorType())
+                    && java.util.Objects.equals(
+                    card.cardId(), action.actorId());
+        }
+        return GroupChatConstant.ACTOR_CHARACTER.equals(action.actorType())
+                && java.util.Objects.equals(
+                card.participantId(), action.actorId());
     }
 
     @Override

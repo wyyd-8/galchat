@@ -38,12 +38,6 @@ public class TrpgInvestigatorContextAssembler {
     public String format(
             GroupConversation conversation, GroupActionSpec action) {
         CocCharacter card = requireCard(conversation, action);
-        boolean combat = GroupChatConstant.ACTION_TRPG_COMBAT.equals(
-                action.actionType())
-                || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
-                action.actionType())
-                || GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
-                action.actionType());
         StringBuilder result = new StringBuilder(
                 "<controlled-investigator>");
         append(result, "调查员", card.getName());
@@ -70,18 +64,13 @@ public class TrpgInvestigatorContextAssembler {
         appendAttributes(result, card);
         appendStatuses(result, card);
         appendSkills(result, card);
+        appendWeapons(result, card.getId());
         CocCharacterProfile profile = first(profileMapper.selectList(
                 new LambdaQueryWrapper<CocCharacterProfile>()
                         .eq(CocCharacterProfile::getCharacterId,
                                 card.getId())
                         .last("limit 1")));
-        if (combat) {
-            appendWeapons(result, card.getId());
-            if (profile != null) {
-                append(result, "携带装备",
-                        profile.getEquipmentText());
-            }
-        } else if (profile != null) {
+        if (profile != null) {
             appendBackground(result, profile);
         }
         return result.append("\n</controlled-investigator>")
@@ -126,7 +115,10 @@ public class TrpgInvestigatorContextAssembler {
                 .append("，MP=")
                 .append(pair(card.getMpCurrent(), card.getMpMax()))
                 .append("，幸运=").append(value(card.getLuckCurrent()))
-                .append("，护甲=").append(value(card.getArmor()));
+                .append("，护甲=").append(value(card.getArmor()))
+                .append("，DB=").append(value(card.getDamageBonus()))
+                .append("，体格=").append(value(card.getBuild()))
+                .append("，MOV=").append(value(card.getMov()));
     }
 
     private void appendStatuses(
@@ -143,7 +135,7 @@ public class TrpgInvestigatorContextAssembler {
     }
 
     private void appendSkills(StringBuilder result, CocCharacter card) {
-        List<CocCharacterSkill> skills = skillResolver.normalizeOverrides(
+        List<CocCharacterSkill> skills = skillResolver.resolveEffectiveSkills(
                 card,
                 skillMapper.selectList(
                         new LambdaQueryWrapper<CocCharacterSkill>()
@@ -156,7 +148,7 @@ public class TrpgInvestigatorContextAssembler {
         StringJoiner values = new StringJoiner("，");
         skills.forEach(skill -> values.add(
                 skill.getDisplayName() + "=" + value(skill.getValue())));
-        append(result, "非标准技能", values.toString());
+        append(result, "技能", values.toString());
     }
 
     private void appendWeapons(StringBuilder result, Long cardId) {
@@ -183,8 +175,18 @@ public class TrpgInvestigatorContextAssembler {
         append(result, "意义非凡之地", profile.getMeaningfulLocations());
         append(result, "宝贵之物", profile.getTreasuredPossessions());
         append(result, "特质", profile.getTraits());
+        if (StringUtils.hasText(profile.getKeyConnectionCategory())
+                || StringUtils.hasText(profile.getKeyConnectionText())) {
+            append(result, "关键联结",
+                    value(profile.getKeyConnectionCategory()) + " / "
+                            + value(profile.getKeyConnectionText()));
+        }
         append(result, "伤口与疤痕", profile.getInjuriesAndScars());
         append(result, "恐惧与狂躁", profile.getPhobiasAndManias());
+        append(result, "携带装备", profile.getEquipmentText());
+        append(result, "资产", profile.getAssetsText());
+        append(result, "消费水平", profile.getSpendingLevel());
+        append(result, "现金", profile.getCash());
         append(result, "备注", profile.getNotes());
     }
 

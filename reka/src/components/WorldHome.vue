@@ -91,7 +91,7 @@ function openDialogue(entry: DialogueEntry) {
       <section class="dashboard-main dialogue-hub">
         <header class="dialogue-hub-heading">
           <div><span class="eyebrow">DIALOGUE HUB</span><h2>对话中心</h2><p>单聊、群聊和跑团按最近互动排列。</p></div>
-          <div class="dialogue-hub-actions"><button class="button secondary" @click="emit('addCharacter')"><Plus :size="16" />添加角色</button><button class="button primary" :disabled="characters.length === 0" @click="emit('newConversation')"><Plus :size="16" />新建会话</button></div>
+          <div class="dialogue-hub-actions"><button class="button secondary" @click="emit('addCharacter')"><Plus :size="16" />添加角色</button><button class="button primary" @click="emit('newConversation')"><Plus :size="16" />新建会话</button></div>
         </header>
 
         <div class="dialogue-filter" role="tablist" aria-label="对话类型">

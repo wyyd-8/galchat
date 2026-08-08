@@ -12,6 +12,14 @@ export interface BindingTarget {
   boundCardId?: number
 }
 
+export function canCreateTrpgRun(
+  title: string,
+  moduleId: number,
+  busy: boolean,
+): boolean {
+  return title.trim().length > 0 && Number.isInteger(moduleId) && moduleId > 0 && !busy
+}
+
 export function canAutoGenerateCard(target: BindingTarget | undefined): boolean {
   return target?.actorType === 'BOT'
     && target.participantId !== undefined

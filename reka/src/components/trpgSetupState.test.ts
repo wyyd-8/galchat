@@ -3,6 +3,7 @@ import test from 'node:test'
 import type { InvestigatorCardSummary } from '../api/types.ts'
 import {
   buildBindingTargets,
+  canCreateTrpgRun,
   canAutoGenerateCard,
   decodeParticipantIds,
   encodeParticipantIds,
@@ -18,6 +19,13 @@ const card = (cardId: number, actorType: 'PLAYER' | 'BOT', participantId?: numbe
   participantId,
   name: `调查员 ${cardId}`,
   checkValues: {},
+})
+
+test('allows creating a TRPG run without selecting AI investigators', () => {
+  assert.equal(canCreateTrpgRun('孤身调查', 3, false), true)
+  assert.equal(canCreateTrpgRun('', 3, false), false)
+  assert.equal(canCreateTrpgRun('孤身调查', 0, false), false)
+  assert.equal(canCreateTrpgRun('孤身调查', 3, true), false)
 })
 
 test('adds multiple investigators and previews the most recently selected one', () => {

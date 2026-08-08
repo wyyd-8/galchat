@@ -38,6 +38,86 @@ import static org.mockito.Mockito.when;
 class GroupConversationServiceTest {
 
     @Test
+    void createTrpgConversationAllowsNoAiInvestigators() {
+        GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
+        GroupChatMemberMapper memberMapper = mock(GroupChatMemberMapper.class);
+        IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
+        CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
+        CocModuleLockService moduleLockService = mock(CocModuleLockService.class);
+        CocModuleCharacterInstantiationService moduleCharacterService =
+                mock(CocModuleCharacterInstantiationService.class);
+        GroupConversationService service = new GroupConversationService(
+                conversationMapper,
+                memberMapper,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                worldService,
+                mock(IUserCharacterInfoService.class),
+                lockService,
+                moduleMapper,
+                moduleLockService,
+                moduleCharacterService);
+        when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
+                new UserWorldPrefix().setId(1L).setWorldId(10L));
+        when(lockService.tryWorldLock(1L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        when(moduleLockService.tryReadLock(3L)).thenReturn(
+                new CocModuleLockService.OwnedLock(mock(RLock.class), 1L));
+        when(moduleMapper.selectById(3L)).thenReturn(
+                new CocModule().setId(3L).setVisible(true));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            ((GroupConversation) invocation.getArgument(0)).setId(7L);
+            return 1;
+        }).when(conversationMapper).insert(any(GroupConversation.class));
+        GroupConversationCreateDTO request = new GroupConversationCreateDTO();
+        request.setUserWorldId(1L);
+        request.setMode(GroupChatConstant.MODE_TRPG);
+        request.setModuleId(3L);
+        request.setCharacterIds(List.of());
+
+        GroupConversation result = service.create(request);
+
+        assertThat(result.getId()).isEqualTo(7L);
+        assertThat(result.getMode()).isEqualTo(GroupChatConstant.MODE_TRPG);
+        verify(memberMapper, never()).insert(any(GroupChatMember.class));
+        verify(moduleCharacterService).instantiate(3L, 7L);
+    }
+
+    @Test
+    void createChatConversationStillRequiresACharacter() {
+        GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
+        IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
+        GroupConversationLockService lockService = mock(GroupConversationLockService.class);
+        GroupConversationService service = new GroupConversationService(
+                conversationMapper,
+                mock(GroupChatMemberMapper.class),
+                mock(GroupChatMessageMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                worldService,
+                mock(IUserCharacterInfoService.class),
+                lockService,
+                mock(CocModuleMapper.class),
+                mock(CocModuleLockService.class),
+                mock(CocModuleCharacterInstantiationService.class));
+        when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
+                new UserWorldPrefix().setId(1L).setWorldId(10L));
+        when(lockService.tryWorldLock(1L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        GroupConversationCreateDTO request = new GroupConversationCreateDTO();
+        request.setUserWorldId(1L);
+        request.setMode(GroupChatConstant.MODE_CHAT);
+        request.setCharacterIds(List.of());
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("群聊参与角色不能为空");
+        verify(conversationMapper, never()).insert(any(GroupConversation.class));
+    }
+
+    @Test
     void createTrpgConversationStartsWithoutUserReplyPlan() {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupChatMemberMapper memberMapper = mock(GroupChatMemberMapper.class);

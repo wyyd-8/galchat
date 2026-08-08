@@ -142,10 +142,13 @@ public class GroupConversationService {
                 .filter(id -> id != null)
                 .distinct()
                 .toList();
-        if (CollectionUtils.isEmpty(distinctCharacterIds)) {
+        if (GroupChatConstant.MODE_CHAT.equals(mode)
+                && CollectionUtils.isEmpty(distinctCharacterIds)) {
             throw new UserRequestException("群聊参与角色不能为空");
         }
-        checkCharacters(userWorldId, distinctCharacterIds);
+        if (!distinctCharacterIds.isEmpty()) {
+            checkCharacters(userWorldId, distinctCharacterIds);
+        }
 
         LocalDateTime now = LocalDateTime.now();
         GroupConversation conversation = new GroupConversation()

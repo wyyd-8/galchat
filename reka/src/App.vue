@@ -20,7 +20,7 @@ import type {
 import { useDirectChat } from '@/composables/useDirectChat'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
-import { hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
+import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
 
 interface FavorabilityRow { id: string; threshold?: number; prompt: string }
 
@@ -536,7 +536,7 @@ async function changePassword() {
     <div v-else class="trpg-participant-picker-layout">
       <section class="trpg-participant-list-pane">
         <header class="settings-section-heading">
-          <span><strong>选择 AI 调查员</strong><small>可以多选；右侧始终显示最近选择的人物，再次点击可取消</small></span>
+          <span><strong>选择 AI 调查员</strong><small>可以不选并以单人团开始，也可以多选 AI 调查员</small></span>
           <em>{{ conversationForm.characterIds.length }} 位已选</em>
         </header>
         <div v-if="workspace.characters.value.length" class="character-choice-list trpg-participant-list" role="group" aria-label="AI 调查员角色">
@@ -566,7 +566,7 @@ async function changePassword() {
           <section class="character-background-preview"><strong>当前世界中的角色资料</strong><p>{{ conversationPreviewCharacter.userInfoPrompt || '尚未填写需要长期记住的用户信息。' }}</p></section>
           <div class="participant-preview-note"><strong>下一阶段</strong><span>跑团创建后，需要为该角色绑定一张独立的 AI 调查员人物卡。</span></div>
         </template>
-        <div v-else class="binding-empty"><strong>未显示人物</strong><span>选择人物后在这里预览；取消任意选择时右侧会置空。</span></div>
+        <div v-else class="binding-empty"><strong>单人团</strong><span>不选择 AI 调查员，将由玩家独自进入本次跑团。</span></div>
       </aside>
     </div>
 
@@ -574,7 +574,7 @@ async function changePassword() {
       <button class="button ghost" :disabled="busy" @click="conversationStep === 2 ? (conversationStep = 1) : (dialogs.conversation = false)">{{ conversationStep === 2 ? '上一步' : '取消' }}</button>
       <button v-if="conversationForm.mode === 'chat'" class="button primary" :disabled="!conversationForm.title || !conversationForm.characterIds.length || busy" @click="createNormalConversation">创建并进入</button>
       <button v-else-if="conversationStep === 1" class="button primary" :disabled="!conversationForm.title || !Number(conversationForm.moduleId) || busy" @click="conversationStep = 2">下一步：选择人物</button>
-      <button v-else class="button primary" :disabled="!conversationForm.characterIds.length || busy" @click="createTrpgConversation">创建跑团并绑定人物卡</button>
+      <button v-else class="button primary" :disabled="!canCreateTrpgRun(conversationForm.title, Number(conversationForm.moduleId), busy)" @click="createTrpgConversation">创建跑团并绑定人物卡</button>
     </template>
   </BaseDialog>
 

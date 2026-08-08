@@ -69,6 +69,11 @@ public class TrpgSaveSnapshotDTO {
         private String summary;
         private String status;
         private Integer version;
+        private Integer gameDayNo;
+        private String gameTimePeriod;
+        private Integer gameTimeRevision;
+        private Long gameTimeChangedStepId;
+        private LocalDateTime gameTimeUpdatedAt;
         private LocalDateTime updatedAt;
         private LocalDateTime closedAt;
     }

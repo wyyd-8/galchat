@@ -7,6 +7,7 @@ import com.me.galchat.domain.dto.GroupReplyPlanDTO;
 import com.me.galchat.domain.dto.GroupEndExplorationDTO;
 import com.me.galchat.domain.dto.GroupTurnContinueDTO;
 import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
+import com.me.galchat.domain.dto.TrpgGameTimeUpdateDTO;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.service.impl.GroupChatService;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
@@ -15,6 +16,9 @@ import com.me.galchat.service.impl.GroupConversationLifecycleService;
 import com.me.galchat.service.impl.GroupReplyPlanService;
 import com.me.galchat.service.impl.TrpgContextWindowService;
 import com.me.galchat.service.impl.TrpgTurnExecutionService;
+import com.me.galchat.service.impl.TrpgGameTimeService;
+import com.me.galchat.utils.CurrentHolder;
+import com.me.galchat.exception.UserRequestException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,6 +44,7 @@ public class GroupChatController {
     private final GroupReplyPlanService replyPlanService;
     private final TrpgContextWindowService contextWindowService;
     private final TrpgTurnExecutionService turnExecutionService;
+    private final TrpgGameTimeService gameTimeService;
 
     @PostMapping("/conversations")
     public Result createConversation(@RequestBody GroupConversationCreateDTO dto) {
@@ -61,6 +66,18 @@ public class GroupChatController {
     public Result getContextWindow(@PathVariable Long conversationId) {
         conversationService.requireAuthorized(conversationId);
         return Result.success(contextWindowService.get(conversationId));
+    }
+
+    @PutMapping("/conversations/{conversationId}/game-time")
+    public Result updateGameTime(
+            @PathVariable Long conversationId,
+            @RequestBody TrpgGameTimeUpdateDTO request) {
+        Integer userId = CurrentHolder.getCurrentId();
+        if (userId == null) {
+            throw new UserRequestException("用户未登录");
+        }
+        return Result.success(gameTimeService.correct(
+                Long.valueOf(userId), conversationId, request));
     }
 
     @PostMapping("/conversations/{conversationId}/close")

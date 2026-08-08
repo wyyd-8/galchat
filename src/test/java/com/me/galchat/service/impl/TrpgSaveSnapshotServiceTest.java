@@ -41,11 +41,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -189,6 +191,14 @@ class TrpgSaveSnapshotServiceTest {
         assertThat(snapshot.getModuleId()).isEqualTo(8L);
         assertThat(snapshot.getCursors()).isSameAs(cursors);
         assertThat(snapshot.getConversationState().getActiveReplyPlanId()).isEqualTo(101L);
+        assertThat(snapshot.getConversationState().getGameDayNo())
+                .isEqualTo(2);
+        assertThat(snapshot.getConversationState().getGameTimePeriod())
+                .isEqualTo("EVENING");
+        assertThat(snapshot.getConversationState().getGameTimeRevision())
+                .isEqualTo(4);
+        assertThat(snapshot.getConversationState().getGameTimeChangedStepId())
+                .isEqualTo(88L);
         assertThat(snapshot.getReplyPlans()).containsExactly(plan);
         assertThat(snapshot.getReplyPlanItems()).containsExactly(item);
         assertThat(snapshot.getCharacters()).containsExactly(character);
@@ -242,7 +252,11 @@ class TrpgSaveSnapshotServiceTest {
         GroupConversation conversation = conversation()
                 .setTitle("后来标题")
                 .setStatus(GroupChatConstant.STATUS_CLOSED)
-                .setActiveReplyPlanId(999L);
+                .setActiveReplyPlanId(999L)
+                .setGameDayNo(5)
+                .setGameTimePeriod("LATE_NIGHT")
+                .setGameTimeRevision(9)
+                .setGameTimeChangedStepId(999L);
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setId(101L)
                 .setConversationId(51L)
@@ -260,7 +274,13 @@ class TrpgSaveSnapshotServiceTest {
                         .setActiveReplyPlanId(101L)
                         .setTitle("存档标题")
                         .setStatus(GroupChatConstant.STATUS_ACTIVE)
-                        .setVersion(3));
+                        .setVersion(3)
+                        .setGameDayNo(1)
+                        .setGameTimePeriod("MORNING")
+                        .setGameTimeRevision(2)
+                        .setGameTimeChangedStepId(77L)
+                        .setGameTimeUpdatedAt(LocalDateTime.of(
+                                2026, 8, 7, 9, 0)));
 
         service.restoreDatabase(conversation, snapshot);
 
@@ -279,7 +299,12 @@ class TrpgSaveSnapshotServiceTest {
         assertThat(conversation.getTitle()).isEqualTo("存档标题");
         assertThat(conversation.getStatus()).isEqualTo(GroupChatConstant.STATUS_ACTIVE);
         assertThat(conversation.getActiveReplyPlanId()).isEqualTo(101L);
+        assertThat(conversation.getGameDayNo()).isEqualTo(1);
+        assertThat(conversation.getGameTimePeriod()).isEqualTo("MORNING");
+        assertThat(conversation.getGameTimeRevision()).isEqualTo(2);
+        assertThat(conversation.getGameTimeChangedStepId()).isEqualTo(77L);
         verify(conversationMapper).updateById(conversation);
+        verify(conversationMapper).update(eq(null), any());
     }
 
     @Test
@@ -344,6 +369,12 @@ class TrpgSaveSnapshotServiceTest {
                 .setTitle("雾港")
                 .setStatus(GroupChatConstant.STATUS_ACTIVE)
                 .setActiveReplyPlanId(101L)
+                .setGameDayNo(2)
+                .setGameTimePeriod("EVENING")
+                .setGameTimeRevision(4)
+                .setGameTimeChangedStepId(88L)
+                .setGameTimeUpdatedAt(LocalDateTime.of(
+                        2026, 8, 7, 18, 0))
                 .setVersion(1);
     }
 

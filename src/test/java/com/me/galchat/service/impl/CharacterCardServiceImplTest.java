@@ -10,6 +10,7 @@ import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserInfo;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
+import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
@@ -32,11 +33,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 class CharacterCardServiceImplTest {
 
@@ -58,6 +62,7 @@ class CharacterCardServiceImplTest {
         conversationMapper = mock(GroupConversationMapper.class);
         service = new CharacterCardServiceImpl(characterMapper, skillMapper,
                 mock(CocCharacterWeaponMapper.class), mock(CocCharacterProfileMapper.class), skillDefMapper,
+                new CharacterSkillResolver(),
                 characterTemplateMapper, userInfoMapper,
                 conversationMapper);
     }
@@ -207,6 +212,49 @@ class CharacterCardServiceImplTest {
     }
 
     @Test
+    void importedCardPersistsOnlyValuesThatOverrideSkillDefinitions() {
+        CharacterCardCreateDTO request = new CharacterCardCreateDTO();
+        request.setRunId(5L);
+        request.setParticipantId(9L);
+        request.setCharacterText("""
+                林恩，记者，女，30岁
+                出身波士顿，现居阿卡姆
+                时代: 现代
+                STR 50 CON 50 SIZ 50 DEX 50
+                APP 50 INT 50 POW 50 EDU 50
+                ————技能————
+                聆听 20%
+                侦查 60%
+                """);
+        when(conversationMapper.selectById(5L)).thenReturn(
+                new GroupConversation().setId(5L)
+                        .setMode(GroupChatConstant.MODE_TRPG));
+        when(characterMapper.selectList(any())).thenReturn(List.of());
+        when(skillDefMapper.selectList(null)).thenReturn(List.of(
+                skillDefinition(1L, "聆听", 20, null),
+                skillDefinition(2L, "侦查", 25, null)));
+        when(characterTemplateMapper.selectById(9L)).thenReturn(
+                new CharacterTemplate().setName("原角色"));
+        AtomicReference<CocCharacter> insertedCharacter = new AtomicReference<>();
+        doAnswer(invocation -> {
+            CocCharacter character = invocation.getArgument(0);
+            character.setId(71L);
+            insertedCharacter.set(character);
+            return 1;
+        }).when(characterMapper).insert(any(CocCharacter.class));
+        when(characterMapper.selectById(71L)).thenAnswer(
+                invocation -> insertedCharacter.get());
+
+        service.create(request);
+
+        var skillCaptor = org.mockito.ArgumentCaptor.forClass(
+                CocCharacterSkill.class);
+        verify(skillMapper, times(1)).insert(skillCaptor.capture());
+        assertThat(skillCaptor.getValue().getDisplayName()).isEqualTo("侦查");
+        assertThat(skillCaptor.getValue().getValue()).isEqualTo(60);
+    }
+
+    @Test
     void resolvesAttributeAndSkillChecksByRunAndUniqueCardName() {
         CocCharacter card = new CocCharacter()
                 .setId(71L).setRunId(5L).setParticipantId(null)
@@ -224,6 +272,51 @@ class CharacterCardServiceImplTest {
                 .containsEntry("SAN", 63)
                 .containsEntry("理智", 63)
                 .containsEntry("侦查", 70);
+    }
+
+    @Test
+    void diceCharacterUsesSkillDefinitionsForDefaultsAndCharacterRowsForOverrides() {
+        CocCharacter card = characterWithAllAttributes(50)
+                .setId(71L).setRunId(5L).setName("林恩")
+                .setDex(41).setEdu(65);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(skillDefMapper.selectList(null)).thenReturn(List.of(
+                skillDefinition(1L, "攀爬", 20, null),
+                skillDefinition(2L, "闪避", null, "DEX/2"),
+                skillDefinition(3L, "母语", null, "EDU"),
+                skillDefinition(4L, "格斗", null, null)));
+        when(skillMapper.selectList(any())).thenReturn(List.of(
+                new CocCharacterSkill().setCharacterId(71L)
+                        .setDisplayName("攀爬").setValue(55)));
+
+        CocDiceCharacterVO resolved = service.requireDiceCharacter(5L, "林恩");
+
+        assertThat(resolved.checkValues())
+                .containsEntry("攀爬", 55)
+                .containsEntry("闪避", 20)
+                .containsEntry("母语", 65)
+                .doesNotContainKey("格斗");
+    }
+
+    @Test
+    void cardReadHidesLegacyRowsThatOnlyRepeatSkillDefinitionDefaults() {
+        CocCharacter card = characterWithAllAttributes(50)
+                .setId(71L).setRunId(5L).setName("林恩");
+        when(characterMapper.selectById(71L)).thenReturn(card);
+        when(skillDefMapper.selectList(null)).thenReturn(List.of(
+                skillDefinition(1L, "聆听", 20, null),
+                skillDefinition(2L, "图书馆使用", 20, null)));
+        when(skillMapper.selectList(any())).thenReturn(List.of(
+                new CocCharacterSkill().setCharacterId(71L)
+                        .setDisplayName("聆听").setBaseValue(20).setValue(20),
+                new CocCharacterSkill().setCharacterId(71L)
+                        .setDisplayName("图书馆使用").setBaseValue(20).setValue(50)));
+
+        CharacterCardVO resolved = service.getById(71L);
+
+        assertThat(resolved.getSkills())
+                .extracting(CocCharacterSkill::getDisplayName)
+                .containsExactly("图书馆使用");
     }
 
     @Test
@@ -394,5 +487,15 @@ class CharacterCardServiceImplTest {
     private CocCharacter characterWithAllAttributes(int value) {
         return new CocCharacter().setStr(value).setCon(value).setSiz(value).setDex(value)
                 .setApp(value).setIntValue(value).setPow(value).setEdu(value);
+    }
+
+    private CocSkillDef skillDefinition(
+            long id, String name, Integer baseValue, String baseFormula) {
+        CocSkillDef definition = new CocSkillDef();
+        definition.setId(id);
+        definition.setName(name);
+        definition.setBaseValue(baseValue);
+        definition.setBaseFormula(baseFormula);
+        return definition;
     }
 }

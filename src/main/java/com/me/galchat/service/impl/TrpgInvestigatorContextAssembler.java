@@ -15,6 +15,7 @@ import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.CocCharacterSkillMapper;
 import com.me.galchat.mapper.CocCharacterWeaponMapper;
+import com.me.galchat.mapper.CocSkillDefMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -31,6 +32,8 @@ public class TrpgInvestigatorContextAssembler {
     private final CocCharacterSkillMapper skillMapper;
     private final CocCharacterProfileMapper profileMapper;
     private final CocCharacterWeaponMapper weaponMapper;
+    private final CocSkillDefMapper skillDefMapper;
+    private final CharacterSkillResolver skillResolver;
 
     public String format(
             GroupConversation conversation, GroupActionSpec action) {
@@ -66,7 +69,7 @@ public class TrpgInvestigatorContextAssembler {
         append(result, "居住地", card.getResidence());
         appendAttributes(result, card);
         appendStatuses(result, card);
-        appendSkills(result, card.getId());
+        appendSkills(result, card);
         CocCharacterProfile profile = first(profileMapper.selectList(
                 new LambdaQueryWrapper<CocCharacterProfile>()
                         .eq(CocCharacterProfile::getCharacterId,
@@ -139,11 +142,14 @@ public class TrpgInvestigatorContextAssembler {
         }
     }
 
-    private void appendSkills(StringBuilder result, Long cardId) {
-        List<CocCharacterSkill> skills = skillMapper.selectList(
-                new LambdaQueryWrapper<CocCharacterSkill>()
-                        .eq(CocCharacterSkill::getCharacterId, cardId)
-                        .orderByAsc(CocCharacterSkill::getId));
+    private void appendSkills(StringBuilder result, CocCharacter card) {
+        List<CocCharacterSkill> skills = skillResolver.normalizeOverrides(
+                card,
+                skillMapper.selectList(
+                        new LambdaQueryWrapper<CocCharacterSkill>()
+                                .eq(CocCharacterSkill::getCharacterId, card.getId())
+                                .orderByAsc(CocCharacterSkill::getId)),
+                skillDefMapper.selectList(null));
         if (skills == null || skills.isEmpty()) {
             return;
         }

@@ -63,13 +63,17 @@ class TrpgSceneSelectionToolsTest {
                 31L));
 
         tools.publishExplorationScenes(
-                List.of("餐厅", "后院"), context);
+                List.of("餐厅", "后院"),
+                2, "AFTERNOON", context);
 
         verify(service).publishOptions(
-                7L, 30L, List.of("餐厅", "后院"));
+                7L, 30L, 31L,
+                List.of("餐厅", "后院"),
+                2, "AFTERNOON");
         Tool annotation = KpSceneSelectionTools.class
                 .getMethod("publishExplorationScenes",
-                        List.class, ToolContext.class)
+                        List.class, Integer.class,
+                        String.class, ToolContext.class)
                 .getAnnotation(Tool.class);
         assertThat(annotation.returnDirect()).isTrue();
     }

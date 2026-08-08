@@ -14,7 +14,7 @@ import BaseDialog from '@/components/ui/BaseDialog.vue'
 import NoticeToast from '@/components/ui/NoticeToast.vue'
 import { api, uploadImage } from '@/api/client'
 import type {
-  CharacterTemplate, UserInfo, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldDetail,
+  CharacterTemplate, TrpgGameTimePeriod, UserInfo, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldDetail,
   WorldTemplate, WorldTemplateUsage,
 } from '@/api/types'
 import { useDirectChat } from '@/composables/useDirectChat'
@@ -128,6 +128,9 @@ async function openDirectChat(id: number) {
 }
 function closeDirectChat() { direct.close(); view.value = 'world' }
 async function restoreTrpg() { const id = workspace.selectedConversationId.value; if (id) await workspace.selectConversation(id) }
+async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
+  await run(() => workspace.correctGameTime(dayNo, period))
+}
 
 function openNewWorld() {
   Object.assign(worldForm, { worldId: '', name: '', acitvePushStatus: true, dailyCompanionMode: true, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
@@ -419,7 +422,7 @@ async function changePassword() {
       <WorldLibrary v-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
-      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:scroller="workspace.messageScroller.value" :conversation="workspace.selectedConversation.value" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="dialogs.trpgTools = true" @send="workspace.sendMessage" @start-turn="workspace.startTrpgTurn" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @retry="workspace.retryStep" @end="dialogs.end = true" />
+      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:scroller="workspace.messageScroller.value" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="dialogs.trpgTools = true" @send="workspace.sendMessage" @start-turn="workspace.startTrpgTurn" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @retry="workspace.retryStep" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
   </div>
   <div v-else class="signed-out"><span class="brand-glyph large">✦</span><h1>GalChat</h1><p>一个安静的角色与群像叙事工作台。</p><button class="button primary" @click="authOpen = true">登录或注册</button></div>

@@ -156,6 +156,7 @@ public class GroupConversationService {
                 .setTitle(StringUtils.hasText(title) ? title.trim() : "群聊")
                 .setStatus(GroupChatConstant.STATUS_ACTIVE)
                 .setVersion(0)
+                .setGameTimeRevision(0)
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         conversationMapper.insert(conversation);

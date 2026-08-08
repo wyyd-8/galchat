@@ -28,7 +28,9 @@ class TrpgGroupContextPolicyTest {
                 mock(TrpgModuleContextAssembler.class),
                 mock(TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
-                mock(TrpgSceneRuntimeContextAssembler.class));
+                mock(TrpgSceneRuntimeContextAssembler.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgGameTimeContextAssembler.class));
         GroupConversation conversation =
                 new GroupConversation().setId(7L);
         GroupActionSpec action = action(
@@ -41,6 +43,39 @@ class TrpgGroupContextPolicyTest {
         assertThat(policy.load(conversation, action).messages())
                 .extracting(message -> message.getText())
                 .contains("<context-summary>阁楼摘要</context-summary>");
+    }
+
+    @Test
+    void kpAndInvestigatorReceiveLatestGameTimeContext() {
+        com.me.galchat.service.impl.TrpgGameTimeContextAssembler
+                timeAssembler = mock(com.me.galchat.service.impl
+                .TrpgGameTimeContextAssembler.class);
+        TrpgExplorationContextAssembler explorationAssembler =
+                mock(TrpgExplorationContextAssembler.class);
+        when(explorationAssembler.assemble(any(), any()))
+                .thenReturn(List.of());
+        when(timeAssembler.format(7L)).thenReturn(
+                "<current-game-time day=\"2\" period=\"EVENING\">第二天 - 晚上</current-game-time>");
+        TrpgGroupContextPolicy policy = new TrpgGroupContextPolicy(
+                mock(TrpgModuleContextAssembler.class),
+                mock(TrpgAgentDecisionContextAssembler.class),
+                explorationAssembler,
+                mock(TrpgSceneRuntimeContextAssembler.class),
+                timeAssembler);
+        GroupConversation conversation =
+                new GroupConversation().setId(7L);
+
+        var kp = policy.load(conversation, action(
+                GroupChatConstant.ACTOR_KP, null));
+        var investigator = policy.load(conversation, action(
+                GroupChatConstant.ACTOR_CHARACTER, 9L));
+
+        assertThat(kp.messages())
+                .extracting(message -> message.getText())
+                .contains("<current-game-time day=\"2\" period=\"EVENING\">第二天 - 晚上</current-game-time>");
+        assertThat(investigator.messages())
+                .extracting(message -> message.getText())
+                .contains("<current-game-time day=\"2\" period=\"EVENING\">第二天 - 晚上</current-game-time>");
     }
 
     @Test
@@ -62,7 +97,9 @@ class TrpgGroupContextPolicyTest {
                 mock(TrpgModuleContextAssembler.class),
                 mock(TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
-                runtimeAssembler);
+                runtimeAssembler,
+                mock(com.me.galchat.service.impl
+                        .TrpgGameTimeContextAssembler.class));
 
         assertThat(policy.load(conversation, kpAction).messages())
                 .extracting(message -> message.getText())
@@ -80,7 +117,9 @@ class TrpgGroupContextPolicyTest {
                 moduleAssembler,
                 mock(TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
-                mock(TrpgSceneRuntimeContextAssembler.class));
+                mock(TrpgSceneRuntimeContextAssembler.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgGameTimeContextAssembler.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(3L);
         when(explorationAssembler.assemble(
@@ -111,7 +150,9 @@ class TrpgGroupContextPolicyTest {
                 mock(TrpgModuleContextAssembler.class),
                 decisionAssembler,
                 explorationAssembler,
-                mock(TrpgSceneRuntimeContextAssembler.class));
+                mock(TrpgSceneRuntimeContextAssembler.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgGameTimeContextAssembler.class));
         GroupConversation conversation =
                 new GroupConversation().setId(7L);
         GroupActionSpec sceneAction = action(

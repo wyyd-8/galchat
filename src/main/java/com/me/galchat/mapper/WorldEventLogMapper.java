@@ -3,7 +3,10 @@ package com.me.galchat.mapper;
 import com.me.galchat.domain.po.WorldEventLog;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.type.ArrayTypeHandler;
 
 /**
  * <p>
@@ -25,6 +28,11 @@ public interface WorldEventLogMapper extends BaseMapper<WorldEventLog> {
             """)
     Long selectMaxRestorableId(@Param("userWorldId") Long userWorldId);
 
+    @Results(id = "worldEventLogResultMap", value = {
+            @Result(column = "visible_characters",
+                    property = "visibleCharacters",
+                    typeHandler = ArrayTypeHandler.class)
+    })
     @Select("""
             SELECT event.*
             FROM world_event_log event

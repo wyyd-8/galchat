@@ -359,7 +359,11 @@ class GroupConversationServiceTest {
                 mock(GroupConversationLockService.class), mock(CocModuleMapper.class),
                 mock(CocModuleLockService.class), mock(CocModuleCharacterInstantiationService.class));
         when(conversationMapper.selectById(7L)).thenReturn(new GroupConversation()
-                .setId(7L).setUserWorldId(1L).setMode(GroupChatConstant.MODE_TRPG));
+                .setId(7L).setUserWorldId(1L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setGameDayNo(2)
+                .setGameTimePeriod("EVENING")
+                .setGameTimeRevision(3));
         when(memberMapper.selectList(any())).thenReturn(List.of(
                 new GroupChatMember().setActorType(GroupChatConstant.ACTOR_CHARACTER).setActorId(11L).setPosition(0),
                 new GroupChatMember().setActorType(GroupChatConstant.ACTOR_CHARACTER).setActorId(22L).setPosition(1)));
@@ -367,5 +371,9 @@ class GroupConversationServiceTest {
         String json = JsonMapper.builder().build().writeValueAsString(service.get(7L));
 
         assertThat(json).contains("\"characterIds\":[11,22]");
+        assertThat(json)
+                .contains("\"gameTime\"")
+                .contains("\"displayText\":\"第二天 - 晚上\"")
+                .contains("\"revision\":3");
     }
 }

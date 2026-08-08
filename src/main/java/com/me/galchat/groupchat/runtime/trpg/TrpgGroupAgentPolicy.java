@@ -194,8 +194,11 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
             if (selectionPhase) {
                 messages.add(new UserMessage("""
-                        现在轮到KP开始选景。根据地点标题索引和当前剧情，调用publishExplorationScenes提交当天能够探索的准确地点名称列表。
-                        只提交此刻合理开放的地点，不强制限制地点数量或探索时长；不得输出地点ID。
+                        现在轮到KP开始选景。先读取current-game-time，并根据上一批场景判断是否需要推进时间。
+                        首次选景必须同时提供targetDay和targetPeriod来初始化当前时间；后续选景可以同时省略它们以保持当前时间，或同时提供任意严格晚于当前时间的目标值。
+                        根据最终采用的时间、地点标题索引、模组时间线、NPC作息和当前剧情，在内部判断此刻合理开放的地点。
+                        调用publishExplorationScenes提交当天能够探索的准确地点名称列表和可选目标时间；不得输出地点ID，不要输出时间推进原因、内部判断或额外自然语言。
+                        不强制限制地点数量或探索时长。
                         工具是returnDirect；调用后立即结束响应，不要再输出自然语言或JSON。
                         如果模组已经完整结束，可调用finishRun并继续输出最终公开收束消息。
                         """));
@@ -268,7 +271,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "行动。" + sceneParticipation
                         + "决策必须先于行动，并严格使用以下格式，标签外不得输出正文：\n"
                         + "<decision>一个完整自然语言段落，说明重要观察、线索联系、判断和本轮行动意图</decision>\n"
-                        + "<action>该角色公开说出的话和采取的行动，不要输出发言者标签</action>\n"
+                        + "<action>该角色公开说出的话和采取的行动，不要输出发言者标签。"
+                        + "公开行动通常只用一至两句；询问信息时直接说清对象和关键问题，"
+                        + "问题数量压到完成当前意图所需的最少；不追加无关的动作描写、语气渲染、"
+                        + "履历、自我评价、能力说明、重复理由或后续计划</action>\n"
                         + "action必须落实decision中的意图，不得重新选择目标；不得宣布未知事实、"
                         + "决定其他角色或NPC反应，也不得自行声明检定成功。"
                         + (combatDefense

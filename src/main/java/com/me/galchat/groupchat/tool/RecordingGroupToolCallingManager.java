@@ -3,6 +3,7 @@ package com.me.galchat.groupchat.tool;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.utils.CurrentHolder;
 import com.me.galchat.utils.TypeConvertUtils;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -40,6 +41,26 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
 
     @Override
     public ToolExecutionResult executeToolCalls(Prompt prompt, ChatResponse response) {
+        Integer previousUserId = CurrentHolder.getCurrentId();
+        Integer executionUserId = executionUserId(prompt);
+        if (executionUserId != null) {
+            CurrentHolder.setCurrentId(executionUserId);
+        }
+        try {
+            return executeToolCallsWithContext(prompt, response);
+        } finally {
+            if (executionUserId != null) {
+                if (previousUserId == null) {
+                    CurrentHolder.remove();
+                } else {
+                    CurrentHolder.setCurrentId(previousUserId);
+                }
+            }
+        }
+    }
+
+    private ToolExecutionResult executeToolCallsWithContext(
+            Prompt prompt, ChatResponse response) {
         List<String> toolNames = toolNames(response);
         long diceToolCount = toolNames.stream()
                 .filter(DiceRollConstant.KP_STATE_TOOL_NAMES::contains)
@@ -62,6 +83,22 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
             return delegate.executeToolCalls(prompt, response);
         }
         return executeAndRecord(prompt, response, replyStepId);
+    }
+
+    private Integer executionUserId(Prompt prompt) {
+        ChatOptions options = prompt.getOptions();
+        if (!(options instanceof ToolCallingChatOptions
+                toolCallingOptions)) {
+            return null;
+        }
+        Map<String, Object> context =
+                toolCallingOptions.getToolContext();
+        if (context == null) {
+            return null;
+        }
+        Long userId = TypeConvertUtils.asLong(
+                context.get(ChatToolContextConstant.USER_ID_KEY));
+        return userId == null ? null : Math.toIntExact(userId);
     }
 
     private ToolExecutionResult executeAndRecord(

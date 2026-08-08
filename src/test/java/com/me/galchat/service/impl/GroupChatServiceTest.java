@@ -68,6 +68,117 @@ import static org.mockito.Mockito.when;
 class GroupChatServiceTest {
 
     @Test
+    void publishingScenesEmitsGameTimeBeforeOptionsWithoutPublicTimeMessage() {
+        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        ChatClient chatClient = ChatClient.builder(model).build();
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupContextPolicy contextPolicy = mock(GroupContextPolicy.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatService service = new GroupChatService(
+                conversationService,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                runtimeRegistry,
+                messageMapper,
+                mock(GroupChatTurnMapper.class),
+                stepMapper,
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                immediateTransactionTemplate(),
+                diceMessageCodec(),
+                JsonMapper.builder().build(),
+                emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L).setWorldId(2L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(31L).setTurnId(30L)
+                .setActionType(
+                        GroupChatConstant.ACTION_TRPG_SCENE_SELECTION)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setGroupKey("scene-selection").setGroupName("选景")
+                .setGroupOrder(1).setItemOrder(1)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        GroupActionSpec action = new GroupActionSpec(
+                step.getActionType(), step.getSpeakerType(), null,
+                step.getGroupKey(), step.getGroupName(),
+                step.getGroupOrder(), step.getItemOrder());
+        when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        when(runtime.contextPolicy()).thenReturn(contextPolicy);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(contextPolicy.load(conversation, action))
+                .thenReturn(new GroupContextMaterial(List.of()));
+        when(agentPolicy.prepare(eq(conversation), eq(action), any()))
+                .thenReturn(new GroupModelInvocation(
+                        chatClient,
+                        new Prompt(List.of(new UserMessage("选景"))),
+                        List.of()));
+        when(agentPolicy.actorName(
+                5L, new GroupActorRef(GroupChatConstant.ACTOR_KP, null)))
+                .thenReturn("KP");
+        when(conversationService.nextSequence(7L)).thenReturn(1L);
+        when(messageMapper.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0)
+                            .setId(40L);
+                    return 1;
+                });
+        String directJson = """
+                {"options":{"1":"书房"},"autoAssigned":false,
+                 "timeChanged":true,
+                 "gameTime":{"dayNo":1,"period":"MORNING",
+                  "periodLabel":"上午","displayText":"第一天 - 上午",
+                  "revision":1}}
+                """;
+        Generation direct = new Generation(
+                new org.springframework.ai.chat.messages.AssistantMessage(
+                        directJson),
+                ChatGenerationMetadata.builder()
+                        .finishReason(ToolExecutionResult.FINISH_REASON)
+                        .metadata(ToolExecutionResult.METADATA_TOOL_NAME,
+                                "publishExplorationScenes")
+                        .metadata(ToolExecutionResult.METADATA_TOOL_ID,
+                                "call-1")
+                        .build());
+        when(model.stream(any(Prompt.class))).thenReturn(
+                Flux.just(new ChatResponse(List.of(direct))));
+
+        List<GroupChatEvent> events = service.streamPersistedStep(
+                conversation, turn, step).collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_REPLY_STARTED,
+                        GroupChatConstant.EVENT_GAME_TIME_CHANGED,
+                        GroupChatConstant.EVENT_SCENE_OPTIONS_CREATED,
+                        GroupChatConstant.EVENT_MESSAGE_COMPLETED);
+        assertThat(events.get(1).getGameTime().displayText())
+                .isEqualTo("第一天 - 上午");
+        verify(messageMapper).updateById(
+                org.mockito.ArgumentMatchers.argThat(
+                        (GroupChatMessage message) ->
+                                !message.getContent().contains("第一天")
+                                        && message.getContent()
+                                        .contains("KP公布可探索地点")));
+    }
+
+    @Test
     void trpgCharacterStepSplitsDecisionAndActionFromOneModelStream() {
         DeepSeekChatModel model = mock(DeepSeekChatModel.class);
         ChatClient chatClient = ChatClient.builder(model).build();
@@ -273,7 +384,9 @@ class GroupChatServiceTest {
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireActive(7L)).thenReturn(conversation);
         when(userWorldPrefixService.getById(1L))
-                .thenReturn(new UserWorldPrefix().setFavorSystemStatus("NORMAL"));
+                .thenReturn(new UserWorldPrefix()
+                        .setUserId(12L)
+                        .setFavorSystemStatus("NORMAL"));
         GroupReplyPlanItem planItem = new GroupReplyPlanItem()
                 .setId(20L)
                 .setGroupKey("scene:100")
@@ -395,6 +508,7 @@ class GroupChatServiceTest {
                 .containsEntry(ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY, 7L)
                 .containsEntry(ChatToolContextConstant.CHARACTER_ID_KEY, 9L)
                 .containsEntry(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 107L)
+                .containsEntry(ChatToolContextConstant.USER_ID_KEY, 12L)
                 .containsEntry(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY, "NORMAL");
         var messageCaptor =
                 org.mockito.ArgumentCaptor.forClass(GroupChatMessage.class);

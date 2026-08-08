@@ -1,6 +1,6 @@
 import type {
-  ApiResult, Character, CharacterCard, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
-  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, Session, TrpgSave, UserInfo, UserToken,
+  ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
+  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, Session, TrpgGameTime, TrpgGameTimePeriod, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
 } from './types'
@@ -119,6 +119,8 @@ export const api = {
   createConversation: (payload: { userWorldId: number; moduleId?: number; mode: string; title: string; characterIds: number[] }) => request<Conversation>('/group-chat/conversations', { method: 'POST', body: body(payload) }),
   closeConversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}/close`, { method: 'POST' }),
   contextWindow: (id: number) => request<ContextWindowUsage | null>(`/group-chat/conversations/${id}/context-window`),
+  updateGameTime: (id: number, payload: { dayNo: number; period: TrpgGameTimePeriod; revision: number }) =>
+    request<TrpgGameTime>(`/group-chat/conversations/${id}/game-time`, { method: 'PUT', body: body(payload) }),
   groupMessages: (id: number, beforeId?: number, size = 50) => request<GroupMessage[]>(`/group-chat/conversations/${id}/messages?size=${size}${beforeId ? `&beforeId=${beforeId}` : ''}`),
   withdrawGroupTurn: (id: number) => request<void>(`/group-chat/conversations/${id}/withdraw`, { method: 'POST' }),
   replyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`),
@@ -132,6 +134,18 @@ export const api = {
   createCharacterCard: (payload: { runId: number; participantId?: number; characterText: string }) => request<CharacterCard>('/character-cards', { method: 'POST', body: body(payload) }),
   deleteCharacterCard: (id: number) => request<void>(`/character-cards/${id}`, { method: 'DELETE' }),
   rollCharacterLuck: (id: number) => request<DiceResult>(`/character-cards/${id}/luck`, { method: 'POST' }),
+  createAutoCharacterCardDraft: (payload: { runId: number; participantId: number; requestId: string }) =>
+    request<CharacterCardCreationDraft>('/character-card-creation/drafts/auto', { method: 'POST', body: body(payload) }),
+  characterCardCreationDraft: (id: number) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}`),
+  activeCharacterCardDraft: (runId: number, participantId: number) =>
+    request<CharacterCardCreationDraft | null>(`/character-card-creation/drafts/active?${new URLSearchParams({ runId: String(runId), participantId: String(participantId) })}`),
+  regenerateCharacterCardDraft: (id: number, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/regenerate`, { method: 'POST', body: body(payload) }),
+  rewriteCharacterCardBackground: (id: number, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/rewrite-background`, { method: 'POST', body: body(payload) }),
+  completeCharacterCardDraft: (id: number, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCard>(`/character-card-creation/drafts/${id}/complete`, { method: 'POST', body: body(payload) }),
 
   diceSummary: (id: number) => request<DiceRollSummary>(`/dice-rolls/${id}`),
   diceResults: (id: number) => request<DiceRollDetail[]>(`/dice-rolls/${id}/results`),

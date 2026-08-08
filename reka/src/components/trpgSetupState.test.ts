@@ -3,9 +3,11 @@ import test from 'node:test'
 import type { InvestigatorCardSummary } from '../api/types.ts'
 import {
   buildBindingTargets,
+  canAutoGenerateCard,
   decodeParticipantIds,
   encodeParticipantIds,
   hasMissingBindings,
+  loadBindingTargetContent,
   resolveParticipantIds,
   toggleParticipantSelection,
 } from './trpgSetupState.ts'
@@ -44,6 +46,24 @@ test('builds one player target followed by only the selected AI investigators', 
 test('reports that card binding is incomplete while any target has no card', () => {
   assert.equal(hasMissingBindings([11, 22], [card(101, 'PLAYER'), card(102, 'BOT', 22)]), true)
   assert.equal(hasMissingBindings([11, 22], [card(101, 'PLAYER'), card(102, 'BOT', 11), card(103, 'BOT', 22)]), false)
+})
+
+test('offers automatic generation only for an unbound AI investigator', () => {
+  assert.equal(canAutoGenerateCard({ key: 'character:11', actorType: 'BOT', participantId: 11 }), true)
+  assert.equal(canAutoGenerateCard({ key: 'player', actorType: 'PLAYER' }), false)
+  assert.equal(canAutoGenerateCard({ key: 'character:11', actorType: 'BOT', participantId: 11, boundCardId: 101 }), false)
+})
+
+test('loads an active draft when reopening an unbound AI investigator', async () => {
+  const restoredDraft = { draftId: 501, status: 'PREVIEW_READY' }
+
+  const result = await loadBindingTargetContent(
+    { key: 'character:11', actorType: 'BOT', participantId: 11 },
+    async () => ({ cardId: 999 }),
+    async () => restoredDraft,
+  )
+
+  assert.deepEqual(result, { card: null, draft: restoredDraft })
 })
 
 test('round trips distinct participant ids for reopening a run before its first turn', () => {

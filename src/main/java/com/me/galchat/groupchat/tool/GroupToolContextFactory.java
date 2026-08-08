@@ -23,8 +23,22 @@ public class GroupToolContextFactory {
             Long turnId,
             Long replyStepId,
             String favorSystemStatus) {
+        return create(conversation, action, turnId, replyStepId,
+                favorSystemStatus, null);
+    }
+
+    public Map<String, Object> create(
+            GroupConversation conversation,
+            GroupActionSpec action,
+            Long turnId,
+            Long replyStepId,
+            String favorSystemStatus,
+            Long userId) {
         Map<String, Object> context = new HashMap<>();
         context.put(ChatToolContextConstant.WORLD_ID_KEY, conversation.getWorldId());
+        if (userId != null) {
+            context.put(ChatToolContextConstant.USER_ID_KEY, userId);
+        }
         context.put(ChatToolContextConstant.USER_WORLD_ID_KEY, conversation.getUserWorldId());
         context.put(ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY, conversation.getId());
         context.put(ChatToolContextConstant.ACTOR_TYPE_KEY, action.actorType());

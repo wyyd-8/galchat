@@ -3,6 +3,7 @@ package com.me.galchat.constant;
 public final class ChatToolContextConstant {
 
     public static final String WORLD_ID_KEY = "worldId";
+    public static final String USER_ID_KEY = "userId";
     public static final String USER_WORLD_ID_KEY = "userWorldId";
     public static final String ACTOR_TYPE_KEY = "actorType";
     public static final String CHARACTER_ID_KEY = "characterId";

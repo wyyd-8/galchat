@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
@@ -22,6 +24,246 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 
 class TrpgSceneSelectionServiceTest {
+
+    @Test
+    void firstSelectionRequiresKpToInitializeGameTime() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        GroupConversation conversation = activeTrpgConversation();
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        TrpgSceneSelectionService service = selectionService(
+                conversationService,
+                mock(CocModuleLocationMapper.class),
+                conversationMapper, store);
+
+        assertThatThrownBy(() -> service.publishOptions(
+                7L, 30L, 31L, List.of("旅店"), null, null))
+                .isInstanceOf(com.me.galchat.exception
+                        .UserRequestException.class)
+                .hasMessage("首次选景必须设置当前时间");
+
+        verify(conversationMapper, never()).updateById(
+                any(GroupConversation.class));
+        verify(store, never()).putOptions(any(), any(), any());
+    }
+
+    @Test
+    void firstSelectionAtomicallyInitializesGameTime() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        GroupConversation conversation = activeTrpgConversation();
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                location(21L, "旅店"),
+                location(22L, "医院")));
+        org.mockito.Mockito.doReturn(1)
+                .when(conversationMapper).updateById(conversation);
+        TrpgSceneSelectionService service = selectionService(
+                conversationService, locationMapper,
+                conversationMapper, store);
+
+        var result = service.publishOptions(
+                7L, 30L, 31L,
+                List.of("旅店", "医院"), 1, "MORNING");
+
+        assertThat(conversation.getGameDayNo()).isEqualTo(1);
+        assertThat(conversation.getGameTimePeriod())
+                .isEqualTo("MORNING");
+        assertThat(conversation.getGameTimeRevision()).isEqualTo(1);
+        assertThat(conversation.getGameTimeChangedStepId())
+                .isEqualTo(31L);
+        assertThat(result.timeChanged()).isTrue();
+        assertThat(result.gameTime().displayText())
+                .isEqualTo("第一天 - 上午");
+        verify(conversationMapper).updateById(conversation);
+        verify(store).putOptions(
+                org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.eq(30L),
+                any());
+    }
+
+    @Test
+    void laterSelectionMayKeepCurrentGameTime() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        GroupConversation conversation = activeTrpgConversation()
+                .setGameDayNo(2)
+                .setGameTimePeriod("AFTERNOON")
+                .setGameTimeRevision(4);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                location(21L, "旅店"),
+                location(22L, "医院")));
+        TrpgSceneSelectionService service = selectionService(
+                conversationService, locationMapper,
+                conversationMapper, store);
+
+        var result = service.publishOptions(
+                7L, 30L, 31L,
+                List.of("旅店", "医院"), null, null);
+
+        assertThat(result.timeChanged()).isFalse();
+        assertThat(result.gameTime().displayText())
+                .isEqualTo("第二天 - 下午");
+        assertThat(conversation.getGameTimeRevision()).isEqualTo(4);
+        verify(conversationMapper, never()).updateById(
+                any(GroupConversation.class));
+    }
+
+    @Test
+    void laterSelectionMayAdvanceToAnyFuturePeriod() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        GroupConversation conversation = activeTrpgConversation()
+                .setGameDayNo(1)
+                .setGameTimePeriod("EVENING")
+                .setGameTimeRevision(2);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                location(21L, "旅店"),
+                location(22L, "医院")));
+        org.mockito.Mockito.doReturn(1)
+                .when(conversationMapper).updateById(conversation);
+        TrpgSceneSelectionService service = selectionService(
+                conversationService, locationMapper,
+                conversationMapper, store);
+
+        var result = service.publishOptions(
+                7L, 30L, 31L,
+                List.of("旅店", "医院"), 3, "DAWN");
+
+        assertThat(result.timeChanged()).isTrue();
+        assertThat(result.gameTime().displayText())
+                .isEqualTo("第三天 - 清晨");
+        assertThat(conversation.getGameTimeRevision()).isEqualTo(3);
+    }
+
+    @Test
+    void missingReplyStepIdIsNotMistakenForSameStepRetry() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        GroupConversation conversation = activeTrpgConversation()
+                .setGameDayNo(1)
+                .setGameTimePeriod("MORNING")
+                .setGameTimeRevision(1);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(locationMapper.selectList(any())).thenReturn(
+                List.of(location(21L, "旅店")));
+        org.mockito.Mockito.doReturn(1)
+                .when(conversationMapper).updateById(conversation);
+        TrpgSceneSelectionService service = selectionService(
+                conversationService, locationMapper,
+                conversationMapper, store);
+
+        var result = service.publishOptions(
+                7L, 30L, null,
+                List.of("旅店"), 1, "NOON");
+
+        assertThat(result.timeChanged()).isTrue();
+        assertThat(result.gameTime().period()).isEqualTo("NOON");
+    }
+
+    @Test
+    void selectionRejectsTimeThatIsNotLater() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        GroupConversation conversation = activeTrpgConversation()
+                .setGameDayNo(2)
+                .setGameTimePeriod("AFTERNOON")
+                .setGameTimeRevision(4);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        TrpgSceneSelectionService service = selectionService(
+                conversationService,
+                mock(CocModuleLocationMapper.class),
+                conversationMapper, store);
+
+        assertThatThrownBy(() -> service.publishOptions(
+                7L, 30L, 31L,
+                List.of("旅店"), 2, "MORNING"))
+                .isInstanceOf(com.me.galchat.exception
+                        .UserRequestException.class)
+                .hasMessage("KP只能将时间推进到未来");
+
+        verify(conversationMapper, never()).updateById(
+                any(GroupConversation.class));
+        verify(store, never()).putOptions(any(), any(), any());
+    }
+
+    @Test
+    void retryingTheSameKpStepDoesNotAdvanceTimeTwice() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        GroupConversation conversation = activeTrpgConversation()
+                .setGameDayNo(1)
+                .setGameTimePeriod("AFTERNOON")
+                .setGameTimeRevision(2)
+                .setGameTimeChangedStepId(31L);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                location(21L, "旅店"),
+                location(22L, "医院")));
+        TrpgSceneSelectionService service = selectionService(
+                conversationService, locationMapper,
+                conversationMapper, store);
+
+        var result = service.publishOptions(
+                7L, 30L, 31L,
+                List.of("旅店", "医院"), 1, "AFTERNOON");
+
+        assertThat(result.timeChanged()).isFalse();
+        assertThat(conversation.getGameTimeRevision()).isEqualTo(2);
+        verify(conversationMapper, never()).updateById(
+                any(GroupConversation.class));
+        verify(store).putOptions(
+                org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.eq(30L),
+                any());
+    }
 
     @Test
     void selectionStageSchedulesKpBeforeEveryEnabledInvestigator() {
@@ -200,7 +442,10 @@ class TrpgSceneSelectionServiceTest {
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(3L)
                 .setMode(GroupChatConstant.MODE_TRPG)
-                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+                .setStatus(GroupChatConstant.STATUS_ACTIVE)
+                .setGameDayNo(1)
+                .setGameTimePeriod("MORNING")
+                .setGameTimeRevision(1);
         TrpgSceneSelectionService service = new TrpgSceneSelectionService(
                 conversationService, locationMapper,
                 mock(GroupConversationMapper.class),
@@ -289,6 +534,37 @@ class TrpgSceneSelectionServiceTest {
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                 .setActorId(actorId)
                 .setEnabled(enabled);
+    }
+
+    private TrpgSceneSelectionService selectionService(
+            GroupConversationService conversationService,
+            CocModuleLocationMapper locationMapper,
+            GroupConversationMapper conversationMapper,
+            TrpgSceneSelectionStore store) {
+        return new TrpgSceneSelectionService(
+                conversationService,
+                locationMapper,
+                conversationMapper,
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                store,
+                mock(TrpgParticipantService.class),
+                mock(TrpgSelectionRandomizer.class));
+    }
+
+    private GroupConversation activeTrpgConversation() {
+        return new GroupConversation()
+                .setId(7L)
+                .setModuleId(3L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+    }
+
+    private CocModuleLocation location(Long id, String name) {
+        return new CocModuleLocation()
+                .setId(id)
+                .setModuleId(3L)
+                .setName(name);
     }
 
     private TrpgParticipantService.Participant participant(

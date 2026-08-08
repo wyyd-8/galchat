@@ -25,6 +25,11 @@ public class GroupConversation implements Serializable {
     private String summary;
     private String status;
     private Integer version;
+    private Integer gameDayNo;
+    private String gameTimePeriod;
+    private Integer gameTimeRevision;
+    private Long gameTimeChangedStepId;
+    private LocalDateTime gameTimeUpdatedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime closedAt;

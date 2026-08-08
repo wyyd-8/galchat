@@ -5,12 +5,14 @@ import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.CocModuleCharacter;
+import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.CocCharacterSkillMapper;
 import com.me.galchat.mapper.CocCharacterWeaponMapper;
 import com.me.galchat.mapper.CocModuleCharacterMapper;
+import com.me.galchat.mapper.CocSkillDefMapper;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -50,7 +52,14 @@ class CocModuleCharacterInstantiationServiceTest {
                                 .setCharacterId(201L)
                                 .setDisplayName("斗殴")
                                 .setSpecialization("")
-                                .setValue(50)),
+                                .setBaseValue(25)
+                                .setValue(50),
+                                new CocCharacterSkill()
+                                        .setId(104L)
+                                        .setCharacterId(201L)
+                                        .setDisplayName("聆听")
+                                        .setBaseValue(20)
+                                        .setValue(20)),
                         List.of(new CocCharacterWeapon()
                                 .setId(102L)
                                 .setCharacterId(201L)
@@ -145,10 +154,21 @@ class CocModuleCharacterInstantiationServiceTest {
                 mock(CocCharacterWeaponMapper.class);
         CocCharacterProfileMapper profileMapper =
                 mock(CocCharacterProfileMapper.class);
+        CocSkillDefMapper skillDefMapper = mock(CocSkillDefMapper.class);
+        CocSkillDef brawl = new CocSkillDef();
+        brawl.setId(1L);
+        brawl.setName("斗殴");
+        brawl.setBaseValue(25);
+        CocSkillDef listen = new CocSkillDef();
+        listen.setId(2L);
+        listen.setName("聆听");
+        listen.setBaseValue(20);
+        when(skillDefMapper.selectList(null)).thenReturn(List.of(brawl, listen));
         return new Fixture(
                 new CocModuleCharacterInstantiationService(
                         moduleCharacterMapper, characterMapper,
                         skillMapper, weaponMapper, profileMapper,
+                        skillDefMapper, new CharacterSkillResolver(),
                         JsonMapper.builder().build()),
                 moduleCharacterMapper, characterMapper,
                 skillMapper, weaponMapper, profileMapper);

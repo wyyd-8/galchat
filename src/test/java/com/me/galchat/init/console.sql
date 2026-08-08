@@ -202,9 +202,20 @@ CREATE TABLE group_conversation (
     summary TEXT,
     status VARCHAR(50) NOT NULL,
     version INT DEFAULT 0,
+    game_day_no INT,
+    game_time_period VARCHAR(20),
+    game_time_revision INT NOT NULL DEFAULT 0,
+    game_time_changed_step_id BIGINT,
+    game_time_updated_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    closed_at TIMESTAMP
+    closed_at TIMESTAMP,
+    CONSTRAINT ck_group_conversation_game_time CHECK (
+        (game_day_no IS NULL AND game_time_period IS NULL)
+        OR (game_day_no >= 1 AND game_time_period IN (
+            'DAWN', 'MORNING', 'NOON', 'AFTERNOON',
+            'EVENING', 'LATE_NIGHT'))
+    )
 );
 
 CREATE INDEX idx_group_conversation_user_status
@@ -741,6 +752,8 @@ CREATE TABLE coc_character_profile (
     meaningful_locations TEXT,
     treasured_possessions TEXT,
     traits TEXT,
+    key_connection_category VARCHAR(50),
+    key_connection_text TEXT,
     injuries_and_scars TEXT,
     phobias_and_manias TEXT,
     equipment_text TEXT,
@@ -749,6 +762,34 @@ CREATE TABLE coc_character_profile (
     cash VARCHAR(100),
     notes TEXT
 );
+
+CREATE TABLE coc_character_creation_draft (
+    id BIGSERIAL PRIMARY KEY,
+    owner_user_id BIGINT NOT NULL,
+    run_id BIGINT NOT NULL,
+    participant_id BIGINT,
+    creation_mode VARCHAR(30) NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    current_step VARCHAR(50) NOT NULL,
+    next_action VARCHAR(50),
+    operation_status VARCHAR(30) NOT NULL DEFAULT 'IDLE',
+    version INT NOT NULL DEFAULT 1,
+    rules_version INT NOT NULL DEFAULT 1,
+    state JSONB NOT NULL,
+    last_request_id VARCHAR(100),
+    last_action VARCHAR(50),
+    last_error_code VARCHAR(100),
+    result_character_id BIGINT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_coc_character_creation_draft_owner
+    ON coc_character_creation_draft (owner_user_id, run_id, participant_id, id);
+
+CREATE UNIQUE INDEX uk_coc_character_creation_draft_active
+    ON coc_character_creation_draft (owner_user_id, run_id, COALESCE(participant_id, -1))
+    WHERE status IN ('IN_PROGRESS', 'PREVIEW_READY');
 
 ALTER TABLE coc_character
     ADD CONSTRAINT ck_coc_character_name_trimmed

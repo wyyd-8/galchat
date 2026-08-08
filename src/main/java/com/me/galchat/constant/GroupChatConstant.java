@@ -66,6 +66,8 @@ public final class GroupChatConstant {
     public static final String EVENT_MESSAGE_DELTA = "message.delta";
     public static final String EVENT_DICE_ROLL_CREATED = "dice_roll.created";
     public static final String EVENT_MATERIAL_CREATED = "material.created";
+    public static final String EVENT_GAME_TIME_CHANGED =
+            "game_time.changed";
     public static final String EVENT_SCENE_OPTIONS_CREATED =
             "scene_selection.options";
     public static final String EVENT_SCENE_CHOICE_CREATED =

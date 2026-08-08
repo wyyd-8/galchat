@@ -40,6 +40,7 @@ class CharacterCardControllerTest {
                 mock(CocCharacterWeaponMapper.class),
                 mock(CocCharacterProfileMapper.class),
                 mock(CocSkillDefMapper.class),
+                new com.me.galchat.service.impl.CharacterSkillResolver(),
                 mock(CharacterTemplateMapper.class),
                 mock(UserInfoMapper.class),
                 mock(GroupConversationMapper.class));

@@ -40,8 +40,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -52,6 +50,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     private final CocCharacterWeaponMapper weaponMapper;
     private final CocCharacterProfileMapper profileMapper;
     private final CocSkillDefMapper skillDefMapper;
+    private final CharacterSkillResolver skillResolver;
     private final CharacterTemplateMapper characterTemplateMapper;
     private final UserInfoMapper userInfoMapper;
     private final GroupConversationMapper conversationMapper;
@@ -68,6 +67,9 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         requireUniqueName(
                 createDTO.getRunId(), parsed.character());
         validateAndFillSkills(parsed.character(), parsed.skills());
+        List<CocCharacterSkill> skillOverrides =
+                skillResolver.normalizeOverrides(
+                        parsed.character(), parsed.skills(), List.of());
         CocCharacter character = parsed.character()
                 .setRunId(createDTO.getRunId())
                 .setParticipantId(createDTO.getParticipantId())
@@ -77,7 +79,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         characterMapper.insert(character);
         Long characterId = character.getId();
 
-        for (CocCharacterSkill skill : parsed.skills()) {
+        for (CocCharacterSkill skill : skillOverrides) {
             skill.setCharacterId(characterId);
             skillMapper.insert(skill);
         }
@@ -162,7 +164,9 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
 
     @Override
     public CocDiceCharacterVO requireDiceCharacter(Long runId, String characterName) {
-        return buildDiceCharacter(requireCharacterByName(runId, characterName));
+        return buildDiceCharacter(
+                requireCharacterByName(runId, characterName),
+                skillDefMapper.selectList(null));
     }
 
     @Override
@@ -369,11 +373,12 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     public List<CocDiceCharacterVO> listDiceCharacters(Long runId) {
         requireRunId(runId);
         List<CocDiceCharacterVO> result = new ArrayList<>();
+        List<CocSkillDef> definitions = skillDefMapper.selectList(null);
         for (CocCharacter character : characterMapper.selectList(
                 new LambdaQueryWrapper<CocCharacter>()
                         .eq(CocCharacter::getRunId, runId)
                         .orderByAsc(CocCharacter::getId))) {
-            result.add(buildDiceCharacter(character));
+            result.add(buildDiceCharacter(character, definitions));
         }
         return List.copyOf(result);
     }
@@ -410,9 +415,12 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
 
     private CharacterCardVO build(CocCharacter character) {
         Long id = character.getId();
-        List<CocCharacterSkill> skills = skillMapper.selectList(new LambdaQueryWrapper<CocCharacterSkill>()
-                .eq(CocCharacterSkill::getCharacterId, id)
-                .orderByAsc(CocCharacterSkill::getId));
+        List<CocCharacterSkill> skills = skillResolver.normalizeOverrides(
+                character,
+                skillMapper.selectList(new LambdaQueryWrapper<CocCharacterSkill>()
+                        .eq(CocCharacterSkill::getCharacterId, id)
+                        .orderByAsc(CocCharacterSkill::getId)),
+                skillDefMapper.selectList(null));
         List<CocCharacterWeapon> weapons = weaponMapper.selectList(new LambdaQueryWrapper<CocCharacterWeapon>()
                 .eq(CocCharacterWeapon::getCharacterId, id)
                 .orderByAsc(CocCharacterWeapon::getId));
@@ -421,7 +429,8 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         return new CharacterCardVO(character, skills, weapons, profile);
     }
 
-    private CocDiceCharacterVO buildDiceCharacter(CocCharacter character) {
+    private CocDiceCharacterVO buildDiceCharacter(
+            CocCharacter character, List<CocSkillDef> definitions) {
         Map<String, Integer> checkValues = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         putAliases(checkValues, character.getStr(), "STR", "力量");
         putAliases(checkValues, character.getCon(), "CON", "体质");
@@ -433,10 +442,12 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         putAliases(checkValues, character.getEdu(), "EDU", "教育");
         putAliases(checkValues, character.getSanCurrent(), "SAN", "理智");
         putAliases(checkValues, character.getLuckCurrent(), "LUCK", "幸运");
-        for (CocCharacterSkill skill : skillMapper.selectList(
+        List<CocCharacterSkill> overrides = skillMapper.selectList(
                 new LambdaQueryWrapper<CocCharacterSkill>()
                         .eq(CocCharacterSkill::getCharacterId, character.getId())
-                        .orderByAsc(CocCharacterSkill::getId))) {
+                        .orderByAsc(CocCharacterSkill::getId));
+        for (CocCharacterSkill skill : skillResolver.resolveEffectiveSkills(
+                character, overrides, definitions)) {
             if (skill.getDisplayName() != null && !skill.getDisplayName().isBlank()
                     && skill.getValue() != null) {
                 checkValues.put(skill.getDisplayName().trim(), skill.getValue());
@@ -495,15 +506,16 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     }
 
     void validateAndFillSkills(CocCharacter character, List<CocCharacterSkill> skills) {
-        Map<String, CocSkillDef> definitions = skillDefMapper.selectList(null).stream()
-                .collect(Collectors.toMap(CocSkillDef::getName, Function.identity()));
+        Map<String, CocSkillDef> definitions = skillResolver.definitionsByName(
+                skillDefMapper.selectList(null));
         int spent = 0;
         for (CocCharacterSkill skill : skills) {
             if ("克苏鲁神话".equals(skill.getDisplayName()) && skill.getValue() != 0) {
                 throw new UserRequestException("新建角色卡的克苏鲁神话点数必须为0");
             }
-            CocSkillDef definition = findDefinition(skill.getDisplayName(), definitions);
-            int baseValue = resolveBaseValue(definition, character);
+            CocSkillDef definition = skillResolver.findDefinition(
+                    skill.getDisplayName(), definitions);
+            int baseValue = skillResolver.resolveBaseValue(definition, character);
             skill.setBaseValue(baseValue);
             skill.setSkillDefId(definition == null ? null : definition.getId());
             skill.setCategory(definition == null ? skill.getCategory() : definition.getCategory());
@@ -517,33 +529,6 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         if (spent > budget) {
             throw new UserRequestException("角色卡技能点超过上限，当前消耗" + spent + "，上限" + budget);
         }
-    }
-
-    private CocSkillDef findDefinition(String skillName, Map<String, CocSkillDef> definitions) {
-        CocSkillDef exact = definitions.get(skillName);
-        if (exact != null) {
-            return exact;
-        }
-        int separator = skillName.indexOf(':');
-        if (separator < 0) {
-            return null;
-        }
-        CocSkillDef specialization = definitions.get(skillName.substring(separator + 1));
-        return specialization != null ? specialization : definitions.get(skillName.substring(0, separator));
-    }
-
-    private int resolveBaseValue(CocSkillDef definition, CocCharacter character) {
-        if (definition == null) {
-            return 0;
-        }
-        if (definition.getBaseValue() != null) {
-            return definition.getBaseValue();
-        }
-        return switch (definition.getBaseFormula() == null ? "" : definition.getBaseFormula()) {
-            case "DEX/2" -> character.getDex() / 2;
-            case "EDU" -> character.getEdu();
-            default -> 0;
-        };
     }
 
     static String resolveActorType(Long participantId) {

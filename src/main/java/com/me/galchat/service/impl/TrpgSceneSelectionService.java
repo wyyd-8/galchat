@@ -2,12 +2,14 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.constant.TrpgGameTimePeriod;
 import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
+import com.me.galchat.domain.vo.TrpgGameTimeVO;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
@@ -91,8 +93,10 @@ public class TrpgSceneSelectionService {
     public SceneOptionsResult publishOptions(
             Long conversationId, List<String> locationNames) {
         Long turnId = store.currentTurnId(conversationId);
-        return publishOptions(conversationId,
-                turnId == null ? 0L : turnId, locationNames);
+        return publishOptions(
+                conversationId,
+                turnId == null ? 0L : turnId,
+                null, locationNames, null, null);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -100,8 +104,24 @@ public class TrpgSceneSelectionService {
             Long conversationId,
             Long turnId,
             List<String> locationNames) {
+        return publishOptions(
+                conversationId, turnId, null,
+                locationNames, null, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public SceneOptionsResult publishOptions(
+            Long conversationId,
+            Long turnId,
+            Long replyStepId,
+            List<String> locationNames,
+            Integer targetDay,
+            String targetPeriod) {
         GroupConversation conversation =
                 requireSelectionConversation(conversationId);
+        TimeChange timeChange = validateTimeChange(
+                conversation, replyStepId,
+                targetDay, targetPeriod);
         if (locationNames == null || locationNames.isEmpty()) {
             throw new UserRequestException("KP至少需要提供一个可选地点");
         }
@@ -136,7 +156,9 @@ public class TrpgSceneSelectionService {
                     names.put(number, option.name()));
             return new SceneOptionsResult(
                     java.util.Collections.unmodifiableMap(names),
-                    existing.size() == 1);
+                    existing.size() == 1,
+                    false,
+                    TrpgGameTimeVO.from(conversation));
         }
         List<CocModuleLocation> locations = locationMapper.selectList(
                 new LambdaQueryWrapper<CocModuleLocation>()
@@ -155,6 +177,8 @@ public class TrpgSceneSelectionService {
             throw new UserRequestException(
                     "KP提供的可选地点包含模组中不存在的名称");
         }
+        boolean timeChanged = applyTimeChange(
+                conversation, replyStepId, timeChange);
         Map<String, TrpgSceneSelectionStore.LocationOption> options =
                 new LinkedHashMap<>();
         for (int index = 0; index < normalized.size(); index++) {
@@ -181,7 +205,79 @@ public class TrpgSceneSelectionService {
                 names.put(number, option.name()));
         return new SceneOptionsResult(
                 java.util.Collections.unmodifiableMap(names),
-                autoAssigned);
+                autoAssigned,
+                timeChanged,
+                TrpgGameTimeVO.from(conversation));
+    }
+
+    private TimeChange validateTimeChange(
+            GroupConversation conversation,
+            Long replyStepId,
+            Integer targetDay,
+            String targetPeriod) {
+        boolean hasDay = targetDay != null;
+        boolean hasPeriod = StringUtils.hasText(targetPeriod);
+        if (hasDay != hasPeriod) {
+            throw new UserRequestException(
+                    "目标天数和时段必须同时提供或同时省略");
+        }
+        boolean initialized = conversation.getGameDayNo() != null
+                && StringUtils.hasText(
+                conversation.getGameTimePeriod());
+        if (!initialized && !hasDay) {
+            throw new UserRequestException(
+                    "首次选景必须设置当前时间");
+        }
+        if (!hasDay) {
+            return null;
+        }
+        if (targetDay <= 0) {
+            throw new UserRequestException("游戏天数必须大于0");
+        }
+        TrpgGameTimePeriod parsed =
+                TrpgGameTimePeriod.parse(targetPeriod);
+        if (!initialized) {
+            return new TimeChange(targetDay, parsed);
+        }
+        if (replyStepId != null && Objects.equals(
+                conversation.getGameTimeChangedStepId(),
+                replyStepId)) {
+            return null;
+        }
+        TrpgGameTimePeriod current =
+                TrpgGameTimePeriod.parse(
+                        conversation.getGameTimePeriod());
+        boolean future = targetDay > conversation.getGameDayNo()
+                || targetDay.equals(conversation.getGameDayNo())
+                && parsed.ordinal() > current.ordinal();
+        if (!future) {
+            throw new UserRequestException(
+                    "KP只能将时间推进到未来");
+        }
+        return new TimeChange(targetDay, parsed);
+    }
+
+    private boolean applyTimeChange(
+            GroupConversation conversation,
+            Long replyStepId,
+            TimeChange timeChange) {
+        if (timeChange == null) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        conversation.setGameDayNo(timeChange.dayNo())
+                .setGameTimePeriod(timeChange.period().name())
+                .setGameTimeRevision(
+                        conversation.getGameTimeRevision() == null
+                                ? 1
+                                : conversation.getGameTimeRevision() + 1)
+                .setGameTimeChangedStepId(replyStepId)
+                .setGameTimeUpdatedAt(now)
+                .setUpdatedAt(now);
+        if (conversationMapper.updateById(conversation) == 0) {
+            throw new IllegalStateException("游戏时间更新失败");
+        }
+        return true;
     }
 
     public SceneChoiceResult selectOption(
@@ -386,7 +482,14 @@ public class TrpgSceneSelectionService {
 
     public record SceneOptionsResult(
             Map<String, String> options,
-            boolean autoAssigned) {
+            boolean autoAssigned,
+            boolean timeChanged,
+            TrpgGameTimeVO gameTime) {
+    }
+
+    private record TimeChange(
+            Integer dayNo,
+            TrpgGameTimePeriod period) {
     }
 
     public record SceneChoiceResult(

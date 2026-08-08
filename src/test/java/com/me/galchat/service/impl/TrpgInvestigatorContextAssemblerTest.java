@@ -13,6 +13,7 @@ import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.CocCharacterSkillMapper;
 import com.me.galchat.mapper.CocCharacterWeaponMapper;
+import com.me.galchat.mapper.CocSkillDefMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -38,6 +39,7 @@ class TrpgInvestigatorContextAssemblerTest {
                 .contains("跑团偏好是行动建议，不是必须遵守的规则")
                 .contains("林登")
                 .contains("图书馆使用=70")
+                .doesNotContain("聆听=20")
                 .contains("相信知识能够解决问题")
                 .doesNotContain("世界背景秘密")
                 .doesNotContain("左轮手枪")
@@ -97,7 +99,12 @@ class TrpgInvestigatorContextAssemblerTest {
         when(skillMapper.selectList(any())).thenReturn(List.of(
                 new CocCharacterSkill()
                         .setDisplayName("图书馆使用")
-                        .setValue(70)));
+                        .setBaseValue(20)
+                        .setValue(70),
+                new CocCharacterSkill()
+                        .setDisplayName("聆听")
+                        .setBaseValue(20)
+                        .setValue(20)));
         when(profileMapper.selectList(any())).thenReturn(List.of(
                 new CocCharacterProfile()
                         .setIdeology("相信知识能够解决问题")
@@ -109,7 +116,9 @@ class TrpgInvestigatorContextAssemblerTest {
         return new Fixture(
                 new TrpgInvestigatorContextAssembler(
                         characterMapper, templateMapper, skillMapper,
-                        profileMapper, weaponMapper),
+                        profileMapper, weaponMapper,
+                        mock(CocSkillDefMapper.class),
+                        new CharacterSkillResolver()),
                 new GroupConversation()
                         .setId(7L)
                         .setUserWorldId(5L));

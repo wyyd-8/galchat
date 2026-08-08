@@ -315,7 +315,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 
 `CocModule` 字段为 `id/name/author/era/introduction/investigatorCreation/coverUrl/playerCount/estimatedDuration/visible/createdAt/updatedAt`。这两个接口只返回 `visible = true` 的模组，不暴露事件真相、隐藏线索、KP 指引等私密模组上下文。创建 TRPG 会话时也只允许绑定当前可选模组。
 
-## 7. 群聊与 TRPG 行动轮（18 个）
+## 7. 群聊与 TRPG 行动轮（19 个）
 
 ### 7.1 会话、消息和历史
 
@@ -325,6 +325,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `GET /group-chat/conversations` | `userWorldId`，可选 `status` | `GroupConversationVO[]` | 查询用户世界下的会话，ID 倒序 |
 | `GET /group-chat/conversations/{conversationId}` | 路径 ID | `GroupConversationVO` | 查询会话详情 |
 | `GET /group-chat/conversations/{conversationId}/context-window` | 路径 ID | `ContextWindowUsage` 或 `null` | 查询最近一次 TRPG 模型提示词的字符量；Redis 记录保留 7 天 |
+| `PUT /group-chat/conversations/{conversationId}/game-time` | `TrpgGameTimeUpdateDTO` | `TrpgGameTimeVO` | 活动 TRPG 的所有者手动校正已初始化的时间；不产生公开消息 |
 | `POST /group-chat/conversations/{conversationId}/close` | 无 | `GroupConversation` | 生成总结并关闭活动会话；已关闭会话会被拒绝 |
 | `POST /group-chat/conversations/{conversationId}/messages` | `GroupChatRequest` | SSE `GroupChatEvent` | 普通群聊发送消息；也由公共运行时处理相应模式 |
 | `GET /group-chat/conversations/{conversationId}/messages` | 可选 `beforeId/size` | `GroupChatMessageVO[]` | 查询公开历史；默认 50，范围 1..200，返回时间正序 |
@@ -340,7 +341,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `title` | string | 否 | 省略/空白时为 `群聊` |
 | `characterIds` | integer[] | 是 | 已加入该用户世界的角色，去重后不能为空 |
 
-`GroupConversationVO` 字段：`id/userWorldId/worldId/moduleId/activeReplyPlanId/mode/title/summary/status/version/createdAt/updatedAt/closedAt/lastChatContent/lastChatTime`。状态主要为 `active`、`closed`。
+`GroupConversationVO` 字段：`id/userWorldId/worldId/moduleId/activeReplyPlanId/mode/title/summary/status/version/gameTime/createdAt/updatedAt/closedAt/lastChatContent/lastChatTime`。状态主要为 `active`、`closed`。普通群聊或尚未由 KP 初始化时间的跑团，其 `gameTime` 为 `null`。
 
 创建和关闭接口返回数据库会话对象 `GroupConversation`，字段与上面相同但不包含计算字段 `lastChatContent/lastChatTime`。
 
@@ -363,6 +364,20 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 ```
 
 `content` 必须非空；TRPG 用户行动接口还限制最长 4000 字符。`clientRequestId` 可省略，但强烈建议提供。
+
+游戏时间由 KP 在选景工具调用中可选推进，粒度为“天 + 时段”。首次选景必须初始化；之后可保持不变，或推进到严格晚于当前时间的任意天/时段。时段枚举依次为 `DAWN/MORNING/NOON/AFTERNOON/EVENING/LATE_NIGHT`，显示为“清晨/上午/中午/下午/晚上/深夜”。KP 只把时间作为内部选景依据，不公开输出判断理由。
+
+手动校时请求用于纠错，可以向前或向后修改，但不能初始化时间；仅会话所有者、活动 TRPG 且当前没有未终结行动轮时可用。客户端必须携带刚读取到的 `revision`：
+
+```json
+{
+  "dayNo": 2,
+  "period": "EVENING",
+  "revision": 3
+}
+```
+
+`TrpgGameTimeVO` 字段为 `dayNo/period/periodLabel/displayText/revision/updatedAt`。推进和校时都不要求原因，也不会生成公开系统消息。
 
 `GroupChatMessageVO` 字段：`id/conversationId/turnId/replyStepId/speakerType/speakerId/speakerName/messageKind/content/decisionContent/sequenceNo/status/createdAt`。`speakerType` 常见 `user/character/kp/narrator`；`messageKind` 常见 `dialogue/narration/dice_roll/material/combat_result`。
 
@@ -457,6 +472,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `delta` | string | 思考、决策或正文增量 |
 | `content` | string | 完整内容或结构化公开文本 |
 | `diceRoll` | object | `KpDiceToolResult`，见骰子模型 |
+| `gameTime` | object | `TrpgGameTimeVO`；仅时间变化事件提供 |
 | `sceneOptions` | object<string,string> | 选景选项 |
 | `sceneChoice` | object | `optionNo/controllerName/investigatorName/locationName/randomized` |
 | `autoSelected` | boolean | 是否自动选景 |
@@ -473,6 +489,7 @@ decision.completed
 message.delta
 dice_roll.created
 material.created
+game_time.changed
 scene_selection.options
 scene_selection.choice
 message.completed
@@ -484,9 +501,9 @@ combat.started
 combat.completed
 ```
 
-典型消费顺序是 `turn.accepted` → 若干 `reply.started`/增量事件 → `message.completed` → `turn.completed`。遇到 `turn.waiting_input` 或 `turn.paused` 时应停止自动推进，查询 `turns/current` 并按 `inputType` 提交下一操作。
+若 KP 在选景时推进时间，服务端先发送 `game_time.changed`，再发送 `scene_selection.options`；时间事件只用于刷新界面，不对应公开消息。典型消费顺序是 `turn.accepted` → 若干 `reply.started`/增量事件 → `message.completed` → `turn.completed`。遇到 `turn.waiting_input` 或 `turn.paused` 时应停止自动推进，查询 `turns/current` 并按 `inputType` 提交下一操作。
 
-## 8. CoC 人物卡（5 个）
+## 8. CoC 人物卡
 
 | 方法与路径 | 请求 | `data` | 说明 |
 | --- | --- | --- | --- |
@@ -495,6 +512,19 @@ combat.completed
 | `GET /character-cards/{id}` | 路径 ID | `CharacterCardVO` | 按人物卡 ID 查询 |
 | `GET /character-cards?runId={id}&participantId={id}` | 查询参数 | `CharacterCardVO` | 按跑团和参与者查询；省略 `participantId` 查询玩家卡 |
 | `POST /character-cards/{id}/luck` | 路径 ID | `DiceRollResultVO` | 首次绑定幸运值，公式固定为 `3D6 * 5`；不可重复投掷 |
+
+AI 调查员还可以按快速开始规则生成服务端草稿。开始生成前不会写入正式人物卡；草稿没有过期机制，同一用户、跑团和参与者同时只保留一个活动草稿。
+
+| 方法与路径 | 请求 | `data` | 说明 |
+| --- | --- | --- | --- |
+| `POST /character-card-creation/drafts/auto` | `runId/participantId/requestId` | `DraftView` | 依据角色模板和模组生成完整预览 |
+| `GET /character-card-creation/drafts/{id}` | 路径 ID | `DraftView` | 恢复草稿 |
+| `GET /character-card-creation/drafts/active?runId={id}&participantId={id}` | 查询参数 | `DraftView` 或 `null` | 按跑团和 AI 调查员恢复当前活动草稿 |
+| `POST /character-card-creation/drafts/{id}/regenerate` | `requestId/expectedVersion` | `DraftView` | 重新生成基础信息、职业、属性/技能排序、骰点和背景 |
+| `POST /character-card-creation/drafts/{id}/rewrite-background` | `requestId/expectedVersion` | `DraftView` | 重投六个背景骰并重写背景、武器和装备，保留基础构筑 |
+| `POST /character-card-creation/drafts/{id}/complete` | `requestId/expectedVersion` | `CharacterCardVO` | 在事务中创建并绑定正式人物卡 |
+
+快速开始由系统把 AI 给出的属性排序映射到 `80/70/60/60/50/50/50/40`，把九项本职技能排序映射到 `70/60/60/50/50/50/40/40/40`，并为前四项有效非本职技能各加 20；未进入本职排序的信用评级保底为 10。背景骰只作为宽松方向。武器只能选自服务端固定常规武器白名单，并由系统映射所需技能和武器数据；装备最多五件。时代不明确时仅提供 1920s 与现代共通武器。草稿预览和完成后的 `CharacterCardVO.skills` 都只包含角色覆盖项，`coc_character_skill` 也只保存不同于 `coc_skill_def` 基础值的覆盖项；标准值仅在 AI 背景、武器匹配、掷骰等需要完整技能集的服务端场景中临时解析。
 
 创建请求：
 
@@ -517,9 +547,9 @@ combat.completed
 `CharacterCardVO`：
 
 - `character`：人物主数据，包括身份、八项属性、`damageBonus/build/mov`、当前/最大 `hp/san/mp`、`luckCurrent`、护甲和伤病状态；内部 `quickNotes` 不会输出。
-- `skills`：技能数组，字段 `id/characterId/skillDefId/displayName/category/specialization/baseValue/value/isCustom`。
+- `skills`：角色技能覆盖项数组，只包含不同于 `coc_skill_def` 基础值的技能；字段 `id/characterId/skillDefId/displayName/category/specialization/baseValue/value/isCustom`。标准值由服务端结合技能定义与人物属性临时解析，不写入人物技能表，也不交给前端过滤。
 - `weapons`：武器数组，字段 `id/characterId/name/skillName/damage/range/attacksPerRound/ammoCapacity/remainingAmmo/malfunction/isBroken/notes`。
-- `profile`：背景资料，字段 `appearance/ideology/significantPeople/meaningfulLocations/treasuredPossessions/traits/injuriesAndScars/phobiasAndManias/equipmentText/assetsText/spendingLevel/cash/notes` 及 ID。
+- `profile`：背景资料，字段 `appearance/ideology/significantPeople/meaningfulLocations/treasuredPossessions/traits/keyConnectionCategory/keyConnectionText/injuriesAndScars/phobiasAndManias/equipmentText/assetsText/spendingLevel/cash/notes` 及 ID。
 
 注意：当前人物卡控制器的接口只经过登录拦截，服务层没有统一调用跑团会话的用户归属校验；调用方不应把可猜测的人物卡 ID 或 `runId` 暴露给非受信客户端。
 

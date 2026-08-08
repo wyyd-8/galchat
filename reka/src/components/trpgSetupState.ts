@@ -12,6 +12,26 @@ export interface BindingTarget {
   boundCardId?: number
 }
 
+export function canAutoGenerateCard(target: BindingTarget | undefined): boolean {
+  return target?.actorType === 'BOT'
+    && target.participantId !== undefined
+    && target.boundCardId === undefined
+}
+
+export async function loadBindingTargetContent<TCard, TDraft>(
+  target: BindingTarget | undefined,
+  loadCard: (cardId: number) => Promise<TCard>,
+  loadActiveDraft: (participantId: number) => Promise<TDraft | null>,
+): Promise<{ card: TCard | null; draft: TDraft | null }> {
+  if (target?.boundCardId !== undefined) {
+    return { card: await loadCard(target.boundCardId), draft: null }
+  }
+  if (target && canAutoGenerateCard(target)) {
+    return { card: null, draft: await loadActiveDraft(target.participantId!) }
+  }
+  return { card: null, draft: null }
+}
+
 export function toggleParticipantSelection(
   selectedIds: number[],
   _previewId: number | null,

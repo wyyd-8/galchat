@@ -30,6 +30,7 @@ public class GroupChatEvent {
     private String delta;
     private String content;
     private KpDiceToolResult diceRoll;
+    private TrpgGameTimeVO gameTime;
     private Map<String, String> sceneOptions;
     private SceneChoice sceneChoice;
     private Boolean autoSelected;

@@ -10,6 +10,7 @@ import com.me.galchat.service.impl.TrpgAgentDecisionContextAssembler;
 import com.me.galchat.service.impl.TrpgExplorationContextAssembler;
 import com.me.galchat.service.impl.TrpgModuleContextAssembler;
 import com.me.galchat.service.impl.TrpgSceneRuntimeContextAssembler;
+import com.me.galchat.service.impl.TrpgGameTimeContextAssembler;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +26,7 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
             explorationContextAssembler;
     private final TrpgSceneRuntimeContextAssembler
             sceneRuntimeContextAssembler;
+    private final TrpgGameTimeContextAssembler gameTimeContextAssembler;
 
     @Autowired
     public TrpgGroupContextPolicy(
@@ -33,13 +35,15 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
             TrpgExplorationContextAssembler
                     explorationContextAssembler,
             TrpgSceneRuntimeContextAssembler
-                    sceneRuntimeContextAssembler) {
+                    sceneRuntimeContextAssembler,
+            TrpgGameTimeContextAssembler gameTimeContextAssembler) {
         this.moduleContextAssembler = moduleContextAssembler;
         this.decisionContextAssembler = decisionContextAssembler;
         this.explorationContextAssembler =
                 explorationContextAssembler;
         this.sceneRuntimeContextAssembler =
                 sceneRuntimeContextAssembler;
+        this.gameTimeContextAssembler = gameTimeContextAssembler;
     }
 
     @Override
@@ -50,6 +54,11 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
     @Override
     public GroupContextMaterial load(GroupConversation conversation, GroupActionSpec action) {
         java.util.List<Message> messages = new java.util.ArrayList<>();
+        String gameTime = gameTimeContextAssembler.format(
+                conversation.getId());
+        if (StringUtils.hasText(gameTime)) {
+            messages.add(new SystemMessage(gameTime));
+        }
         if (GroupChatConstant.ACTOR_KP.equals(action.actorType())) {
             String moduleContext =
                     moduleContextAssembler.formatKpContext(conversation);

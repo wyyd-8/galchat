@@ -76,7 +76,9 @@ class GroupModeRuntimeTest {
                         .TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
                 mock(com.me.galchat.service.impl
-                        .TrpgSceneRuntimeContextAssembler.class));
+                        .TrpgSceneRuntimeContextAssembler.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgGameTimeContextAssembler.class));
 
         chatPolicy.onTurnStarted(chat, userMessage);
         trpgPolicy.onTurnStarted(trpg, userMessage);

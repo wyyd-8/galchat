@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.CocModuleCharacter;
+import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
@@ -13,6 +14,7 @@ import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.CocCharacterSkillMapper;
 import com.me.galchat.mapper.CocCharacterWeaponMapper;
 import com.me.galchat.mapper.CocModuleCharacterMapper;
+import com.me.galchat.mapper.CocSkillDefMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,8 @@ public class CocModuleCharacterInstantiationService {
     private final CocCharacterSkillMapper skillMapper;
     private final CocCharacterWeaponMapper weaponMapper;
     private final CocCharacterProfileMapper profileMapper;
+    private final CocSkillDefMapper skillDefMapper;
+    private final CharacterSkillResolver skillResolver;
     private final ObjectMapper objectMapper;
 
     @Transactional(rollbackFor = Exception.class)
@@ -61,6 +65,7 @@ public class CocModuleCharacterInstantiationService {
                                         CocModuleCharacter::getSortOrder)
                                 .orderByAsc(CocModuleCharacter::getId));
         Set<String> names = existingNames(runId);
+        List<CocSkillDef> definitions = skillDefMapper.selectList(null);
         int copied = 0;
         for (CocModuleCharacter template : templates) {
             CharacterCardVO card = template.getCardData() == null
@@ -77,7 +82,7 @@ public class CocModuleCharacterInstantiationService {
             if (!names.add(name)) {
                 continue;
             }
-            copyCard(card, name, runId);
+            copyCard(card, name, runId, definitions);
             copied++;
         }
         return copied;
@@ -97,7 +102,8 @@ public class CocModuleCharacterInstantiationService {
     }
 
     private void copyCard(
-            CharacterCardVO card, String name, Long runId) {
+            CharacterCardVO card, String name, Long runId,
+            List<CocSkillDef> definitions) {
         LocalDateTime now = LocalDateTime.now();
         CocCharacter character = new CocCharacter();
         BeanUtils.copyProperties(card.getCharacter(), character);
@@ -111,7 +117,8 @@ public class CocModuleCharacterInstantiationService {
                 .setUpdatedAt(now);
         characterMapper.insert(character);
         Long characterId = character.getId();
-        for (CocCharacterSkill source : safe(card.getSkills())) {
+        for (CocCharacterSkill source : skillResolver.normalizeOverrides(
+                character, safe(card.getSkills()), definitions)) {
             CocCharacterSkill skill = new CocCharacterSkill();
             BeanUtils.copyProperties(source, skill);
             skill.setId(null).setCharacterId(characterId);

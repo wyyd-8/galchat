@@ -347,7 +347,13 @@ class TrpgGroupAgentPolicyTest {
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("当天能够探索")
                 .contains("publishExplorationScenes")
-                .contains("不得输出地点ID");
+                .contains("不得输出地点ID")
+                .contains("首次选景")
+                .contains("targetDay")
+                .contains("targetPeriod")
+                .contains("保持当前时间")
+                .contains("内部判断")
+                .contains("不要输出时间推进原因");
         assertThat(invocation.tools())
                 .containsExactly(
                         selectionTools, moduleTools, runTools);
@@ -428,6 +434,9 @@ class TrpgGroupAgentPolicyTest {
                 .contains("</decision>")
                 .contains("<action>")
                 .contains("</action>")
+                .contains("公开行动通常只用一至两句")
+                .contains("问题数量压到完成当前意图所需的最少")
+                .contains("不追加无关的动作描写、语气渲染、履历、自我评价、能力说明、重复理由或后续计划")
                 .contains("决策必须先于行动")
                 .contains("本轮首位提案者")
                 .contains("首先提出一个具体可执行的计划")

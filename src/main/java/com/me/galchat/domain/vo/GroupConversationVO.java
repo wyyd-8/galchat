@@ -27,6 +27,7 @@ public class GroupConversationVO {
     private String lastChatContent;
     private LocalDateTime lastChatTime;
     private List<Long> characterIds;
+    private TrpgGameTimeVO gameTime;
 
     public static GroupConversationVO from(GroupConversation conversation) {
         return new GroupConversationVO()
@@ -40,6 +41,7 @@ public class GroupConversationVO {
                 .setSummary(conversation.getSummary())
                 .setStatus(conversation.getStatus())
                 .setVersion(conversation.getVersion())
+                .setGameTime(TrpgGameTimeVO.from(conversation))
                 .setCreatedAt(conversation.getCreatedAt())
                 .setUpdatedAt(conversation.getUpdatedAt())
                 .setClosedAt(conversation.getClosedAt());

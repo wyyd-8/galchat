@@ -1,11 +1,12 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { api, clearSession, currentSession, saveSession, streamGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
 import type {
-  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem,
+  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem, TrpgGameTimePeriod,
   UserInfo, UserWorld, WorldDetail, WorldSave, WorldTemplate,
 } from '@/api/types'
 import { beginReplyTurn, updateReplyTurn, type ReplyTurnState } from '@/components/replyTurnStatus'
 import { decodeParticipantIds, encodeParticipantIds, resolveParticipantIds } from '@/components/trpgSetupState'
+import { applyGameTimeEvent } from '@/components/gameTimeState'
 import { errorMessage, notify } from './useNotice'
 
 let tempMessageId = -1
@@ -249,6 +250,11 @@ export function useWorkspace() {
 
   function applyEvent(event: GroupChatEvent) {
     const step = event.replyStepId
+    if (event.eventType === 'game_time.changed' && selectedConversationId.value) {
+      conversations.value = conversations.value.map((conversation) => conversation.id === selectedConversationId.value
+        ? applyGameTimeEvent(conversation, event)
+        : conversation)
+    }
     if (selectedConversation.value?.mode === 'chat') replyTurnState.value = updateReplyTurn(replyTurnState.value, event)
     if (event.eventType === 'dice_roll.created' && event.diceRoll) latestDiceRoll.value = event.diceRoll
     if (event.eventType === 'reply.started' && step) {
@@ -313,6 +319,17 @@ export function useWorkspace() {
     messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
     replyPlan.value = plan || freshPlan()
     currentTurn.value = turn
+  }
+  async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
+    const conversation = selectedConversation.value
+    if (!conversation?.gameTime) throw new Error('当前时间尚未由 KP 初始化')
+    const gameTime = await api.updateGameTime(conversation.id, {
+      dayNo, period, revision: conversation.gameTime.revision,
+    })
+    conversations.value = conversations.value.map((item) => item.id === conversation.id
+      ? { ...item, gameTime }
+      : item)
+    notify('游戏时间已校正', gameTime.displayText, 'success')
   }
   async function startTrpgTurn() {
     const conversation = selectedConversation.value
@@ -423,6 +440,6 @@ export function useWorkspace() {
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,
-    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep,
+    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep, correctGameTime,
   }
 }

@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Archive, ChevronDown, CircleStop, Footprints, GripVertical, History, LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, RotateCcw, Save, Send, Trash2, UsersRound } from '@lucide/vue'
+import { Archive, Check, ChevronDown, CircleStop, Clock3, Footprints, GripVertical, History, LoaderCircle, MessageSquareText, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Send, Trash2, UsersRound, X } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
-import type { Character, Conversation, CurrentTurn, GroupMessage, ReplyPlan } from '@/api/types'
-import { replyPlanSignature, shouldShowSavePlan } from './replyPlanState'
+import type { Character, Conversation, CurrentTurn, GroupMessage, ReplyPlan, ReplyPlanItem, TrpgGameTimePeriod } from '@/api/types'
+import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
 import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = defineProps<{ conversation: Conversation; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>()
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; end: [] }>()
+const props = defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>()
+const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
@@ -20,7 +20,15 @@ const reasoningOpen = reactive<Record<number, boolean>>({})
 const reasoningPhase = new Map<number, 'thinking' | 'main' | 'idle'>()
 const lastScrollTop = ref(0)
 const initialScrollPending = ref(true)
-const items = computed(() => props.replyPlan.groups[0]?.items || [])
+const timeEditing = ref(false)
+const timeForm = reactive<{ dayNo: number; period: TrpgGameTimePeriod }>({ dayNo: 1, period: 'MORNING' })
+const timePeriods: Array<{ value: TrpgGameTimePeriod; label: string }> = [
+  { value: 'DAWN', label: '清晨' }, { value: 'MORNING', label: '上午' },
+  { value: 'NOON', label: '中午' }, { value: 'AFTERNOON', label: '下午' },
+  { value: 'EVENING', label: '晚上' }, { value: 'LATE_NIGHT', label: '深夜' },
+]
+const planItems = computed(() => props.replyPlan.groups[0]?.items || [])
+const items = computed(() => visibleReplyPlanItems(props.conversation.mode, planItems.value))
 const loadedPlanSignature = ref('')
 const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && props.currentTurn.inputType === 'message'))
 const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
@@ -60,7 +68,7 @@ let latestScrollFrame = 0
 
 watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(message.replyStepId && props.reasoning[message.replyStepId])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
 watch(() => props.replyPlan, (plan) => { loadedPlanSignature.value = replyPlanSignature(plan.groups[0]?.items || []) }, { immediate: true, flush: 'sync' })
-watch(() => props.conversation.id, () => { lastScrollTop.value = 0; initialScrollPending.value = true }, { immediate: true })
+watch(() => props.conversation.id, () => { lastScrollTop.value = 0; initialScrollPending.value = true; timeEditing.value = false }, { immediate: true })
 watch(() => props.loading, (loading) => {
   if (!loading && initialScrollPending.value) { initialScrollPending.value = false; scrollToLatest() }
 }, { immediate: true, flush: 'post' })
@@ -83,8 +91,21 @@ function syncReasoningState() {
 }
 
 function character(id?: number) { return props.characters.find((item) => item.characterId === id) }
+function planCharacter(item: ReplyPlanItem) { return item.actorType === 'character' ? character(item.actorId) : undefined }
+function planActorName(item: ReplyPlanItem) { return replyPlanActorName(item, props.username, planCharacter(item)?.characterName) }
 function drop(index: number) { if (draggedIndex.value !== null) emit('movePlanItem', draggedIndex.value, index); draggedIndex.value = null }
 function addActor() { const id = Number(addActorId.value); if (id) { emit('addPlanItem', id); addActorId.value = '' } }
+function beginTimeEdit() {
+  if (!props.conversation.gameTime) return
+  timeForm.dayNo = props.conversation.gameTime.dayNo
+  timeForm.period = props.conversation.gameTime.period
+  timeEditing.value = true
+}
+function submitTime() {
+  if (!Number.isInteger(timeForm.dayNo) || timeForm.dayNo <= 0) return
+  emit('correctTime', timeForm.dayNo, timeForm.period)
+  timeEditing.value = false
+}
 function keydown(event: KeyboardEvent) { if (!event.isComposing && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); emit('send') } }
 function scrollToLatest() {
   void nextTick(() => {
@@ -150,11 +171,21 @@ function handleScroll(event: Event) {
         </div>
       </section>
       <aside class="reply-panel">
+        <section v-if="conversation.mode === 'trpg'" class="trpg-time-panel">
+          <header><span><Clock3 :size="17" /><small>当前时间</small><strong>{{ conversation.gameTime?.displayText || '尚未设定' }}</strong></span><button v-if="conversation.gameTime && conversation.status === 'active' && !timeEditing" class="icon-button subtle" :disabled="sending || Boolean(currentTurn)" :title="currentTurn ? '行动轮进行中，暂不能校时' : '校正游戏时间'" @click="beginTimeEdit"><Pencil :size="14" /></button></header>
+          <div v-if="timeEditing" class="trpg-time-editor">
+            <label>第 <input v-model.number="timeForm.dayNo" min="1" step="1" type="number" /> 天</label>
+            <select v-model="timeForm.period"><option v-for="period in timePeriods" :key="period.value" :value="period.value">{{ period.label }}</option></select>
+            <button class="icon-button subtle" title="取消" @click="timeEditing = false"><X :size="14" /></button>
+            <button class="icon-button bordered" :disabled="!Number.isInteger(timeForm.dayNo) || timeForm.dayNo <= 0" title="确认校时" @click="submitTime"><Check :size="14" /></button>
+          </div>
+          <p v-if="!conversation.gameTime">由 KP 在首次选景时初始化。</p>
+        </section>
         <div class="reply-panel-title"><span><UsersRound :size="18" /><strong>{{ planTitle }}</strong></span><button class="icon-button subtle" @click="planOpen = !planOpen"><ChevronDown :size="17" :class="{ rotated: !planOpen }" /></button></div>
         <p>{{ planDescription }}</p>
         <div v-show="planOpen" class="reply-plan-list">
           <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}-${item.subjectCharacterId}`" class="reply-plan-item" :draggable="canEditPlan" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
-            <GripVertical v-if="canEditPlan" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="character(item.actorId)?.characterImage ? { backgroundImage: `url(${character(item.actorId)?.characterImage})` } : {}">{{ character(item.actorId)?.characterImage ? '' : (character(item.actorId)?.characterName || (item.actorType === 'kp' ? 'KP' : '?')).slice(0, 1) }}</span><span class="reply-name">{{ character(item.actorId)?.characterName || (item.actorType === 'kp' ? `KP · NPC #${item.subjectCharacterId}` : `角色 #${item.actorId}`) }}<small>{{ conversation.mode === 'trpg' ? '由跑团流程安排' : `第 ${index + 1} 位回复` }}</small></span><button v-if="canEditPlan" class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
+            <GripVertical v-if="canEditPlan" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="planCharacter(item)?.characterImage ? { backgroundImage: `url(${planCharacter(item)?.characterImage})` } : {}">{{ planCharacter(item)?.characterImage ? '' : planActorName(item).slice(0, 1) }}</span><span class="reply-name">{{ planActorName(item) }}<small>{{ conversation.mode === 'trpg' ? '由跑团流程安排' : `第 ${index + 1} 位回复` }}</small></span><button v-if="canEditPlan" class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
           </div>
           <div v-if="!items.length" class="plan-empty">暂无回复角色</div>
         </div>

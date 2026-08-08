@@ -322,7 +322,9 @@ public class GroupChatService {
             ChatClient.ChatClientRequestSpec requestSpec = invocation.chatClient().prompt(invocation.prompt())
                     .toolContext(toolContextFactory.create(
                             conversation, action, turn.getId(),
-                            step.getId(), favorSystemStatus));
+                            step.getId(), favorSystemStatus,
+                            userWorld == null
+                                    ? null : userWorld.getUserId()));
             if (!invocation.tools().isEmpty()) {
                 requestSpec = requestSpec.tools(invocation.tools().toArray());
             }
@@ -655,6 +657,13 @@ public class GroupChatService {
                 if (result.autoAssigned()) {
                     recoveryService.cancelPendingSteps(
                             turn.getId(), "单地点已自动分配");
+                }
+                if (result.timeChanged()) {
+                    events.add(baseEvent(
+                            GroupChatConstant.EVENT_GAME_TIME_CHANGED,
+                            conversation, turn, step, message, speaker)
+                            .gameTime(result.gameTime())
+                            .build());
                 }
                 events.add(baseEvent(
                         GroupChatConstant.EVENT_SCENE_OPTIONS_CREATED,

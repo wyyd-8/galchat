@@ -20,6 +20,8 @@ public class CocCharacterProfile {
     private String meaningfulLocations;
     private String treasuredPossessions;
     private String traits;
+    private String keyConnectionCategory;
+    private String keyConnectionText;
     private String injuriesAndScars;
     private String phobiasAndManias;
     private String equipmentText;

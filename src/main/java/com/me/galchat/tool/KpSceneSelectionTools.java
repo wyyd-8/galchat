@@ -23,12 +23,20 @@ public class KpSceneSelectionTools {
 
     @Tool(
             name = "publishExplorationScenes",
-            description = "KP在选景阶段公布本轮可探索地点名称；后端生成编号Map。",
+            description = "KP在选景阶段公布本轮可探索地点，并可同时将当前时间推进到未来；首次选景必须设置时间。",
             returnDirect = true)
     public TrpgSceneSelectionService.SceneOptionsResult
             publishExplorationScenes(
             @ToolParam(description = "可探索地点的准确名称列表")
             List<String> locationNames,
+            @ToolParam(
+                    required = false,
+                    description = "可选目标天数；首次选景必填，后续省略表示保持当前时间")
+            Integer targetDay,
+            @ToolParam(
+                    required = false,
+                    description = "可选目标时段：DAWN、MORNING、NOON、AFTERNOON、EVENING或LATE_NIGHT；必须与目标天数同时提供")
+            String targetPeriod,
             ToolContext context) {
         Map<String, Object> values = requireContext(context);
         if (!GroupChatConstant.ACTOR_KP.equals(
@@ -48,7 +56,8 @@ public class KpSceneSelectionTools {
                     "选景工具缺少群聊、行动轮或回复步骤上下文");
         }
         return selectionService.publishOptions(
-                conversationId, turnId, locationNames);
+                conversationId, turnId, replyStepId,
+                locationNames, targetDay, targetPeriod);
     }
 
     private Map<String, Object> requireContext(

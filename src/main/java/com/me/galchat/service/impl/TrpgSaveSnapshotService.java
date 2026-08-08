@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
 import com.me.galchat.domain.po.CocCharacter;
@@ -505,9 +506,32 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 .setSummary(state.getSummary())
                 .setStatus(state.getStatus())
                 .setVersion(state.getVersion())
+                .setGameDayNo(state.getGameDayNo())
+                .setGameTimePeriod(state.getGameTimePeriod())
+                .setGameTimeRevision(state.getGameTimeRevision())
+                .setGameTimeChangedStepId(
+                        state.getGameTimeChangedStepId())
+                .setGameTimeUpdatedAt(state.getGameTimeUpdatedAt())
                 .setUpdatedAt(state.getUpdatedAt())
                 .setClosedAt(state.getClosedAt());
         conversationMapper.updateById(conversation);
+        conversationMapper.update(null,
+                new UpdateWrapper<GroupConversation>()
+                        .eq("id", conversation.getId())
+                        .set("active_reply_plan_id",
+                                state.getActiveReplyPlanId())
+                        .set("summary", state.getSummary())
+                        .set("game_day_no", state.getGameDayNo())
+                        .set("game_time_period",
+                                state.getGameTimePeriod())
+                        .set("game_time_revision",
+                                state.getGameTimeRevision())
+                        .set("game_time_changed_step_id",
+                                state.getGameTimeChangedStepId())
+                        .set("game_time_updated_at",
+                                state.getGameTimeUpdatedAt())
+                        .set("updated_at", state.getUpdatedAt())
+                        .set("closed_at", state.getClosedAt()));
     }
 
     private TrpgSaveSnapshotDTO.ConversationStateSnapshot conversationState(
@@ -518,6 +542,14 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 .setSummary(conversation.getSummary())
                 .setStatus(conversation.getStatus())
                 .setVersion(conversation.getVersion())
+                .setGameDayNo(conversation.getGameDayNo())
+                .setGameTimePeriod(conversation.getGameTimePeriod())
+                .setGameTimeRevision(
+                        conversation.getGameTimeRevision())
+                .setGameTimeChangedStepId(
+                        conversation.getGameTimeChangedStepId())
+                .setGameTimeUpdatedAt(
+                        conversation.getGameTimeUpdatedAt())
                 .setUpdatedAt(conversation.getUpdatedAt())
                 .setClosedAt(conversation.getClosedAt());
     }

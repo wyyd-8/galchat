@@ -60,9 +60,14 @@ export interface DirectMessage {
 
 export type ConversationMode = 'chat' | 'trpg'
 export type ConversationStatus = 'active' | 'closed'
+export type TrpgGameTimePeriod = 'DAWN' | 'MORNING' | 'NOON' | 'AFTERNOON' | 'EVENING' | 'LATE_NIGHT'
+export interface TrpgGameTime {
+  dayNo: number; period: TrpgGameTimePeriod; periodLabel: string; displayText: string; revision: number; updatedAt?: string
+}
 export interface Conversation {
   id: number; userWorldId: number; worldId: number; moduleId?: number; activeReplyPlanId?: number; mode: ConversationMode
   title: string; summary?: string; status: ConversationStatus; version?: number
+  gameTime?: TrpgGameTime
   characterIds?: number[]
   createdAt?: string; updatedAt?: string; closedAt?: string; lastChatContent?: string; lastChatTime?: string
 }
@@ -74,10 +79,11 @@ export interface GroupMessage {
 }
 export interface GroupSpeaker { type: string; id?: number; name?: string; avatar?: string }
 export interface GroupChatEvent {
-  eventType: 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
+  eventType: 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
   actionType?: string; groupName?: string; itemOrder?: number; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string
   diceRoll?: DiceRollAggregate
+  gameTime?: TrpgGameTime
   sceneOptions?: Record<string, string>; autoSelected?: boolean
   sceneChoice?: { optionNo?: string; controllerName?: string; investigatorName?: string; locationName?: string; randomized?: boolean }
 }
@@ -108,10 +114,41 @@ export interface CocSkill { id: number; characterId: number; displayName: string
 export interface CocWeapon { id: number; characterId: number; name: string; skillName?: string; damage?: string; range?: string; attacksPerRound?: string; ammoCapacity?: number; remainingAmmo?: number; malfunction?: string; isBroken?: boolean; notes?: string }
 export interface CocProfile {
   appearance?: string; ideology?: string; significantPeople?: string; meaningfulLocations?: string; treasuredPossessions?: string
-  traits?: string; injuriesAndScars?: string; phobiasAndManias?: string; equipmentText?: string; assetsText?: string
+  traits?: string; keyConnectionCategory?: string; keyConnectionText?: string
+  injuriesAndScars?: string; phobiasAndManias?: string; equipmentText?: string; assetsText?: string
   spendingLevel?: string; cash?: string; notes?: string
 }
 export interface CharacterCard { character: CocCharacter; skills: CocSkill[]; weapons: CocWeapon[]; profile?: CocProfile }
+export interface DraftCharacterCard {
+  character: Omit<CocCharacter, 'id' | 'runId'> & { id?: number; runId?: number }
+  skills: Array<Omit<CocSkill, 'id' | 'characterId'> & { id?: number; characterId?: number }>
+  weapons: Array<Omit<CocWeapon, 'id' | 'characterId'> & { id?: number; characterId?: number }>
+  profile?: CocProfile
+}
+export interface CharacterCardBuildPlan {
+  name: string; age: number; sex?: string; birthplace?: string; residence?: string; occupation?: string
+  attributeOrder: string[]; occupationSkillOrder: string[]; interestSkillOrder: string[]; explanations?: string[]
+}
+export interface CharacterCardBackgroundRolls {
+  ideology: number; significantPersonWho: number; significantPersonReason: number
+  meaningfulLocation: number; treasuredPossession: number; trait: number; directions: Record<string, string>
+}
+export interface CharacterCardBackgroundPlan {
+  appearance?: string; ideology?: string; significantPeople?: string; meaningfulLocations?: string
+  treasuredPossessions?: string; traits?: string; keyConnectionCategory?: string; keyConnectionText?: string
+  weaponCode?: string; equipment?: string[]
+}
+export interface CharacterCardCreationDraft {
+  draftId: number; creationMode: string; status: string; currentStep: string; nextAction?: string; version: number
+  state: {
+    formatVersion: number
+    buildPlan: CharacterCardBuildPlan
+    buildRolls?: { luck?: number; educationChecks?: number[]; educationIncreases?: number[] }
+    backgroundRolls?: CharacterCardBackgroundRolls
+    backgroundPlan?: CharacterCardBackgroundPlan
+    preview: DraftCharacterCard
+  }
+}
 export interface InvestigatorCardSummary {
   cardId: number; actorType: 'PLAYER' | 'BOT'; participantId?: number; name: string; checkValues: Record<string, number>
   hpCurrent?: number; hpMax?: number; sanCurrent?: number; sanMax?: number; con?: number; armor?: number

@@ -40,7 +40,7 @@ public class GroupTurnPlanResolver {
                 selection.source())) {
             actions = sceneLifecycleService.remainingActions(
                     conversation.getId(),
-                    selection.contextId(),
+                    conversation.getActiveReplyPlanId(),
                     actions);
             actions = proposalOrderService.orderForTurn(
                     conversation, actions);

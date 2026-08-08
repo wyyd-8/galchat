@@ -2,7 +2,6 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
@@ -12,7 +11,6 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
-import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
@@ -27,13 +25,10 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -44,7 +39,6 @@ public class TrpgChildSceneCommandService {
     private final GroupChatTurnMapper turnMapper;
     private final GroupReplyPlanMapper planMapper;
     private final GroupReplyPlanItemMapper itemMapper;
-    private final CocModuleLocationMapper locationMapper;
     private final TrpgParticipantService participantService;
     private final TrpgChildScenePlanService childPlanService;
     private final GroupChatToolCallMapper toolCallMapper;
@@ -70,14 +64,11 @@ public class TrpgChildSceneCommandService {
             throw new UserRequestException(
                     "同一回复步骤不能重复创建子场景");
         }
-        CocModuleLocation location = requireDescendantLocation(
-                execution.conversation(),
-                execution.plan().getContextId(),
-                childSceneName);
+        String sceneName = normalizeSceneName(childSceneName);
         Selected selected = selectItems(
                 execution, investigatorNames,
                 GroupChatConstant.PARTICIPANT_ACTIVE);
-        return "已创建子场景“" + location.getName()
+        return "已创建子场景“" + sceneName
                 + "”，调查员"
                 + String.join("、", selected.names())
                 + "将进入该场景。";
@@ -122,7 +113,8 @@ public class TrpgChildSceneCommandService {
                 childPlanService.startChildUnderLock(
                         execution.conversation(),
                         execution.plan(),
-                        prepared.location(),
+                        prepared.sceneName(),
+                        step.getId(),
                         prepared.selected().items());
                 return true;
             }
@@ -155,22 +147,7 @@ public class TrpgChildSceneCommandService {
             GroupConversation conversation) {
         try {
             GroupReplyPlan scene = requireActiveScene(conversation);
-            if (activeInvestigatorItems(scene.getId()).isEmpty()) {
-                return false;
-            }
-            List<CocModuleLocation> locations =
-                    locationMapper.selectList(
-                            new LambdaQueryWrapper<CocModuleLocation>()
-                                    .eq(CocModuleLocation::getModuleId,
-                                            conversation.getModuleId()));
-            Map<Long, CocModuleLocation> byId = new HashMap<>();
-            locations.forEach(location ->
-                    byId.put(location.getId(), location));
-            return locations.stream()
-                    .filter(location ->
-                            StringUtils.hasText(location.getContent()))
-                    .anyMatch(location -> isStrictDescendant(
-                            location, scene.getContextId(), byId));
+            return !activeInvestigatorItems(scene.getId()).isEmpty();
         } catch (UserRequestException ignored) {
             return false;
         }
@@ -244,15 +221,13 @@ public class TrpgChildSceneCommandService {
                     objectMapper.readValue(
                             toolArguments,
                             ChildSceneStartArguments.class);
-            CocModuleLocation location = requireDescendantLocation(
-                    execution.conversation(),
-                    execution.plan().getContextId(),
+            String sceneName = normalizeSceneName(
                     arguments.childSceneName());
             Selected selected = selectItems(
                     execution,
                     arguments.investigatorNames(),
                     GroupChatConstant.PARTICIPANT_ACTIVE);
-            return new PreparedChildStart(location, selected);
+            return new PreparedChildStart(sceneName, selected);
         } catch (JacksonException | UserRequestException ignored) {
             return null;
         }
@@ -274,58 +249,15 @@ public class TrpgChildSceneCommandService {
         return plan;
     }
 
-    private CocModuleLocation requireDescendantLocation(
-            GroupConversation conversation,
-            Long currentLocationId,
-            String locationName) {
-        if (!StringUtils.hasText(locationName)) {
+    private String normalizeSceneName(String sceneName) {
+        if (!StringUtils.hasText(sceneName)) {
             throw new UserRequestException("子场景名称不能为空");
         }
-        String exactName = locationName.trim();
-        List<CocModuleLocation> locations =
-                locationMapper.selectList(
-                        new LambdaQueryWrapper<CocModuleLocation>()
-                                .eq(CocModuleLocation::getModuleId,
-                                        conversation.getModuleId()));
-        Map<Long, CocModuleLocation> byId = new HashMap<>();
-        locations.forEach(location ->
-                byId.put(location.getId(), location));
-        List<CocModuleLocation> matches = locations.stream()
-                .filter(location ->
-                        exactName.equals(location.getName()))
-                .filter(location ->
-                        StringUtils.hasText(location.getContent()))
-                .filter(location -> isStrictDescendant(
-                        location, currentLocationId, byId))
-                .toList();
-        if (matches.isEmpty()) {
-            throw new UserRequestException(
-                    "子场景必须是模组中有实际描述的后代地点");
+        String normalized = sceneName.trim();
+        if (normalized.length() > 200) {
+            throw new UserRequestException("子场景名称不能超过200个字符");
         }
-        if (matches.size() > 1) {
-            throw new UserRequestException("子场景名称不唯一");
-        }
-        return matches.getFirst();
-    }
-
-    private boolean isStrictDescendant(
-            CocModuleLocation location,
-            Long ancestorId,
-            Map<Long, CocModuleLocation> byId) {
-        if (location == null
-                || location.getId().equals(ancestorId)) {
-            return false;
-        }
-        Set<Long> visited = new HashSet<>();
-        CocModuleLocation current = location;
-        while (current != null && visited.add(current.getId())) {
-            if (ancestorId.equals(current.getParentLocationId())) {
-                return true;
-            }
-            current = current.getParentLocationId() == null
-                    ? null : byId.get(current.getParentLocationId());
-        }
-        return false;
+        return normalized;
     }
 
     private Selected selectItems(
@@ -431,7 +363,7 @@ public class TrpgChildSceneCommandService {
     }
 
     private record PreparedChildStart(
-            CocModuleLocation location,
+            String sceneName,
             Selected selected) {
     }
 

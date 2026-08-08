@@ -15,6 +15,7 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.po.TrpgCombat;
+import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -36,6 +37,7 @@ public class TrpgSaveSnapshotDTO {
     private ConversationStateSnapshot conversationState;
     private List<GroupReplyPlan> replyPlans;
     private List<GroupReplyPlanItem> replyPlanItems;
+    private List<TrpgRuntimeChildScene> runtimeChildScenes;
     private List<CocCharacter> characters;
     private Map<Long, String> characterQuickNotes;
     private List<CocCharacterProfile> characterProfiles;

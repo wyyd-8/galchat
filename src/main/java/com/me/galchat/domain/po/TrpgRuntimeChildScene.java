@@ -11,15 +11,13 @@ import java.time.LocalDateTime;
 
 @Data
 @Accessors(chain = true)
-@TableName("coc_module_location")
-public class CocModuleLocation implements Serializable {
+@TableName("trpg_runtime_child_scene")
+public class TrpgRuntimeChildScene implements Serializable {
 
-    @TableId(value = "id", type = IdType.AUTO)
-    private Long id;
-    private Long moduleId;
-    private String name;
-    private String summary;
-    private String content;
+    @TableId(value = "plan_id", type = IdType.INPUT)
+    private Long planId;
+    private Long conversationId;
+    private String sceneName;
+    private Long createdStepId;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }

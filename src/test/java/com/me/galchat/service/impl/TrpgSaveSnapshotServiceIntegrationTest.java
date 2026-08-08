@@ -20,6 +20,7 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.GroupTurnCheckpointMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
 import com.me.galchat.mapper.TrpgSaveRestoreMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.service.ITrpgRedisStateService;
 import org.junit.jupiter.api.Test;
@@ -94,6 +95,7 @@ class TrpgSaveSnapshotServiceIntegrationTest {
                 conversationMapper,
                 planMapper,
                 mock(GroupReplyPlanItemMapper.class),
+                mock(TrpgRuntimeChildSceneMapper.class),
                 characterMapper,
                 mock(CocCharacterProfileMapper.class),
                 mock(CocCharacterSkillMapper.class),

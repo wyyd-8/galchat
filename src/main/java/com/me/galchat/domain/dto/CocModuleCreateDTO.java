@@ -36,7 +36,6 @@ public class CocModuleCreateDTO {
 
     @Data
     public static class Location {
-        private String parentName;
         private String name;
         private String summary;
         private String content;

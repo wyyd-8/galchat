@@ -217,7 +217,8 @@ class TrpgGroupAgentPolicyTest {
                 .contains(childTools, waitingTools);
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("分头行动")
-                .contains("不会加载更多模组信息")
+                .contains("动态子场景")
+                .contains("继承当前大场景")
                 .contains("一起行动时应保持在主场景");
     }
 

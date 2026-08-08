@@ -6,18 +6,22 @@ import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +31,7 @@ public class TrpgSceneParticipantService {
     private final GroupReplyPlanItemMapper itemMapper;
     private final CocModuleLocationMapper locationMapper;
     private final TrpgParticipantService participantService;
+    private final TrpgRuntimeChildSceneMapper runtimeSceneMapper;
 
     public SceneState state(GroupConversation conversation) {
         GroupReplyPlan scene = requireActiveScene(conversation);
@@ -57,8 +62,7 @@ public class TrpgSceneParticipantService {
         }
         return new SceneState(
                 scene.getId(),
-                scenePath(conversation.getModuleId(),
-                        scene.getContextId()),
+                scenePath(conversation.getModuleId(), scene),
                 List.copyOf(active),
                 List.copyOf(waiting));
     }
@@ -104,24 +108,44 @@ public class TrpgSceneParticipantService {
                         .orderByAsc(GroupReplyPlanItem::getId));
     }
 
-    private String scenePath(Long moduleId, Long locationId) {
-        List<CocModuleLocation> locations = locationMapper.selectList(
-                new LambdaQueryWrapper<CocModuleLocation>()
-                        .eq(CocModuleLocation::getModuleId, moduleId));
-        Map<Long, CocModuleLocation> byId = new HashMap<>();
-        locations.forEach(location ->
-                byId.put(location.getId(), location));
-        List<String> names = new ArrayList<>();
-        CocModuleLocation current = byId.get(locationId);
+    private String scenePath(
+            Long moduleId, GroupReplyPlan activeScene) {
+        List<GroupReplyPlan> chain = new ArrayList<>();
+        Set<Long> visited = new HashSet<>();
+        GroupReplyPlan current = activeScene;
         while (current != null) {
-            names.addFirst(current.getName());
-            current = current.getParentLocationId() == null
-                    ? null : byId.get(current.getParentLocationId());
+            if (!visited.add(current.getId())) {
+                throw new UserRequestException("场景计划父链存在循环");
+            }
+            chain.addFirst(current);
+            current = current.getParentPlanId() == null
+                    ? null : planMapper.selectById(
+                    current.getParentPlanId());
         }
-        if (names.isEmpty()) {
+        GroupReplyPlan root = chain.getFirst();
+        StringBuilder result = new StringBuilder(
+                moduleLocationName(moduleId, root.getContextId()));
+        for (int index = 1; index < chain.size(); index++) {
+            GroupReplyPlan child = chain.get(index);
+            TrpgRuntimeChildScene runtime =
+                    runtimeSceneMapper.selectById(child.getId());
+            if (runtime != null) {
+                result.append(" - ").append(runtime.getSceneName());
+            } else {
+                throw new UserRequestException("动态子场景数据不存在");
+            }
+        }
+        return result.toString();
+    }
+
+    private String moduleLocationName(Long moduleId, Long locationId) {
+        CocModuleLocation location = locationMapper.selectById(locationId);
+        if (location == null
+                || !java.util.Objects.equals(
+                moduleId, location.getModuleId())) {
             throw new UserRequestException("当前场景地点不存在");
         }
-        return String.join(" - ", names);
+        return location.getName();
     }
 
     private boolean isInvestigator(GroupReplyPlanItem item) {

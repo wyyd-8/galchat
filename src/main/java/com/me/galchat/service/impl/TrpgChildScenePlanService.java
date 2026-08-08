@@ -2,15 +2,16 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,15 +28,17 @@ public class TrpgChildScenePlanService {
     private final GroupReplyPlanMapper planMapper;
     private final GroupReplyPlanItemMapper itemMapper;
     private final GroupConversationMapper conversationMapper;
+    private final TrpgRuntimeChildSceneMapper runtimeSceneMapper;
 
     @Transactional(rollbackFor = Exception.class)
     public GroupReplyPlan startChildUnderLock(
             GroupConversation conversation,
             GroupReplyPlan parent,
-            CocModuleLocation location,
+            String sceneName,
+            Long createdStepId,
             List<GroupReplyPlanItem> selectedInvestigators) {
         if (conversation == null || parent == null
-                || location == null
+                || sceneName == null || createdStepId == null
                 || selectedInvestigators == null
                 || selectedInvestigators.isEmpty()
                 || !parent.getId().equals(
@@ -46,19 +49,25 @@ public class TrpgChildScenePlanService {
         GroupReplyPlan child = new GroupReplyPlan()
                 .setConversationId(conversation.getId())
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
-                .setContextId(location.getId())
+                .setContextId(parent.getContextId())
                 .setParentPlanId(parent.getId())
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         planMapper.insert(child);
-        String groupKey = "scene:" + location.getId();
+        runtimeSceneMapper.insert(new TrpgRuntimeChildScene()
+                .setPlanId(child.getId())
+                .setConversationId(conversation.getId())
+                .setSceneName(sceneName)
+                .setCreatedStepId(createdStepId)
+                .setCreatedAt(now));
+        String groupKey = "scene:" + child.getId();
         int order = 1;
         for (GroupReplyPlanItem selected :
                 selectedInvestigators) {
             itemMapper.insert(new GroupReplyPlanItem()
                     .setPlanId(child.getId())
                     .setGroupKey(groupKey)
-                    .setGroupName(location.getName())
+                    .setGroupName(sceneName)
                     .setGroupOrder(1)
                     .setItemOrder(order++)
                     .setActorType(selected.getActorType())
@@ -73,7 +82,7 @@ public class TrpgChildScenePlanService {
         itemMapper.insert(new GroupReplyPlanItem()
                 .setPlanId(child.getId())
                 .setGroupKey(groupKey)
-                .setGroupName(location.getName())
+                .setGroupName(sceneName)
                 .setGroupOrder(1)
                 .setItemOrder(order)
                 .setActorType(GroupChatConstant.ACTOR_KP)
@@ -129,6 +138,7 @@ public class TrpgChildScenePlanService {
                 new LambdaQueryWrapper<GroupReplyPlanItem>()
                         .eq(GroupReplyPlanItem::getPlanId,
                                 child.getId()));
+        runtimeSceneMapper.deleteById(child.getId());
         planMapper.deleteById(child.getId());
         conversation.setActiveReplyPlanId(parent.getId())
                 .setUpdatedAt(now);

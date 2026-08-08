@@ -24,13 +24,13 @@ public class KpChildSceneTools {
     @Tool(
             name = "startChildScene",
             description = """
-                    当调查员决定分头行动，并且其中一队前往当前模组场景中已有实际描述的后代地点时，创建子场景。
-                    子场景仅分隔行动轮，不会提供更多模组信息；当前主场景及其全部子项内容已经存在于上下文中。
+                    当调查员决定分头行动，并且其中一队进入需要独立推进的地点或行动区域时，创建动态子场景。
+                    子场景仅分隔行动轮，不会提供更多模组信息；它继承当前大场景的全部模组上下文。
                     如果所有调查员一起行动，应继续停留在主场景中，不推荐调用本工具。
                     调用成功后，当前公开回复需要在原有叙事基础上明确说明哪些调查员去了哪个地点，不要提前描述子场景内部信息。
                     """)
     public String startChildScene(
-            @ToolParam(description = "模组中已有实际描述的准确子地点名称")
+            @ToolParam(description = "简洁、明确的动态子场景名称，不超过200个字符")
             String childSceneName,
             @ToolParam(description = "进入子场景的准确调查员名称列表，允许选择全部活动调查员")
             List<String> investigatorNames,

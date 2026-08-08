@@ -1,7 +1,6 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
@@ -9,13 +8,13 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
-import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,10 +35,10 @@ class TrpgChildSceneCommandServiceTest {
         Fixture fixture = fixture();
 
         String result = fixture.service().startChildScene(
-                7L, 51L, "阁楼", List.of("亨利", "艾琳"));
+                7L, 51L, "临时藏身处", List.of("亨利", "艾琳"));
 
         assertThat(result).isEqualTo(
-                "已创建子场景“阁楼”，调查员亨利、艾琳将进入该场景。");
+                "已创建子场景“临时藏身处”，调查员亨利、艾琳将进入该场景。");
         assertThat(fixture.conversation().getActiveReplyPlanId())
                 .isEqualTo(fixture.parent().getId());
         verify(fixture.planMapper(), never())
@@ -76,7 +75,7 @@ class TrpgChildSceneCommandServiceTest {
                         .setReplyStepId(fixture.step().getId())
                         .setToolName("startChildScene")
                         .setToolArguments("""
-                                {"childSceneName":"阁楼","investigatorNames":["亨利","艾琳"]}
+                                {"childSceneName":"临时藏身处","investigatorNames":["亨利","艾琳"]}
                                 """)
                         .setToolResult("已创建子场景")));
         when(fixture.planMapper().insert(any(GroupReplyPlan.class)))
@@ -103,14 +102,31 @@ class TrpgChildSceneCommandServiceTest {
                         .setReplyStepId(fixture.step().getId())
                         .setToolName("startChildScene")
                         .setToolArguments("""
-                                {"childSceneName":"阁楼","investigatorNames":["亨利"]}
+                                {"childSceneName":"临时藏身处","investigatorNames":["亨利"]}
                                 """)
                         .setToolResult("已创建子场景")));
 
         assertThatThrownBy(() -> fixture.service().startChildScene(
-                7L, 51L, "阁楼", List.of("艾琳")))
+                7L, 51L, "另一条林间小路", List.of("艾琳")))
                 .hasMessageContaining("同一回复步骤")
                 .hasMessageContaining("子场景");
+    }
+
+    @Test
+    void offersChildSceneToolWithoutPresetDescendantLocations() {
+        Fixture fixture = fixture();
+
+        assertThat(fixture.service().canStartChildScene(
+                fixture.conversation())).isTrue();
+    }
+
+    @Test
+    void rejectsChildSceneNamesLongerThanStorageLimit() {
+        Fixture fixture = fixture();
+
+        assertThatThrownBy(() -> fixture.service().startChildScene(
+                7L, 51L, "临".repeat(201), List.of("亨利")))
+                .hasMessageContaining("200");
     }
 
     private Fixture fixture() {
@@ -128,13 +144,12 @@ class TrpgChildSceneCommandServiceTest {
                 mock(GroupReplyPlanItemMapper.class);
         GroupConversationMapper conversationMapper =
                 mock(GroupConversationMapper.class);
-        CocModuleLocationMapper locationMapper =
-                mock(CocModuleLocationMapper.class);
         TrpgParticipantService participantService =
                 mock(TrpgParticipantService.class);
         TrpgChildScenePlanService planService =
                 new TrpgChildScenePlanService(
-                        planMapper, itemMapper, conversationMapper);
+                        planMapper, itemMapper, conversationMapper,
+                        mock(TrpgRuntimeChildSceneMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(5L)
                 .setActiveReplyPlanId(31L)
@@ -143,13 +158,6 @@ class TrpgChildSceneCommandServiceTest {
                 .setId(31L).setConversationId(7L)
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
                 .setContextId(21L);
-        CocModuleLocation root = new CocModuleLocation()
-                .setId(21L).setModuleId(5L).setName("教堂")
-                .setContent("教堂内容");
-        CocModuleLocation attic = new CocModuleLocation()
-                .setId(22L).setModuleId(5L)
-                .setParentLocationId(21L).setName("阁楼")
-                .setContent("阁楼内容");
         List<GroupReplyPlanItem> investigatorItems = List.of(
                 item(GroupChatConstant.ACTOR_USER, 101L, 1),
                 item(GroupChatConstant.ACTOR_CHARACTER, 9L, 2));
@@ -172,8 +180,6 @@ class TrpgChildSceneCommandServiceTest {
                     add(new GroupReplyPlanItem()
                             .setActorType(GroupChatConstant.ACTOR_KP));
                 }});
-        when(locationMapper.selectList(any()))
-                .thenReturn(List.of(root, attic));
         when(participantService.listInvestigators(conversation))
                 .thenReturn(List.of(
                         new TrpgParticipantService.Participant(
@@ -189,13 +195,13 @@ class TrpgChildSceneCommandServiceTest {
         TrpgChildSceneCommandService service =
                 new TrpgChildSceneCommandService(
                         conversationService, stepMapper, turnMapper,
-                        planMapper, itemMapper, locationMapper,
+                        planMapper, itemMapper,
                         participantService, planService,
                         toolCallMapper, new ObjectMapper());
         return new Fixture(
                 service, stepMapper, toolCallMapper, planMapper,
                 itemMapper, conversation, step, turn,
-                parent, attic, investigatorItems);
+                parent, investigatorItems);
     }
 
     private GroupReplyPlanItem item(
@@ -223,7 +229,6 @@ class TrpgChildSceneCommandServiceTest {
             GroupChatReplyStep step,
             GroupChatTurn turn,
             GroupReplyPlan parent,
-            CocModuleLocation attic,
             List<GroupReplyPlanItem> investigatorItems) {
     }
 }

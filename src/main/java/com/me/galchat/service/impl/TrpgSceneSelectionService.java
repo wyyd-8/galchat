@@ -379,7 +379,7 @@ public class TrpgSceneSelectionService {
             }
         }
         if (!locationById.keySet().containsAll(selectedLocationIds)) {
-            throw new UserRequestException("选景结果包含无效地点");
+            throw new UserRequestException("选景结果包含无效模组地点");
         }
 
         Map<Long, List<TrpgParticipantService.Participant>>

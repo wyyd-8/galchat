@@ -29,7 +29,7 @@ import static org.mockito.Mockito.when;
 class TrpgModuleContextAssemblerTest {
 
     @Test
-    void childSceneUsesMainSceneAndAllDescendantLocationContent() {
+    void dynamicChildSceneUsesOnlyItsSelectedMainSceneContent() {
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleContextMapper contextMapper =
                 mock(CocModuleContextMapper.class);
@@ -66,7 +66,7 @@ class TrpgModuleContextAssemblerTest {
                         .setSummary("患者隔离地")
                         .setContent("医院完整原文"),
                 new CocModuleLocation().setId(23L)
-                        .setParentLocationId(21L).setName("医院阁楼")
+                        .setName("医院阁楼")
                         .setSummary("封闭区域")
                         .setContent("阁楼完整原文"),
                 new CocModuleLocation().setId(22L).setName("酒店")
@@ -86,7 +86,7 @@ class TrpgModuleContextAssemblerTest {
                 .setContextId(21L));
         when(planMapper.selectById(11L)).thenReturn(new GroupReplyPlan()
                 .setId(11L).setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
-                .setContextId(23L).setParentPlanId(10L));
+                .setContextId(21L).setParentPlanId(10L));
         conversation.setActiveReplyPlanId(11L);
         when(characterMapper.selectList(any())).thenReturn(List.of(
                 new CocCharacter().setName("林恩")
@@ -97,12 +97,13 @@ class TrpgModuleContextAssemblerTest {
 
         assertThat(result)
                 .contains("太阳与九英镑", "幕后真相")
-                .contains("医院", "酒店")
+                .contains("医院", "医院阁楼：封闭区域", "酒店")
                 .contains("感染源", "普通传闻")
-                .contains("医院完整原文", "阁楼完整原文")
+                .contains("医院完整原文")
                 .contains("玛德琳的信", "信中提到酒店", "已展示")
                 .contains("林恩", "已经感染第一阶段")
                 .doesNotContain("酒店完整原文")
+                .doesNotContain("阁楼完整原文")
                 .doesNotContain("酒馆闲谈")
                 .doesNotContain("https://secret.example/image.jpg");
     }

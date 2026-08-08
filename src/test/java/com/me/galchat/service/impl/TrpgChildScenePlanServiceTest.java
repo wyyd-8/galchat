@@ -1,13 +1,14 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -30,6 +31,8 @@ class TrpgChildScenePlanServiceTest {
                 mock(GroupReplyPlanItemMapper.class);
         GroupConversationMapper conversationMapper =
                 mock(GroupConversationMapper.class);
+        TrpgRuntimeChildSceneMapper runtimeSceneMapper =
+                mock(TrpgRuntimeChildSceneMapper.class);
         AtomicLong ids = new AtomicLong(40L);
         when(planMapper.insert(any(GroupReplyPlan.class)))
                 .thenAnswer(invocation -> {
@@ -39,7 +42,8 @@ class TrpgChildScenePlanServiceTest {
         });
         TrpgChildScenePlanService service =
                 new TrpgChildScenePlanService(
-                        planMapper, itemMapper, conversationMapper);
+                        planMapper, itemMapper, conversationMapper,
+                        runtimeSceneMapper);
         GroupConversation conversation =
                 new GroupConversation().setId(7L)
                         .setActiveReplyPlanId(31L);
@@ -51,15 +55,27 @@ class TrpgChildScenePlanServiceTest {
         GroupReplyPlan child = service.startChildUnderLock(
                 conversation,
                 parent,
-                new CocModuleLocation().setId(22L).setName("阁楼"),
+                "阁楼",
+                51L,
                 List.of(
                         item(GroupChatConstant.ACTOR_USER, 101L, 1),
                         item(GroupChatConstant.ACTOR_CHARACTER, 9L, 2)));
 
         assertThat(child.getParentPlanId()).isEqualTo(31L);
-        assertThat(child.getContextId()).isEqualTo(22L);
+        assertThat(child.getContextId()).isEqualTo(21L);
         assertThat(conversation.getActiveReplyPlanId())
                 .isEqualTo(child.getId());
+        ArgumentCaptor<TrpgRuntimeChildScene> sceneCaptor =
+                ArgumentCaptor.forClass(
+                        TrpgRuntimeChildScene.class);
+        verify(runtimeSceneMapper).insert(sceneCaptor.capture());
+        assertThat(sceneCaptor.getValue())
+                .extracting(
+                        TrpgRuntimeChildScene::getPlanId,
+                        TrpgRuntimeChildScene::getConversationId,
+                        TrpgRuntimeChildScene::getSceneName,
+                        TrpgRuntimeChildScene::getCreatedStepId)
+                .containsExactly(41L, 7L, "阁楼", 51L);
         ArgumentCaptor<GroupReplyPlanItem> captor =
                 ArgumentCaptor.forClass(GroupReplyPlanItem.class);
         verify(itemMapper,
@@ -81,6 +97,8 @@ class TrpgChildScenePlanServiceTest {
                 mock(GroupReplyPlanItemMapper.class);
         GroupConversationMapper conversationMapper =
                 mock(GroupConversationMapper.class);
+        TrpgRuntimeChildSceneMapper runtimeSceneMapper =
+                mock(TrpgRuntimeChildSceneMapper.class);
         GroupReplyPlan parent = new GroupReplyPlan()
                 .setId(31L).setConversationId(7L)
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE);
@@ -99,7 +117,8 @@ class TrpgChildScenePlanServiceTest {
                         item(GroupChatConstant.ACTOR_CHARACTER, 10L, 3)));
         TrpgChildScenePlanService service =
                 new TrpgChildScenePlanService(
-                        planMapper, itemMapper, conversationMapper);
+                        planMapper, itemMapper, conversationMapper,
+                        runtimeSceneMapper);
         GroupConversation conversation =
                 new GroupConversation().setId(7L)
                         .setActiveReplyPlanId(41L);
@@ -118,6 +137,7 @@ class TrpgChildScenePlanServiceTest {
                 .extracting(GroupReplyPlanItem::getParticipantStatus)
                 .containsOnly(GroupChatConstant.PARTICIPANT_WAITING);
         verify(planMapper).deleteById(41L);
+        verify(runtimeSceneMapper).deleteById(41L);
         verify(conversationMapper).updateById(conversation);
     }
 

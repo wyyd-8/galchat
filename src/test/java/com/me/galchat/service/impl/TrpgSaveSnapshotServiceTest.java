@@ -14,6 +14,7 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.TrpgCombat;
+import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
@@ -32,6 +33,7 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.GroupTurnCheckpointMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
 import com.me.galchat.mapper.TrpgSaveRestoreMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.service.ITrpgRedisStateService;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,6 +65,8 @@ class TrpgSaveSnapshotServiceTest {
     private GroupReplyPlanMapper planMapper;
     @Mock
     private GroupReplyPlanItemMapper planItemMapper;
+    @Mock
+    private TrpgRuntimeChildSceneMapper runtimeChildSceneMapper;
     @Mock
     private CocCharacterMapper characterMapper;
     @Mock
@@ -103,6 +107,7 @@ class TrpgSaveSnapshotServiceTest {
                 conversationMapper,
                 planMapper,
                 planItemMapper,
+                runtimeChildSceneMapper,
                 characterMapper,
                 profileMapper,
                 skillMapper,
@@ -124,14 +129,26 @@ class TrpgSaveSnapshotServiceTest {
     void captureBuildsACompleteSnapshotForTheRequestedRun() {
         GroupConversation conversation = conversation();
         TrpgSaveSnapshotDTO.CursorSnapshot cursors = cursors();
+        GroupReplyPlan parentPlan = new GroupReplyPlan()
+                .setId(100L)
+                .setConversationId(51L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setContextId(301L);
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setId(101L)
                 .setConversationId(51L)
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
-                .setContextId(301L);
+                .setContextId(301L)
+                .setParentPlanId(100L);
         GroupReplyPlanItem item = new GroupReplyPlanItem()
                 .setId(201L)
                 .setPlanId(101L);
+        TrpgRuntimeChildScene runtimeChildScene =
+                new TrpgRuntimeChildScene()
+                        .setPlanId(101L)
+                        .setConversationId(51L)
+                        .setSceneName("林间临时营地")
+                        .setCreatedStepId(33L);
         CocCharacter character = new CocCharacter()
                 .setId(401L)
                 .setRunId(51L)
@@ -167,8 +184,11 @@ class TrpgSaveSnapshotServiceTest {
         TrpgSaveSnapshotDTO.RedisStateSnapshot redis =
                 new TrpgSaveSnapshotDTO.RedisStateSnapshot();
         when(restoreMapper.selectCursors(51L)).thenReturn(cursors);
-        when(planMapper.selectList(any())).thenReturn(List.of(plan));
+        when(planMapper.selectList(any()))
+                .thenReturn(List.of(parentPlan, plan));
         when(planItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(runtimeChildSceneMapper.selectList(any()))
+                .thenReturn(List.of(runtimeChildScene));
         when(characterMapper.selectList(any())).thenReturn(List.of(character));
         when(profileMapper.selectList(any())).thenReturn(List.of());
         when(skillMapper.selectList(any())).thenReturn(List.of());
@@ -181,7 +201,8 @@ class TrpgSaveSnapshotServiceTest {
         when(decisionMapper.selectList(any())).thenReturn(List.of(decision));
         when(diceSummaryMapper.selectList(any())).thenReturn(List.of(diceSummary));
         when(diceResultMapper.selectList(any())).thenReturn(List.of(diceResult));
-        when(redisStateService.capture(51L, List.of(301L))).thenReturn(redis);
+        when(redisStateService.capture(
+                51L, List.of(100L, 101L))).thenReturn(redis);
 
         TrpgSaveSnapshotDTO snapshot = service.capture(conversation);
 
@@ -199,8 +220,11 @@ class TrpgSaveSnapshotServiceTest {
                 .isEqualTo(4);
         assertThat(snapshot.getConversationState().getGameTimeChangedStepId())
                 .isEqualTo(88L);
-        assertThat(snapshot.getReplyPlans()).containsExactly(plan);
+        assertThat(snapshot.getReplyPlans())
+                .containsExactly(parentPlan, plan);
         assertThat(snapshot.getReplyPlanItems()).containsExactly(item);
+        assertThat(snapshot.getRuntimeChildScenes())
+                .containsExactly(runtimeChildScene);
         assertThat(snapshot.getCharacters()).containsExactly(character);
         assertThat(snapshot.getCharacterQuickNotes())
                 .containsEntry(401L, "藏着钥匙");
@@ -257,14 +281,27 @@ class TrpgSaveSnapshotServiceTest {
                 .setGameTimePeriod("LATE_NIGHT")
                 .setGameTimeRevision(9)
                 .setGameTimeChangedStepId(999L);
+        GroupReplyPlan parentPlan = new GroupReplyPlan()
+                .setId(100L)
+                .setConversationId(51L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setContextId(301L);
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setId(101L)
                 .setConversationId(51L)
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
-                .setContextId(301L);
+                .setContextId(301L)
+                .setParentPlanId(100L);
+        TrpgRuntimeChildScene runtimeChildScene =
+                new TrpgRuntimeChildScene()
+                        .setPlanId(101L)
+                        .setConversationId(51L)
+                        .setSceneName("林间临时营地")
+                        .setCreatedStepId(33L);
         TrpgSaveSnapshotDTO snapshot = baseSnapshot()
-                .setReplyPlans(List.of(plan))
+                .setReplyPlans(List.of(parentPlan, plan))
                 .setReplyPlanItems(List.of())
+                .setRuntimeChildScenes(List.of(runtimeChildScene))
                 .setCharacters(List.of())
                 .setCharacterProfiles(List.of())
                 .setCharacterSkills(List.of())
@@ -305,6 +342,8 @@ class TrpgSaveSnapshotServiceTest {
         assertThat(conversation.getGameTimeChangedStepId()).isEqualTo(77L);
         verify(conversationMapper).updateById(conversation);
         verify(conversationMapper).update(eq(null), any());
+        verify(runtimeChildSceneMapper).delete(any());
+        verify(runtimeChildSceneMapper).insert(runtimeChildScene);
     }
 
     @Test
@@ -388,6 +427,7 @@ class TrpgSaveSnapshotServiceTest {
                 .setCursors(cursors())
                 .setReplyPlans(List.of())
                 .setReplyPlanItems(List.of())
+                .setRuntimeChildScenes(List.of())
                 .setCharacters(List.of())
                 .setCharacterProfiles(List.of())
                 .setCharacterSkills(List.of())

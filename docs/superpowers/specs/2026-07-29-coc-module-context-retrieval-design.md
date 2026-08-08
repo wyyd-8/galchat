@@ -94,12 +94,11 @@ GalChat 将 COC 模组保存为不可编辑的静态内容，并将一个 TRPG �
 | 字段 | 说明 |
 |---|---|
 | `module_id` | 所属模组 |
-| `parent_location_id` | 可选父地点 |
 | `name` | 当前模组内唯一的地点名称 |
 | `summary` | 标题索引使用的摘要 |
 | `content` | 地点完整原文 |
 
-`id` 同时作为运行时 `scene_id` 和 SCENE Plan 的 `context_id`。同一地点可被多次探索；各次总结通过消息序号范围区分。
+每条地点都是可选择的独立大场景。`id` 同时作为运行时 `scene_id` 和 SCENE Plan 的 `context_id`。同一地点可被多次探索；各次总结通过消息序号范围区分。
 
 地点内部的环境、NPC 表现、检定建议、成功失败信息、可选事件和分支均保留在 `content`，第一版不继续结构化。
 

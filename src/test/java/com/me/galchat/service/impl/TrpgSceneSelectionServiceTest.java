@@ -130,6 +130,36 @@ class TrpgSceneSelectionServiceTest {
     }
 
     @Test
+    void selectionOptionsTreatEveryModuleLocationAsMainScene() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        TrpgSceneSelectionStore store =
+                mock(TrpgSceneSelectionStore.class);
+        GroupConversation conversation = activeTrpgConversation()
+                .setGameDayNo(2)
+                .setGameTimePeriod("AFTERNOON")
+                .setGameTimeRevision(4);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                location(23L, "医院阁楼")));
+        TrpgSceneSelectionService service = selectionService(
+                conversationService, locationMapper,
+                mock(GroupConversationMapper.class), store);
+
+        var result = service.publishOptions(
+                7L, 30L, 31L,
+                List.of("医院阁楼"), null, null);
+
+        assertThat(result.options())
+                .containsExactlyEntriesOf(java.util.Map.of(
+                        "1", "医院阁楼"));
+        verify(store).putOptions(any(), any(), any());
+    }
+
+    @Test
     void laterSelectionMayAdvanceToAnyFuturePeriod() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);

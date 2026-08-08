@@ -41,10 +41,10 @@ public class TrpgSceneLifecycleService {
 
     public List<GroupActionSpec> remainingActions(
             Long conversationId,
-            Long sceneId,
+            Long scenePlanId,
             List<GroupActionSpec> actions) {
         Set<String> readyActors = progressStore.readyActors(
-                conversationId, sceneId);
+                conversationId, scenePlanId);
         if (readyActors.isEmpty()) {
             return List.copyOf(actions);
         }
@@ -85,7 +85,7 @@ public class TrpgSceneLifecycleService {
                     "只能由当前调查员结束自己的场景探索");
         }
         progressStore.markReady(
-                conversationId, execution.sceneId(), actor);
+                conversationId, execution.plan().getId(), actor);
         Set<String> participantActors = itemMapper.selectList(
                         new LambdaQueryWrapper<GroupReplyPlanItem>()
                                 .eq(GroupReplyPlanItem::getPlanId,
@@ -101,11 +101,11 @@ public class TrpgSceneLifecycleService {
                                 item.getActorId())))
                 .collect(Collectors.toSet());
         Set<String> readyActors = progressStore.readyActors(
-                conversationId, execution.sceneId());
+                conversationId, execution.plan().getId());
         if (!participantActors.isEmpty()
                 && readyActors.containsAll(participantActors)) {
             progressStore.requestFinish(
-                    conversationId, execution.sceneId());
+                    conversationId, execution.plan().getId());
             recoveryService.cancelPendingInvestigatorSteps(
                     execution.turn().getId(),
                     "所有调查员已结束当前场景探索");
@@ -123,7 +123,7 @@ public class TrpgSceneLifecycleService {
             throw new UserAuthException("只有KP可以直接结束场景探索");
         }
         progressStore.requestFinish(
-                conversationId, execution.sceneId());
+                conversationId, execution.plan().getId());
         recoveryService.cancelPendingSteps(
                 execution.turn().getId(), "KP已结束当前场景探索");
     }
@@ -145,7 +145,7 @@ public class TrpgSceneLifecycleService {
         }
         Long sceneId = plan.getContextId();
         if (!progressStore.isFinishRequested(
-                conversation.getId(), sceneId)) {
+                conversation.getId(), plan.getId())) {
             return false;
         }
         summaryService.summarize(
@@ -161,7 +161,7 @@ public class TrpgSceneLifecycleService {
                         conversation.getId());
             }
         }
-        progressStore.clear(conversation.getId(), sceneId);
+        progressStore.clear(conversation.getId(), plan.getId());
         return true;
     }
 
@@ -184,18 +184,17 @@ public class TrpgSceneLifecycleService {
         if (plan == null
                 || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
                 plan.getSource())
+                || !Objects.equals(plan.getId(), turn.getPlanId())
                 || !Objects.equals(
                 plan.getContextId(), turn.getPlanContextId())) {
             throw new UserRequestException("当前场景回复计划已变化");
         }
-        return new SceneExecution(
-                step, turn, plan, plan.getContextId());
+        return new SceneExecution(step, turn, plan);
     }
 
     private record SceneExecution(
             GroupChatReplyStep step,
             GroupChatTurn turn,
-            GroupReplyPlan plan,
-            Long sceneId) {
+            GroupReplyPlan plan) {
     }
 }

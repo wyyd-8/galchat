@@ -1,16 +1,22 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.me.galchat.domain.dto.GroupReplyPlanDTO;
 import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.redisson.api.RLock;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -31,6 +37,33 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GroupReplyPlanServiceTest {
+
+    @BeforeAll
+    static void initMybatisPlusTableInfo() {
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(
+                new MybatisConfiguration(), "");
+        TableInfoHelper.initTableInfo(assistant, GroupReplyPlan.class);
+        TableInfoHelper.initTableInfo(
+                assistant, TrpgRuntimeChildScene.class);
+        TableInfoHelper.initTableInfo(
+                assistant, GroupReplyPlanItem.class);
+    }
+
+    @Test
+    void clearingConversationPlansAlsoDeletesRuntimeChildScenes() {
+        Fixture fixture = new Fixture();
+        GroupConversation conversation = activeConversation(
+                GroupChatConstant.MODE_TRPG, 12L);
+        when(fixture.planMapper.selectList(any())).thenReturn(List.of(
+                plan(10L, GroupChatConstant.PLAN_SOURCE_SCENE, null),
+                plan(12L, GroupChatConstant.PLAN_SOURCE_SCENE, null)
+                        .setParentPlanId(10L)));
+
+        fixture.service.clearConversationPlans(conversation);
+
+        verify(fixture.runtimeChildSceneMapper).delete(any());
+        assertThat(conversation.getActiveReplyPlanId()).isNull();
+    }
 
     @Test
     void trpgPlanStructureAcceptsImplicitKpIdentityWithNullActorId() {
@@ -542,10 +575,13 @@ class GroupReplyPlanServiceTest {
         private final GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         private final GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         private final GroupReplyPlanItemMapper itemMapper = mock(GroupReplyPlanItemMapper.class);
+        private final TrpgRuntimeChildSceneMapper runtimeChildSceneMapper =
+                mock(TrpgRuntimeChildSceneMapper.class);
         private final GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         private final GroupReplyPlanService service = new GroupReplyPlanService(conversationService, lockService,
-                conversationMapper, planMapper, itemMapper, recoveryService,
+                conversationMapper, planMapper, itemMapper,
+                runtimeChildSceneMapper, recoveryService,
                 transactionTemplate, mock(TrpgParticipantService.class));
 
         private Fixture() {

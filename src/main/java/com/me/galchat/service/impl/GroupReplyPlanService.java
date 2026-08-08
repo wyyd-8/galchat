@@ -7,12 +7,14 @@ import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.domain.vo.GroupReplyPlanVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -42,6 +44,7 @@ public class GroupReplyPlanService {
     private final GroupConversationMapper conversationMapper;
     private final GroupReplyPlanMapper planMapper;
     private final GroupReplyPlanItemMapper itemMapper;
+    private final TrpgRuntimeChildSceneMapper runtimeChildSceneMapper;
     private final GroupTurnRecoveryService recoveryService;
     private final TransactionTemplate transactionTemplate;
     private final TrpgParticipantService participantService;
@@ -201,6 +204,10 @@ public class GroupReplyPlanService {
                         .eq(GroupReplyPlan::getConversationId, conversation.getId()))
                 .stream().map(GroupReplyPlan::getId).toList();
         if (!planIds.isEmpty()) {
+            runtimeChildSceneMapper.delete(
+                    new LambdaQueryWrapper<TrpgRuntimeChildScene>()
+                            .in(TrpgRuntimeChildScene::getPlanId,
+                                    planIds));
             itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
                     .in(GroupReplyPlanItem::getPlanId, planIds));
             planMapper.delete(new LambdaQueryWrapper<GroupReplyPlan>()

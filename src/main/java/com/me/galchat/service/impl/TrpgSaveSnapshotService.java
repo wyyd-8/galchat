@@ -20,6 +20,7 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.po.TrpgCombat;
+import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
@@ -37,6 +38,7 @@ import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.GroupTurnCheckpointMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
+import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import com.me.galchat.mapper.TrpgSaveRestoreMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.service.ITrpgRedisStateService;
@@ -44,6 +46,7 @@ import com.me.galchat.service.ITrpgSaveSnapshotService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -51,6 +54,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -66,6 +71,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
     private final GroupConversationMapper conversationMapper;
     private final GroupReplyPlanMapper planMapper;
     private final GroupReplyPlanItemMapper planItemMapper;
+    private final TrpgRuntimeChildSceneMapper runtimeChildSceneMapper;
     private final CocCharacterMapper characterMapper;
     private final CocCharacterProfileMapper profileMapper;
     private final CocCharacterSkillMapper skillMapper;
@@ -121,6 +127,16 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 .setConversationState(conversationState(conversation))
                 .setReplyPlans(plans)
                 .setReplyPlanItems(planItems)
+                .setRuntimeChildScenes(
+                        runtimeChildSceneMapper.selectList(
+                                new LambdaQueryWrapper<
+                                        TrpgRuntimeChildScene>()
+                                        .eq(TrpgRuntimeChildScene::
+                                                        getConversationId,
+                                                conversationId)
+                                        .orderByAsc(
+                                                TrpgRuntimeChildScene::
+                                                        getPlanId)))
                 .setCharacters(characters)
                 .setCharacterQuickNotes(characterQuickNotes(characters))
                 .setCharacterProfiles(characterIds.isEmpty() ? List.of()
@@ -227,6 +243,27 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
             requirePlanReference(plan.getParentPlanId(), planIds);
             requirePlanReference(plan.getResumePlanId(), planIds);
             requirePlanReference(plan.getNextPlanId(), planIds);
+        }
+        Map<Long, GroupReplyPlan> planById = plans.stream()
+                .collect(Collectors.toMap(
+                        GroupReplyPlan::getId,
+                        Function.identity()));
+        for (TrpgRuntimeChildScene runtimeScene :
+                safe(snapshot.getRuntimeChildScenes())) {
+            GroupReplyPlan plan = runtimeScene == null
+                    ? null : planById.get(runtimeScene.getPlanId());
+            if (plan == null
+                    || plan.getParentPlanId() == null
+                    || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                    plan.getSource())
+                    || !Objects.equals(runtimeScene.getConversationId(),
+                    snapshot.getConversationId())
+                    || !StringUtils.hasText(
+                    runtimeScene.getSceneName())
+                    || runtimeScene.getCreatedStepId() == null) {
+                throw new UserRequestException(
+                        "跑团动态子场景存档不合法");
+            }
         }
         TrpgSaveSnapshotDTO.ConversationStateSnapshot state =
                 snapshot.getConversationState();
@@ -408,6 +445,10 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                         new LambdaQueryWrapper<GroupReplyPlan>()
                                 .eq(GroupReplyPlan::getConversationId, conversationId))
                 .stream().map(GroupReplyPlan::getId).toList();
+        runtimeChildSceneMapper.delete(
+                new LambdaQueryWrapper<TrpgRuntimeChildScene>()
+                        .eq(TrpgRuntimeChildScene::getConversationId,
+                                conversationId));
         if (!currentPlanIds.isEmpty()) {
             planItemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
                     .in(GroupReplyPlanItem::getPlanId, currentPlanIds));
@@ -415,6 +456,8 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                     .in(GroupReplyPlan::getId, currentPlanIds));
         }
         safe(snapshot.getReplyPlans()).forEach(planMapper::insert);
+        safe(snapshot.getRuntimeChildScenes())
+                .forEach(runtimeChildSceneMapper::insert);
         safe(snapshot.getReplyPlanItems()).forEach(planItemMapper::insert);
     }
 
@@ -558,7 +601,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
         return plans.stream()
                 .filter(plan -> GroupChatConstant.PLAN_SOURCE_SCENE.equals(
                         plan.getSource()))
-                .map(GroupReplyPlan::getContextId)
+                .map(GroupReplyPlan::getId)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();

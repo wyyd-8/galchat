@@ -24,9 +24,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Set;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -98,7 +96,7 @@ public class TrpgModuleContextAssembler {
         result.append("</clue-title-index>\n");
 
         if (mainLocationId != null) {
-            appendMainSceneTree(
+            appendMainScene(
                     result, locations, mainLocationId);
         }
 
@@ -152,62 +150,24 @@ public class TrpgModuleContextAssembler {
         return active.getContextId();
     }
 
-    private void appendMainSceneTree(
+    private void appendMainScene(
             StringBuilder result,
             List<CocModuleLocation> locations,
             Long rootId) {
-        Map<Long, CocModuleLocation> byId = new HashMap<>();
-        locations.forEach(location ->
-                byId.put(location.getId(), location));
-        CocModuleLocation root = byId.get(rootId);
+        CocModuleLocation root = locations.stream()
+                .filter(location -> rootId.equals(location.getId()))
+                .findFirst()
+                .orElse(null);
         if (root == null) {
             throw new UserRequestException("主场景地点不存在");
         }
-        result.append("<module-scene-context>\n");
-        for (CocModuleLocation location : locations) {
-            if (!isDescendantOrSelf(location, rootId, byId)) {
-                continue;
-            }
-            String element = location.getId().equals(rootId)
-                    ? "main-scene" : "subscene";
-            result.append('<').append(element)
-                    .append(" path=\"")
-                    .append(escape(path(location, byId)))
-                    .append("\">\n")
-                    .append(location.getContent()).append('\n')
-                    .append("</").append(element).append(">\n");
-        }
-        result.append("</module-scene-context>\n");
-    }
-
-    private boolean isDescendantOrSelf(
-            CocModuleLocation location,
-            Long rootId,
-            Map<Long, CocModuleLocation> byId) {
-        CocModuleLocation current = location;
-        Set<Long> visited = new HashSet<>();
-        while (current != null && visited.add(current.getId())) {
-            if (rootId.equals(current.getId())) {
-                return true;
-            }
-            current = current.getParentLocationId() == null
-                    ? null : byId.get(current.getParentLocationId());
-        }
-        return false;
-    }
-
-    private String path(
-            CocModuleLocation location,
-            Map<Long, CocModuleLocation> byId) {
-        List<String> names = new java.util.ArrayList<>();
-        CocModuleLocation current = location;
-        Set<Long> visited = new HashSet<>();
-        while (current != null && visited.add(current.getId())) {
-            names.addFirst(current.getName());
-            current = current.getParentLocationId() == null
-                    ? null : byId.get(current.getParentLocationId());
-        }
-        return String.join(" - ", names);
+        result.append("<module-scene-context>\n")
+                .append("<main-scene path=\"")
+                .append(escape(root.getName()))
+                .append("\">\n")
+                .append(root.getContent()).append('\n')
+                .append("</main-scene>\n")
+                .append("</module-scene-context>\n");
     }
 
     private void appendGlobal(

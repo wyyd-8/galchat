@@ -176,7 +176,7 @@ class GroupTurnPlanResolverTest {
         when(turnPolicy.plan(conversation, selection))
                 .thenReturn(List.of(ended, kp));
         when(sceneLifecycle.remainingActions(
-                7L, 100L, List.of(ended, kp)))
+                7L, 10L, List.of(ended, kp)))
                 .thenReturn(List.of(kp));
         when(proposalOrder.orderForTurn(
                 conversation, List.of(kp)))
@@ -266,7 +266,7 @@ class GroupTurnPlanResolverTest {
         when(turnPolicy.plan(conversation, selection))
                 .thenReturn(List.of(user, agent, kp));
         when(sceneLifecycle.remainingActions(
-                7L, 100L, List.of(user, agent, kp)))
+                7L, 10L, List.of(user, agent, kp)))
                 .thenReturn(List.of(user, agent, kp));
         when(proposalOrder.orderForTurn(
                 conversation, List.of(user, agent, kp)))

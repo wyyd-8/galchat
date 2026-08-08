@@ -104,7 +104,7 @@ class CocModuleServiceTest {
     }
 
     @Test
-    void createResolvesParentLocationByNameInsideNewModule() {
+    void createStoresModuleLocationsInSuppliedOrder() {
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleContextMapper contextMapper = mock(CocModuleContextMapper.class);
         CocModuleLocationMapper locationMapper = mock(CocModuleLocationMapper.class);
@@ -133,7 +133,6 @@ class CocModuleServiceTest {
         street.setContent("街区原文");
         CocModuleCreateDTO.Location basement = new CocModuleCreateDTO.Location();
         basement.setName("地下室");
-        basement.setParentName("薰衣草街区");
         basement.setSummary("法术核心所在地");
         basement.setContent("地下室原文");
         request.setLocations(java.util.List.of(basement, street));
@@ -144,10 +143,8 @@ class CocModuleServiceTest {
         var captor = org.mockito.ArgumentCaptor.forClass(CocModuleLocation.class);
         verify(locationMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
         assertThat(captor.getAllValues())
-                .extracting(CocModuleLocation::getName, CocModuleLocation::getParentLocationId)
-                .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple("薰衣草街区", null),
-                        org.assertj.core.groups.Tuple.tuple("地下室", 1L));
+                .extracting(CocModuleLocation::getName)
+                .containsExactly("地下室", "薰衣草街区");
     }
 
     @Test

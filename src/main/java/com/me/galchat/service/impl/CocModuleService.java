@@ -26,11 +26,8 @@ import org.springframework.util.StringUtils;
 import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -164,13 +161,6 @@ public class CocModuleService {
                 throw new UserRequestException("同一模组内地点名称不能重复");
             }
         }
-        for (CocModuleCreateDTO.Location location : safe(request.getLocations())) {
-            String parentName = trimToNull(location.getParentName());
-            if (parentName != null && (!locationNames.contains(parentName)
-                    || parentName.equals(location.getName().trim()))) {
-                throw new UserRequestException("父地点必须是当前模组内的其他地点");
-            }
-        }
         Set<String> clueTitles = new HashSet<>();
         for (CocModuleCreateDTO.Clue clue : safe(request.getClues())) {
             if (clue == null || !StringUtils.hasText(clue.getTitle())
@@ -214,31 +204,14 @@ public class CocModuleService {
 
     private void insertLocations(Long moduleId, List<CocModuleCreateDTO.Location> locations,
                                  LocalDateTime now) {
-        Map<String, Long> insertedIds = new HashMap<>();
-        List<CocModuleCreateDTO.Location> pending = new ArrayList<>(locations);
-        while (!pending.isEmpty()) {
-            int before = pending.size();
-            for (var iterator = pending.iterator(); iterator.hasNext();) {
-                CocModuleCreateDTO.Location source = iterator.next();
-                String parentName = trimToNull(source.getParentName());
-                if (parentName != null && !insertedIds.containsKey(parentName)) {
-                    continue;
-                }
-                CocModuleLocation location = new CocModuleLocation()
-                        .setModuleId(moduleId)
-                        .setParentLocationId(parentName == null ? null : insertedIds.get(parentName))
-                        .setName(source.getName().trim())
-                        .setSummary(source.getSummary().trim())
-                        .setContent(source.getContent().trim())
-                        .setCreatedAt(now)
-                        .setUpdatedAt(now);
-                locationMapper.insert(location);
-                insertedIds.put(location.getName(), location.getId());
-                iterator.remove();
-            }
-            if (pending.size() == before) {
-                throw new UserRequestException("地点父子关系存在循环");
-            }
+        for (CocModuleCreateDTO.Location source : locations) {
+            locationMapper.insert(new CocModuleLocation()
+                    .setModuleId(moduleId)
+                    .setName(source.getName().trim())
+                    .setSummary(source.getSummary().trim())
+                    .setContent(source.getContent().trim())
+                    .setCreatedAt(now)
+                    .setUpdatedAt(now));
         }
     }
 

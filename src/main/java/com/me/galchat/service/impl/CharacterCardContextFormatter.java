@@ -1,7 +1,13 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.InsanityCatalog;
+import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.CocCharacterProfile;
+import com.me.galchat.domain.po.CocCharacterSkill;
+import com.me.galchat.domain.po.CocCharacterWeapon;
+import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
+import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -16,7 +22,181 @@ public class CharacterCardContextFormatter {
     }
 
     public String formatNpcs(List<CocDiceCharacterVO> cards) {
-        return format(cards, "npc-cards", "npc-card", false);
+        if (cards == null || cards.isEmpty()) {
+            return "<npc-roster />";
+        }
+        StringBuilder result = new StringBuilder("<npc-roster>");
+        for (CocDiceCharacterVO card : cards) {
+            result.append("\n- ").append(escape(card.name()));
+        }
+        result.append("\n</npc-roster>");
+        List<CocDiceCharacterVO> changed = cards.stream()
+                .filter(this::hasChangedRuntimeState)
+                .toList();
+        if (changed.isEmpty()) {
+            return result.toString();
+        }
+        result.append("\n<npc-state-changes>");
+        for (CocDiceCharacterVO card : changed) {
+            result.append("\n- ").append(escape(card.name()))
+                    .append("：HP ").append(value(card.hpCurrent()))
+                    .append('/').append(value(card.hpMax()));
+            appendInlineStatuses(result, card);
+        }
+        return result.append("\n</npc-state-changes>").toString();
+    }
+
+    public String formatActiveNpcs(List<CharacterCardVO> cards) {
+        if (cards == null || cards.isEmpty()) {
+            return "";
+        }
+        StringBuilder result = new StringBuilder("<active-npcs>");
+        for (CharacterCardVO card : cards) {
+            if (card == null || card.getCharacter() == null) {
+                continue;
+            }
+            appendActiveNpc(result, card);
+        }
+        if (result.length() == "<active-npcs>".length()) {
+            return "";
+        }
+        return result.append("\n</active-npcs>").toString();
+    }
+
+    private void appendActiveNpc(
+            StringBuilder result, CharacterCardVO card) {
+        CocCharacter character = card.getCharacter();
+        result.append("\n<active-npc name=\"")
+                .append(escape(character.getName())).append("\">");
+        appendCompactLine(result, "职业", character.getOccupation(), 80);
+        CocCharacterProfile profile = card.getProfile();
+        if (profile != null) {
+            appendCompactLine(result, "外貌", profile.getAppearance(), 180);
+            appendCompactLine(result, "特征", profile.getTraits(), 180);
+            appendCompactLine(result, "动机", profile.getIdeology(), 180);
+            appendCompactLine(result, "相关地点",
+                    profile.getMeaningfulLocations(), 140);
+            appendCompactLine(result, "要点", profile.getNotes(), 240);
+        }
+        result.append("\n机械：HP ")
+                .append(value(character.getHpCurrent())).append('/')
+                .append(value(character.getHpMax()));
+        appendMechanicalValue(result, "MP", character.getMpCurrent(),
+                character.getMpMax());
+        appendMechanicalValue(result, "DEX", character.getDex());
+        appendMechanicalValue(result, "CON", character.getCon());
+        appendMechanicalValue(result, "护甲", character.getArmor());
+        appendMechanicalValue(result, "体格", character.getBuild());
+        appendMechanicalText(result, "DB", character.getDamageBonus());
+        appendMechanicalValue(result, "MOV", character.getMov());
+        appendSparseSkills(result, card.getSkills());
+        appendWeapons(result, card.getWeapons());
+        result.append("\n</active-npc>");
+    }
+
+    private void appendCompactLine(
+            StringBuilder result, String label, String text, int maxLength) {
+        if (!StringUtils.hasText(text)) {
+            return;
+        }
+        String compact = text.trim().replaceAll("\\s+", " ");
+        if (compact.length() > maxLength) {
+            compact = compact.substring(0, maxLength) + "…";
+        }
+        result.append("\n").append(label).append("：")
+                .append(escape(compact));
+    }
+
+    private void appendMechanicalValue(
+            StringBuilder result, String label, Integer value) {
+        if (value != null) {
+            result.append("；").append(label).append(' ').append(value);
+        }
+    }
+
+    private void appendMechanicalValue(
+            StringBuilder result, String label,
+            Integer current, Integer maximum) {
+        if (current != null || maximum != null) {
+            result.append("；").append(label).append(' ')
+                    .append(value(current)).append('/').append(value(maximum));
+        }
+    }
+
+    private void appendMechanicalText(
+            StringBuilder result, String label, String value) {
+        if (StringUtils.hasText(value)) {
+            result.append("；").append(label).append(' ')
+                    .append(escape(value.trim()));
+        }
+    }
+
+    private void appendSparseSkills(
+            StringBuilder result, List<CocCharacterSkill> skills) {
+        if (skills == null) {
+            return;
+        }
+        StringJoiner values = new StringJoiner("，");
+        skills.stream()
+                .filter(skill -> StringUtils.hasText(
+                        skill.getDisplayName()))
+                .filter(skill -> skill.getValue() != null)
+                .filter(skill -> Boolean.TRUE.equals(skill.getIsCustom())
+                        || skill.getBaseValue() == null
+                        || !skill.getValue().equals(skill.getBaseValue()))
+                .sorted(java.util.Comparator.comparing(
+                        CocCharacterSkill::getDisplayName,
+                        String.CASE_INSENSITIVE_ORDER))
+                .forEach(skill -> values.add(
+                        escape(skill.getDisplayName().trim())
+                                + "=" + skill.getValue()));
+        if (values.length() > 0) {
+            result.append("\n特长：").append(values);
+        }
+    }
+
+    private void appendWeapons(
+            StringBuilder result, List<CocCharacterWeapon> weapons) {
+        if (weapons == null || weapons.isEmpty()) {
+            return;
+        }
+        StringJoiner values = new StringJoiner("；");
+        for (CocCharacterWeapon weapon : weapons) {
+            if (!StringUtils.hasText(weapon.getName())) {
+                continue;
+            }
+            StringBuilder value = new StringBuilder(
+                    escape(weapon.getName().trim()));
+            if (StringUtils.hasText(weapon.getSkillName())) {
+                value.append('/').append(escape(
+                        weapon.getSkillName().trim()));
+            }
+            if (StringUtils.hasText(weapon.getDamage())) {
+                value.append(" 伤害").append(escape(
+                        weapon.getDamage().trim()));
+            }
+            values.add(value.toString());
+        }
+        if (values.length() > 0) {
+            result.append("\n武器：").append(values);
+        }
+    }
+
+    private boolean hasChangedRuntimeState(CocDiceCharacterVO card) {
+        return !java.util.Objects.equals(card.hpCurrent(), card.hpMax())
+                || Boolean.TRUE.equals(card.majorWound())
+                || Boolean.TRUE.equals(card.unconscious())
+                || Boolean.TRUE.equals(card.dying())
+                || Boolean.TRUE.equals(card.dead())
+                || Boolean.TRUE.equals(card.temporaryInsanity());
+    }
+
+    private void appendInlineStatuses(
+            StringBuilder result, CocDiceCharacterVO card) {
+        StringJoiner statuses = statuses(card);
+        if (statuses.length() > 0) {
+            result.append("；").append(statuses);
+        }
     }
 
     private String format(
@@ -65,6 +245,13 @@ public class CharacterCardContextFormatter {
     }
 
     private void appendStatuses(StringBuilder result, CocDiceCharacterVO card) {
+        StringJoiner statuses = statuses(card);
+        if (statuses.length() > 0) {
+            result.append("\n状态：").append(statuses);
+        }
+    }
+
+    private StringJoiner statuses(CocDiceCharacterVO card) {
         StringJoiner statuses = new StringJoiner("；");
         if (Boolean.TRUE.equals(card.majorWound())) {
             statuses.add("重伤");
@@ -81,9 +268,7 @@ public class CharacterCardContextFormatter {
         if (Boolean.TRUE.equals(card.temporaryInsanity())) {
             statuses.add(insanityStatus(card));
         }
-        if (statuses.length() > 0) {
-            result.append("\n状态：").append(statuses);
-        }
+        return statuses;
     }
 
     private String insanityStatus(CocDiceCharacterVO card) {

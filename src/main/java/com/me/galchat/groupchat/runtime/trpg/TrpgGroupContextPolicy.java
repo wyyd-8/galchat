@@ -11,6 +11,7 @@ import com.me.galchat.service.impl.TrpgExplorationContextAssembler;
 import com.me.galchat.service.impl.TrpgModuleContextAssembler;
 import com.me.galchat.service.impl.TrpgSceneRuntimeContextAssembler;
 import com.me.galchat.service.impl.TrpgGameTimeContextAssembler;
+import com.me.galchat.service.impl.TrpgNpcContextSelector;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,7 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
     private final TrpgSceneRuntimeContextAssembler
             sceneRuntimeContextAssembler;
     private final TrpgGameTimeContextAssembler gameTimeContextAssembler;
+    private final TrpgNpcContextSelector npcContextSelector;
 
     @Autowired
     public TrpgGroupContextPolicy(
@@ -36,7 +38,8 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
                     explorationContextAssembler,
             TrpgSceneRuntimeContextAssembler
                     sceneRuntimeContextAssembler,
-            TrpgGameTimeContextAssembler gameTimeContextAssembler) {
+            TrpgGameTimeContextAssembler gameTimeContextAssembler,
+            TrpgNpcContextSelector npcContextSelector) {
         this.moduleContextAssembler = moduleContextAssembler;
         this.decisionContextAssembler = decisionContextAssembler;
         this.explorationContextAssembler =
@@ -44,6 +47,18 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
         this.sceneRuntimeContextAssembler =
                 sceneRuntimeContextAssembler;
         this.gameTimeContextAssembler = gameTimeContextAssembler;
+        this.npcContextSelector = npcContextSelector;
+    }
+
+    public TrpgGroupContextPolicy(
+            TrpgModuleContextAssembler moduleContextAssembler,
+            TrpgAgentDecisionContextAssembler decisionContextAssembler,
+            TrpgExplorationContextAssembler explorationContextAssembler,
+            TrpgSceneRuntimeContextAssembler sceneRuntimeContextAssembler,
+            TrpgGameTimeContextAssembler gameTimeContextAssembler) {
+        this(moduleContextAssembler, decisionContextAssembler,
+                explorationContextAssembler, sceneRuntimeContextAssembler,
+                gameTimeContextAssembler, null);
     }
 
     @Override
@@ -85,7 +100,13 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
                 messages.add(new SystemMessage(privateContext));
             }
         }
-        return new GroupContextMaterial(java.util.List.copyOf(messages));
+        java.util.Set<Long> relevantCharacterIds =
+                GroupChatConstant.ACTOR_KP.equals(action.actorType())
+                        && npcContextSelector != null
+                        ? npcContextSelector.select(conversation, action)
+                        : java.util.Set.of();
+        return new GroupContextMaterial(
+                java.util.List.copyOf(messages), relevantCharacterIds);
     }
 
     private boolean usesPrivateDecisionContext(

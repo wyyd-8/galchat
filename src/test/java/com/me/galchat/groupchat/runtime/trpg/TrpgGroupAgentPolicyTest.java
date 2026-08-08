@@ -1,7 +1,11 @@
 package com.me.galchat.groupchat.runtime.trpg;
 
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.CocCharacterProfile;
+import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
@@ -57,6 +61,26 @@ class TrpgGroupAgentPolicyTest {
                 card("林恩", null),
                 card("艾琳", 9L),
                 npcCard("食尸鬼")));
+        when(cardService.getById(81L)).thenReturn(new CharacterCardVO(
+                new CocCharacter().setId(81L).setRunId(7L)
+                        .setActorType("NPC").setName("食尸鬼")
+                        .setOccupation("食腐怪物")
+                        .setHpCurrent(12).setHpMax(12)
+                        .setMpCurrent(8).setMpMax(8)
+                        .setDex(60).setCon(50).setArmor(1)
+                        .setBuild(0).setMov(9).setDamageBonus("0"),
+                List.of(
+                        new CocCharacterSkill()
+                                .setDisplayName("斗殴").setValue(45)
+                                .setBaseValue(25),
+                        new CocCharacterSkill()
+                                .setDisplayName("聆听").setValue(20)
+                                .setBaseValue(20)),
+                List.of(),
+                new CocCharacterProfile()
+                        .setAppearance("弓背、皮肤灰白，利爪沾着泥土。")
+                        .setTraits("饥饿、谨慎，会优先拖走落单者。")
+                        .setIdeology("保护巢穴并寻找尸体。")));
 
         TrpgGroupAgentPolicy policy =
                 new TrpgGroupAgentPolicy(
@@ -89,14 +113,21 @@ class TrpgGroupAgentPolicyTest {
                         "地下室",
                         1,
                         1),
-                new GroupContextMaterial(List.of()));
+                new GroupContextMaterial(List.of(), Set.of(81L)));
 
         assertThat(invocation.prompt().getInstructions().getFirst().getText())
                 .contains("仅世界提示词")
                 .contains("<investigator-card name=\"林恩\"")
                 .contains("<investigator-card name=\"艾琳\"")
-                .contains("<npc-card name=\"食尸鬼\"")
+                .contains("<npc-roster>", "食尸鬼")
+                .contains("<active-npc name=\"食尸鬼\"")
+                .contains("职业：食腐怪物")
+                .contains("外貌：弓背、皮肤灰白，利爪沾着泥土。")
+                .contains("特征：饥饿、谨慎，会优先拖走落单者。")
+                .contains("动机：保护巢穴并寻找尸体。")
+                .contains("HP 12/12", "DEX 60", "斗殴=45")
                 .doesNotContain("<investigator-card name=\"食尸鬼\"")
+                .doesNotContain("聆听=20")
                 .contains("基础游戏循环")
                 .contains("<kp-skill-index>")
                 .contains("- 侦查：")

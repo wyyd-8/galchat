@@ -41,4 +41,31 @@ class CharacterCardContextFormatterTest {
                 .contains("临时疯狂（编号：legacy）")
                 .contains("剩余2小时");
     }
+
+    @Test
+    void npcRosterKeepsExactNamesButOnlyPublishesChangedRuntimeState() {
+        CocDiceCharacterVO normal = new CocDiceCharacterVO(
+                81L, "NPC", null, "乔瑟夫·特纳",
+                Map.of("DEX", 55, "斗殴", 50),
+                20, 20, 0, 0, 120, 0,
+                false, false, false, false,
+                false, null, null);
+        CocDiceCharacterVO wounded = new CocDiceCharacterVO(
+                82L, "NPC", null, "亨利·沃尔特斯",
+                Map.of("DEX", 15, "斗殴", 40),
+                8, 17, 0, 0, 105, 0,
+                true, false, false, false,
+                false, null, null);
+
+        String text = formatter.formatNpcs(List.of(normal, wounded));
+
+        assertThat(text)
+                .contains("<npc-roster>")
+                .contains("乔瑟夫·特纳", "亨利·沃尔特斯")
+                .contains("<npc-state-changes>")
+                .contains("亨利·沃尔特斯：HP 8/17；重伤")
+                .doesNotContain("乔瑟夫·特纳：HP")
+                .doesNotContain("检定值")
+                .doesNotContain("DEX=", "斗殴=");
+    }
 }

@@ -3,6 +3,7 @@ package com.me.galchat.groupchat.runtime.trpg;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
+import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupAgentPolicy;
@@ -164,9 +165,17 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             List<CocDiceCharacterVO> npcCards = cards.stream()
                     .filter(card -> "NPC".equals(card.actorType()))
                     .toList();
+            List<CharacterCardVO> activeNpcCards = npcCards.stream()
+                    .filter(card -> context.relevantCharacterIds()
+                            .contains(card.cardId()))
+                    .map(card -> characterCardService.getById(card.cardId()))
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
             messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, actor) + "\n"
                     + investigatorCardContext + "\n"
                     + characterCardFormatter.formatNpcs(npcCards)
+                    + "\n" + characterCardFormatter.formatActiveNpcs(
+                            activeNpcCards)
                     + TrpgRulePrompts.residentRules()
                     + TrpgRulePrompts.skillIndex()
                     + (combatPhase ? TrpgRulePrompts.combatRules() : "")

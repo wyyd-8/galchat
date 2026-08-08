@@ -10,6 +10,7 @@ import com.me.galchat.service.impl.TrpgSceneRuntimeContextAssembler;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -19,6 +20,34 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TrpgGroupContextPolicyTest {
+
+    @Test
+    void kpContextCarriesStructuredRelevantNpcIds() {
+        com.me.galchat.service.impl.TrpgNpcContextSelector selector =
+                mock(com.me.galchat.service.impl
+                        .TrpgNpcContextSelector.class);
+        TrpgExplorationContextAssembler explorationAssembler =
+                mock(TrpgExplorationContextAssembler.class);
+        when(explorationAssembler.assemble(any(), any()))
+                .thenReturn(List.of());
+        TrpgGroupContextPolicy policy = new TrpgGroupContextPolicy(
+                mock(TrpgModuleContextAssembler.class),
+                mock(TrpgAgentDecisionContextAssembler.class),
+                explorationAssembler,
+                mock(TrpgSceneRuntimeContextAssembler.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgGameTimeContextAssembler.class),
+                selector);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setModuleId(3L);
+        GroupActionSpec action = action(GroupChatConstant.ACTOR_KP, null);
+        when(selector.select(conversation, action))
+                .thenReturn(Set.of(81L, 82L));
+
+        assertThat(policy.load(conversation, action)
+                .relevantCharacterIds())
+                .containsExactlyInAnyOrder(81L, 82L);
+    }
 
     @Test
     void trpgContextUsesIntervalCompressedExplorationRecord() {

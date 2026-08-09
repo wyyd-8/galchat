@@ -7,7 +7,7 @@ import {
   type IdleSpinTarget,
 } from './idleSpin'
 import { continuousRotationTarget, interpolateRotation } from './rollRotation'
-import { settleScaleFactor } from './settleScale'
+import { settleCameraDistance, settleScaleFactor } from './settleScale'
 
 export interface DiceRollValue {
   sides: number
@@ -371,7 +371,7 @@ async function createDie(
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  renderer.setSize(104, 104, false)
+  renderer.setSize(168, 168, false)
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = skin === 'galaxy' ? 1.26 : skin === 'moonwhite' ? 1.18 : 1.12
@@ -382,7 +382,7 @@ async function createDie(
 
   const scene = new THREE.Scene()
   const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20)
-  camera.position.set(0, 0, 4)
+  camera.position.set(0, 0, settleCameraDistance(4))
   const groundColor = skin === 'moonwhite' ? 0x244d73 : 0x392552
   scene.add(new THREE.HemisphereLight(0xffffff, groundColor, 2.25))
   const keyLight = new THREE.DirectionalLight(skin === 'moonwhite' ? 0xdaf5ff : 0xffffff, 3.4)
@@ -672,6 +672,15 @@ export class ThreeDiceBoard {
       die.wrapper.classList.add(outcome === 'selected' ? 'is-selected' : 'is-dimmed')
       if (outcome === 'selected') die.wrapper.setAttribute('aria-current', 'true')
     }
+  }
+
+  dispose(): void {
+    this.preparationGeneration += 1
+    this.idleSpin.stop()
+    this.activeDice.forEach((die) => die.dispose())
+    this.activeDice = []
+    this.preparedResult = undefined
+    this.diceTray.replaceChildren()
   }
 
   private renderWaitingDice(): void {

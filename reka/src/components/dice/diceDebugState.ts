@@ -1,0 +1,445 @@
+import type { DiceResult, DiceRollAggregate, DiceRollDetail } from '../../api/types'
+
+export type DiceDebugPreset =
+  | 'standard' | 'group' | 'percentile' | 'normal-percentile'
+  | 'advantage' | 'double-advantage' | 'disadvantage' | 'double-disadvantage' | 'custom'
+export type DiceDebugAggregatePreset = 'multiplayer-check' | 'opposed-check'
+type PercentilePreset = 'percentile' | 'normal-percentile' | 'advantage' | 'double-advantage' | 'disadvantage' | 'double-disadvantage'
+export type DiceSkin = 'classic' | 'galaxy' | 'moonwhite'
+export type DicePlayerPhase = 'idle' | 'loading' | 'ready' | 'playing' | 'complete' | 'error'
+export type DiceGroupRule = 'ANY_SUCCESS' | 'ALL_SUCCESS'
+export type DiceGroupOutcomePhase = 'concealed' | 'individual' | 'highlighted' | 'merging' | 'merged'
+export interface DicePlaybackGroupPresentation {
+  label: string
+  checkName: string
+  outcomeLabel: string
+  success: boolean
+  winner?: boolean
+}
+export interface DicePlaybackPresentation {
+  kind: 'multiplayer-check' | 'opposed-check'
+  resultLabel: string
+  resultValue: string
+  formulaLabel: string
+  formulaValue: string
+  groups: DicePlaybackGroupPresentation[]
+  groupRule?: DiceGroupRule
+}
+export interface DicePlaybackRequest {
+  id: number
+  result: DiceResult
+  skin: DiceSkin
+  reason?: string
+  presentation?: DicePlaybackPresentation
+}
+export interface DicePlayerSummary {
+  skinLabel: string
+  moduleLabel: string
+  diceLabel: string
+  modifierLabel: string
+  selectionLabel: string
+  groups: DicePlayerGroupSummary[]
+  equation: string
+  resultLabel: string
+  resultValue: number | string
+  formulaLabel: string
+  formulaValue: string
+}
+export interface DicePlayerGroupSummary {
+  label: string
+  expression: string
+  result: number | string
+  diceCount: number
+}
+export interface DicePlayerStatus {
+  label: string
+  hint: string
+  revealResult: boolean
+  showDieValues: boolean
+  actionLabel: string
+  actionDisabled: boolean
+}
+
+const SUPPORTED_SIDES = new Set([4, 6, 8, 10, 12, 20])
+
+function normalModule(sides: number, values: number[]) {
+  return {
+    expression: `${values.length}D${sides}`,
+    diceCount: values.length,
+    diceSides: sides,
+    modifier: 'NORMAL',
+    dice: values.map((value) => ({ sides, value, role: 'NORMAL', selected: true })),
+    result: values.reduce((sum, value) => sum + value, 0),
+  }
+}
+
+function percentilePreset(preset: PercentilePreset): DiceResult {
+  const config = {
+    'normal-percentile': { formula: '1D100', modifier: 'NORMAL', tens: [2], selected: 0, result: 27 },
+    advantage: { formula: '1D100#', modifier: 'ADVANTAGE', tens: [8, 2], selected: 1, result: 27 },
+    'double-advantage': { formula: '1D100##', modifier: 'DOUBLE_ADVANTAGE', tens: [8, 2, 5], selected: 1, result: 27 },
+    disadvantage: { formula: '1D100$', modifier: 'DISADVANTAGE', tens: [8, 2], selected: 0, result: 87 },
+    'double-disadvantage': { formula: '1D100$$', modifier: 'DOUBLE_DISADVANTAGE', tens: [8, 2, 5], selected: 0, result: 87 },
+  }[preset === 'percentile' ? 'double-advantage' : preset]
+  if (!config) throw new Error(`未知的百分骰预设：${preset}`)
+  return {
+    formula: config.formula,
+    modules: [{
+      expression: config.formula,
+      diceCount: 1,
+      diceSides: 100,
+      modifier: config.modifier,
+      dice: [
+        { sides: 10, value: 7, role: 'PERCENTILE_ONES', selected: true },
+        ...config.tens.map((value, index) => ({
+          sides: 10, value, role: 'PERCENTILE_TENS', selected: index === config.selected,
+        })),
+      ],
+      result: config.result,
+    }],
+    result: config.result,
+  }
+}
+
+function resolvedPercentileResult(value: number): DiceResult {
+  const ones = value % 10
+  const tens = Math.floor(value / 10)
+  return {
+    formula: '1D100',
+    modules: [{
+      expression: '1D100',
+      diceCount: 1,
+      diceSides: 100,
+      modifier: 'NORMAL',
+      dice: [
+        { sides: 10, value: ones, role: 'PERCENTILE_ONES', selected: true },
+        { sides: 10, value: tens, role: 'PERCENTILE_TENS', selected: true },
+      ],
+      result: value,
+    }],
+    result: value,
+  }
+}
+
+function debugCheckDetail(
+  id: number,
+  displayOrder: number,
+  type: 'CHECK' | 'OPPOSED_CHECK',
+  characterName: string,
+  checkName: string,
+  category: string,
+  value: number,
+): DiceRollDetail {
+  return {
+    id,
+    summaryId: type === 'OPPOSED_CHECK' ? 9002 : 9001,
+    roundNo: 1,
+    displayOrder,
+    displayType: type,
+    reason: type === 'OPPOSED_CHECK' ? '争夺手枪' : '搜索废弃宅邸',
+    resultData: resolvedPercentileResult(value),
+    resolution: {
+      type,
+      outcome: { characterName, checkName, category },
+    },
+    resolvedAt: '2026-08-09T12:00:00',
+  }
+}
+
+export function createDiceDebugAggregatePreset(preset: DiceDebugAggregatePreset): DiceRollAggregate {
+  if (preset === 'multiplayer-check') {
+    return {
+      summary: {
+        id: 9001,
+        conversationId: 1,
+        reason: '搜索废弃宅邸',
+        totalResult: '林恩侦查成功；陈默侦查失败；苏婉侦查大成功',
+        roundCount: 1,
+        status: 'COMPLETED',
+      },
+      results: [
+        debugCheckDetail(9101, 1, 'CHECK', '林恩', '侦查', 'SUCCESS', 27),
+        debugCheckDetail(9102, 2, 'CHECK', '陈默', '侦查', 'FAILURE', 78),
+        debugCheckDetail(9103, 3, 'CHECK', '苏婉', '侦查', 'CRITICAL_SUCCESS', 1),
+      ],
+      semanticResult: '林恩侦查成功；陈默侦查失败；苏婉侦查大成功',
+    }
+  }
+  return {
+    summary: {
+      id: 9002,
+      conversationId: 1,
+      reason: '争夺手枪',
+      totalResult: '林恩获胜',
+      roundCount: 1,
+      status: 'COMPLETED',
+    },
+    results: [
+      debugCheckDetail(9201, 1, 'OPPOSED_CHECK', '林恩', '格斗', 'SUCCESS', 35),
+      debugCheckDetail(9202, 2, 'OPPOSED_CHECK', '陈默', '闪避', 'SUCCESS', 40),
+    ],
+    semanticResult: '林恩获胜',
+  }
+}
+
+function isPercentilePreset(preset: DiceDebugPreset): preset is PercentilePreset {
+  return ['percentile', 'normal-percentile', 'advantage', 'double-advantage', 'disadvantage', 'double-disadvantage'].includes(preset)
+}
+
+export function createDiceDebugPreset(preset: DiceDebugPreset): DiceResult {
+  if (preset === 'standard') {
+    return {
+      formula: '1D4 + 1D6 + 1D8 + 1D10 + 1D12 + 1D20',
+      modules: [
+        normalModule(4, [3]), normalModule(6, [5]), normalModule(8, [7]),
+        normalModule(10, [9]), normalModule(12, [11]), normalModule(20, [17]),
+      ],
+      result: 52,
+    }
+  }
+  if (preset === 'group') {
+    return {
+      formula: '3D6 + 2D8',
+      modules: [normalModule(6, [4, 5, 6]), normalModule(8, [3, 7])],
+      result: 25,
+    }
+  }
+  if (isPercentilePreset(preset)) {
+    return percentilePreset(preset)
+  }
+  return {
+    formula: '1D20',
+    modules: [normalModule(20, [12])],
+    result: 12,
+  }
+}
+
+export function validatePlayableDiceResult(result: DiceResult): string[] {
+  const errors: string[] = []
+  if (!result.formula.trim()) errors.push('缺少掷骰公式')
+  if (!result.modules.length) errors.push('至少需要一个骰子模块')
+  if (!Number.isFinite(result.result)) errors.push('缺少总结果')
+
+  result.modules.forEach((module, moduleIndex) => {
+    const prefix = `模块 ${moduleIndex + 1}`
+    if (!module.expression.trim()) errors.push(`${prefix} 缺少表达式`)
+    if (!Number.isInteger(module.diceCount) || module.diceCount < 1) errors.push(`${prefix} 的骰子数量无效`)
+    if (!Number.isFinite(module.result)) errors.push(`${prefix} 缺少模块结果`)
+    if (!module.dice.length) errors.push(`${prefix} 至少需要一颗骰子`)
+
+    module.dice.forEach((die, dieIndex) => {
+      const diePrefix = `${prefix} 的骰子 ${dieIndex + 1}`
+      const percentile = die.role === 'PERCENTILE_ONES' || die.role === 'PERCENTILE_TENS'
+      if (!percentile && !SUPPORTED_SIDES.has(die.sides)) {
+        errors.push(`${diePrefix} 暂不支持 D${die.sides} 动画`)
+        return
+      }
+      if (percentile && die.sides !== 10) {
+        errors.push(`${diePrefix} 的百分骰必须使用 D10 模型`)
+        return
+      }
+      const minimum = percentile ? 0 : 1
+      const maximum = percentile ? 9 : die.sides
+      const value = die.value
+      if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum || value > maximum) {
+        errors.push(`${diePrefix} 的结果必须是 ${minimum}–${maximum} 的整数`)
+      }
+    })
+
+    if (module.diceSides === 100) {
+      const ones = module.dice.filter((die) => die.role === 'PERCENTILE_ONES')
+      const tens = module.dice.filter((die) => die.role === 'PERCENTILE_TENS')
+      if (ones.length !== 1 || !ones[0]?.selected) errors.push(`${prefix} 必须包含一个选中的个位骰`)
+      if (tens.filter((die) => die.selected).length !== 1) errors.push(`${prefix} 必须且只能选中一个十位骰`)
+    }
+  })
+  return errors
+}
+
+export function createDicePlaybackRequest(
+  previousId: number,
+  result: DiceResult,
+  skin: DiceSkin,
+  reason?: string,
+): DicePlaybackRequest {
+  const snapshot = JSON.parse(JSON.stringify(result)) as DiceResult
+  return { id: previousId + 1, result: snapshot, skin, reason }
+}
+
+const CHECK_OUTCOME_LABELS: Record<string, string> = {
+  CRITICAL_SUCCESS: '大成功',
+  EXTREME_SUCCESS: '极难成功',
+  HARD_SUCCESS: '困难成功',
+  SUCCESS: '成功',
+  FAILURE: '失败',
+  FUMBLE: '大失败',
+}
+
+const SUCCESSFUL_CHECK_OUTCOMES = new Set([
+  'CRITICAL_SUCCESS',
+  'EXTREME_SUCCESS',
+  'HARD_SUCCESS',
+  'SUCCESS',
+])
+
+function aggregateGroup(detail: DiceRollDetail, index: number): DicePlaybackGroupPresentation {
+  const outcome = detail.resolution?.outcome || {}
+  return {
+    label: typeof outcome.characterName === 'string'
+      ? outcome.characterName
+      : detail.reason || `参与者 ${index + 1}`,
+    checkName: typeof outcome.checkName === 'string' ? outcome.checkName : detail.displayType || '检定',
+    outcomeLabel: typeof outcome.category === 'string'
+      ? CHECK_OUTCOME_LABELS[outcome.category] || outcome.category
+      : '已结算',
+    success: typeof outcome.category === 'string'
+      && SUCCESSFUL_CHECK_OUTCOMES.has(outcome.category),
+  }
+}
+
+export function createGroupOutcomeVisibility(phase: DiceGroupOutcomePhase) {
+  const revealsAggregate = phase === 'merging' || phase === 'merged'
+  return {
+    showIndividuals: true,
+    revealIndividualResults: phase !== 'concealed',
+    showTransition: revealsAggregate,
+    showFinal: revealsAggregate,
+    highlightWinner: phase === 'highlighted' || revealsAggregate,
+  }
+}
+
+export function createDiceAggregatePlaybackRequest(
+  previousId: number,
+  aggregate: DiceRollAggregate,
+  skin: DiceSkin,
+  groupRule: DiceGroupRule = 'ANY_SUCCESS',
+): DicePlaybackRequest {
+  const resolved = aggregate.results
+    .filter((detail): detail is DiceRollDetail & { resultData: DiceResult } => Boolean(detail.resultData))
+  if (!resolved.length) throw new Error('这组检定还没有可播放的掷骰结果')
+  const latestRound = Math.max(...resolved.map((detail) => detail.roundNo || 1))
+  const details = resolved
+    .filter((detail) => (detail.roundNo || 1) === latestRound)
+    .sort((left, right) => (left.displayOrder || 0) - (right.displayOrder || 0) || left.id - right.id)
+  const opposed = details.every((detail) => detail.resolution?.type === 'OPPOSED_CHECK')
+  const aggregateResult = aggregate.semanticResult || aggregate.summary.totalResult || '已完成'
+  const winnerName = opposed ? aggregateResult.match(/^(.+?)获胜(?:；|$)/)?.[1] : undefined
+  const groups = details.map((detail, index) => {
+    const group = aggregateGroup(detail, index)
+    return opposed ? { ...group, winner: group.label === winnerName } : group
+  })
+  const checkNames = [...new Set(groups.map((group) => group.checkName))]
+  const groupSucceeded = groupRule === 'ALL_SUCCESS'
+    ? groups.every((group) => group.success)
+    : groups.some((group) => group.success)
+  const resultValue = opposed
+    ? aggregateResult
+    : groupSucceeded ? '成功' : '失败'
+  const formulaValue = opposed
+    ? groups.map((group) => `${group.label}（${group.checkName}）`).join(' vs ')
+    : `${groups.length} 人参与 · ${checkNames.join(' / ')} · ${groupRule === 'ALL_SUCCESS' ? '全部成功才通过' : '任一成功即通过'}`
+  const result: DiceResult = {
+    formula: details.map((detail) => detail.resultData.formula).join(' / '),
+    modules: details.flatMap((detail) => detail.resultData.modules),
+  }
+  return {
+    id: previousId + 1,
+    result: JSON.parse(JSON.stringify(result)) as DiceResult,
+    skin,
+    reason: aggregate.summary.reason,
+    presentation: {
+      kind: opposed ? 'opposed-check' : 'multiplayer-check',
+      resultLabel: opposed ? '对抗结果' : groupRule === 'ALL_SUCCESS' ? '全部成功' : '任一成功',
+      resultValue,
+      formulaLabel: opposed ? '对抗双方' : '检定项目',
+      formulaValue,
+      groups,
+      groupRule: opposed ? undefined : groupRule,
+    },
+  }
+}
+
+export function createDicePlayerSummary(
+  result: DiceResult,
+  skin: DiceSkin,
+  presentation?: DicePlaybackPresentation,
+): DicePlayerSummary {
+  const skinLabel = { classic: '经典', galaxy: '星穹', moonwhite: '月白冰晶' }[skin]
+  const diceCount = result.modules.reduce((total, module) => total + module.dice.length, 0)
+  const selectedCount = result.modules.reduce(
+    (total, module) => total + module.dice.filter((die) => die.selected).length,
+    0,
+  )
+  const discardedCount = diceCount - selectedCount
+  const modifiers = new Set(result.modules.map((module) => module.modifier || 'NORMAL'))
+  const modifierLabel = presentation?.kind === 'opposed-check'
+    ? '对抗检定'
+    : presentation?.kind === 'multiplayer-check'
+      ? '多人检定'
+      : modifiers.size === 1
+    ? ({
+        NORMAL: '常规判定',
+        ADVANTAGE: '奖励骰',
+        DOUBLE_ADVANTAGE: '双奖励骰',
+        DISADVANTAGE: '惩罚骰',
+        DOUBLE_DISADVANTAGE: '双惩罚骰',
+      } as Record<string, string>)[modifiers.values().next().value as string] || '特殊判定'
+    : '组合判定'
+  const settledResult = typeof result.result === 'number' && Number.isFinite(result.result)
+    ? result.result
+    : '—'
+  return {
+    skinLabel,
+    moduleLabel: `${result.modules.length} 组判定`,
+    diceLabel: `${diceCount} 颗骰子`,
+    modifierLabel,
+    selectionLabel: discardedCount > 0
+      ? `${selectedCount} 颗计入 · ${discardedCount} 颗舍弃`
+      : `${diceCount} 颗全部计入`,
+    groups: result.modules.map((module, index) => ({
+      label: presentation?.groups[index]?.label || `第 ${index + 1} 组`,
+      expression: presentation?.groups[index]?.checkName || module.expression,
+      result: presentation?.groups[index]
+        ? `${Number.isFinite(module.result) ? module.result : '—'} · ${presentation.groups[index].outcomeLabel}`
+        : Number.isFinite(module.result) ? module.result as number : '—',
+      diceCount: module.dice.length,
+    })),
+    equation: `${result.formula} = ${settledResult}`,
+    resultLabel: presentation?.resultLabel || '最终结果',
+    resultValue: presentation?.resultValue || settledResult,
+    formulaLabel: presentation?.formulaLabel || '判定公式',
+    formulaValue: presentation?.formulaValue || result.formula,
+  }
+}
+
+export function createDicePlayerStatus(phase: DicePlayerPhase): DicePlayerStatus {
+  return {
+    idle: { label: '等待投掷', hint: '准备开始这次判定', revealResult: false, showDieValues: false, actionLabel: '掷骰', actionDisabled: true },
+    loading: { label: '正在准备', hint: '加载骰子与判定桌面', revealResult: false, showDieValues: false, actionLabel: '准备骰子', actionDisabled: true },
+    ready: { label: '准备就绪', hint: '骰子正在待机，点击掷骰开始判定', revealResult: false, showDieValues: false, actionLabel: '掷骰', actionDisabled: false },
+    playing: { label: '正在投掷', hint: '结果将在骰子停稳后揭晓', revealResult: false, showDieValues: false, actionLabel: '正在掷骰', actionDisabled: true },
+    complete: { label: '判定完成', hint: '最终点数已锁定', revealResult: true, showDieValues: true, actionLabel: '重放动画', actionDisabled: false },
+    error: { label: '播放中断', hint: '已保留结果，可以重新准备', revealResult: true, showDieValues: false, actionLabel: '重新准备', actionDisabled: false },
+  }[phase]
+}
+
+export function parseDiceResultJson(source: string): DiceResult {
+  const value: unknown = JSON.parse(source)
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('JSON 根节点必须是对象')
+  }
+  const candidate = value as Record<string, unknown>
+  if (typeof candidate.formula !== 'string' || !Array.isArray(candidate.modules)) {
+    throw new Error('JSON 缺少 formula 或 modules')
+  }
+  candidate.modules.forEach((module, index) => {
+    if (!module || typeof module !== 'object' || Array.isArray(module)) {
+      throw new Error(`模块 ${index + 1} 必须是对象`)
+    }
+    const moduleCandidate = module as Record<string, unknown>
+    if (typeof moduleCandidate.expression !== 'string' || !Array.isArray(moduleCandidate.dice)) {
+      throw new Error(`模块 ${index + 1} 缺少 expression 或 dice`)
+    }
+  })
+  return value as DiceResult
+}

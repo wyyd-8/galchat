@@ -1,13 +1,23 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, BookUser, Dices, LoaderCircle, RefreshCw, RotateCcw, Save, Trash2 } from '@lucide/vue'
+import { Activity, BookUser, Dices, FlaskConical, LoaderCircle, Play, RefreshCw, RotateCcw, Save, Trash2 } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import DiceDebugPanel from '@/components/dice/DiceDebugPanel.vue'
+import DicePlayerDialog from '@/components/dice/DicePlayerDialog.vue'
 import { api } from '@/api/client'
 import type {
-  Character, CharacterCard, CocModule, ContextWindowUsage, Conversation, DiceRollAggregate, DiceRollDetail, DiceRollSummary, TrpgSave,
+  Character, CharacterCard, CocModule, ContextWindowUsage, Conversation, DiceResult, DiceRollAggregate, DiceRollDetail, DiceRollSummary, TrpgSave,
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
+import {
+  createDiceAggregatePlaybackRequest,
+  createDicePlaybackRequest,
+  validatePlayableDiceResult,
+  type DicePlaybackRequest,
+  type DiceGroupRule,
+  type DiceSkin,
+} from '@/components/dice/diceDebugState'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ conversation: Conversation; module: CocModule | null; characters: Character[]; latestDiceRoll: DiceRollAggregate | null }>()
@@ -25,6 +35,8 @@ const confirmDelete = ref(false)
 const diceId = ref('')
 const diceSummary = ref<DiceRollSummary | null>(null)
 const diceResults = ref<DiceRollDetail[]>([])
+const dicePlayerOpen = ref(false)
+const playbackRequest = ref<DicePlaybackRequest | null>(null)
 
 const selectedParticipantId = computed(() => selectedParticipant.value ? Number(selectedParticipant.value) : undefined)
 const contextPercent = computed(() => Math.max(0, Math.round((contextUsage.value?.ratio || 0) * 100)))
@@ -96,8 +108,44 @@ async function loadDice(id = Number(diceId.value)) {
 async function rollResult(id: number) {
   const progress = await api.rollDiceResult(id)
   diceSummary.value = progress.summary
+  if (progress.rolledResult.resultData) {
+    playDiceResult(
+      progress.rolledResult.resultData,
+      'classic',
+      progress.rolledResult.reason || progress.summary.reason,
+    )
+  }
   await loadDice(progress.summary.id)
   notify('掷骰已完成', progress.summary.totalResult || String(progress.rolledResult.resultData?.result ?? ''), 'success')
+}
+function playDiceResult(result: DiceResult, skin: DiceSkin = 'classic', reason?: string) {
+  const errors = validatePlayableDiceResult(result)
+  if (errors.length) {
+    notify('这份结果无法播放 3D 动画', errors.join('；'), 'danger')
+    return
+  }
+  playbackRequest.value = createDicePlaybackRequest(playbackRequest.value?.id || 0, result, skin, reason)
+  dicePlayerOpen.value = true
+}
+function playDiceAggregate(
+  aggregate: DiceRollAggregate,
+  skin: DiceSkin = 'classic',
+  groupRule: DiceGroupRule = 'ANY_SUCCESS',
+) {
+  const errors = aggregate.results.flatMap((detail) => detail.resultData
+    ? validatePlayableDiceResult(detail.resultData).map((error) => `${detail.reason || `骰位 #${detail.id}`}：${error}`)
+    : [`${detail.reason || `骰位 #${detail.id}`}：缺少掷骰结果`])
+  if (errors.length) {
+    notify('这组检定无法播放 3D 动画', errors.join('；'), 'danger')
+    return
+  }
+  playbackRequest.value = createDiceAggregatePlaybackRequest(
+    playbackRequest.value?.id || 0,
+    aggregate,
+    skin,
+    groupRule,
+  )
+  dicePlayerOpen.value = true
 }
 
 watch(open, (visible) => { if (visible) void execute(refreshOverview) })
@@ -115,6 +163,7 @@ watch(() => props.latestDiceRoll, (aggregate) => {
         <TabsTrigger value="status"><Activity :size="15" />状态与存档</TabsTrigger>
         <TabsTrigger value="card"><BookUser :size="15" />人物卡</TabsTrigger>
         <TabsTrigger value="dice"><Dices :size="15" />骰子</TabsTrigger>
+        <TabsTrigger value="dice-debug"><FlaskConical :size="15" />骰子调试</TabsTrigger>
       </TabsList>
 
       <TabsContent value="status" class="tabs-content tool-section">
@@ -145,10 +194,15 @@ watch(() => props.latestDiceRoll, (aggregate) => {
       <TabsContent value="dice" class="tabs-content tool-section">
         <div class="field-inline"><label class="field"><span>掷骰摘要 ID</span><input v-model="diceId" inputmode="numeric" placeholder="仅在已知摘要 ID 时手动查询" /></label><button class="button secondary dice-load-button" :disabled="!diceId || busy" @click="execute(() => loadDice())"><RefreshCw :size="16" />查询</button></div>
         <section v-if="diceSummary" class="tool-card dice-summary"><div class="tool-card-heading"><span><strong>{{ diceSummary.reason || `掷骰 #${diceSummary.id}` }}</strong><small>{{ diceStatus(diceSummary.status) }} · {{ diceSummary.roundCount || 1 }} 轮</small></span><b>{{ diceSummary.totalResult || '进行中' }}</b></div></section>
-        <div v-if="diceResults.length" class="dice-result-list"><article v-for="item in diceResults" :key="item.id"><span class="dice-result-value">{{ resultText(item) }}</span><span><strong>{{ item.reason || `骰位 #${item.id}` }}</strong><small>{{ item.resultData?.formula || item.displayType || '待投骰' }} · 第 {{ item.roundNo || 1 }} 轮</small></span><button v-if="!item.resolvedAt" class="button secondary" :disabled="busy" @click="execute(() => rollResult(item.id))"><Dices :size="15" />投掷</button></article></div>
+        <div v-if="diceResults.length" class="dice-result-list"><article v-for="item in diceResults" :key="item.id"><span class="dice-result-value">{{ resultText(item) }}</span><span><strong>{{ item.reason || `骰位 #${item.id}` }}</strong><small>{{ item.resultData?.formula || item.displayType || '待投骰' }} · 第 {{ item.roundNo || 1 }} 轮</small></span><button v-if="!item.resolvedAt" class="button secondary" :disabled="busy" @click="execute(() => rollResult(item.id))"><Dices :size="15" />投掷</button><button v-else-if="item.resultData" class="button ghost" @click="playDiceResult(item.resultData, 'classic', item.reason || diceSummary?.reason)"><Play :size="15" />播放</button></article></div>
         <div v-else class="empty-panel compact"><Dices :size="24" /><p>打开本页面后收到的新掷骰事件会自动显示；历史掷骰仅支持按已知摘要 ID 查询。</p></div>
+      </TabsContent>
+
+      <TabsContent value="dice-debug" class="tabs-content tool-section">
+        <DiceDebugPanel @play="playDiceResult" @play-aggregate="playDiceAggregate" />
       </TabsContent>
     </TabsRoot>
     <div v-if="busy" class="dialog-busy"><LoaderCircle class="spin" :size="17" />正在处理…</div>
   </BaseDialog>
+  <DicePlayerDialog v-model="dicePlayerOpen" :request="playbackRequest" />
 </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { BookUser, Check, LoaderCircle, RefreshCw, Sparkles, Trash2, UserRound } from '@lucide/vue'
+import { BookUser, Check, Dices, LoaderCircle, RefreshCw, Sparkles, Trash2, UserRound } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import { api } from '@/api/client'
 import type { Character, CharacterCard, CharacterCardCreationDraft, Conversation, InvestigatorCardSummary } from '@/api/types'
@@ -142,6 +142,13 @@ async function removeCard() {
   notify('人物卡已解除绑定', selectedName.value, 'success')
 }
 
+async function rollLuck() {
+  if (!card.value) return
+  await api.rollCharacterLuck(card.value.character.id)
+  await loadSelectedCard()
+  notify('幸运值已生成', String(card.value?.character.luckCurrent ?? ''), 'success')
+}
+
 function finish() {
   if (!complete.value) return
   open.value = false
@@ -226,7 +233,7 @@ watch(() => props.conversation?.id, () => {
             <button class="button ghost" :disabled="busy" @click="execute(rewriteBackground)"><Sparkles :size="15" />重骰并重写背景</button>
             <button class="button primary" :disabled="busy" @click="execute(confirmGeneratedCard)"><Check :size="15" />确认并绑定</button>
           </div>
-          <div v-else class="tool-actions"><button class="button" :class="confirmDelete ? 'danger' : 'ghost'" :disabled="busy" @click="execute(removeCard)"><Trash2 :size="15" />{{ confirmDelete ? '确认解除绑定' : '解除并重新绑定' }}</button></div>
+          <div v-else class="tool-actions"><button class="button secondary" :disabled="displayCard.character.luckCurrent != null || busy" @click="execute(rollLuck)"><Dices :size="15" />{{ displayCard.character.luckCurrent == null ? '投掷幸运' : `幸运 ${displayCard.character.luckCurrent}` }}</button><button class="button" :class="confirmDelete ? 'danger' : 'ghost'" :disabled="busy" @click="execute(removeCard)"><Trash2 :size="15" />{{ confirmDelete ? '确认解除绑定' : '解除并重新绑定' }}</button></div>
         </section>
         <section v-else class="tool-card import-card binding-import-card">
           <BookUser :size="25" />

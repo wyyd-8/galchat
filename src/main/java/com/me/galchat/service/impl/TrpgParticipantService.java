@@ -44,6 +44,7 @@ public class TrpgParticipantService {
                     "跑团必须且只能存在一张用户调查员人物卡");
         }
         CocCharacter player = playerCards.getFirst();
+        requireLuck(player);
         List<Participant> result = new ArrayList<>();
         result.add(new Participant(
                 new GroupActorRef(
@@ -69,6 +70,7 @@ public class TrpgParticipantService {
                 throw new UserRequestException(
                         "调查员缺少人物卡：" + member.getActorId());
             }
+            requireLuck(card);
             result.add(new Participant(
                     new GroupActorRef(
                             GroupChatConstant.ACTOR_CHARACTER,
@@ -76,6 +78,13 @@ public class TrpgParticipantService {
                     card.getId(), card.getName(), card.getPlayerName()));
         }
         return List.copyOf(result);
+    }
+
+    private void requireLuck(CocCharacter card) {
+        if (card.getLuckCurrent() == null) {
+            throw new UserRequestException(
+                    "调查员尚未投掷幸运：" + card.getName());
+        }
     }
 
     public record Participant(

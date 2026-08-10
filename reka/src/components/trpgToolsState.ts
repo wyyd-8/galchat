@@ -9,11 +9,17 @@ export interface ToolCharacterTarget {
   cardId?: number
 }
 
+export function toolDialogContentClass(tab: string): string {
+  return tab === 'card' ? 'trpg-binding-dialog' : ''
+}
+
 export function buildToolCharacterTargets(
   characters: Character[],
   cards: InvestigatorCardSummary[],
+  participantIds: number[],
 ): ToolCharacterTarget[] {
   const playerCard = cards.find((card) => card.actorType === 'PLAYER')
+  const participantIdSet = new Set(participantIds)
 
   return [
     {
@@ -22,7 +28,7 @@ export function buildToolCharacterTargets(
       name: '玩家调查员',
       ...(playerCard ? { cardId: playerCard.cardId } : {}),
     },
-    ...characters.map((character) => {
+    ...characters.filter((character) => participantIdSet.has(character.characterId)).map((character) => {
       const boundCard = cards.find((card) => card.actorType === 'BOT'
         && card.participantId === character.characterId)
       return {

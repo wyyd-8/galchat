@@ -38,6 +38,25 @@ function cssRule(source: string, selector: string): string {
   return source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || ''
 }
 
+function findElement(root: RootNode, predicate: (element: ElementNode) => boolean): ElementNode | undefined {
+  const visit = (node: unknown): ElementNode | undefined => {
+    if (!node || typeof node !== 'object') return undefined
+    const candidate = node as { type?: number, children?: unknown[] }
+    if (candidate.type === NodeTypes.ELEMENT) {
+      const element = node as ElementNode
+      if (predicate(element)) return element
+    }
+    if (Array.isArray(candidate.children)) {
+      for (const child of candidate.children) {
+        const match = visit(child)
+        if (match) return match
+      }
+    }
+    return undefined
+  }
+  return visit(root)
+}
+
 test('renders the opposed-check separator as an accessible crossed-swords icon', async () => {
   const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
@@ -78,6 +97,124 @@ test('renders structured dice messages with the dedicated compact component', as
   assert.equal(visit(root), true)
 })
 
+test('reuses iconless chat dice cards for the tool dice history', async () => {
+  const source = await readFile(new URL('../TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const root = baseParse(template)
+  const diceTab = findElement(root, (element) => element.tag === 'TabsContent' && element.props.some((prop) => (
+    prop.type === NodeTypes.ATTRIBUTE && prop.name === 'value' && prop.value?.content === 'dice'
+  )))
+
+  assert.ok(diceTab, 'the tools dialog should contain a dice tab')
+  assert.equal(Boolean(findElement(diceTab as unknown as RootNode, (element) => element.tag === 'input')), false)
+  const card = findElement(diceTab as unknown as RootNode, (element) => element.tag === 'DiceRollMessage')
+  assert.ok(card, 'the dice tab should reuse the chat dice message component')
+  assert.equal(card.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'bind'
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.content === 'show-icon'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content === 'false'
+  )), true)
+})
+
+test('shows a dedicated empty state when the current chat has no dice messages', async () => {
+  const source = await readFile(new URL('../TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+
+  const empty = findElementByClass(baseParse(template), 'dice-history-empty')
+
+  assert.ok(empty, 'the dice history should explain that the current chat has no rolls')
+  assert.equal(empty.children.some((child) => child.type === NodeTypes.ELEMENT && child.tag === 'strong'), true)
+  assert.equal(empty.children.some((child) => child.type === NodeTypes.ELEMENT && child.tag === 'p'), true)
+})
+
+test('adds a separate locate control to each tool dice card', async () => {
+  const source = await readFile(new URL('../TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const root = baseParse(template)
+  const item = findElementByClass(root, 'dice-history-item')
+  const locate = findElementByClass(root, 'dice-history-locate')
+
+  assert.ok(item, 'each dice history entry should reserve a locate action area')
+  assert.ok(locate, 'each dice history entry should offer a locate action')
+  assert.equal(locate.tag, 'button')
+  assert.equal(locate.children.some((child) => child.type === NodeTypes.ELEMENT && child.tag === 'LocateFixed'), true)
+  assert.equal(locate.props.some((prop) => (
+    prop.type === NodeTypes.ATTRIBUTE
+      && prop.name === 'aria-label'
+      && prop.value?.content === '定位到聊天记录'
+  )), true)
+  assert.equal(locate.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'on'
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.content === 'click'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content.includes("emit('locateDice', message.id)")
+  )), true)
+})
+
+test('wires tool dice location requests to the chat navigator', async () => {
+  const source = await readFile(new URL('../../App.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'App should contain a template')
+  const tools = findElement(baseParse(template), (element) => element.tag === 'TrpgToolsDialog')
+
+  assert.ok(tools, 'App should render the TRPG tools dialog')
+  assert.equal(tools.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'on'
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.content === 'locate-dice'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content === 'locateDiceMessage'
+  )), true)
+})
+
+test('opens each new backend dice roll after its chat card is rendered', async () => {
+  const appSource = await readFile(new URL('../../App.vue', import.meta.url), 'utf8')
+  const workspaceSource = await readFile(new URL('../../composables/useWorkspace.ts', import.meta.url), 'utf8')
+
+  assert.match(workspaceSource, /event\.eventType === 'dice_roll\.created'[\s\S]*incomingDiceRoll\.value = aggregate/)
+  assert.match(appSource, /watch\(\s*\(\) => workspace\.incomingDiceRoll\.value/)
+  assert.match(appSource, /if \(aggregate\) openIncomingDiceMessage\(aggregate\)/)
+  assert.match(appSource, /\{ flush: 'post' \}/)
+})
+
+test('marks each chat message as a scroll target for tool navigation', async () => {
+  const source = await readFile(new URL('../GroupChatStage.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'GroupChatStage should contain a template')
+  const message = findElementByClass(baseParse(template), 'chat-message')
+
+  assert.ok(message, 'the chat should render message articles')
+  assert.equal(message.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'bind'
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.content === 'data-message-id'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content === 'message.id'
+  )), true)
+})
+
+test('reserves the card right edge for the tool locate control', async () => {
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  const item = cssRule(styles, '.dice-history-item')
+  const card = cssRule(styles, '.dice-history-item .dice-message-card')
+  const locate = cssRule(styles, '.dice-history-locate')
+
+  assert.match(item, /position:\s*relative/)
+  assert.match(card, /padding-right:\s*58px/)
+  assert.match(locate, /position:\s*absolute/)
+  assert.match(locate, /right:\s*14px/)
+})
+
 test('offers an explicit continue action below replay after the first player roll', async () => {
   const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
@@ -89,6 +226,40 @@ test('offers an explicit continue action below replay after the first player rol
   assert.equal(action.children.some((child) => (
     child.type === NodeTypes.TEXT && child.content.trim() === '继续'
   )), true)
+})
+
+test('places the dice player and its overlay on a foreground dialog layer', async () => {
+  const playerSource = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const playerTemplate = playerSource.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(playerTemplate, 'DicePlayerDialog should contain a template')
+  const playerDialog = findElement(baseParse(playerTemplate), (element) => element.tag === 'BaseDialog')
+  assert.ok(playerDialog, 'DicePlayerDialog should render a BaseDialog')
+  assert.equal(playerDialog.props.some((prop) => (
+    prop.type === NodeTypes.ATTRIBUTE
+      && prop.name === 'layer'
+      && prop.value?.content === 'foreground'
+  )), true)
+
+  const baseSource = await readFile(new URL('../ui/BaseDialog.vue', import.meta.url), 'utf8')
+  const baseTemplate = baseSource.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(baseTemplate, 'BaseDialog should contain a template')
+  const baseRoot = baseParse(baseTemplate)
+  for (const tag of ['DialogOverlay', 'DialogContent']) {
+    const element = findElement(baseRoot, (candidate) => candidate.tag === tag)
+    assert.ok(element, `BaseDialog should render ${tag}`)
+    assert.equal(element.props.some((prop) => (
+      prop.type === NodeTypes.DIRECTIVE
+        && prop.name === 'bind'
+        && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+        && prop.arg.content === 'class'
+        && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+        && prop.exp.content.includes('layerClass')
+    )), true)
+  }
+
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  assert.match(cssRule(styles, '.dialog-overlay.dialog-layer-foreground'), /z-index:\s*60/)
+  assert.match(cssRule(styles, '.dialog-content.dialog-layer-foreground'), /z-index:\s*61/)
 })
 
 test('stretches each dice message card across the chat message row', async () => {

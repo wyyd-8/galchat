@@ -5,6 +5,8 @@ import BaseDialog from '@/components/ui/BaseDialog.vue'
 import {
   createDicePlayerWindowClass,
   createDicePlayerInitialState,
+  createDiceAutoPlayPlan,
+  createDicePlayerPreparedResult,
   createGroupOutcomeVisibility,
   createDicePlayerStatus,
   createDicePlayerSummary,
@@ -224,15 +226,6 @@ async function prepare(request: DicePlaybackRequest) {
       request.presentation?.groupRule,
     )
     groupOutcomePhase.value = initial.groupOutcomePhase
-    if (mode === 'pending') {
-      disposeBoard()
-      const placeholder = document.createElement('p')
-      placeholder.className = 'empty-tray'
-      placeholder.textContent = '骰子已经备妥，等待你的决定'
-      tray.value.replaceChildren(placeholder)
-      status.value = initial.phase
-      return
-    }
     if (!board) {
       const { ThreeDiceBoard: DiceBoard } = await import('../../../../dice-lab/src/dice/ThreeDice')
       if (currentGeneration !== generation) return
@@ -240,18 +233,30 @@ async function prepare(request: DicePlaybackRequest) {
     }
     const activeBoard = board
     activeBoard.setSkin(request.skin)
-    const playableResult = request.result as DiceRollResult
+    const playableResult = createDicePlayerPreparedResult(request) as DiceRollResult
     await activeBoard.prepareResult(playableResult)
     if (currentGeneration !== generation) return
     arrangeDiceModuleRows()
+    if (mode === 'pending') {
+      status.value = initial.phase
+      return
+    }
     if (mode === 'settled') {
       await activeBoard.showResult(playableResult)
       if (currentGeneration !== generation) return
       status.value = 'complete'
       return
     }
-    status.value = 'ready'
-    if (request.autoPlay) await roll()
+    const autoPlayPlan = createDiceAutoPlayPlan(request)
+    status.value = autoPlayPlan.phase
+    if (request.autoPlay) {
+      if (autoPlayPlan.delayMs > 0) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, autoPlayPlan.delayMs))
+        if (currentGeneration !== generation) return
+      }
+      status.value = 'ready'
+      await roll()
+    }
   } catch (cause) {
     if (currentGeneration !== generation) return
     status.value = 'error'
@@ -325,6 +330,7 @@ onBeforeUnmount(() => {
     :title="request?.reason || '掷骰判定'"
     :description="dialogDescription"
     size="lg"
+    layer="foreground"
     :content-class="dialogContentClass"
     :content-style="dialogContentStyle"
   >

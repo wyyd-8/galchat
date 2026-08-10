@@ -682,6 +682,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         outcome.put("characterName", stringValue(rule, "characterName"));
         outcome.put("checkName", stringValue(rule, "checkName"));
         outcome.put("category", check.outcome().name());
+        outcome.put("rank", check.rank().name());
         resolution.setOutcome(outcome);
     }
 

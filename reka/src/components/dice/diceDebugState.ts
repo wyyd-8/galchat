@@ -15,7 +15,7 @@ export type DiceMessageTone = 'pending' | 'damage' | 'sanity' | 'healing' | 'pus
   | 'opposed' | 'success' | 'failure' | 'default'
 export interface DiceMessagePresentation {
   title: string
-  statusLabel: '未投掷' | '已投掷'
+  statusLabel: string
   tone: DiceMessageTone
 }
 export interface DicePlaybackGroupPresentation {
@@ -43,6 +43,8 @@ export interface DicePlaybackRequest {
   presentation?: DicePlaybackPresentation
   mode?: DicePlaybackMode
   autoPlay?: boolean
+  autoPlayDelayMs?: number
+  offerContinueAfterComplete?: boolean
 }
 export interface DicePlayerSummary {
   skinLabel: string
@@ -298,12 +300,30 @@ const CHECK_OUTCOME_LABELS: Record<string, string> = {
   FUMBLE: '大失败',
 }
 
+const CHECK_RANK_LABELS: Record<string, string> = {
+  CRITICAL: '大成功',
+  EXTREME: '极难成功',
+  HARD: '困难成功',
+  REGULAR: '常规成功',
+}
+
 const SUCCESSFUL_CHECK_OUTCOMES = new Set([
   'CRITICAL_SUCCESS',
   'EXTREME_SUCCESS',
   'HARD_SUCCESS',
   'SUCCESS',
 ])
+
+const PARTICIPANT_CHECK_TYPES = new Set(['CHECK', 'SAN_CHECK', 'OPPOSED_CHECK'])
+
+function checkOutcomeLabel(outcome: Record<string, unknown>): string {
+  const category = typeof outcome.category === 'string' ? outcome.category : undefined
+  if (!category) return '已结算'
+  if (category === 'SUCCESS' && typeof outcome.rank === 'string') {
+    return CHECK_RANK_LABELS[outcome.rank] || CHECK_OUTCOME_LABELS[category]
+  }
+  return CHECK_OUTCOME_LABELS[category] || category
+}
 
 const PERSONALIZED_MESSAGE_TONES: Record<string, DiceMessageTone> = {
   rollDamage: 'damage',
@@ -344,14 +364,15 @@ export function createDiceMessagePresentation(
     ? PERSONALIZED_MESSAGE_TONES[aggregate.summary.toolName]
     : undefined
   const details = latestDiceDetails(aggregate)
+  const aggregateResult = aggregate.semanticResult || aggregate.summary.totalResult || '已完成'
+  const opposed = details.length > 0
+    && details.every((detail) => detail.resolution?.type === 'OPPOSED_CHECK')
+  const groupRule = details.map((detail) => detail.resolution?.groupRule)
+    .find((rule): rule is DiceGroupRule => Boolean(rule))
+  const categories = details.map((detail) => detail.resolution?.outcome?.category)
+    .filter((category): category is string => typeof category === 'string')
   let tone: DiceMessageTone = personalizedTone || 'default'
   if (!personalizedTone) {
-    const opposed = details.length > 0
-      && details.every((detail) => detail.resolution?.type === 'OPPOSED_CHECK')
-    const groupRule = details.map((detail) => detail.resolution?.groupRule)
-      .find((rule): rule is DiceGroupRule => Boolean(rule))
-    const categories = details.map((detail) => detail.resolution?.outcome?.category)
-      .filter((category): category is string => typeof category === 'string')
     if (opposed) {
       tone = 'opposed'
     } else if (details.length === 1 && categories.length === 1) {
@@ -364,19 +385,47 @@ export function createDiceMessagePresentation(
       tone = succeeded ? 'success' : 'failure'
     }
   }
+  let statusLabel = '已投掷'
+  if (opposed) {
+    statusLabel = aggregateResult
+  } else if (details.length === 1 && details[0]!.resolution?.outcome) {
+    statusLabel = checkOutcomeLabel(details[0]!.resolution!.outcome!)
+  } else if (details.length > 1 && groupRule && groupRule !== 'SEPARATE'
+      && categories.length === details.length) {
+    const succeeded = groupRule === 'ALL_SUCCESS'
+      ? categories.every((category) => SUCCESSFUL_CHECK_OUTCOMES.has(category))
+      : categories.some((category) => SUCCESSFUL_CHECK_OUTCOMES.has(category))
+    statusLabel = succeeded ? '成功' : '失败'
+  } else if (details.length > 1 && groupRule === 'SEPARATE') {
+    statusLabel = '分别结果'
+  }
   return {
     title,
-    statusLabel: '已投掷',
+    statusLabel,
     tone,
   }
 }
 
 export function shouldOfferDiceContinue(
-  openedPending: boolean,
+  request: DicePlaybackRequest | null,
   summaryStatus: string,
   hasPendingResults: boolean,
 ): boolean {
-  return openedPending && summaryStatus === 'COMPLETED' && !hasPendingResults
+  return request?.offerContinueAfterComplete === true
+    && summaryStatus === 'COMPLETED'
+    && !hasPendingResults
+}
+
+export function createDiceAutoPlayPlan(
+  request: DicePlaybackRequest,
+): { phase: 'idle' | 'ready'; delayMs: number } {
+  const delayMs = request.autoPlay
+    ? Math.max(0, request.autoPlayDelayMs || 0)
+    : 0
+  return {
+    phase: delayMs > 0 ? 'idle' : 'ready',
+    delayMs,
+  }
 }
 
 export function createDicePlayerInitialState(
@@ -392,6 +441,38 @@ export function createDicePlayerInitialState(
       ? 'individual'
       : presentationKind ? 'merged' : 'individual',
   }
+}
+
+export function createStandbyDiceResult(result: DiceResult): DiceResult {
+  return {
+    ...result,
+    result: 0,
+    modules: result.modules.map((module) => {
+      let selectedTens = false
+      return {
+        ...module,
+        result: 0,
+        dice: module.dice.map((die) => {
+          const percentile = die.role === 'PERCENTILE_ONES' || die.role === 'PERCENTILE_TENS'
+          const selected = die.role === 'PERCENTILE_TENS'
+            ? !selectedTens
+            : die.selected
+          if (die.role === 'PERCENTILE_TENS' && selected) selectedTens = true
+          return {
+            ...die,
+            value: percentile ? 0 : 1,
+            selected,
+          }
+        }),
+      }
+    }),
+  }
+}
+
+export function createDicePlayerPreparedResult(request: DicePlaybackRequest): DiceResult {
+  return request.mode === 'pending'
+    ? createStandbyDiceResult(request.result)
+    : request.result
 }
 
 interface DiceMessageReference {
@@ -441,6 +522,19 @@ export async function hydrateDiceMessage(
   return { ...message, content: '', diceRoll, diceRoundNos }
 }
 
+export function listDiceMessagesNewestFirst(messages: GroupMessage[]): GroupMessage[] {
+  return [...messages].reverse().filter((message) => (
+    message.messageKind === 'dice_roll' && Boolean(message.diceRoll)
+  ))
+}
+
+export function findDiceMessageElement<T extends { dataset: { messageId?: string } }>(
+  elements: Iterable<T>,
+  messageId: number,
+): T | undefined {
+  return Array.from(elements).find((element) => element.dataset.messageId === String(messageId))
+}
+
 function aggregateGroup(detail: DiceRollDetail, index: number): DicePlaybackGroupPresentation {
   const outcome = detail.resolution?.outcome || {}
   return {
@@ -448,9 +542,7 @@ function aggregateGroup(detail: DiceRollDetail, index: number): DicePlaybackGrou
       ? outcome.characterName
       : detail.reason || `参与者 ${index + 1}`,
     checkName: typeof outcome.checkName === 'string' ? outcome.checkName : detail.displayType || '检定',
-    outcomeLabel: typeof outcome.category === 'string'
-      ? CHECK_OUTCOME_LABELS[outcome.category] || outcome.category
-      : '已结算',
+    outcomeLabel: checkOutcomeLabel(outcome),
     success: typeof outcome.category === 'string'
       && SUCCESSFUL_CHECK_OUTCOMES.has(outcome.category),
   }
@@ -536,6 +628,49 @@ export function createDiceAggregatePlaybackRequest(
   }
 }
 
+export function createDiceMessagePlaybackRequest(
+  previousId: number,
+  aggregate: DiceRollAggregate,
+  skin: DiceSkin,
+): DicePlaybackRequest {
+  const latestRound = Math.max(1, ...aggregate.results.map((detail) => detail.roundNo || 1))
+  const details = aggregate.results
+    .filter((detail): detail is DiceRollDetail & { resultData: DiceResult } => (
+      (detail.roundNo || 1) === latestRound && Boolean(detail.resultData)
+    ))
+    .sort((left, right) => (left.displayOrder || 0) - (right.displayOrder || 0) || left.id - right.id)
+  if (!details.length) throw new Error('这条骰子消息没有可显示的骰子')
+
+  const participantCheck = details.every((detail) => PARTICIPANT_CHECK_TYPES.has(
+    detail.resolution?.type || detail.displayType || '',
+  ))
+  if (participantCheck || details.length > 1) {
+    return createDiceAggregatePlaybackRequest(previousId, aggregate, skin)
+  }
+  return createDicePlaybackRequest(
+    previousId,
+    details[0]!.resultData,
+    skin,
+    aggregate.summary.reason || details[0]!.reason,
+    aggregate.summary.toolName,
+  )
+}
+
+export function createIncomingDiceMessagePlaybackRequest(
+  previousId: number,
+  aggregate: DiceRollAggregate,
+  skin: DiceSkin,
+): DicePlaybackRequest {
+  const pending = isDiceAggregatePending(aggregate)
+  return {
+    ...createDiceMessagePlaybackRequest(previousId, aggregate, skin),
+    mode: pending ? 'pending' : 'play',
+    autoPlay: !pending,
+    autoPlayDelayMs: pending ? undefined : 1_000,
+    offerContinueAfterComplete: true,
+  }
+}
+
 export function createDicePlayerSummary(
   result: DiceResult,
   skin: DiceSkin,
@@ -552,7 +687,7 @@ export function createDicePlayerSummary(
   const modifierLabel = presentation?.kind === 'opposed-check'
     ? '对抗检定'
     : presentation?.kind === 'multiplayer-check'
-      ? '多人检定'
+      ? presentation.groups.length === 1 ? '单人检定' : '多人检定'
       : modifiers.size === 1
     ? ({
         NORMAL: '常规判定',

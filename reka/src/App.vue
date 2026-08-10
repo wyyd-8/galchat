@@ -23,8 +23,9 @@ import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
 import {
-  createDiceAggregatePlaybackRequest,
-  createDicePlaybackRequest,
+  createIncomingDiceMessagePlaybackRequest,
+  createDiceMessagePlaybackRequest,
+  findDiceMessageElement,
   isDiceAggregatePending,
   shouldOfferDiceContinue,
   type DicePlaybackMode,
@@ -55,52 +56,61 @@ const characterPreviewLoading = ref(false)
 const dicePlayerOpen = ref(false)
 const dicePlaybackRequest = ref<DicePlaybackRequest | null>(null)
 const diceMessageAggregate = ref<DiceRollAggregate | null>(null)
-const diceOpenedPending = ref(false)
 const diceShowContinue = ref(false)
 
 function createMessagePlaybackRequest(
   aggregate: DiceRollAggregate,
   mode: DicePlaybackMode,
   autoPlay = false,
+  offerContinueAfterComplete = false,
 ): DicePlaybackRequest {
-  const latestRound = Math.max(1, ...aggregate.results.map((detail) => detail.roundNo || 1))
-  const details = aggregate.results
-    .filter((detail) => (detail.roundNo || 1) === latestRound && detail.resultData)
-    .sort((left, right) => (left.displayOrder || 0) - (right.displayOrder || 0) || left.id - right.id)
-  if (!details.length) throw new Error('这条骰子消息没有可显示的骰子')
   const previousId = dicePlaybackRequest.value?.id || 0
-  const request = details.length === 1
-    ? createDicePlaybackRequest(
-      previousId,
-      details[0]!.resultData!,
-      'classic',
-      aggregate.summary.reason,
-      aggregate.summary.toolName,
-    )
-    : createDiceAggregatePlaybackRequest(
-      previousId,
-      aggregate,
-      'classic',
-      undefined,
-      aggregate.summary.toolName,
-    )
-  return { ...request, mode, autoPlay }
+  const request = createDiceMessagePlaybackRequest(previousId, aggregate, 'classic')
+  return { ...request, mode, autoPlay, offerContinueAfterComplete }
 }
 
 function openDiceMessage(aggregate: DiceRollAggregate) {
   try {
     const pending = isDiceAggregatePending(aggregate)
     diceMessageAggregate.value = aggregate
-    diceOpenedPending.value = pending
     diceShowContinue.value = false
     dicePlaybackRequest.value = createMessagePlaybackRequest(
       aggregate,
       pending ? 'pending' : 'settled',
+      false,
+      pending,
     )
     dicePlayerOpen.value = true
   } catch (error) {
     notify('无法打开骰子结果', errorMessage(error), 'danger')
   }
+}
+
+function openIncomingDiceMessage(aggregate: DiceRollAggregate) {
+  try {
+    diceMessageAggregate.value = aggregate
+    diceShowContinue.value = false
+    dicePlaybackRequest.value = createIncomingDiceMessagePlaybackRequest(
+      dicePlaybackRequest.value?.id || 0,
+      aggregate,
+      'classic',
+    )
+    dicePlayerOpen.value = true
+  } catch (error) {
+    notify('无法打开骰子结果', errorMessage(error), 'danger')
+  }
+}
+
+async function locateDiceMessage(messageId: number) {
+  dialogs.trpgTools = false
+  await nextTick()
+  const viewport = workspace.messageScroller.value
+  if (!viewport) return
+  const target = findDiceMessageElement(
+    viewport.querySelectorAll<HTMLElement>('.chat-message'),
+    messageId,
+  )
+  target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 async function rollDiceMessage() {
@@ -113,6 +123,7 @@ async function rollDiceMessage() {
     && detail.characterId == null
   ))
   if (!pendingResult) return
+  const offerContinueAfterComplete = dicePlaybackRequest.value?.offerContinueAfterComplete === true
   try {
     await api.rollDiceResult(pendingResult.id)
     const refreshed = await workspace.refreshDiceRoll(aggregate.summary.id)
@@ -122,10 +133,16 @@ async function rollDiceMessage() {
       refreshed,
       pending ? 'pending' : 'play',
       !pending,
+      offerContinueAfterComplete,
     )
   } catch (error) {
     notify('投掷失败', errorMessage(error), 'danger')
-    dicePlaybackRequest.value = createMessagePlaybackRequest(aggregate, 'pending')
+    dicePlaybackRequest.value = createMessagePlaybackRequest(
+      aggregate,
+      'pending',
+      false,
+      offerContinueAfterComplete,
+    )
   }
 }
 
@@ -133,7 +150,7 @@ function completeDiceMessageRoll() {
   const aggregate = diceMessageAggregate.value
   if (!aggregate) return
   diceShowContinue.value = shouldOfferDiceContinue(
-    diceOpenedPending.value,
+    dicePlaybackRequest.value,
     aggregate.summary.status,
     isDiceAggregatePending(aggregate),
   )
@@ -189,6 +206,11 @@ let characterPickerTransition = 0
 watch(() => workspace.isLoggedIn.value, (loggedIn) => { authOpen.value = !loggedIn; if (!loggedIn) { direct.close(); view.value = 'library' } })
 watch(() => worldForm.thinkStatus, (thinking) => { if (thinking) worldForm.eotDetectionStatus = false; else worldForm.addSpecialPrompt = false })
 watch(settingsTab, (tab) => { if (tab !== 'lore') resetDetailComposer() })
+watch(
+  () => workspace.incomingDiceRoll.value,
+  (aggregate) => { if (aggregate) openIncomingDiceMessage(aggregate) },
+  { flush: 'post' },
+)
 watch(() => dialogs.template, async (open, wasOpen) => {
   if (open || !wasOpen || !templateReturnToSettings.value) return
   templateReturnToSettings.value = false
@@ -829,7 +851,7 @@ async function changePassword() {
     :participant-ids="workspace.participantIds.value"
     @complete="completeTrpgBinding"
   />
-  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :characters="workspace.characters.value" :latest-dice-roll="workspace.latestDiceRoll.value" @restored="restoreTrpg" />
+  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :characters="workspace.characters.value" :messages="workspace.messages.value" @restored="restoreTrpg" @open-dice="openDiceMessage" @locate-dice="locateDiceMessage" />
   <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" />
   <NoticeToast />
 </template>

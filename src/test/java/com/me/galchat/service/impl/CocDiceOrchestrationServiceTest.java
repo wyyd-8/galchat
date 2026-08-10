@@ -97,12 +97,12 @@ class CocDiceOrchestrationServiceTest {
         assertThat(result.results().get(0).getResultData().getResult()).isNull();
         assertThat(result.results().get(0).getResultData().getModules()).isNotEmpty();
         assertThat(result.results().get(1).getResolution().getOutcome())
-                .containsKey("category");
-        assertThat(result.results().get(1).getResolution().getOutcome())
-                .doesNotContainKey("rank");
+                .containsEntry("category", "SUCCESS")
+                .containsEntry("rank", "REGULAR");
         assertThat(result.summary().getStatus())
                 .isEqualTo(DiceRollConstant.STATUS_PENDING);
-        assertThat(result.semanticResult()).isEqualTo("陈默成功");
+        assertThat(result.semanticResult())
+                .isEqualTo("陈默进行“侦查”检定：常规成功");
         assertThat(result.results())
                 .allSatisfy(detail -> assertThat(detail.getResolution())
                         .hasFieldOrPropertyWithValue("groupRule", "SEPARATE"));
@@ -302,7 +302,8 @@ class CocDiceOrchestrationServiceTest {
         assertThat(result.rolledResult().getResolution().getOutcome())
                 .containsEntry("category", "CRITICAL_SUCCESS");
         assertThat(result.summary().getStatus()).isEqualTo(DiceRollConstant.STATUS_COMPLETED);
-        assertThat(result.summary().getTotalResult()).isEqualTo("林恩大成功");
+        assertThat(result.summary().getTotalResult())
+                .isEqualTo("林恩进行“侦查”检定：大成功");
         verify(internal).saveResult(pending);
         verify(internal).saveSummary(summary);
     }
@@ -338,7 +339,8 @@ class CocDiceOrchestrationServiceTest {
 
         assertThat(progress.summary().getStatus())
                 .isEqualTo(DiceRollConstant.STATUS_PENDING);
-        assertThat(progress.summary().getTotalResult()).isEqualTo("陈默成功");
+        assertThat(progress.summary().getTotalResult())
+                .isEqualTo("陈默进行“侦查”检定：成功");
         verify(internal).saveSummary(summary);
         verify(internal, never()).appendDiceRollRound(any(), any(), any());
     }

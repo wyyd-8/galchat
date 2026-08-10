@@ -145,14 +145,11 @@ public class CocDiceSummaryFormatter {
                 return "";
             }
             String name = stringValue(outcome, "characterName");
+            String checkName = stringValue(resolution.getRule(), "checkName");
             CocCheckOutcome category = CocCheckOutcome.valueOf(
                     stringValue(outcome, "category"));
-            return name + switch (category) {
-                case CRITICAL_SUCCESS -> "大成功";
-                case SUCCESS -> "成功";
-                case FAILURE -> "失败";
-                case FUMBLE -> "大失败";
-            };
+            return name + "进行“" + checkName + "”检定："
+                    + checkOutcomeLabel(category, outcome);
         }
         if (DiceRollConstant.TYPE_UNCONSCIOUS_RECOVERY_CON.equals(
                 resolution.getType())) {
@@ -354,5 +351,28 @@ public class CocDiceSummaryFormatter {
 
     private String nullableString(Object value) {
         return Objects.toString(value, null);
+    }
+
+    private String checkOutcomeLabel(
+            CocCheckOutcome category, Map<String, Object> outcome) {
+        return switch (category) {
+            case CRITICAL_SUCCESS -> "大成功";
+            case FAILURE -> "失败";
+            case FUMBLE -> "大失败";
+            case SUCCESS -> {
+                String savedRank = nullableString(outcome.get("rank"));
+                if (savedRank == null || savedRank.isBlank()) {
+                    yield "成功";
+                }
+                yield switch (CocDiceRules.CheckRank.valueOf(savedRank)) {
+                    case CRITICAL -> "大成功";
+                    case EXTREME -> "极难成功";
+                    case HARD -> "困难成功";
+                    case REGULAR -> "常规成功";
+                    case FAILURE, FUMBLE -> throw new UserRequestException(
+                            "掷骰结果成功等级无效：" + savedRank);
+                };
+            }
+        };
     }
 }

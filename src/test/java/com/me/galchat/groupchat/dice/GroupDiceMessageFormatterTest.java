@@ -2,14 +2,19 @@ package com.me.galchat.groupchat.dice;
 
 import com.me.galchat.domain.po.DiceRollResult;
 import com.me.galchat.domain.po.DiceRollSummary;
+import com.me.galchat.domain.vo.DiceResolutionDataVO;
 import com.me.galchat.domain.vo.DiceRollResultVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.DiceRollResultMapper;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
+import com.me.galchat.service.impl.CocDiceSummaryFormatter;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -20,7 +25,7 @@ import static org.mockito.Mockito.when;
 class GroupDiceMessageFormatterTest {
 
     @Test
-    void formatsOnlyRoundsDeclaredByTheMessage() {
+    void formatsOnlyDeclaredRoundsAsSemanticResultsWithoutRawDicePoints() {
         DiceRollSummaryMapper summaryMapper = mock(DiceRollSummaryMapper.class);
         DiceRollResultMapper resultMapper = mock(DiceRollResultMapper.class);
         GroupDiceMessageFormatter formatter = formatter(summaryMapper, resultMapper);
@@ -37,8 +42,37 @@ class GroupDiceMessageFormatterTest {
 
         assertThat(formatted)
                 .contains("<dice-roll summary-id=\"501\" rounds=\"2,3\">")
-                .contains("第2轮", "第3轮", "侦查", "幸运", "1D100 = 32", "1D100 = 21")
-                .doesNotContain("第1轮", "聆听", "1D100 = 44");
+                .contains(
+                        "第2轮",
+                        "第3轮",
+                        "康特进行“侦查”检定：常规成功",
+                        "康特进行“幸运”检定：困难成功")
+                .doesNotContain(
+                        "第1轮",
+                        "聆听",
+                        "1D100",
+                        " = 32",
+                        " = 21",
+                        " = 44",
+                        "目标值");
+    }
+
+    @Test
+    void pendingRoundTellsTheAgentToWaitWithoutExposingTheDiceFormula() {
+        DiceRollSummaryMapper summaryMapper = mock(DiceRollSummaryMapper.class);
+        DiceRollResultMapper resultMapper = mock(DiceRollResultMapper.class);
+        GroupDiceMessageFormatter formatter = formatter(summaryMapper, resultMapper);
+        when(summaryMapper.selectById(501L)).thenReturn(new DiceRollSummary()
+                .setId(501L)
+                .setReason("调查书房"));
+        when(resultMapper.selectList(any())).thenReturn(List.of(pendingResult(2, "侦查")));
+
+        String formatted = formatter.format(
+                "{\"summaryId\":501,\"roundNos\":[2]}");
+
+        assertThat(formatted)
+                .contains("第2轮", "等待玩家掷骰")
+                .doesNotContain("1D100", "目标值");
     }
 
     @Test
@@ -73,16 +107,50 @@ class GroupDiceMessageFormatterTest {
         return new GroupDiceMessageFormatter(
                 new DiceRollMessageCodec(JsonMapper.builder().build()),
                 summaryMapper,
-                resultMapper);
+                resultMapper,
+                new CocDiceSummaryFormatter());
     }
 
-    private DiceRollResult result(int roundNo, String reason, int result) {
+    private DiceRollResult result(int roundNo, String checkName, int result) {
+        Map<String, Object> rule = checkRule(checkName);
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("characterName", "康特");
+        outcome.put("checkName", checkName);
+        outcome.put("category", "SUCCESS");
+        outcome.put("rank", result == 21 ? "HARD" : "REGULAR");
         return new DiceRollResult()
                 .setId((long) roundNo)
                 .setSummaryId(501L)
                 .setRoundNo(roundNo)
                 .setDisplayOrder(1)
-                .setReason(reason)
-                .setResultData(new DiceRollResultVO("1D100", List.of(), result));
+                .setReason(checkName)
+                .setResultData(new DiceRollResultVO("1D100", List.of(), result))
+                .setResolutionData(DiceResolutionDataVO.pending("CHECK", null, rule)
+                        .setOutcome(outcome))
+                .setResolvedAt(LocalDateTime.now());
+    }
+
+    private DiceRollResult pendingResult(int roundNo, String checkName) {
+        return new DiceRollResult()
+                .setId((long) roundNo)
+                .setSummaryId(501L)
+                .setRoundNo(roundNo)
+                .setDisplayOrder(1)
+                .setReason(checkName)
+                .setResultData(new DiceRollResultVO("1D100", List.of(), null))
+                .setResolutionData(DiceResolutionDataVO.pending(
+                        "CHECK", null, checkRule(checkName)));
+    }
+
+    private Map<String, Object> checkRule(String checkName) {
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("cardId", 11L);
+        rule.put("characterName", "康特");
+        rule.put("checkName", checkName);
+        rule.put("targetValue", 50);
+        rule.put("difficulty", "REGULAR");
+        rule.put("modifier", "NORMAL");
+        rule.put("pushed", false);
+        return rule;
     }
 }

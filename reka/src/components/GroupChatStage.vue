@@ -139,7 +139,7 @@ function handleScroll(event: Event) {
           <div v-if="loading && !messages.length" class="chat-loading"><LoaderCircle class="spin" :size="22" />载入消息</div>
           <button v-else-if="hasOlderMessages" class="load-earlier-button" :disabled="loading" @click="emit('loadEarlier')"><LoaderCircle v-if="loading" class="spin" :size="14" /><History v-else :size="14" />加载更早记录</button>
           <div v-else-if="!messages.length" class="empty-chat"><MessageSquareText :size="30" /><h2>{{ conversation.mode === 'trpg' ? '跑团尚未开始' : '对话从这里开始' }}</h2><p>{{ emptyDescription }}</p></div>
-          <article v-for="message in messages" :key="message.id" class="chat-message" :class="[message.speakerType, message.messageKind]">
+          <article v-for="message in messages" :key="message.id" class="chat-message" :class="[message.speakerType, message.messageKind]" :data-message-id="message.id">
             <DiceRollMessage v-if="message.messageKind === 'dice_roll' && message.diceRoll" :aggregate="message.diceRoll" @open="emit('openDice', message.diceRoll)" />
             <template v-else>
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>

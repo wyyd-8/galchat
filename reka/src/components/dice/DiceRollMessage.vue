@@ -4,7 +4,9 @@ import { Dices } from '@lucide/vue'
 import type { DiceRollAggregate } from '@/api/types'
 import { createDiceMessagePresentation } from './diceDebugState'
 
-const props = defineProps<{ aggregate: DiceRollAggregate }>()
+const props = withDefaults(defineProps<{ aggregate: DiceRollAggregate; showIcon?: boolean }>(), {
+  showIcon: true,
+})
 const emit = defineEmits<{ open: [] }>()
 const presentation = computed(() => createDiceMessagePresentation(props.aggregate))
 </script>
@@ -16,7 +18,7 @@ const presentation = computed(() => createDiceMessagePresentation(props.aggregat
     :class="`is-${presentation.tone}`"
     @click="emit('open')"
   >
-    <span class="dice-message-title"><Dices :size="15" />{{ presentation.title }}</span>
+    <span class="dice-message-title"><Dices v-if="showIcon" :size="15" />{{ presentation.title }}</span>
     <span class="dice-message-status"><i />{{ presentation.statusLabel }}</span>
   </button>
 </template>

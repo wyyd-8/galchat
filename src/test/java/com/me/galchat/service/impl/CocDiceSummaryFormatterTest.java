@@ -17,13 +17,40 @@ class CocDiceSummaryFormatterTest {
     private final CocDiceSummaryFormatter formatter = new CocDiceSummaryFormatter();
 
     @Test
+    void checkResultIncludesCheckNameAndAchievedRank() {
+        DiceRollResult result = check(1L, 1, 1, "康特", "SUCCESS", 48);
+        result.getResolutionData().setOutcome(Map.of(
+                "characterName", "康特",
+                "checkName", "图书馆使用",
+                "category", "SUCCESS",
+                "rank", "REGULAR"));
+        result.getResolutionData().getRule().put("checkName", "图书馆使用");
+
+        assertThat(formatter.formatRound(List.of(result)))
+                .isEqualTo("康特进行“图书馆使用”检定：常规成功");
+    }
+
+    @Test
+    void legacyCheckWithoutRankFallsBackToItsOutcomeCategory() {
+        DiceRollResult result = check(1L, 1, 1, "康特", "SUCCESS", 48);
+        result.getResolutionData().getRule().put("checkName", "图书馆使用");
+        result.getResolutionData().setOutcome(Map.of(
+                "characterName", "康特",
+                "checkName", "图书馆使用",
+                "category", "SUCCESS"));
+
+        assertThat(formatter.formatRound(List.of(result)))
+                .isEqualTo("康特进行“图书馆使用”检定：成功");
+    }
+
+    @Test
     void rebuildsOnlyCompletedRoundsInNumericOrder() {
         DiceRollResult first = check(1L, 1, 1, "林恩", "SUCCESS", 42);
         DiceRollResult incomplete = check(2L, 2, 1, "林恩", null, null);
         DiceRollResult third = check(3L, 3, 1, "林恩", "FUMBLE", 100);
 
         assertThat(formatter.rebuildTotalResult(List.of(third, incomplete, first)))
-                .isEqualTo("林恩成功\n林恩大失败");
+                .isEqualTo("林恩进行“侦查”检定：成功\n林恩进行“侦查”检定：大失败");
     }
 
     @Test

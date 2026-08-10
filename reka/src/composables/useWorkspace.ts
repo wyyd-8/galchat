@@ -36,6 +36,7 @@ export function useWorkspace() {
   const currentTurn = ref<CurrentTurn | null>(null)
   const replyTurnState = ref<ReplyTurnState | null>(null)
   const latestDiceRoll = ref<DiceRollAggregate | null>(null)
+  const incomingDiceRoll = ref<DiceRollAggregate | null>(null)
   const hasOlderGroupMessages = ref(false)
   const diceRollCache = new Map<number, Promise<DiceRollAggregate>>()
 
@@ -60,7 +61,7 @@ export function useWorkspace() {
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
     conversations.value = []; messages.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; replyTurnState.value = null; modules.value = []
-    latestDiceRoll.value = null; hasOlderGroupMessages.value = false; diceRollCache.clear()
+    latestDiceRoll.value = null; incomingDiceRoll.value = null; hasOlderGroupMessages.value = false; diceRollCache.clear()
   }
 
   function loadDiceAggregate(summaryId: number, refresh = false): Promise<DiceRollAggregate> {
@@ -202,7 +203,7 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; replyTurnState.value = null; latestDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
       const [conversationDetail, history, plan, turn] = await Promise.all([
         api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id),
@@ -301,6 +302,7 @@ export function useWorkspace() {
         summary: { ...event.diceRoll.summary, toolName: event.toolName },
       }
       latestDiceRoll.value = aggregate
+      incomingDiceRoll.value = aggregate
       diceRollCache.set(aggregate.summary.id, Promise.resolve(aggregate))
       const message = messages.value.find((item) => item.replyStepId === step)
       if (message) Object.assign(message, {
@@ -489,7 +491,7 @@ export function useWorkspace() {
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
     conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlan, participantIds, messageInput, messageScroller, currentTurn, replyTurnState,
-    latestDiceRoll, hasOlderGroupMessages,
+    latestDiceRoll, incomingDiceRoll, hasOlderGroupMessages,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,

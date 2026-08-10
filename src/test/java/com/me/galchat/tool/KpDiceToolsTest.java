@@ -22,7 +22,7 @@ import static org.mockito.Mockito.verify;
 class KpDiceToolsTest {
 
     @Test
-    void exposesSixCombatSafeReturnDirectDiceTools() {
+    void exposesSeparateSingleAndGroupCheckTools() {
         List<Method> toolMethods = Arrays.stream(KpDiceTools.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(Tool.class))
                 .toList();
@@ -31,6 +31,7 @@ class KpDiceToolsTest {
                 .extracting(method -> method.getAnnotation(Tool.class).name())
                 .containsExactlyInAnyOrder(
                         DiceRollConstant.TOOL_REQUEST_CHECK,
+                        "requestGroupCheck",
                         DiceRollConstant.TOOL_REQUEST_OPPOSED_CHECK,
                         DiceRollConstant.TOOL_REQUEST_SAN_CHECK,
                         "rollSanLoss",
@@ -39,6 +40,13 @@ class KpDiceToolsTest {
         assertThat(toolMethods)
                 .allSatisfy(method -> assertThat(
                         method.getAnnotation(Tool.class).returnDirect()).isTrue());
+
+        assertThat(tool(DiceRollConstant.TOOL_REQUEST_CHECK).description())
+                .contains("单人")
+                .doesNotContain("群体");
+        assertThat(tool("requestGroupCheck").description())
+                .contains("群体", "任一", "全部", "分离", "仅供前端展示")
+                .contains("聆听", "潜行", "不确定");
     }
 
     @Test

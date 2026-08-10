@@ -792,6 +792,11 @@ class GroupChatServiceTest {
                 .singleElement()
                 .extracting(event -> event.getDiceRoll().summary().getId())
                 .isEqualTo(501L);
+        assertThat(events).filteredOn(event ->
+                        GroupChatConstant.EVENT_DICE_ROLL_CREATED.equals(event.getEventType()))
+                .singleElement()
+                .extracting(GroupChatEvent::getToolName)
+                .isEqualTo("requestCheck");
         verify(messageMapper).updateById(org.mockito.ArgumentMatchers.argThat(
                 (GroupChatMessage message) ->
                         GroupChatConstant.MESSAGE_DICE_ROLL.equals(message.getMessageKind())

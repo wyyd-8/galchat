@@ -20,12 +20,14 @@ public final class DiceRollConstant {
             "UNCONSCIOUS_RECOVERY_CON";
 
     public static final String TOOL_REQUEST_CHECK = "requestCheck";
+    public static final String TOOL_REQUEST_GROUP_CHECK = "requestGroupCheck";
     public static final String TOOL_REQUEST_SAN_CHECK = "requestSanCheck";
     public static final String TOOL_REQUEST_PUSHED_CHECK = "requestPushedCheck";
     public static final String TOOL_REQUEST_OPPOSED_CHECK = "requestOpposedCheck";
 
     public static final Set<String> KP_STATE_TOOL_NAMES = Set.of(
             TOOL_REQUEST_CHECK,
+            TOOL_REQUEST_GROUP_CHECK,
             TOOL_REQUEST_OPPOSED_CHECK,
             TOOL_REQUEST_PUSHED_CHECK,
             TOOL_REQUEST_SAN_CHECK,

@@ -7,6 +7,7 @@ import com.me.galchat.constant.DamageSourceMode;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
+import com.me.galchat.constant.GroupCheckRule;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.domain.po.CocCharacter;
@@ -66,7 +67,37 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         CocCheckDifficulty difficulty = Objects.requireNonNullElse(
                 request.difficulty(), CocCheckDifficulty.REGULAR);
         List<KpDiceRequestDTOs.CheckTarget> targets =
+                requireTargets(List.of(request.target()), false);
+        return createChecks(
+                conversationId, runId, request.reason(), difficulty, targets, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KpDiceToolResult requestGroupCheck(
+            Long conversationId, Long runId, KpDiceRequestDTOs.GroupCheck request) {
+        requireContext(conversationId, runId);
+        requireRequest(request, request == null ? null : request.reason());
+        CocCheckDifficulty difficulty = Objects.requireNonNullElse(
+                request.difficulty(), CocCheckDifficulty.REGULAR);
+        GroupCheckRule groupRule = Objects.requireNonNullElse(
+                request.groupRule(), GroupCheckRule.SEPARATE);
+        if (request.targets() == null || request.targets().size() < 2) {
+            throw new UserRequestException("群体检定至少需要两个角色");
+        }
+        List<KpDiceRequestDTOs.CheckTarget> targets =
                 requireTargets(request.targets(), false);
+        return createChecks(
+                conversationId, runId, request.reason(), difficulty, targets, groupRule);
+    }
+
+    private KpDiceToolResult createChecks(
+            Long conversationId,
+            Long runId,
+            String reason,
+            CocCheckDifficulty difficulty,
+            List<KpDiceRequestDTOs.CheckTarget> targets,
+            GroupCheckRule groupRule) {
         List<DiceRollResultCreateDTO> drafts = new ArrayList<>(targets.size());
         for (int index = 0; index < targets.size(); index++) {
             KpDiceRequestDTOs.CheckTarget target = targets.get(index);
@@ -74,7 +105,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     runId, target.characterName().trim());
             int targetValue = requireCheckValue(card, target.checkName());
             CocPercentileModifier modifier = normalizeModifier(target.modifier());
-            drafts.add(checkDraft(
+            DiceRollResultCreateDTO draft = checkDraft(
                     card,
                     target.checkName().trim(),
                     targetValue,
@@ -82,11 +113,16 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     modifier,
                     false,
                     DiceRollConstant.TYPE_CHECK,
-                    request.reason(),
+                    reason,
                     index + 1,
-                    null));
+                    null);
+            if (groupRule != null) {
+                draft.getResolutionData().getRule()
+                        .put("groupRule", groupRule.name());
+            }
+            drafts.add(draft);
         }
-        return createAndSettle(conversationId, request.reason(), drafts);
+        return createAndSettle(conversationId, reason, drafts);
     }
 
     @Override
@@ -134,7 +170,10 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         requireRequest(request, request == null ? null : request.reason());
         List<String> names = requireCharacterNames(request.characterNames());
         Long summaryId = followUpLocator.requireLatestSummaryId(
-                conversationId, Set.of(DiceRollConstant.TOOL_REQUEST_CHECK));
+                conversationId,
+                Set.of(
+                        DiceRollConstant.TOOL_REQUEST_CHECK,
+                        DiceRollConstant.TOOL_REQUEST_GROUP_CHECK));
         DiceRollSummary summary = internalService.requireSummaryForUpdate(summaryId);
         requireConversation(summary, conversationId);
         if (!DiceRollConstant.STATUS_COMPLETED.equals(summary.getStatus())) {
@@ -307,6 +346,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     conversationId,
                     Set.of(
                             DiceRollConstant.TOOL_REQUEST_CHECK,
+                            DiceRollConstant.TOOL_REQUEST_GROUP_CHECK,
                             DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK,
                             DiceRollConstant.TOOL_REQUEST_OPPOSED_CHECK));
             summary = internalService.requireSummaryForUpdate(summaryId);
@@ -396,6 +436,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     conversationId,
                     Set.of(
                             DiceRollConstant.TOOL_REQUEST_CHECK,
+                            DiceRollConstant.TOOL_REQUEST_GROUP_CHECK,
                             DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK));
             summary = internalService.requireSummaryForUpdate(summaryId);
             requireConversation(summary, conversationId);

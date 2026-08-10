@@ -5,6 +5,7 @@ import com.me.galchat.constant.CocPercentileModifier;
 import com.me.galchat.constant.DamageSourceMode;
 import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
+import com.me.galchat.constant.GroupCheckRule;
 import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.util.List;
@@ -21,7 +22,23 @@ public final class KpDiceRequestDTOs {
                     description = "检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
                     required = false)
             CocCheckDifficulty difficulty,
-            @ToolParam(description = "参与检定的角色及其检定项；单人和群体检定均使用此列表")
+            @ToolParam(description = "参与单人检定的角色及其检定项")
+            CheckTarget target) {
+    }
+
+    public record GroupCheck(
+            @ToolParam(description = "本次群体检定的原因，会作为掷骰概要和前端展示文本")
+            String reason,
+            @ToolParam(
+                    description = "检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
+                    required = false)
+            CocCheckDifficulty difficulty,
+            @ToolParam(description = "群体通过规则，仅供前端展示，不改变各角色的实际检定结果："
+                    + "ANY_SUCCESS任一成功即通过，例如群体聆听；"
+                    + "ALL_SUCCESS全部成功才通过，例如群体潜行；"
+                    + "SEPARATE分别展示、不计算群体结论；不确定时使用SEPARATE（默认）")
+            GroupCheckRule groupRule,
+            @ToolParam(description = "参与群体检定的角色及其检定项")
             List<CheckTarget> targets) {
     }
 

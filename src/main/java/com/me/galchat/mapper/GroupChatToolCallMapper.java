@@ -46,6 +46,16 @@ public interface GroupChatToolCallMapper extends BaseMapper<GroupChatToolCall> {
                         @Param("diceRollSummaryId") Long diceRollSummaryId);
 
     @Select("""
+            SELECT tool_name
+            FROM group_chat_tool_call
+            WHERE dice_roll_summary_id = #{diceRollSummaryId}
+            ORDER BY id DESC
+            LIMIT 1
+            """)
+    String findToolNameByDiceRollSummaryId(
+            @Param("diceRollSummaryId") Long diceRollSummaryId);
+
+    @Select("""
             <script>
             SELECT tool_call.dice_roll_summary_id
             FROM group_chat_tool_call tool_call

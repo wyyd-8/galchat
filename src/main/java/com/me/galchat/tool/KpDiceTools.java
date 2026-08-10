@@ -24,7 +24,7 @@ public class KpDiceTools {
 
     @Tool(
             name = "requestCheck",
-            description = "发起单人或群体属性/技能检定；后端读取角色卡目标值并直接给出成功或失败。",
+            description = "发起单人属性/技能检定；后端读取角色卡目标值并直接给出成功或失败。",
             returnDirect = true)
     public KpDiceToolResult requestCheck(
             @ToolParam(description = "检定原因、难度和角色检定项")
@@ -32,6 +32,23 @@ public class KpDiceTools {
             ToolContext context) {
         KpExecutionContext kp = requireKpContext(context);
         return orchestrationService.requestCheck(
+                kp.conversationId(), kp.runId(), request);
+    }
+
+    @Tool(
+            name = "requestGroupCheck",
+            description = "发起群体属性/技能检定。必须选择群体展示规则："
+                    + "任一成功适用于聆听等一人发现即可的检定；"
+                    + "全部成功适用于潜行等所有人都必须通过的检定；"
+                    + "分离表示分别展示、不计算群体结论，不确定时使用分离。"
+                    + "该规则仅供前端展示，不改变后端返回的各角色检定结果。",
+            returnDirect = true)
+    public KpDiceToolResult requestGroupCheck(
+            @ToolParam(description = "群体检定原因、难度、展示规则和角色检定项")
+            KpDiceRequestDTOs.GroupCheck request,
+            ToolContext context) {
+        KpExecutionContext kp = requireKpContext(context);
+        return orchestrationService.requestGroupCheck(
                 kp.conversationId(), kp.runId(), request);
     }
 

@@ -15,6 +15,7 @@ public class DiceRollSummaryVO {
     private String totalResult;
     private Integer roundCount;
     private String status;
+    private String toolName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

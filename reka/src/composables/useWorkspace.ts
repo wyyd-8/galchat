@@ -7,6 +7,7 @@ import type {
 import { beginReplyTurn, updateReplyTurn, type ReplyTurnState } from '@/components/replyTurnStatus'
 import { decodeParticipantIds, encodeParticipantIds, resolveParticipantIds } from '@/components/trpgSetupState'
 import { applyGameTimeEvent } from '@/components/gameTimeState'
+import { hydrateDiceMessage } from '@/components/dice/diceDebugState'
 import { errorMessage, notify } from './useNotice'
 
 let tempMessageId = -1
@@ -36,6 +37,7 @@ export function useWorkspace() {
   const replyTurnState = ref<ReplyTurnState | null>(null)
   const latestDiceRoll = ref<DiceRollAggregate | null>(null)
   const hasOlderGroupMessages = ref(false)
+  const diceRollCache = new Map<number, Promise<DiceRollAggregate>>()
 
   const isLoggedIn = computed(() => Boolean(session.token && session.id))
   const selectedWorld = computed(() => worlds.value.find((item) => item.id === selectedWorldId.value) || null)
@@ -58,7 +60,43 @@ export function useWorkspace() {
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
     conversations.value = []; messages.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; replyTurnState.value = null; modules.value = []
-    latestDiceRoll.value = null; hasOlderGroupMessages.value = false
+    latestDiceRoll.value = null; hasOlderGroupMessages.value = false; diceRollCache.clear()
+  }
+
+  function loadDiceAggregate(summaryId: number, refresh = false): Promise<DiceRollAggregate> {
+    if (refresh) diceRollCache.delete(summaryId)
+    const cached = diceRollCache.get(summaryId)
+    if (cached) return cached
+    const request = Promise.all([api.diceSummary(summaryId), api.diceResults(summaryId)])
+      .then(([summary, results]) => ({
+        summary,
+        results,
+        semanticResult: summary.totalResult,
+      }))
+      .catch((error) => {
+        diceRollCache.delete(summaryId)
+        throw error
+      })
+    diceRollCache.set(summaryId, request)
+    return request
+  }
+
+  async function hydrateGroupMessages(source: GroupMessage[]): Promise<GroupMessage[]> {
+    return Promise.all(source.map((message) => hydrateDiceMessage(message, loadDiceAggregate)))
+  }
+
+  async function refreshDiceRoll(summaryId: number): Promise<DiceRollAggregate> {
+    const aggregate = await loadDiceAggregate(summaryId, true)
+    messages.value = messages.value.map((message) => {
+      if (message.diceRoll?.summary.id !== summaryId) return message
+      const rounds = new Set(message.diceRoundNos || [])
+      const diceRoll = rounds.size
+        ? { ...aggregate, results: aggregate.results.filter((detail) => rounds.has(detail.roundNo || 1)) }
+        : aggregate
+      return { ...message, diceRoll }
+    })
+    latestDiceRoll.value = aggregate
+    return aggregate
   }
   function logout() { clearSession(); Object.assign(session, currentSession()); userInfo.value = null; resetWorkspace() }
 
@@ -164,13 +202,13 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; replyTurnState.value = null; latestDiceRoll.value = null; Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; replyTurnState.value = null; latestDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
       const [conversationDetail, history, plan, turn] = await Promise.all([
         api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id),
       ])
       conversations.value = conversations.value.map((item) => item.id === id ? { ...item, ...conversationDetail } : item)
-      messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
+      messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
       hasOlderGroupMessages.value = history.length === 50
       replyPlan.value = plan || freshPlan()
       currentTurn.value = turn
@@ -214,7 +252,8 @@ export function useWorkspace() {
       if (conversationId !== selectedConversationId.value) return
       const previousTop = viewport?.scrollTop ?? 0
       const known = new Set(messages.value.map((item) => item.id))
-      messages.value = [...older.filter((item) => !known.has(item.id)), ...messages.value].sort((a, b) => a.sequenceNo - b.sequenceNo)
+      const hydrated = await hydrateGroupMessages(older)
+      messages.value = [...hydrated.filter((item) => !known.has(item.id)), ...messages.value].sort((a, b) => a.sequenceNo - b.sequenceNo)
       hasOlderGroupMessages.value = older.length === 50
       await nextTick()
       if (viewport && messageScroller.value === viewport) viewport.scrollTop = previousTop + viewport.scrollHeight - previousHeight
@@ -224,7 +263,7 @@ export function useWorkspace() {
     if (!selectedConversationId.value) return
     await api.withdrawGroupTurn(selectedConversationId.value)
     const history = await api.groupMessages(selectedConversationId.value)
-    messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
+    messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
     hasOlderGroupMessages.value = history.length === 50
     replyTurnState.value = null
     notify('已撤回最近一轮群聊', '', 'success')
@@ -256,7 +295,21 @@ export function useWorkspace() {
         : conversation)
     }
     if (selectedConversation.value?.mode === 'chat') replyTurnState.value = updateReplyTurn(replyTurnState.value, event)
-    if (event.eventType === 'dice_roll.created' && event.diceRoll) latestDiceRoll.value = event.diceRoll
+    if (event.eventType === 'dice_roll.created' && event.diceRoll) {
+      const aggregate = {
+        ...event.diceRoll,
+        summary: { ...event.diceRoll.summary, toolName: event.toolName },
+      }
+      latestDiceRoll.value = aggregate
+      diceRollCache.set(aggregate.summary.id, Promise.resolve(aggregate))
+      const message = messages.value.find((item) => item.replyStepId === step)
+      if (message) Object.assign(message, {
+        messageKind: 'dice_roll',
+        content: '',
+        diceRoll: aggregate,
+        diceRoundNos: [...new Set(aggregate.results.map((detail) => detail.roundNo || 1))],
+      })
+    }
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
       const existing = messages.value.find((item) => item.replyStepId === step)
@@ -316,7 +369,7 @@ export function useWorkspace() {
     const [history, plan, turn] = await Promise.all([
       api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id),
     ])
-    messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo)
+    messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
     replyPlan.value = plan || freshPlan()
     currentTurn.value = turn
   }
@@ -413,7 +466,7 @@ export function useWorkspace() {
         await streamGroupMessage(conversation.id, { clientRequestId, content }, applyEvent)
         await api.finishReplyPlan(conversation.id)
         const [history, plan] = await Promise.all([api.groupMessages(conversation.id), api.replyPlan(conversation.id)])
-        messages.value = [...history].sort((a, b) => a.sequenceNo - b.sequenceNo); replyPlan.value = plan
+        messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo); replyPlan.value = plan
       }
     } catch (error) {
       if (conversation.mode === 'trpg') {
@@ -440,6 +493,6 @@ export function useWorkspace() {
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,
-    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep, correctGameTime,
+    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep, correctGameTime, refreshDiceRoll,
   }
 }

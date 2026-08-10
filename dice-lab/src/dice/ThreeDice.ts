@@ -674,6 +674,28 @@ export class ThreeDiceBoard {
     }
   }
 
+  async showResult(result: DiceRollResult): Promise<void> {
+    if (this.preparedResult !== result || this.activeDice.length === 0) {
+      await this.prepareResult(result)
+    }
+    if (this.preparedResult !== result) return
+    this.idleSpin.stop()
+    for (const die of this.activeDice) {
+      const finalTarget = uprightTarget(die.faceNormal, die.faceUp)
+      die.model.quaternion.copy(finalTarget)
+      die.model.scale.multiplyScalar(settleScaleFactor(1))
+      die.renderer.render(die.scene, die.camera)
+      die.wrapper.classList.add('is-settled')
+      die.valueLabel.style.opacity = '1'
+      die.valueLabel.style.transform = 'translateX(-50%) translateY(0) scale(1)'
+      const outcome = die.wrapper.dataset.percentileOutcome
+      if (outcome) {
+        die.wrapper.classList.add(outcome === 'selected' ? 'is-selected' : 'is-dimmed')
+        if (outcome === 'selected') die.wrapper.setAttribute('aria-current', 'true')
+      }
+    }
+  }
+
   dispose(): void {
     this.preparationGeneration += 1
     this.idleSpin.stop()

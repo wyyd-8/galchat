@@ -10,6 +10,7 @@ import java.util.Map;
 public class DiceResolutionVO {
     private String type;
     private Long sourceResultId;
+    private String groupRule;
     private Map<String, Object> outcome;
     private Map<String, Object> effect;
 }

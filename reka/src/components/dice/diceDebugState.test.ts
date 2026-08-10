@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { reactive } from 'vue'
-import type { DiceResult } from '../../api/types.ts'
+import type { DiceResult, GroupMessage } from '../../api/types.ts'
+import * as diceState from './diceDebugState.ts'
 import {
   createDiceAggregatePlaybackRequest,
   createDiceDebugAggregatePreset,
@@ -14,13 +15,194 @@ import {
   validatePlayableDiceResult,
 } from './diceDebugState.ts'
 
+type DiceMessagePresentation = {
+  title: string
+  statusLabel: '未投掷' | '已投掷'
+  tone: string
+}
+
+function diceMessagePresentation(
+  aggregate: ReturnType<typeof createDiceDebugAggregatePreset>,
+): DiceMessagePresentation | undefined {
+  const createPresentation = Reflect.get(diceState, 'createDiceMessagePresentation') as
+    | ((value: typeof aggregate) => DiceMessagePresentation)
+    | undefined
+  return createPresentation?.(aggregate)
+}
+
+test('shows pending dice messages in gray regardless of their eventual result type', () => {
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  aggregate.summary.status = 'PENDING'
+  aggregate.results[0]!.resolvedAt = undefined
+  aggregate.results[0]!.resultData!.result = undefined
+
+  assert.deepEqual(diceMessagePresentation(aggregate), {
+    title: '争夺手枪',
+    statusLabel: '未投掷',
+    tone: 'pending',
+  })
+})
+
+test('keeps a completed historical round settled while its summary waits on a later round', () => {
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  aggregate.summary.status = 'PENDING'
+
+  assert.equal(diceMessagePresentation(aggregate)?.statusLabel, '已投掷')
+})
+
+test('uses personalized window tones before generic result tones', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.summary.toolName = 'rollDamage'
+  aggregate.results.forEach((detail) => {
+    Object.assign(detail.resolution || {}, { groupRule: 'ALL_SUCCESS' })
+  })
+
+  assert.equal(diceMessagePresentation(aggregate)?.tone, 'damage')
+})
+
+test('uses yellow for completed opposed checks', () => {
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+
+  assert.equal(diceMessagePresentation(aggregate)?.tone, 'opposed')
+})
+
+test('uses green or red for single and merged check outcomes', () => {
+  const successful = createDiceDebugAggregatePreset('multiplayer-check')
+  successful.results.forEach((detail) => {
+    Object.assign(detail.resolution || {}, { groupRule: 'ANY_SUCCESS' })
+  })
+  const failed = createDiceDebugAggregatePreset('multiplayer-check')
+  failed.results.forEach((detail) => {
+    Object.assign(detail.resolution || {}, {
+      groupRule: 'ALL_SUCCESS',
+      outcome: { ...detail.resolution?.outcome, category: 'FAILURE' },
+    })
+  })
+  const single = createDiceDebugAggregatePreset('multiplayer-check')
+  single.results = [single.results[0]!]
+
+  assert.equal(diceMessagePresentation(successful)?.tone, 'success')
+  assert.equal(diceMessagePresentation(failed)?.tone, 'failure')
+  assert.equal(diceMessagePresentation(single)?.tone, 'success')
+})
+
+test('uses blue for separate multiplayer results', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.results.forEach((detail) => {
+    Object.assign(detail.resolution || {}, { groupRule: 'SEPARATE' })
+  })
+
+  assert.equal(diceMessagePresentation(aggregate)?.tone, 'default')
+})
+
+test('offers continue only after a pending player roll first becomes complete', () => {
+  const shouldOfferContinue = Reflect.get(diceState, 'shouldOfferDiceContinue') as
+    | ((openedPending: boolean, status: string, hasPendingResults: boolean) => boolean)
+    | undefined
+
+  assert.equal(shouldOfferContinue?.(true, 'COMPLETED', false), true)
+  assert.equal(shouldOfferContinue?.(false, 'COMPLETED', false), false)
+  assert.equal(shouldOfferContinue?.(true, 'PENDING', true), false)
+})
+
+test('opens pending, animated, and settled dice requests in distinct player states', () => {
+  const initialState = Reflect.get(diceState, 'createDicePlayerInitialState') as
+    | ((mode: string, kind?: string, groupRule?: string) => {
+      phase: string
+      groupOutcomePhase: string
+    })
+    | undefined
+
+  assert.deepEqual(initialState?.('pending'), {
+    phase: 'ready',
+    groupOutcomePhase: 'concealed',
+  })
+  assert.deepEqual(initialState?.('play'), {
+    phase: 'loading',
+    groupOutcomePhase: 'concealed',
+  })
+  assert.deepEqual(initialState?.('settled', 'multiplayer-check', 'SEPARATE'), {
+    phase: 'complete',
+    groupOutcomePhase: 'individual',
+  })
+  assert.deepEqual(initialState?.('settled', 'opposed-check'), {
+    phase: 'complete',
+    groupOutcomePhase: 'merged',
+  })
+})
+
+test('reads a persisted dice summary reference without accepting malformed chat content', () => {
+  const parseSummaryId = Reflect.get(diceState, 'parseDiceMessageSummaryId') as
+    | ((content: string) => number | undefined)
+    | undefined
+
+  assert.equal(parseSummaryId?.('{"summaryId":42,"roundNos":[1]}'), 42)
+  assert.equal(parseSummaryId?.('{"summaryId":0,"roundNos":[1]}'), undefined)
+  assert.equal(parseSummaryId?.('not-json'), undefined)
+})
+
+test('hydrates a persisted dice message into a renderable aggregate', async () => {
+  const hydrateMessage = Reflect.get(diceState, 'hydrateDiceMessage') as
+    | ((message: GroupMessage, load: (id: number) => Promise<unknown>) => Promise<GroupMessage>)
+    | undefined
+  const message: GroupMessage = {
+    id: 10,
+    conversationId: 1,
+    speakerType: 'kp',
+    messageKind: 'dice_roll',
+    content: '{"summaryId":42,"roundNos":[1]}',
+    sequenceNo: 1,
+    status: 'completed',
+  }
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+
+  const hydrated = await hydrateMessage?.(message, async (id) => {
+    assert.equal(id, 42)
+    return aggregate
+  })
+
+  assert.equal(hydrated?.content, '')
+  assert.deepEqual(hydrated?.diceRoundNos, [1])
+  assert.deepEqual(hydrated?.diceRoll, aggregate)
+})
+
+test('hydrates only the rounds referenced by each persisted dice message', async () => {
+  const hydrateMessage = Reflect.get(diceState, 'hydrateDiceMessage') as
+    | ((message: GroupMessage, load: (id: number) => Promise<unknown>) => Promise<GroupMessage>)
+    | undefined
+  const message: GroupMessage = {
+    id: 11,
+    conversationId: 1,
+    speakerType: 'kp',
+    messageKind: 'dice_roll',
+    content: '{"summaryId":42,"roundNos":[2]}',
+    sequenceNo: 2,
+    status: 'completed',
+  }
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  aggregate.results = [
+    { ...aggregate.results[0]!, id: 1, roundNo: 1, reason: '争夺手枪' },
+    { ...aggregate.results[1]!, id: 2, roundNo: 2, reason: '手枪伤害' },
+  ]
+
+  const hydrated = await hydrateMessage?.(message, async () => aggregate)
+
+  assert.deepEqual(hydrated?.diceRoll?.results.map((detail) => detail.id), [2])
+  assert.equal(diceMessagePresentation(hydrated!.diceRoll!)?.title, '手枪伤害')
+})
+
 test('creates a multiplayer check playback from backend-shaped roll details', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.summary.toolName = 'requestCheck'
+  aggregate.results.forEach((detail) => {
+    Object.assign(detail.resolution || {}, { groupRule: 'ANY_SUCCESS' })
+  })
 
   const request = createDiceAggregatePlaybackRequest(6, aggregate, 'galaxy')
   const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
 
   assert.equal(request.id, 7)
+  assert.equal(request.toolName, 'requestCheck')
   assert.equal(request.reason, '搜索废弃宅邸')
   assert.ok(aggregate.results.every((detail) => detail.summaryId === aggregate.summary.id))
   assert.equal(request.result.modules.length, 3)
@@ -36,6 +218,70 @@ test('creates a multiplayer check playback from backend-shaped roll details', ()
   assert.equal(summary.formulaValue, '3 人参与 · 侦查 · 任一成功即通过')
 })
 
+test('applies the selected damage window style to aggregate debug playback', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+
+  const request = createDiceAggregatePlaybackRequest(
+    0,
+    aggregate,
+    'classic',
+    'ANY_SUCCESS',
+    'rollDamage',
+  )
+
+  assert.equal(request.toolName, 'rollDamage')
+})
+
+test('resolves rollDamage to the static damage window class', () => {
+  const resolveWindowClass = Reflect.get(diceState, 'createDicePlayerWindowClass') as
+    | ((toolName?: string) => string)
+    | undefined
+
+  assert.equal(typeof resolveWindowClass, 'function')
+  assert.equal(resolveWindowClass?.(), 'dice-player-window')
+  assert.equal(
+    resolveWindowClass?.('rollDamage'),
+    'dice-player-window dice-player-window--damage',
+  )
+})
+
+test('resolves sanity check and sanity loss tools to the same sanity window class', () => {
+  const resolveWindowClass = Reflect.get(diceState, 'createDicePlayerWindowClass') as
+    | ((toolName?: string) => string)
+    | undefined
+
+  assert.equal(
+    resolveWindowClass?.('requestSanCheck'),
+    'dice-player-window dice-player-window--sanity',
+  )
+  assert.equal(
+    resolveWindowClass?.('rollSanLoss'),
+    'dice-player-window dice-player-window--sanity',
+  )
+})
+
+test('resolves rollHealing to the static healing window class', () => {
+  const resolveWindowClass = Reflect.get(diceState, 'createDicePlayerWindowClass') as
+    | ((toolName?: string) => string)
+    | undefined
+
+  assert.equal(
+    resolveWindowClass?.('rollHealing'),
+    'dice-player-window dice-player-window--healing',
+  )
+})
+
+test('resolves requestPushedCheck to the static pushed-check window class', () => {
+  const resolveWindowClass = Reflect.get(diceState, 'createDicePlayerWindowClass') as
+    | ((toolName?: string) => string)
+    | undefined
+
+  assert.equal(
+    resolveWindowClass?.('requestPushedCheck'),
+    'dice-player-window dice-player-window--pushed-check',
+  )
+})
+
 test('fails an all-success group check when any participant fails', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
 
@@ -46,6 +292,28 @@ test('fails an all-success group check when any participant fails', () => {
   assert.equal(summary.resultLabel, '全部成功')
   assert.equal(summary.resultValue, '失败')
   assert.equal(summary.formulaValue, '3 人参与 · 侦查 · 全部成功才通过')
+})
+
+test('reads the group rule from backend roll details', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.results.forEach((detail) => {
+    Object.assign(detail.resolution || {}, { groupRule: 'ALL_SUCCESS' })
+  })
+
+  const request = createDiceAggregatePlaybackRequest(0, aggregate, 'classic')
+
+  assert.equal(request.presentation?.groupRule, 'ALL_SUCCESS')
+  assert.equal(request.presentation?.resultValue, '失败')
+})
+
+test('defaults legacy group checks to separate presentation', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+
+  const request = createDiceAggregatePlaybackRequest(0, aggregate, 'classic')
+
+  assert.equal(request.presentation?.groupRule, 'SEPARATE')
+  assert.equal(request.presentation?.resultLabel, '分别结果')
+  assert.equal(request.presentation?.resultValue, aggregate.semanticResult)
 })
 
 test('passes an all-success group check when every participant succeeds', () => {
@@ -90,6 +358,16 @@ test('keeps individual group results beside the final result after the merge', (
     showTransition: true,
     showFinal: true,
     highlightWinner: true,
+  })
+})
+
+test('keeps separate group results unmerged after rolling', () => {
+  assert.deepEqual(createGroupOutcomeVisibility('merged', 'SEPARATE'), {
+    showIndividuals: true,
+    revealIndividualResults: true,
+    showTransition: false,
+    showFinal: false,
+    highlightWinner: false,
   })
 })
 
@@ -234,11 +512,18 @@ test('creates a playback request from a Vue reactive debug form', () => {
 test('keeps the production roll reason in an immutable playback request', () => {
   const result = createDiceDebugPreset('normal-percentile')
 
-  const request = createDicePlaybackRequest(8, result, 'classic', '侦查检定')
+  const request = createDicePlaybackRequest(
+    8,
+    result,
+    'classic',
+    '侦查检定',
+    'requestCheck',
+  )
   result.formula = 'changed after playback'
 
   assert.equal(request.id, 9)
   assert.equal(request.reason, '侦查检定')
+  assert.equal(request.toolName, 'requestCheck')
   assert.equal(request.result.formula, '1D100')
 })
 

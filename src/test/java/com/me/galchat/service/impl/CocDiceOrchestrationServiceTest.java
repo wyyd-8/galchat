@@ -82,12 +82,13 @@ class CocDiceOrchestrationServiceTest {
         when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(agent(12L, "陈默", 45));
         stubCreate(7L);
 
-        KpDiceToolResult result = service.requestCheck(
+        KpDiceToolResult result = service.requestGroupCheck(
                 7L,
                 5L,
-                new KpDiceRequestDTOs.Check(
+                new KpDiceRequestDTOs.GroupCheck(
                         "调查书房",
                         CocCheckDifficulty.REGULAR,
+                        null,
                         List.of(
                                 target("林恩", "侦查"),
                                 target("陈默", "侦查"))));
@@ -102,6 +103,9 @@ class CocDiceOrchestrationServiceTest {
         assertThat(result.summary().getStatus())
                 .isEqualTo(DiceRollConstant.STATUS_PENDING);
         assertThat(result.semanticResult()).isEqualTo("陈默成功");
+        assertThat(result.results())
+                .allSatisfy(detail -> assertThat(detail.getResolution())
+                        .hasFieldOrPropertyWithValue("groupRule", "SEPARATE"));
     }
 
     @Test
@@ -115,8 +119,8 @@ class CocDiceOrchestrationServiceTest {
                 new KpDiceRequestDTOs.Check(
                         "调查书房",
                         CocCheckDifficulty.HARD,
-                        List.of(new KpDiceRequestDTOs.CheckTarget(
-                                "林恩", "侦查", CocPercentileModifier.BONUS_1))));
+                        new KpDiceRequestDTOs.CheckTarget(
+                                "林恩", "侦查", CocPercentileModifier.BONUS_1)));
 
         @SuppressWarnings("unchecked")
         List<DiceRollResultCreateDTO> drafts =
@@ -138,6 +142,21 @@ class CocDiceOrchestrationServiceTest {
                             "modifier", "BONUS_1",
                             "pushed", false));
         });
+    }
+
+    @Test
+    void groupCheckRequiresAtLeastTwoCharacters() {
+        assertThatThrownBy(() -> service.requestGroupCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.GroupCheck(
+                        "只有一人参与",
+                        CocCheckDifficulty.REGULAR,
+                        com.me.galchat.constant.GroupCheckRule.SEPARATE,
+                        List.of(target("林恩", "聆听")))))
+                .hasMessageContaining("群体检定至少需要两个角色");
+
+        verify(cards, never()).requireDiceCharacter(any(), any());
     }
 
     @Test
@@ -175,7 +194,9 @@ class CocDiceOrchestrationServiceTest {
 
     @Test
     void pushedCheckUsesLatestCompatibleFailureSnapshot() {
-        when(followUps.requireLatestSummaryId(7L, Set.of("requestCheck")))
+        when(followUps.requireLatestSummaryId(7L, Set.of(
+                DiceRollConstant.TOOL_REQUEST_CHECK,
+                DiceRollConstant.TOOL_REQUEST_GROUP_CHECK)))
                 .thenReturn(101L);
         DiceRollSummary previous = new DiceRollSummary()
                 .setId(101L)
@@ -201,12 +222,16 @@ class CocDiceOrchestrationServiceTest {
             assertThat(pushed.getRoundNo()).isEqualTo(2);
             assertThat(pushed.getResolution().getOutcome()).isNull();
         });
-        verify(followUps).requireLatestSummaryId(7L, Set.of("requestCheck"));
+        verify(followUps).requireLatestSummaryId(7L, Set.of(
+                DiceRollConstant.TOOL_REQUEST_CHECK,
+                DiceRollConstant.TOOL_REQUEST_GROUP_CHECK));
     }
 
     @Test
     void pushedCheckRejectsPreviousSuccess() {
-        when(followUps.requireLatestSummaryId(7L, Set.of("requestCheck")))
+        when(followUps.requireLatestSummaryId(7L, Set.of(
+                DiceRollConstant.TOOL_REQUEST_CHECK,
+                DiceRollConstant.TOOL_REQUEST_GROUP_CHECK)))
                 .thenReturn(101L);
         when(internal.requireSummaryForUpdate(101L)).thenReturn(new DiceRollSummary()
                 .setId(101L)
@@ -861,6 +886,7 @@ class CocDiceOrchestrationServiceTest {
                 7L,
                 Set.of(
                         DiceRollConstant.TOOL_REQUEST_CHECK,
+                        DiceRollConstant.TOOL_REQUEST_GROUP_CHECK,
                         DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK)))
                 .thenReturn(101L);
         DiceRollSummary summary = new DiceRollSummary()

@@ -680,6 +680,8 @@ public class GroupChatService {
                 accumulator.diceRoll = readDirectDiceResult(output.getText());
                 events.add(baseEvent(GroupChatConstant.EVENT_DICE_ROLL_CREATED,
                         conversation, turn, step, message, speaker)
+                        .toolName(generation.getMetadata().get(
+                                ToolExecutionResult.METADATA_TOOL_NAME))
                         .diceRoll(accumulator.diceRoll)
                         .build());
                 continue;

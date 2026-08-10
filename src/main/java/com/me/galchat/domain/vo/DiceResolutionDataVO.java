@@ -25,6 +25,12 @@ public class DiceResolutionDataVO {
     }
 
     public DiceResolutionVO publicView() {
-        return new DiceResolutionVO(type, sourceResultId, outcome, effect);
+        Object savedGroupRule = rule == null ? null : rule.get("groupRule");
+        return new DiceResolutionVO(
+                type,
+                sourceResultId,
+                savedGroupRule instanceof String value ? value : null,
+                outcome,
+                effect);
     }
 }

@@ -135,6 +135,7 @@ public class TrpgUnconsciousRecoveryService {
                 .messageId(message.getId())
                 .sequence(message.getSequenceNo())
                 .messageKind(GroupChatConstant.MESSAGE_DICE_ROLL)
+                .toolName("systemUnconsciousRecoveryCon")
                 .diceRoll(roll)
                 .build();
         return new Execution(Outcome.PAUSED, List.of(event));

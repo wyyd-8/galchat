@@ -75,13 +75,15 @@ export interface GroupMessage {
   id: number; conversationId: number; turnId?: number; replyStepId?: number
   speakerType: 'user' | 'character' | 'kp' | 'narrator'; speakerId?: number; speakerName?: string
   messageKind: 'dialogue' | 'narration' | 'system_event' | 'dice_roll' | 'material' | 'combat_result'; content: string; sequenceNo: number
+  diceRoll?: DiceRollAggregate
+  diceRoundNos?: number[]
   decisionContent?: string; status: string; createdAt?: string
 }
 export interface GroupSpeaker { type: string; id?: number; name?: string; avatar?: string }
 export interface GroupChatEvent {
   eventType: 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
-  actionType?: string; groupName?: string; itemOrder?: number; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string
+  actionType?: string; groupName?: string; itemOrder?: number; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string; toolName?: string
   diceRoll?: DiceRollAggregate
   gameTime?: TrpgGameTime
   sceneOptions?: Record<string, string>; autoSelected?: boolean
@@ -159,8 +161,8 @@ export interface InvestigatorCardSummary {
 export interface DiceValue { sides: number; value?: number; role?: string; selected: boolean }
 export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number }
 export interface DiceResult { formula: string; modules: DiceModule[]; result?: number }
-export interface DiceResolution { type?: string; sourceResultId?: number; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
-export interface DiceRollSummary { id: number; conversationId: number; reason?: string; totalResult?: string; roundCount?: number; status: string; createdAt?: string; updatedAt?: string }
+export interface DiceResolution { type?: string; sourceResultId?: number; groupRule?: 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
+export interface DiceRollSummary { id: number; conversationId: number; reason?: string; totalResult?: string; roundCount?: number; status: string; toolName?: string; createdAt?: string; updatedAt?: string }
 export interface DiceRollDetail { id: number; summaryId: number; characterId?: number; roundNo?: number; displayOrder?: number; displayType?: string; reason?: string; resultData?: DiceResult; resolution?: DiceResolution; resolvedAt?: string; createdAt?: string; updatedAt?: string }
 export interface DiceRollProgress { summary: DiceRollSummary; rolledResult: DiceRollDetail; createdResults: DiceRollDetail[] }
 export interface DiceRollAggregate { summary: DiceRollSummary; results: DiceRollDetail[]; semanticResult?: string }

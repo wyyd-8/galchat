@@ -12,20 +12,22 @@ import {
   type DiceDebugPreset,
   type DiceGroupRule,
   type DiceSkin,
+  type DiceWindowStyle,
 } from './diceDebugState'
 
 type PanelPreset = DiceDebugPreset | DiceDebugAggregatePreset
 
 const emit = defineEmits<{
-  play: [result: DiceResult, skin: DiceSkin]
-  playAggregate: [aggregate: DiceRollAggregate, skin: DiceSkin, groupRule: DiceGroupRule]
+  play: [result: DiceResult, skin: DiceSkin, reason?: string, toolName?: string]
+  playAggregate: [aggregate: DiceRollAggregate, skin: DiceSkin, groupRule: DiceGroupRule, toolName?: string]
 }>()
 
 const preset = ref<PanelPreset>('percentile')
 const skin = ref<DiceSkin>('classic')
+const windowStyle = ref<DiceWindowStyle>('default')
 const result = ref<DiceResult>(createDiceDebugPreset('percentile'))
 const aggregate = ref<DiceRollAggregate | null>(null)
-const groupRule = ref<DiceGroupRule>('ANY_SUCCESS')
+const groupRule = ref<DiceGroupRule>('SEPARATE')
 const jsonSource = ref('')
 const jsonError = ref('')
 const attempted = ref(false)
@@ -119,8 +121,9 @@ function importJson() {
 function play() {
   attempted.value = true
   if (errors.value.length) return
-  if (aggregate.value) emit('playAggregate', aggregate.value, skin.value, groupRule.value)
-  else emit('play', result.value, skin.value)
+  const toolName = windowStyle.value === 'default' ? undefined : windowStyle.value
+  if (aggregate.value) emit('playAggregate', aggregate.value, skin.value, groupRule.value, toolName)
+  else emit('play', result.value, skin.value, undefined, toolName)
 }
 </script>
 
@@ -128,8 +131,9 @@ function play() {
   <div class="dice-debug-grid">
     <div class="dice-debug-toolbar">
       <label class="field"><span>骰子皮肤</span><select v-model="skin"><option value="classic">经典</option><option value="galaxy">星穹</option><option value="moonwhite">月白冰晶</option></select></label>
+      <label class="field"><span>窗口样式</span><select v-model="windowStyle"><option value="default">默认</option><option value="rollDamage">伤害结算</option><option value="requestSanCheck">理智检定 / 损失</option><option value="rollHealing">治疗恢复</option><option value="requestPushedCheck">孤注一掷</option></select></label>
       <label class="field"><span>掷骰种类</span><select v-model="preset" @change="applyPreset"><optgroup label="检定场景"><option value="multiplayer-check">多人检定</option><option value="opposed-check">对抗检定</option></optgroup><optgroup label="骰子与数值"><option value="standard">全部标准骰</option><option value="group">骰子组 / 数值计算</option><option value="normal-percentile">普通百分骰</option><option value="advantage">奖励骰</option><option value="double-advantage">双奖励骰</option><option value="disadvantage">惩罚骰</option><option value="double-disadvantage">双惩罚骰</option><option value="custom">自定义</option></optgroup></select></label>
-      <label v-if="isMultiplayerCheck" class="field"><span>群体通过规则</span><select v-model="groupRule"><option value="ANY_SUCCESS">任一成功</option><option value="ALL_SUCCESS">全部成功</option></select></label>
+      <label v-if="isMultiplayerCheck" class="field"><span>群体通过规则</span><select v-model="groupRule"><option value="SEPARATE">分别展示</option><option value="ANY_SUCCESS">任一成功</option><option value="ALL_SUCCESS">全部成功</option></select></label>
       <label v-if="!aggregate" class="field"><span>完整公式</span><input v-model="result.formula" @input="preset = 'custom'" /></label>
       <label v-if="!aggregate" class="field"><span>总结果</span><input v-model.number="result.result" type="number" /></label>
     </div>

@@ -29,6 +29,7 @@ public class GroupChatEvent {
     private Speaker speaker;
     private String delta;
     private String content;
+    private String toolName;
     private KpDiceToolResult diceRoll;
     private TrpgGameTimeVO gameTime;
     private Map<String, String> sceneOptions;

@@ -8,6 +8,9 @@ public interface ICocDiceOrchestrationService {
     KpDiceToolResult requestCheck(
             Long conversationId, Long runId, KpDiceRequestDTOs.Check request);
 
+    KpDiceToolResult requestGroupCheck(
+            Long conversationId, Long runId, KpDiceRequestDTOs.GroupCheck request);
+
     KpDiceToolResult requestOpposedCheck(
             Long conversationId, Long runId, KpDiceRequestDTOs.Opposed request);
 

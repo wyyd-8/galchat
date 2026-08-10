@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { CircleAlert, Dices, FastForward, LoaderCircle, RotateCcw, Swords } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import {
+  createDicePlayerWindowClass,
+  createDicePlayerInitialState,
   createGroupOutcomeVisibility,
   createDicePlayerStatus,
   createDicePlayerSummary,
@@ -24,7 +26,8 @@ import type {
 } from '../../../../dice-lab/src/dice/ThreeDice'
 
 const open = defineModel<boolean>({ required: true })
-const props = defineProps<{ request: DicePlaybackRequest | null }>()
+const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean }>()
+const emit = defineEmits<{ roll: []; complete: []; continue: [] }>()
 
 const tray = ref<HTMLElement | null>(null)
 const status = ref<DicePlayerPhase>('idle')
@@ -42,6 +45,7 @@ const summary = computed(() => props.request
 const presentation = computed(() => createDicePlayerStatus(status.value))
 const playerLayout = computed(() => createDicePlayerLayout(props.request?.result.modules.length || 0))
 const dialogContentStyle = computed(() => ({ width: `${dialogWidthPx.value}px` }))
+const dialogContentClass = computed(() => createDicePlayerWindowClass(props.request?.toolName))
 const stageStyle = computed(() => ({ minHeight: `${playerLayout.value.stageMinHeightPx}px` }))
 const dialogDescription = computed(() => summary.value
   ? `${summary.value.modifierLabel} · ${summary.value.diceLabel}`
@@ -49,8 +53,13 @@ const dialogDescription = computed(() => summary.value
 const isMultiplayerCheck = computed(() => props.request?.presentation?.kind === 'multiplayer-check')
 const isOpposedCheck = computed(() => props.request?.presentation?.kind === 'opposed-check')
 const hasAggregateOutcome = computed(() => isMultiplayerCheck.value || isOpposedCheck.value)
+const isSeparateGroupCheck = computed(() => isMultiplayerCheck.value
+  && props.request?.presentation?.groupRule === 'SEPARATE')
 const hasOpposedWinner = computed(() => props.request?.presentation?.groups.some((group) => group.winner) === true)
-const groupOutcomeVisibility = computed(() => createGroupOutcomeVisibility(groupOutcomePhase.value))
+const groupOutcomeVisibility = computed(() => createGroupOutcomeVisibility(
+  groupOutcomePhase.value,
+  props.request?.presentation?.groupRule,
+))
 const isWinnerHighlighted = computed(() => isOpposedCheck.value && groupOutcomeVisibility.value.highlightWinner)
 
 function clearGroupOutcomeTimers() {
@@ -78,6 +87,7 @@ function scheduleGroupOutcomeMerge(request: DicePlaybackRequest, playGeneration:
     return
   }
   if (request.presentation.kind !== 'multiplayer-check') return
+  if (request.presentation.groupRule === 'SEPARATE') return
   const mergeDelayMs = 1_300 + Math.max(0, request.presentation.groups.length - 1) * 280
   groupOutcomeTimers.push(window.setTimeout(() => {
     if (generation === playGeneration) groupOutcomePhase.value = 'merging'
@@ -207,6 +217,22 @@ async function prepare(request: DicePlaybackRequest) {
   if (!tray.value || currentGeneration !== generation) return
 
   try {
+    const mode = request.mode || 'play'
+    const initial = createDicePlayerInitialState(
+      mode,
+      request.presentation?.kind,
+      request.presentation?.groupRule,
+    )
+    groupOutcomePhase.value = initial.groupOutcomePhase
+    if (mode === 'pending') {
+      disposeBoard()
+      const placeholder = document.createElement('p')
+      placeholder.className = 'empty-tray'
+      placeholder.textContent = '骰子已经备妥，等待你的决定'
+      tray.value.replaceChildren(placeholder)
+      status.value = initial.phase
+      return
+    }
     if (!board) {
       const { ThreeDiceBoard: DiceBoard } = await import('../../../../dice-lab/src/dice/ThreeDice')
       if (currentGeneration !== generation) return
@@ -218,7 +244,14 @@ async function prepare(request: DicePlaybackRequest) {
     await activeBoard.prepareResult(playableResult)
     if (currentGeneration !== generation) return
     arrangeDiceModuleRows()
+    if (mode === 'settled') {
+      await activeBoard.showResult(playableResult)
+      if (currentGeneration !== generation) return
+      status.value = 'complete'
+      return
+    }
     status.value = 'ready'
+    if (request.autoPlay) await roll()
   } catch (cause) {
     if (currentGeneration !== generation) return
     status.value = 'error'
@@ -248,6 +281,7 @@ async function roll() {
     prepareDiceValueMerges(request, currentGeneration)
     status.value = 'complete'
     scheduleGroupOutcomeMerge(request, currentGeneration)
+    emit('complete')
   } catch (cause) {
     if (currentGeneration !== generation) return
     status.value = 'error'
@@ -260,6 +294,11 @@ function handleRollAction() {
   if (!props.request) return
   if (status.value === 'error') {
     void prepare(props.request)
+    return
+  }
+  if (props.request.mode === 'pending') {
+    status.value = 'loading'
+    emit('roll')
     return
   }
   void roll()
@@ -286,7 +325,7 @@ onBeforeUnmount(() => {
     :title="request?.reason || '掷骰判定'"
     :description="dialogDescription"
     size="lg"
-    content-class="dice-player-window"
+    :content-class="dialogContentClass"
     :content-style="dialogContentStyle"
   >
     <section
@@ -336,7 +375,10 @@ onBeforeUnmount(() => {
       <div
         v-if="hasAggregateOutcome && request.presentation"
         class="dice-group-outcome-flow"
-        :class="[`is-${groupOutcomePhase}`, { 'is-opposed': isOpposedCheck }]"
+        :class="[`is-${groupOutcomePhase}`, {
+          'is-opposed': isOpposedCheck,
+          'is-separate': isSeparateGroupCheck,
+        }]"
       >
         <div class="dice-group-outcome-heading">
           <span>{{ summary.formulaLabel }}</span>
@@ -424,17 +466,20 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
-      <button
-        class="button secondary dice-player-replay"
-        type="button"
-        :disabled="presentation.actionDisabled"
-        @click="handleRollAction"
-      >
-        <LoaderCircle v-if="presentation.actionDisabled" class="spin" :size="15" />
-        <RotateCcw v-else-if="status === 'complete' || status === 'error'" :size="15" />
-        <Dices v-else :size="15" />
-        {{ presentation.actionLabel }}
-      </button>
+      <div class="dice-player-actions" :class="{ 'has-continue': showContinue }">
+        <button
+          class="button secondary dice-player-replay"
+          type="button"
+          :disabled="presentation.actionDisabled"
+          @click="handleRollAction"
+        >
+          <LoaderCircle v-if="presentation.actionDisabled" class="spin" :size="15" />
+          <RotateCcw v-else-if="status === 'complete' || status === 'error'" :size="15" />
+          <Dices v-else :size="15" />
+          {{ presentation.actionLabel }}
+        </button>
+        <button v-if="showContinue" class="button primary dice-player-continue" type="button" @click="emit('continue')">继续</button>
+      </div>
     </footer>
   </BaseDialog>
 </template>

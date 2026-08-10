@@ -82,6 +82,8 @@ class TrpgUnconsciousRecoveryServiceTest {
         assertThat(execution.events())
                 .extracting(event -> event.getEventType())
                 .containsExactly(GroupChatConstant.EVENT_DICE_ROLL_CREATED);
+        assertThat(execution.events().getFirst().getToolName())
+                .isEqualTo("systemUnconsciousRecoveryCon");
         assertThat(attack.getActionType()).isEqualTo(
                 GroupChatConstant.ACTION_COMBAT_UNCONSCIOUS_RECOVERY);
         assertThat(attack.getStatus())

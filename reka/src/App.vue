@@ -8,19 +8,28 @@ import DirectChatStage from '@/components/DirectChatStage.vue'
 import GroupChatStage from '@/components/GroupChatStage.vue'
 import TrpgCharacterBindingDialog from '@/components/TrpgCharacterBindingDialog.vue'
 import TrpgToolsDialog from '@/components/TrpgToolsDialog.vue'
+import DicePlayerDialog from '@/components/dice/DicePlayerDialog.vue'
 import WorldHome from '@/components/WorldHome.vue'
 import WorldLibrary from '@/components/WorldLibrary.vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import NoticeToast from '@/components/ui/NoticeToast.vue'
 import { api, uploadImage } from '@/api/client'
 import type {
-  CharacterTemplate, TrpgGameTimePeriod, UserInfo, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldDetail,
+  CharacterTemplate, DiceRollAggregate, TrpgGameTimePeriod, UserInfo, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldDetail,
   WorldTemplate, WorldTemplateUsage,
 } from '@/api/types'
 import { useDirectChat } from '@/composables/useDirectChat'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
+import {
+  createDiceAggregatePlaybackRequest,
+  createDicePlaybackRequest,
+  isDiceAggregatePending,
+  shouldOfferDiceContinue,
+  type DicePlaybackMode,
+  type DicePlaybackRequest,
+} from '@/components/dice/diceDebugState'
 
 interface FavorabilityRow { id: string; threshold?: number; prompt: string }
 
@@ -43,6 +52,98 @@ const characterChoice = ref('')
 const characterPrompt = ref('')
 const characterChoicePreview = ref<CharacterTemplate | null>(null)
 const characterPreviewLoading = ref(false)
+const dicePlayerOpen = ref(false)
+const dicePlaybackRequest = ref<DicePlaybackRequest | null>(null)
+const diceMessageAggregate = ref<DiceRollAggregate | null>(null)
+const diceOpenedPending = ref(false)
+const diceShowContinue = ref(false)
+
+function createMessagePlaybackRequest(
+  aggregate: DiceRollAggregate,
+  mode: DicePlaybackMode,
+  autoPlay = false,
+): DicePlaybackRequest {
+  const latestRound = Math.max(1, ...aggregate.results.map((detail) => detail.roundNo || 1))
+  const details = aggregate.results
+    .filter((detail) => (detail.roundNo || 1) === latestRound && detail.resultData)
+    .sort((left, right) => (left.displayOrder || 0) - (right.displayOrder || 0) || left.id - right.id)
+  if (!details.length) throw new Error('这条骰子消息没有可显示的骰子')
+  const previousId = dicePlaybackRequest.value?.id || 0
+  const request = details.length === 1
+    ? createDicePlaybackRequest(
+      previousId,
+      details[0]!.resultData!,
+      'classic',
+      aggregate.summary.reason,
+      aggregate.summary.toolName,
+    )
+    : createDiceAggregatePlaybackRequest(
+      previousId,
+      aggregate,
+      'classic',
+      undefined,
+      aggregate.summary.toolName,
+    )
+  return { ...request, mode, autoPlay }
+}
+
+function openDiceMessage(aggregate: DiceRollAggregate) {
+  try {
+    const pending = isDiceAggregatePending(aggregate)
+    diceMessageAggregate.value = aggregate
+    diceOpenedPending.value = pending
+    diceShowContinue.value = false
+    dicePlaybackRequest.value = createMessagePlaybackRequest(
+      aggregate,
+      pending ? 'pending' : 'settled',
+    )
+    dicePlayerOpen.value = true
+  } catch (error) {
+    notify('无法打开骰子结果', errorMessage(error), 'danger')
+  }
+}
+
+async function rollDiceMessage() {
+  const aggregate = diceMessageAggregate.value
+  if (!aggregate) return
+  const latestRound = Math.max(1, ...aggregate.results.map((detail) => detail.roundNo || 1))
+  const pendingResult = aggregate.results.find((detail) => (
+    (detail.roundNo || 1) === latestRound
+    && !detail.resolvedAt
+    && detail.characterId == null
+  ))
+  if (!pendingResult) return
+  try {
+    await api.rollDiceResult(pendingResult.id)
+    const refreshed = await workspace.refreshDiceRoll(aggregate.summary.id)
+    diceMessageAggregate.value = refreshed
+    const pending = isDiceAggregatePending(refreshed)
+    dicePlaybackRequest.value = createMessagePlaybackRequest(
+      refreshed,
+      pending ? 'pending' : 'play',
+      !pending,
+    )
+  } catch (error) {
+    notify('投掷失败', errorMessage(error), 'danger')
+    dicePlaybackRequest.value = createMessagePlaybackRequest(aggregate, 'pending')
+  }
+}
+
+function completeDiceMessageRoll() {
+  const aggregate = diceMessageAggregate.value
+  if (!aggregate) return
+  diceShowContinue.value = shouldOfferDiceContinue(
+    diceOpenedPending.value,
+    aggregate.summary.status,
+    isDiceAggregatePending(aggregate),
+  )
+}
+
+async function continueAfterDice() {
+  dicePlayerOpen.value = false
+  diceShowContinue.value = false
+  await workspace.startTrpgTurn()
+}
 const characterPickerOpen = ref(false)
 const characterPickerPhase = ref<'closed' | 'moving' | 'expanded'>('closed')
 const characterTemplateForm = reactive<CharacterTemplate>({ name: '', image: '', background: '', personality: '', cocPlayStyle: '', initFavor: 0, favorability: {} })
@@ -422,7 +523,7 @@ async function changePassword() {
       <WorldLibrary v-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
-      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:scroller="workspace.messageScroller.value" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="dialogs.trpgTools = true" @send="workspace.sendMessage" @start-turn="workspace.startTrpgTurn" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @retry="workspace.retryStep" @correct-time="correctGameTime" @end="dialogs.end = true" />
+      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:scroller="workspace.messageScroller.value" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="dialogs.trpgTools = true" @open-dice="openDiceMessage" @send="workspace.sendMessage" @start-turn="workspace.startTrpgTurn" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @retry="workspace.retryStep" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
   </div>
   <div v-else class="signed-out"><span class="brand-glyph large">✦</span><h1>GalChat</h1><p>一个安静的角色与群像叙事工作台。</p><button class="button primary" @click="authOpen = true">登录或注册</button></div>
@@ -729,5 +830,6 @@ async function changePassword() {
     @complete="completeTrpgBinding"
   />
   <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :characters="workspace.characters.value" :latest-dice-roll="workspace.latestDiceRoll.value" @restored="restoreTrpg" />
+  <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" />
   <NoticeToast />
 </template>

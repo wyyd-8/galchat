@@ -1,4 +1,4 @@
-import type { DiceResult, DiceRollAggregate, DiceRollDetail } from '../../api/types'
+import type { DiceResult, DiceRollAggregate, DiceRollDetail, GroupMessage } from '../../api/types'
 
 export type DiceDebugPreset =
   | 'standard' | 'group' | 'percentile' | 'normal-percentile'
@@ -6,9 +6,18 @@ export type DiceDebugPreset =
 export type DiceDebugAggregatePreset = 'multiplayer-check' | 'opposed-check'
 type PercentilePreset = 'percentile' | 'normal-percentile' | 'advantage' | 'double-advantage' | 'disadvantage' | 'double-disadvantage'
 export type DiceSkin = 'classic' | 'galaxy' | 'moonwhite'
+export type DiceWindowStyle = 'default' | 'rollDamage' | 'requestSanCheck' | 'rollHealing' | 'requestPushedCheck'
 export type DicePlayerPhase = 'idle' | 'loading' | 'ready' | 'playing' | 'complete' | 'error'
-export type DiceGroupRule = 'ANY_SUCCESS' | 'ALL_SUCCESS'
+export type DicePlaybackMode = 'pending' | 'play' | 'settled'
+export type DiceGroupRule = 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'
 export type DiceGroupOutcomePhase = 'concealed' | 'individual' | 'highlighted' | 'merging' | 'merged'
+export type DiceMessageTone = 'pending' | 'damage' | 'sanity' | 'healing' | 'pushed-check'
+  | 'opposed' | 'success' | 'failure' | 'default'
+export interface DiceMessagePresentation {
+  title: string
+  statusLabel: '未投掷' | '已投掷'
+  tone: DiceMessageTone
+}
 export interface DicePlaybackGroupPresentation {
   label: string
   checkName: string
@@ -30,7 +39,10 @@ export interface DicePlaybackRequest {
   result: DiceResult
   skin: DiceSkin
   reason?: string
+  toolName?: string
   presentation?: DicePlaybackPresentation
+  mode?: DicePlaybackMode
+  autoPlay?: boolean
 }
 export interface DicePlayerSummary {
   skinLabel: string
@@ -58,6 +70,16 @@ export interface DicePlayerStatus {
   showDieValues: boolean
   actionLabel: string
   actionDisabled: boolean
+}
+
+export function createDicePlayerWindowClass(toolName?: string): string {
+  if (toolName === 'rollDamage') return 'dice-player-window dice-player-window--damage'
+  if (toolName === 'requestSanCheck' || toolName === 'rollSanLoss') {
+    return 'dice-player-window dice-player-window--sanity'
+  }
+  if (toolName === 'rollHealing') return 'dice-player-window dice-player-window--healing'
+  if (toolName === 'requestPushedCheck') return 'dice-player-window dice-player-window--pushed-check'
+  return 'dice-player-window'
 }
 
 const SUPPORTED_SIDES = new Set([4, 6, 8, 10, 12, 20])
@@ -261,9 +283,10 @@ export function createDicePlaybackRequest(
   result: DiceResult,
   skin: DiceSkin,
   reason?: string,
+  toolName?: string,
 ): DicePlaybackRequest {
   const snapshot = JSON.parse(JSON.stringify(result)) as DiceResult
-  return { id: previousId + 1, result: snapshot, skin, reason }
+  return { id: previousId + 1, result: snapshot, skin, reason, toolName }
 }
 
 const CHECK_OUTCOME_LABELS: Record<string, string> = {
@@ -282,6 +305,142 @@ const SUCCESSFUL_CHECK_OUTCOMES = new Set([
   'SUCCESS',
 ])
 
+const PERSONALIZED_MESSAGE_TONES: Record<string, DiceMessageTone> = {
+  rollDamage: 'damage',
+  requestSanCheck: 'sanity',
+  rollSanLoss: 'sanity',
+  rollHealing: 'healing',
+  requestPushedCheck: 'pushed-check',
+}
+
+function latestDiceDetails(aggregate: DiceRollAggregate): DiceRollDetail[] {
+  const latestRound = Math.max(1, ...aggregate.results.map((detail) => detail.roundNo || 1))
+  return aggregate.results.filter((detail) => (detail.roundNo || 1) === latestRound)
+}
+
+export function isDiceAggregatePending(aggregate: DiceRollAggregate): boolean {
+  const details = latestDiceDetails(aggregate)
+  return details.length
+    ? details.some((detail) => !detail.resolvedAt)
+    : aggregate.summary.status === 'PENDING'
+}
+
+export function createDiceMessagePresentation(
+  aggregate: DiceRollAggregate,
+): DiceMessagePresentation {
+  const pending = isDiceAggregatePending(aggregate)
+  const title = latestDiceDetails(aggregate)[0]?.reason
+    || aggregate.summary.reason
+    || '掷骰判定'
+  if (pending) {
+    return {
+      title,
+      statusLabel: '未投掷',
+      tone: 'pending',
+    }
+  }
+
+  const personalizedTone = aggregate.summary.toolName
+    ? PERSONALIZED_MESSAGE_TONES[aggregate.summary.toolName]
+    : undefined
+  const details = latestDiceDetails(aggregate)
+  let tone: DiceMessageTone = personalizedTone || 'default'
+  if (!personalizedTone) {
+    const opposed = details.length > 0
+      && details.every((detail) => detail.resolution?.type === 'OPPOSED_CHECK')
+    const groupRule = details.map((detail) => detail.resolution?.groupRule)
+      .find((rule): rule is DiceGroupRule => Boolean(rule))
+    const categories = details.map((detail) => detail.resolution?.outcome?.category)
+      .filter((category): category is string => typeof category === 'string')
+    if (opposed) {
+      tone = 'opposed'
+    } else if (details.length === 1 && categories.length === 1) {
+      tone = SUCCESSFUL_CHECK_OUTCOMES.has(categories[0]!) ? 'success' : 'failure'
+    } else if (details.length > 1 && groupRule && groupRule !== 'SEPARATE'
+        && categories.length === details.length) {
+      const succeeded = groupRule === 'ALL_SUCCESS'
+        ? categories.every((category) => SUCCESSFUL_CHECK_OUTCOMES.has(category))
+        : categories.some((category) => SUCCESSFUL_CHECK_OUTCOMES.has(category))
+      tone = succeeded ? 'success' : 'failure'
+    }
+  }
+  return {
+    title,
+    statusLabel: '已投掷',
+    tone,
+  }
+}
+
+export function shouldOfferDiceContinue(
+  openedPending: boolean,
+  summaryStatus: string,
+  hasPendingResults: boolean,
+): boolean {
+  return openedPending && summaryStatus === 'COMPLETED' && !hasPendingResults
+}
+
+export function createDicePlayerInitialState(
+  mode: DicePlaybackMode,
+  presentationKind?: DicePlaybackPresentation['kind'],
+  groupRule?: DiceGroupRule,
+): { phase: DicePlayerPhase; groupOutcomePhase: DiceGroupOutcomePhase } {
+  if (mode === 'pending') return { phase: 'ready', groupOutcomePhase: 'concealed' }
+  if (mode === 'play') return { phase: 'loading', groupOutcomePhase: 'concealed' }
+  return {
+    phase: 'complete',
+    groupOutcomePhase: presentationKind === 'multiplayer-check' && groupRule === 'SEPARATE'
+      ? 'individual'
+      : presentationKind ? 'merged' : 'individual',
+  }
+}
+
+interface DiceMessageReference {
+  summaryId: number
+  roundNos: number[]
+}
+
+function parseDiceMessageReference(content: string): DiceMessageReference | undefined {
+  try {
+    const parsed = JSON.parse(content) as { summaryId?: unknown; roundNos?: unknown }
+    const summaryId = typeof parsed.summaryId === 'number'
+      && Number.isInteger(parsed.summaryId)
+      && parsed.summaryId > 0
+      ? parsed.summaryId
+      : undefined
+    if (!summaryId) return undefined
+    const roundNos = Array.isArray(parsed.roundNos)
+      ? parsed.roundNos.filter((round): round is number => (
+        typeof round === 'number' && Number.isInteger(round) && round > 0
+      ))
+      : []
+    return { summaryId, roundNos }
+  } catch {
+    return undefined
+  }
+}
+
+export function parseDiceMessageSummaryId(content: string): number | undefined {
+  return parseDiceMessageReference(content)?.summaryId
+}
+
+export async function hydrateDiceMessage(
+  message: GroupMessage,
+  loadAggregate: (summaryId: number) => Promise<DiceRollAggregate>,
+): Promise<GroupMessage> {
+  if (message.messageKind !== 'dice_roll' || message.diceRoll) return message
+  const reference = parseDiceMessageReference(message.content)
+  if (!reference) return message
+  const loaded = await loadAggregate(reference.summaryId)
+  const diceRoundNos = reference.roundNos.length
+    ? reference.roundNos
+    : [...new Set(loaded.results.map((detail) => detail.roundNo || 1))]
+  const rounds = new Set(diceRoundNos)
+  const diceRoll = rounds.size
+    ? { ...loaded, results: loaded.results.filter((detail) => rounds.has(detail.roundNo || 1)) }
+    : loaded
+  return { ...message, content: '', diceRoll, diceRoundNos }
+}
+
 function aggregateGroup(detail: DiceRollDetail, index: number): DicePlaybackGroupPresentation {
   const outcome = detail.resolution?.outcome || {}
   return {
@@ -297,14 +456,18 @@ function aggregateGroup(detail: DiceRollDetail, index: number): DicePlaybackGrou
   }
 }
 
-export function createGroupOutcomeVisibility(phase: DiceGroupOutcomePhase) {
-  const revealsAggregate = phase === 'merging' || phase === 'merged'
+export function createGroupOutcomeVisibility(
+  phase: DiceGroupOutcomePhase,
+  groupRule?: DiceGroupRule,
+) {
+  const permitsAggregate = groupRule !== 'SEPARATE'
+  const revealsAggregate = permitsAggregate && (phase === 'merging' || phase === 'merged')
   return {
     showIndividuals: true,
     revealIndividualResults: phase !== 'concealed',
     showTransition: revealsAggregate,
     showFinal: revealsAggregate,
-    highlightWinner: phase === 'highlighted' || revealsAggregate,
+    highlightWinner: permitsAggregate && (phase === 'highlighted' || revealsAggregate),
   }
 }
 
@@ -312,7 +475,8 @@ export function createDiceAggregatePlaybackRequest(
   previousId: number,
   aggregate: DiceRollAggregate,
   skin: DiceSkin,
-  groupRule: DiceGroupRule = 'ANY_SUCCESS',
+  groupRule?: DiceGroupRule,
+  toolName?: string,
 ): DicePlaybackRequest {
   const resolved = aggregate.results
     .filter((detail): detail is DiceRollDetail & { resultData: DiceResult } => Boolean(detail.resultData))
@@ -322,6 +486,10 @@ export function createDiceAggregatePlaybackRequest(
     .filter((detail) => (detail.roundNo || 1) === latestRound)
     .sort((left, right) => (left.displayOrder || 0) - (right.displayOrder || 0) || left.id - right.id)
   const opposed = details.every((detail) => detail.resolution?.type === 'OPPOSED_CHECK')
+  const effectiveGroupRule = groupRule
+    ?? details.map((detail) => detail.resolution?.groupRule).find((rule): rule is DiceGroupRule =>
+      rule === 'ANY_SUCCESS' || rule === 'ALL_SUCCESS' || rule === 'SEPARATE')
+    ?? 'SEPARATE'
   const aggregateResult = aggregate.semanticResult || aggregate.summary.totalResult || '已完成'
   const winnerName = opposed ? aggregateResult.match(/^(.+?)获胜(?:；|$)/)?.[1] : undefined
   const groups = details.map((detail, index) => {
@@ -329,15 +497,19 @@ export function createDiceAggregatePlaybackRequest(
     return opposed ? { ...group, winner: group.label === winnerName } : group
   })
   const checkNames = [...new Set(groups.map((group) => group.checkName))]
-  const groupSucceeded = groupRule === 'ALL_SUCCESS'
+  const groupSucceeded = effectiveGroupRule === 'ALL_SUCCESS'
     ? groups.every((group) => group.success)
     : groups.some((group) => group.success)
   const resultValue = opposed
     ? aggregateResult
-    : groupSucceeded ? '成功' : '失败'
+    : effectiveGroupRule === 'SEPARATE'
+      ? aggregateResult
+      : groupSucceeded ? '成功' : '失败'
   const formulaValue = opposed
     ? groups.map((group) => `${group.label}（${group.checkName}）`).join(' vs ')
-    : `${groups.length} 人参与 · ${checkNames.join(' / ')} · ${groupRule === 'ALL_SUCCESS' ? '全部成功才通过' : '任一成功即通过'}`
+    : `${groups.length} 人参与 · ${checkNames.join(' / ')} · ${effectiveGroupRule === 'ALL_SUCCESS'
+      ? '全部成功才通过'
+      : effectiveGroupRule === 'ANY_SUCCESS' ? '任一成功即通过' : '分别展示'}`
   const result: DiceResult = {
     formula: details.map((detail) => detail.resultData.formula).join(' / '),
     modules: details.flatMap((detail) => detail.resultData.modules),
@@ -347,14 +519,19 @@ export function createDiceAggregatePlaybackRequest(
     result: JSON.parse(JSON.stringify(result)) as DiceResult,
     skin,
     reason: aggregate.summary.reason,
+    toolName: toolName ?? aggregate.summary.toolName,
     presentation: {
       kind: opposed ? 'opposed-check' : 'multiplayer-check',
-      resultLabel: opposed ? '对抗结果' : groupRule === 'ALL_SUCCESS' ? '全部成功' : '任一成功',
+      resultLabel: opposed
+        ? '对抗结果'
+        : effectiveGroupRule === 'ALL_SUCCESS'
+          ? '全部成功'
+          : effectiveGroupRule === 'ANY_SUCCESS' ? '任一成功' : '分别结果',
       resultValue,
       formulaLabel: opposed ? '对抗双方' : '检定项目',
       formulaValue,
       groups,
-      groupRule: opposed ? undefined : groupRule,
+      groupRule: opposed ? undefined : effectiveGroupRule,
     },
   }
 }

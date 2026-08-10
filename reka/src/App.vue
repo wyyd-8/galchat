@@ -8,7 +8,7 @@ import DirectChatStage from '@/components/DirectChatStage.vue'
 import GroupChatStage from '@/components/GroupChatStage.vue'
 import TrpgCharacterBindingDialog from '@/components/TrpgCharacterBindingDialog.vue'
 import TrpgToolsDialog from '@/components/TrpgToolsDialog.vue'
-import DicePlayerDialog from '@/components/dice/DicePlayerDialog.vue'
+import DicePlayerDialog from '@/dice/components/DicePlayerDialog.vue'
 import WorldHome from '@/components/WorldHome.vue'
 import WorldLibrary from '@/components/WorldLibrary.vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
@@ -30,7 +30,7 @@ import {
   shouldOfferDiceContinue,
   type DicePlaybackMode,
   type DicePlaybackRequest,
-} from '@/components/dice/diceDebugState'
+} from '@/dice/domain/dicePlayback'
 
 interface FavorabilityRow { id: string; threshold?: number; prompt: string }
 

@@ -7,7 +7,7 @@ import {
   idleSpinAngle,
   randomIdleQuaternion,
   type IdleSpinScheduler,
-} from '../src/dice/idleSpin.ts'
+} from './idleSpin.ts'
 
 test('creates a normalized deterministic quaternion from supplied randomness', () => {
   const values = [0.25, 0.5, 0.75]

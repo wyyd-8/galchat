@@ -7,7 +7,7 @@ import type {
 import { beginReplyTurn, updateReplyTurn, type ReplyTurnState } from '@/components/replyTurnStatus'
 import { decodeParticipantIds, encodeParticipantIds, resolveParticipantIds } from '@/components/trpgSetupState'
 import { applyGameTimeEvent } from '@/components/gameTimeState'
-import { hydrateDiceMessage } from '@/components/dice/diceDebugState'
+import { hydrateDiceMessage } from '@/dice/domain/dicePlayback'
 import { errorMessage, notify } from './useNotice'
 
 let tempMessageId = -1

@@ -1,25 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, BookUser, Dices, FlaskConical, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, Trash2 } from '@lucide/vue'
+import { Activity, BookUser, Check, Dices, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, Trash2, UserRound } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
-import DiceDebugPanel from '@/components/dice/DiceDebugPanel.vue'
-import DicePlayerDialog from '@/components/dice/DicePlayerDialog.vue'
-import DiceRollMessage from '@/components/dice/DiceRollMessage.vue'
+import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import { api } from '@/api/client'
 import type {
-  Character, CharacterCard, CocModule, ContextWindowUsage, Conversation, DiceResult, DiceRollAggregate, GroupMessage, TrpgSave,
+  Character, CharacterCard, CocModule, ContextWindowUsage, Conversation, DiceRollAggregate, GroupMessage,
+  InvestigatorCardSummary, TrpgSave,
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
-import {
-  createDiceAggregatePlaybackRequest,
-  createDicePlaybackRequest,
-  listDiceMessagesNewestFirst,
-  validatePlayableDiceResult,
-  type DicePlaybackRequest,
-  type DiceGroupRule,
-  type DiceSkin,
-} from '@/components/dice/diceDebugState'
+import { listDiceMessagesNewestFirst } from '@/dice/domain/dicePlayback'
+import { buildToolCharacterTargets } from '@/components/trpgToolsState'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ conversation: Conversation; module: CocModule | null; characters: Character[]; messages: GroupMessage[] }>()
@@ -30,19 +22,20 @@ const contextUsage = ref<ContextWindowUsage | null>(null)
 const save = ref<TrpgSave | null>(null)
 const saveRemark = ref('')
 const confirmLoad = ref(false)
-const selectedParticipant = ref('')
+const cards = ref<InvestigatorCardSummary[]>([])
+const selectedKey = ref('player')
 const card = ref<CharacterCard | null>(null)
 const cardText = ref('')
 const confirmDelete = ref(false)
-const dicePlayerOpen = ref(false)
-const playbackRequest = ref<DicePlaybackRequest | null>(null)
 
-const selectedParticipantId = computed(() => selectedParticipant.value ? Number(selectedParticipant.value) : undefined)
+const characterTargets = computed(() => buildToolCharacterTargets(props.characters, cards.value))
+const selectedTarget = computed(() => characterTargets.value.find((target) => target.key === selectedKey.value)
+  || characterTargets.value[0])
+const selectedParticipantId = computed(() => selectedTarget.value?.participantId)
 const contextPercent = computed(() => Math.max(0, Math.round((contextUsage.value?.ratio || 0) * 100)))
 const contextTone = computed(() => contextPercent.value >= 90 ? 'danger' : contextPercent.value >= 70 ? 'warning' : 'safe')
-const selectedActorName = computed(() => selectedParticipantId.value
-  ? props.characters.find((item) => item.characterId === selectedParticipantId.value)?.characterName || `角色 #${selectedParticipantId.value}`
-  : '玩家调查员')
+const selectedActorName = computed(() => selectedTarget.value?.name || '玩家调查员')
+const completedCardCount = computed(() => characterTargets.value.filter((target) => target.cardId !== undefined).length)
 const diceMessages = computed(() => listDiceMessagesNewestFirst(props.messages))
 
 function time(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '暂无记录' }
@@ -55,28 +48,31 @@ async function execute(action: () => Promise<void>) {
 }
 async function loadCard() {
   confirmDelete.value = false
-  const summaries = await api.investigatorCards(props.conversation.id)
-  const summary = summaries.find((item) => selectedParticipantId.value
-    ? item.actorType === 'BOT' && item.participantId === selectedParticipantId.value
-    : item.actorType === 'PLAYER')
-  card.value = summary ? await api.characterCardById(summary.cardId) : null
+  card.value = null
+  card.value = selectedTarget.value?.cardId
+    ? await api.characterCardById(selectedTarget.value.cardId)
+    : null
+}
+async function refreshCards() {
+  cards.value = await api.investigatorCards(props.conversation.id)
+  await loadCard()
 }
 async function refreshOverview() {
   const [usageResult, saveResult] = await Promise.all([
     api.contextWindow(props.conversation.id), api.trpgSave(props.conversation.id),
   ])
   contextUsage.value = usageResult; save.value = saveResult; saveRemark.value = saveResult?.remark || ''
-  await loadCard()
+  await refreshCards()
 }
 async function createCard() {
   if (!cardText.value.trim()) throw new Error('请先粘贴人物卡文本')
-  card.value = await api.createCharacterCard({ runId: props.conversation.id, participantId: selectedParticipantId.value, characterText: cardText.value.trim() })
-  cardText.value = ''; notify('人物卡已导入', card.value.character.name, 'success')
+  const createdCard = await api.createCharacterCard({ runId: props.conversation.id, participantId: selectedParticipantId.value, characterText: cardText.value.trim() })
+  cardText.value = ''; await refreshCards(); notify('人物卡已导入', createdCard.character.name, 'success')
 }
 async function removeCard() {
   if (!card.value) return
   if (!confirmDelete.value) { confirmDelete.value = true; return }
-  await api.deleteCharacterCard(card.value.character.id); card.value = null; confirmDelete.value = false
+  await api.deleteCharacterCard(card.value.character.id); await refreshCards(); confirmDelete.value = false
   notify('人物卡已删除', '', 'success')
 }
 async function rollLuck() {
@@ -92,46 +88,18 @@ async function loadSnapshot() {
   await api.loadTrpg(props.conversation.id); confirmLoad.value = false; await refreshOverview(); emit('restored')
   notify('跑团存档已读取', '存档点之后的进度已回滚', 'success')
 }
-function playDiceResult(result: DiceResult, skin: DiceSkin = 'classic', reason?: string, toolName?: string) {
-  const errors = validatePlayableDiceResult(result)
-  if (errors.length) {
-    notify('这份结果无法播放 3D 动画', errors.join('；'), 'danger')
-    return
-  }
-  playbackRequest.value = createDicePlaybackRequest(
-    playbackRequest.value?.id || 0,
-    result,
-    skin,
-    reason,
-    toolName,
-  )
-  dicePlayerOpen.value = true
+async function selectTarget(key: string) {
+  if (busy.value || selectedKey.value === key) return
+  selectedKey.value = key
+  cardText.value = ''
+  await execute(loadCard)
 }
-function playDiceAggregate(
-  aggregate: DiceRollAggregate,
-  skin: DiceSkin = 'classic',
-  groupRule: DiceGroupRule = 'SEPARATE',
-  toolName?: string,
-) {
-  const errors = aggregate.results.flatMap((detail) => detail.resultData
-    ? validatePlayableDiceResult(detail.resultData).map((error) => `${detail.reason || `骰位 #${detail.id}`}：${error}`)
-    : [`${detail.reason || `骰位 #${detail.id}`}：缺少掷骰结果`])
-  if (errors.length) {
-    notify('这组检定无法播放 3D 动画', errors.join('；'), 'danger')
-    return
-  }
-  playbackRequest.value = createDiceAggregatePlaybackRequest(
-    playbackRequest.value?.id || 0,
-    aggregate,
-    skin,
-    groupRule,
-    toolName,
-  )
-  dicePlayerOpen.value = true
-}
-
 watch(open, (visible) => { if (visible) void execute(refreshOverview) })
-watch(selectedParticipant, () => { if (open.value) void execute(loadCard) })
+watch(() => props.conversation.id, () => {
+  selectedKey.value = 'player'
+  cards.value = []
+  card.value = null
+})
 </script>
 
 <template>
@@ -141,7 +109,6 @@ watch(selectedParticipant, () => { if (open.value) void execute(loadCard) })
         <TabsTrigger value="status"><Activity :size="15" />状态与存档</TabsTrigger>
         <TabsTrigger value="card"><BookUser :size="15" />人物卡</TabsTrigger>
         <TabsTrigger value="dice"><Dices :size="15" />骰子</TabsTrigger>
-        <TabsTrigger value="dice-debug"><FlaskConical :size="15" />骰子调试</TabsTrigger>
       </TabsList>
 
       <TabsContent value="status" class="tabs-content tool-section">
@@ -159,14 +126,50 @@ watch(selectedParticipant, () => { if (open.value) void execute(loadCard) })
       </TabsContent>
 
       <TabsContent value="card" class="tabs-content tool-section">
-        <label class="field"><span>查看对象</span><select v-model="selectedParticipant"><option value="">玩家调查员</option><option v-for="item in characters" :key="item.characterId" :value="String(item.characterId)">{{ item.characterName }}（AI 调查员）</option></select></label>
-        <section v-if="card" class="character-sheet">
-          <div class="sheet-heading"><span><small>{{ card.character.actorType === 'PLAYER' ? '玩家调查员' : card.character.actorType === 'BOT' ? 'AI 调查员' : '模组角色' }} · {{ card.character.occupation || '未填写职业' }}</small><h3>{{ card.character.name }}</h3><p>{{ card.character.sex || '—' }} · {{ card.character.age || '—' }} 岁 · {{ card.character.era || '时代未填' }}</p></span><div class="vitals"><b>HP {{ card.character.hpCurrent }}/{{ card.character.hpMax }}</b><b>SAN {{ card.character.sanCurrent }}/{{ card.character.sanMax }}</b><b>MP {{ card.character.mpCurrent }}/{{ card.character.mpMax }}</b></div></div>
-          <div class="attribute-grid"><span v-for="[name, value] in Object.entries({ STR: card.character.str, CON: card.character.con, SIZ: card.character.siz, DEX: card.character.dex, APP: card.character.app, INT: card.character.intValue, POW: card.character.pow, EDU: card.character.edu })" :key="name"><small>{{ name }}</small><strong>{{ value }}</strong></span></div>
-          <div class="sheet-columns"><div><strong>技能</strong><p>{{ card.skills.map((item) => `${item.displayName} ${item.value}%`).join(' · ') || '暂无技能' }}</p></div><div><strong>武器</strong><p>{{ card.weapons.map((item) => `${item.name}${item.damage ? ` ${item.damage}` : ''}`).join(' · ') || '暂无武器' }}</p></div></div>
-          <div class="tool-actions"><button class="button secondary" :disabled="card.character.luckCurrent != null || busy" @click="execute(rollLuck)"><Dices :size="16" />{{ card.character.luckCurrent == null ? '投掷幸运' : `幸运 ${card.character.luckCurrent}` }}</button><button class="button" :class="confirmDelete ? 'danger' : 'ghost'" :disabled="busy" @click="execute(removeCard)"><Trash2 :size="16" />{{ confirmDelete ? '确认删除' : '删除人物卡' }}</button></div>
-        </section>
-        <section v-else class="tool-card import-card"><strong>{{ selectedActorName }}尚未建立人物卡</strong><p>首行必须是“姓名, 职业, 性别, 年龄岁”，并包含 STR、CON、SIZ、DEX、APP、INT、POW、EDU 八项属性；年龄范围为 15–90。</p><label class="field"><span>人物卡文本</span><textarea v-model="cardText" rows="10" placeholder="调查员, 记者, 女, 27岁\n时代: 1920s\nSTR 50 CON 55 SIZ 60 DEX 65 APP 60 INT 70 POW 55 EDU 70\n——技能——\n侦查 60%" /></label><button class="button primary" :disabled="!cardText.trim() || busy" @click="execute(createCard)">导入人物卡</button></section>
+        <div class="trpg-binding-layout trpg-tools-card-layout">
+          <section class="trpg-binding-list-pane">
+            <header class="settings-section-heading">
+              <span><strong>调查员</strong><small>选择左侧人物，在右侧查看人物卡详情</small></span>
+              <em>{{ completedCardCount }}/{{ characterTargets.length }} 已建立</em>
+            </header>
+            <div class="character-choice-list trpg-binding-targets" role="radiogroup" aria-label="人物卡角色">
+              <button
+                v-for="target in characterTargets"
+                :key="target.key"
+                type="button"
+                class="choice-row"
+                :class="{ active: selectedKey === target.key }"
+                role="radio"
+                :aria-checked="selectedKey === target.key"
+                @click="selectTarget(target.key)"
+              >
+                <span
+                  class="character-avatar small"
+                  :class="{ 'player-avatar': target.actorType === 'PLAYER' }"
+                  :style="target.image ? { backgroundImage: `url(${target.image})` } : {}"
+                >
+                  <UserRound v-if="target.actorType === 'PLAYER'" :size="17" />
+                  <template v-else>{{ target.image ? '' : target.name.slice(0, 1) }}</template>
+                </span>
+                <span><strong>{{ target.name }}</strong><small>{{ target.actorType === 'PLAYER' ? '由当前登录用户控制' : 'AI 调查员' }}</small></span>
+                <span class="binding-state" :class="{ complete: target.cardId !== undefined }">
+                  <Check v-if="target.cardId !== undefined" :size="13" />{{ target.cardId !== undefined ? '已建立' : '待建立' }}
+                </span>
+              </button>
+            </div>
+          </section>
+
+          <aside class="trpg-binding-card-pane">
+            <div v-if="busy && !card" class="binding-empty"><LoaderCircle class="spin" :size="24" /><strong>正在读取人物卡…</strong></div>
+            <section v-else-if="card" class="character-sheet binding-sheet">
+              <div class="sheet-heading"><span><small>{{ card.character.actorType === 'PLAYER' ? '玩家调查员' : card.character.actorType === 'BOT' ? 'AI 调查员' : '模组角色' }} · {{ card.character.occupation || '未填写职业' }}</small><h3>{{ card.character.name }}</h3><p>{{ card.character.sex || '—' }} · {{ card.character.age || '—' }} 岁 · {{ card.character.era || '时代未填' }}</p></span><div class="vitals"><b>HP {{ card.character.hpCurrent }}/{{ card.character.hpMax }}</b><b>SAN {{ card.character.sanCurrent }}/{{ card.character.sanMax }}</b><b>MP {{ card.character.mpCurrent }}/{{ card.character.mpMax }}</b></div></div>
+              <div class="attribute-grid"><span v-for="[name, value] in Object.entries({ STR: card.character.str, CON: card.character.con, SIZ: card.character.siz, DEX: card.character.dex, APP: card.character.app, INT: card.character.intValue, POW: card.character.pow, EDU: card.character.edu })" :key="name"><small>{{ name }}</small><strong>{{ value }}</strong></span></div>
+              <div class="sheet-columns"><div><strong>技能</strong><p>{{ card.skills.map((item) => `${item.displayName} ${item.value}%`).join(' · ') || '暂无技能' }}</p></div><div><strong>武器与装备</strong><p>{{ card.weapons.map((item) => `${item.name}${item.damage ? ` ${item.damage}` : ''}`).join(' · ') || '暂无武器' }}<br />{{ card.profile?.equipmentText || '无额外装备' }}</p></div></div>
+              <div class="tool-actions"><button class="button secondary" :disabled="card.character.luckCurrent != null || busy" @click="execute(rollLuck)"><Dices :size="16" />{{ card.character.luckCurrent == null ? '投掷幸运' : `幸运 ${card.character.luckCurrent}` }}</button><button class="button" :class="confirmDelete ? 'danger' : 'ghost'" :disabled="busy" @click="execute(removeCard)"><Trash2 :size="16" />{{ confirmDelete ? '确认删除' : '删除人物卡' }}</button></div>
+            </section>
+            <section v-else class="tool-card import-card binding-import-card"><BookUser :size="25" /><strong>{{ selectedActorName }}尚未建立人物卡</strong><p>首行必须是“姓名, 职业, 性别, 年龄岁”，并包含 STR、CON、SIZ、DEX、APP、INT、POW、EDU 八项属性；年龄范围为 15–90。</p><label class="field"><span>人物卡文本</span><textarea v-model="cardText" rows="10" placeholder="调查员, 记者, 女, 27岁\n时代: 1920s\nSTR 50 CON 55 SIZ 60 DEX 65 APP 60 INT 70 POW 55 EDU 70\n——技能——\n侦查 60%" /></label><button class="button primary" :disabled="!cardText.trim() || busy" @click="execute(createCard)">导入人物卡</button></section>
+          </aside>
+        </div>
       </TabsContent>
 
       <TabsContent value="dice" class="tabs-content tool-section">
@@ -199,11 +202,7 @@ watch(selectedParticipant, () => { if (open.value) void execute(loadCard) })
         </div>
       </TabsContent>
 
-      <TabsContent value="dice-debug" class="tabs-content tool-section">
-        <DiceDebugPanel @play="playDiceResult" @play-aggregate="playDiceAggregate" />
-      </TabsContent>
     </TabsRoot>
     <div v-if="busy" class="dialog-busy"><LoaderCircle class="spin" :size="17" />正在处理…</div>
   </BaseDialog>
-  <DicePlayerDialog v-model="dicePlayerOpen" :request="playbackRequest" />
 </template>

@@ -8,9 +8,6 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   server: {
-    fs: {
-      allow: [fileURLToPath(new URL('..', import.meta.url))],
-    },
     proxy: {
       '/api': { target: 'http://localhost:8080', changeOrigin: true, rewrite: (path) => path.replace(/^\/api/, '') },
       '/ws': { target: 'ws://localhost:8080', ws: true, changeOrigin: true },

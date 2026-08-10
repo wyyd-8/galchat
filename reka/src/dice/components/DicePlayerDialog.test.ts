@@ -82,7 +82,7 @@ test('renders the opposed-check separator as an accessible crossed-swords icon',
 })
 
 test('renders structured dice messages with the dedicated compact component', async () => {
-  const source = await readFile(new URL('../GroupChatStage.vue', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../../components/GroupChatStage.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'GroupChatStage should contain a template')
 
@@ -98,7 +98,7 @@ test('renders structured dice messages with the dedicated compact component', as
 })
 
 test('reuses iconless chat dice cards for the tool dice history', async () => {
-  const source = await readFile(new URL('../TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../../components/TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
   const root = baseParse(template)
@@ -121,7 +121,7 @@ test('reuses iconless chat dice cards for the tool dice history', async () => {
 })
 
 test('shows a dedicated empty state when the current chat has no dice messages', async () => {
-  const source = await readFile(new URL('../TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../../components/TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
 
@@ -133,7 +133,7 @@ test('shows a dedicated empty state when the current chat has no dice messages',
 })
 
 test('adds a separate locate control to each tool dice card', async () => {
-  const source = await readFile(new URL('../TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../../components/TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
   const root = baseParse(template)
@@ -187,7 +187,7 @@ test('opens each new backend dice roll after its chat card is rendered', async (
 })
 
 test('marks each chat message as a scroll target for tool navigation', async () => {
-  const source = await readFile(new URL('../GroupChatStage.vue', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../../components/GroupChatStage.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'GroupChatStage should contain a template')
   const message = findElementByClass(baseParse(template), 'chat-message')
@@ -240,7 +240,7 @@ test('places the dice player and its overlay on a foreground dialog layer', asyn
       && prop.value?.content === 'foreground'
   )), true)
 
-  const baseSource = await readFile(new URL('../ui/BaseDialog.vue', import.meta.url), 'utf8')
+  const baseSource = await readFile(new URL('../../components/ui/BaseDialog.vue', import.meta.url), 'utf8')
   const baseTemplate = baseSource.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(baseTemplate, 'BaseDialog should contain a template')
   const baseRoot = baseParse(baseTemplate)

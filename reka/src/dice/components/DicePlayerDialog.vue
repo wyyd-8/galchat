@@ -13,19 +13,19 @@ import {
   type DicePlaybackRequest,
   type DiceGroupOutcomePhase,
   type DicePlayerPhase,
-} from './diceDebugState'
+} from '@/dice/domain/dicePlayback'
 import {
   createDiceGroupMergePlan,
   createDiceValueMergeTokenLayout,
-} from './diceGroupMerge'
+} from '@/dice/domain/diceGroupMerge'
 import {
   createDicePlayerLayout,
   createDicePlayerWindowWidth,
-} from './dicePlayerLayout'
+} from '@/dice/domain/dicePlayerLayout'
 import type {
   DiceRollResult,
   ThreeDiceBoard,
-} from '../../../../dice-lab/src/dice/ThreeDice'
+} from '@/dice/renderer/ThreeDice'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean }>()
@@ -227,7 +227,7 @@ async function prepare(request: DicePlaybackRequest) {
     )
     groupOutcomePhase.value = initial.groupOutcomePhase
     if (!board) {
-      const { ThreeDiceBoard: DiceBoard } = await import('../../../../dice-lab/src/dice/ThreeDice')
+      const { ThreeDiceBoard: DiceBoard } = await import('@/dice/renderer/ThreeDice')
       if (currentGeneration !== generation) return
       board = new DiceBoard(tray.value)
     }

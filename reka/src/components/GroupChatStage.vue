@@ -6,7 +6,7 @@ import {
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
 import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMessage, ReplyPlan, ReplyPlanItem, TrpgGameTimePeriod } from '@/api/types'
-import DiceRollMessage from '@/components/dice/DiceRollMessage.vue'
+import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
 import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
 

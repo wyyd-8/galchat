@@ -68,68 +68,68 @@ let fogTexture: THREE.CanvasTexture | undefined
 const MODEL_CONFIGS: Record<ModelKey, DiceModelConfig> = {
   d4: {
     key: 'd4',
-    url: new URL('../../model/D4_四面骰_baked.glb', import.meta.url).href,
+    url: new URL('../assets/models/classic/D4_四面骰_baked.glb', import.meta.url).href,
     facePattern: /^D4_Face_\d+_(\d+)$/,
     faceLabels: ['1', '2', '3', '4'],
     displayScale: 0.65,
   },
   d6: {
     key: 'd6',
-    url: new URL('../../model/D6_六面骰_baked.glb', import.meta.url).href,
+    url: new URL('../assets/models/classic/D6_六面骰_baked.glb', import.meta.url).href,
     facePattern: /^D6_Face_\d+_(\d+)$/,
     faceLabels: ['1', '2', '3', '4', '5', '6'],
     displayScale: 0.65,
   },
   d8: {
     key: 'd8',
-    url: new URL('../../model/D8_八面骰_baked.glb', import.meta.url).href,
+    url: new URL('../assets/models/classic/D8_八面骰_baked.glb', import.meta.url).href,
     facePattern: /^D8_Face_\d+_(\d+)$/,
     faceLabels: ['1', '2', '3', '4', '5', '6', '7', '8'],
   },
   'd10-ones': {
     key: 'd10-ones',
-    url: new URL('../../model/D10_个位骰_0-9_baked.glb', import.meta.url).href,
+    url: new URL('../assets/models/classic/D10_个位骰_0-9_baked.glb', import.meta.url).href,
     facePattern: /^D10_0_9_Face_\d+_(\d)$/,
     faceLabels: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
   },
   'd10-tens': {
     key: 'd10-tens',
-    url: new URL('../../model/D10_百分骰_00-90_baked.glb', import.meta.url).href,
+    url: new URL('../assets/models/classic/D10_百分骰_00-90_baked.glb', import.meta.url).href,
     facePattern: /^D10_00_90_Face_\d+_(\d{2})$/,
     faceLabels: ['00', '10', '20', '30', '40', '50', '60', '70', '80', '90'],
   },
   d12: {
     key: 'd12',
-    url: new URL('../../model/D12_十二面骰_baked.glb', import.meta.url).href,
+    url: new URL('../assets/models/classic/D12_十二面骰_baked.glb', import.meta.url).href,
     facePattern: /^D12_Face_\d+_(\d+)$/,
     faceLabels: Array.from({ length: 12 }, (_, index) => String(index + 1)),
   },
   d20: {
     key: 'd20',
-    url: new URL('../../model/D20_二十面骰_baked.glb', import.meta.url).href,
+    url: new URL('../assets/models/classic/D20_二十面骰_baked.glb', import.meta.url).href,
     facePattern: /^Face_\d+_Number_(\d+)$/,
     faceLabels: Array.from({ length: 20 }, (_, index) => String(index + 1)),
   },
 }
 
 const GALAXY_MODEL_URLS: Record<ModelKey, string> = {
-  d4: new URL('../../model/galaxy/D4_四面骰_星穹_baked.glb', import.meta.url).href,
-  d6: new URL('../../model/galaxy/D6_六面骰_星穹_baked.glb', import.meta.url).href,
-  d8: new URL('../../model/galaxy/D8_八面骰_星穹_baked.glb', import.meta.url).href,
-  'd10-ones': new URL('../../model/galaxy/D10_个位骰_0-9_星穹_baked.glb', import.meta.url).href,
-  'd10-tens': new URL('../../model/galaxy/D10_百分骰_00-90_星穹_baked.glb', import.meta.url).href,
-  d12: new URL('../../model/galaxy/D12_十二面骰_星穹_baked.glb', import.meta.url).href,
-  d20: new URL('../../model/galaxy/D20_二十面骰_星穹_baked.glb', import.meta.url).href,
+  d4: new URL('../assets/models/galaxy/D4_四面骰_星穹_baked.glb', import.meta.url).href,
+  d6: new URL('../assets/models/galaxy/D6_六面骰_星穹_baked.glb', import.meta.url).href,
+  d8: new URL('../assets/models/galaxy/D8_八面骰_星穹_baked.glb', import.meta.url).href,
+  'd10-ones': new URL('../assets/models/galaxy/D10_个位骰_0-9_星穹_baked.glb', import.meta.url).href,
+  'd10-tens': new URL('../assets/models/galaxy/D10_百分骰_00-90_星穹_baked.glb', import.meta.url).href,
+  d12: new URL('../assets/models/galaxy/D12_十二面骰_星穹_baked.glb', import.meta.url).href,
+  d20: new URL('../assets/models/galaxy/D20_二十面骰_星穹_baked.glb', import.meta.url).href,
 }
 
 const MOONWHITE_MODEL_URLS: Record<ModelKey, string> = {
-  d4: new URL('../../model/moonwhite/D4_四面骰_月白冰晶_baked.glb', import.meta.url).href,
-  d6: new URL('../../model/moonwhite/D6_六面骰_月白冰晶_baked.glb', import.meta.url).href,
-  d8: new URL('../../model/moonwhite/D8_八面骰_月白冰晶_baked.glb', import.meta.url).href,
-  'd10-ones': new URL('../../model/moonwhite/D10_个位骰_0-9_月白冰晶_baked.glb', import.meta.url).href,
-  'd10-tens': new URL('../../model/moonwhite/D10_百分骰_00-90_月白冰晶_baked.glb', import.meta.url).href,
-  d12: new URL('../../model/moonwhite/D12_十二面骰_月白冰晶_baked.glb', import.meta.url).href,
-  d20: new URL('../../model/moonwhite/D20_二十面骰_月白冰晶_baked.glb', import.meta.url).href,
+  d4: new URL('../assets/models/moonwhite/D4_四面骰_月白冰晶_baked.glb', import.meta.url).href,
+  d6: new URL('../assets/models/moonwhite/D6_六面骰_月白冰晶_baked.glb', import.meta.url).href,
+  d8: new URL('../assets/models/moonwhite/D8_八面骰_月白冰晶_baked.glb', import.meta.url).href,
+  'd10-ones': new URL('../assets/models/moonwhite/D10_个位骰_0-9_月白冰晶_baked.glb', import.meta.url).href,
+  'd10-tens': new URL('../assets/models/moonwhite/D10_百分骰_00-90_月白冰晶_baked.glb', import.meta.url).href,
+  d12: new URL('../assets/models/moonwhite/D12_十二面骰_月白冰晶_baked.glb', import.meta.url).href,
+  d20: new URL('../assets/models/moonwhite/D20_二十面骰_月白冰晶_baked.glb', import.meta.url).href,
 }
 
 function wait(milliseconds: number): Promise<void> {

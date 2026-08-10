@@ -2,19 +2,19 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { reactive } from 'vue'
 import type { DiceResult, DiceRollAggregate, GroupMessage } from '../../api/types.ts'
-import * as diceState from './diceDebugState.ts'
+import * as diceState from './dicePlayback.ts'
 import {
   createDiceAggregatePlaybackRequest,
-  createDiceDebugAggregatePreset,
   createDicePlaybackRequest,
-  createDiceDebugPreset,
   createDicePlayerSummary,
   createDicePlayerStatus,
   createGroupOutcomeVisibility,
-  parseDiceResultJson,
   type DicePlaybackRequest,
-  validatePlayableDiceResult,
-} from './diceDebugState.ts'
+} from './dicePlayback.ts'
+import {
+  createDiceAggregateFixture as createDiceDebugAggregatePreset,
+  createDiceResultFixture as createDiceDebugPreset,
+} from '../../../test/fixtures/dice.ts'
 
 type DiceMessagePresentation = {
   title: string
@@ -597,92 +597,6 @@ test('creates an opposed check playback that reveals the winner after both rolls
   assert.equal(summary.formulaValue, '林恩（格斗） vs 陈默（闪避）')
 })
 
-test('creates a percentile preset that preserves every backend dice field', () => {
-  const result = createDiceDebugPreset('percentile')
-
-  assert.deepEqual(result, {
-    formula: '1D100##',
-    modules: [{
-      expression: '1D100##',
-      diceCount: 1,
-      diceSides: 100,
-      modifier: 'DOUBLE_ADVANTAGE',
-      dice: [
-        { sides: 10, value: 7, role: 'PERCENTILE_ONES', selected: true },
-        { sides: 10, value: 8, role: 'PERCENTILE_TENS', selected: false },
-        { sides: 10, value: 2, role: 'PERCENTILE_TENS', selected: true },
-        { sides: 10, value: 5, role: 'PERCENTILE_TENS', selected: false },
-      ],
-      result: 27,
-    }],
-    result: 27,
-  })
-})
-
-test('creates a double-disadvantage preset with the selected highest tens die', () => {
-  const result = createDiceDebugPreset('double-disadvantage')
-
-  assert.equal(result.formula, '1D100$$')
-  assert.equal(result.modules[0].modifier, 'DOUBLE_DISADVANTAGE')
-  assert.deepEqual(result.modules[0].dice.map((die) => die.selected), [true, true, false, false])
-  assert.equal(result.result, 87)
-})
-
-test('accepts a complete multi-module backend result', () => {
-  const result: DiceResult = {
-    formula: '2D6 + 1D8',
-    modules: [
-      {
-        expression: '2D6', diceCount: 2, diceSides: 6, modifier: 'NORMAL', result: 9,
-        dice: [
-          { sides: 6, value: 4, role: 'NORMAL', selected: true },
-          { sides: 6, value: 5, role: 'NORMAL', selected: true },
-        ],
-      },
-      {
-        expression: '1D8', diceCount: 1, diceSides: 8, modifier: 'NORMAL', result: 7,
-        dice: [{ sides: 8, value: 7, role: 'NORMAL', selected: true }],
-      },
-    ],
-    result: 16,
-  }
-
-  assert.deepEqual(validatePlayableDiceResult(result), [])
-})
-
-test('reports missing results and invalid percentile selections before opening the player', () => {
-  const result: DiceResult = {
-    formula: '1D100#',
-    modules: [{
-      expression: '1D100#', diceCount: 1, diceSides: 100, modifier: 'ADVANTAGE',
-      dice: [
-        { sides: 10, value: 3, role: 'PERCENTILE_ONES', selected: true },
-        { sides: 10, value: 1, role: 'PERCENTILE_TENS', selected: false },
-        { sides: 10, value: 7, role: 'PERCENTILE_TENS', selected: false },
-      ],
-    }],
-  }
-
-  assert.deepEqual(validatePlayableDiceResult(result), [
-    '缺少总结果',
-    '模块 1 缺少模块结果',
-    '模块 1 必须且只能选中一个十位骰',
-  ])
-})
-
-test('rejects values that cannot be represented by an available 3D model', () => {
-  const result: DiceResult = {
-    formula: '1D7',
-    modules: [{
-      expression: '1D7', diceCount: 1, diceSides: 7, modifier: 'NORMAL', result: 7,
-      dice: [{ sides: 7, value: 7, role: 'NORMAL', selected: true }],
-    }],
-    result: 7,
-  }
-
-  assert.deepEqual(validatePlayableDiceResult(result), ['模块 1 的骰子 1 暂不支持 D7 动画'])
-})
-
 test('creates a new immutable playback request when the same result is replayed', () => {
   const result = createDiceDebugPreset('group')
 
@@ -696,7 +610,7 @@ test('creates a new immutable playback request when the same result is replayed'
   assert.equal(first.result.modules[0].dice[0].value, 4)
 })
 
-test('creates a playback request from a Vue reactive debug form', () => {
+test('creates a playback request from a Vue reactive result', () => {
   const formResult = reactive(createDiceDebugPreset('normal-percentile'))
 
   const request = createDicePlaybackRequest(4, formResult, 'classic')
@@ -876,31 +790,5 @@ test('locks the roll control only while dice are loading or rolling', () => {
       ['正在掷骰', true],
       ['重放动画', false],
     ],
-  )
-})
-
-test('imports the full backend JSON payload without dropping additional fields', () => {
-  const result = parseDiceResultJson(JSON.stringify({
-    formula: '1D6',
-    modules: [{
-      expression: '1D6', diceCount: 1, diceSides: 6, modifier: 'NORMAL', result: 5,
-      dice: [{ sides: 6, value: 5, role: 'NORMAL', selected: true, trace: 'server-die' }],
-      trace: 'server-module',
-    }],
-    result: 5,
-    trace: 'server-result',
-  })) as DiceResult & { trace: string }
-
-  assert.equal(result.trace, 'server-result')
-  assert.equal((result.modules[0] as unknown as { trace: string }).trace, 'server-module')
-  assert.equal((result.modules[0].dice[0] as unknown as { trace: string }).trace, 'server-die')
-})
-
-test('rejects JSON that is not a DiceResult object', () => {
-  assert.throws(() => parseDiceResultJson('[1, 2, 3]'), /JSON 根节点必须是对象/)
-  assert.throws(() => parseDiceResultJson('{}'), /JSON 缺少 formula 或 modules/)
-  assert.throws(
-    () => parseDiceResultJson('{"formula":"1D6","modules":[{}]}'),
-    /模块 1 缺少 expression 或 dice/,
   )
 })

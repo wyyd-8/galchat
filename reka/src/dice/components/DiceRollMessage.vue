@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { Dices } from '@lucide/vue'
 import type { DiceRollAggregate } from '@/api/types'
-import { createDiceMessagePresentation } from './diceDebugState'
+import { createDiceMessagePresentation } from '@/dice/domain/dicePlayback'
 
 const props = withDefaults(defineProps<{ aggregate: DiceRollAggregate; showIcon?: boolean }>(), {
   showIcon: true,

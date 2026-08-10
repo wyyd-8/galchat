@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { continuousRotationTarget, interpolateRotation } from '../src/dice/rollRotation.ts'
+import { continuousRotationTarget, interpolateRotation } from './rollRotation.ts'
 
 const FULL_TURN = Math.PI * 2
 const moduloTurn = (value: number): number => ((value % FULL_TURN) + FULL_TURN) % FULL_TURN

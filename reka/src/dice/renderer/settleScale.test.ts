@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { settleCameraDistance, settleScaleFactor } from '../src/dice/settleScale.ts'
+import { settleCameraDistance, settleScaleFactor } from './settleScale.ts'
 
 test('scales from the original size to 1.12 during reset', () => {
   assert.equal(settleScaleFactor(0), 1)

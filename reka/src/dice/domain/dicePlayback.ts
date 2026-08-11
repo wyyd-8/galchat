@@ -1,6 +1,12 @@
 import type { DiceResult, DiceRollAggregate, DiceRollDetail, GroupMessage } from '../../api/types'
 
-export type DiceSkin = 'classic' | 'galaxy' | 'moonwhite'
+export const DICE_SKIN_OPTIONS = [
+  { value: 'classic', label: '经典' },
+  { value: 'galaxy', label: '星穹' },
+  { value: 'moonwhite', label: '月白冰晶' },
+] as const
+
+export type DiceSkin = typeof DICE_SKIN_OPTIONS[number]['value']
 export type DicePlayerPhase = 'idle' | 'loading' | 'ready' | 'playing' | 'complete' | 'error'
 export type DicePlaybackMode = 'pending' | 'play' | 'settled'
 export type DiceGroupRule = 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'
@@ -68,6 +74,14 @@ export interface DicePlayerStatus {
   actionDisabled: boolean
 }
 
+const DICE_SKIN_VALUES = new Set<string>(DICE_SKIN_OPTIONS.map((option) => option.value))
+
+export function resolveDiceSkin(value: unknown): DiceSkin {
+  return typeof value === 'string' && DICE_SKIN_VALUES.has(value)
+    ? value as DiceSkin
+    : 'classic'
+}
+
 export function createDicePlayerWindowClass(toolName?: string): string {
   if (toolName === 'rollDamage') return 'dice-player-window dice-player-window--damage'
   if (toolName === 'requestSanCheck' || toolName === 'rollSanLoss') {
@@ -81,12 +95,12 @@ export function createDicePlayerWindowClass(toolName?: string): string {
 export function createDicePlaybackRequest(
   previousId: number,
   result: DiceResult,
-  skin: DiceSkin,
+  skin: unknown,
   reason?: string,
   toolName?: string,
 ): DicePlaybackRequest {
   const snapshot = JSON.parse(JSON.stringify(result)) as DiceResult
-  return { id: previousId + 1, result: snapshot, skin, reason, toolName }
+  return { id: previousId + 1, result: snapshot, skin: resolveDiceSkin(skin), reason, toolName }
 }
 
 const CHECK_OUTCOME_LABELS: Record<string, string> = {
@@ -364,7 +378,7 @@ export function createGroupOutcomeVisibility(
 export function createDiceAggregatePlaybackRequest(
   previousId: number,
   aggregate: DiceRollAggregate,
-  skin: DiceSkin,
+  skin: unknown,
   groupRule?: DiceGroupRule,
   toolName?: string,
 ): DicePlaybackRequest {
@@ -407,7 +421,7 @@ export function createDiceAggregatePlaybackRequest(
   return {
     id: previousId + 1,
     result: JSON.parse(JSON.stringify(result)) as DiceResult,
-    skin,
+    skin: resolveDiceSkin(skin),
     reason: aggregate.summary.reason,
     toolName: toolName ?? aggregate.summary.toolName,
     presentation: {
@@ -429,7 +443,7 @@ export function createDiceAggregatePlaybackRequest(
 export function createDiceMessagePlaybackRequest(
   previousId: number,
   aggregate: DiceRollAggregate,
-  skin: DiceSkin,
+  skin: unknown,
 ): DicePlaybackRequest {
   const latestRound = Math.max(1, ...aggregate.results.map((detail) => detail.roundNo || 1))
   const details = aggregate.results
@@ -457,7 +471,7 @@ export function createDiceMessagePlaybackRequest(
 export function createIncomingDiceMessagePlaybackRequest(
   previousId: number,
   aggregate: DiceRollAggregate,
-  skin: DiceSkin,
+  skin: unknown,
 ): DicePlaybackRequest {
   const pending = isDiceAggregatePending(aggregate)
   return {
@@ -474,7 +488,7 @@ export function createDicePlayerSummary(
   skin: DiceSkin,
   presentation?: DicePlaybackPresentation,
 ): DicePlayerSummary {
-  const skinLabel = { classic: '经典', galaxy: '星穹', moonwhite: '月白冰晶' }[skin]
+  const skinLabel = DICE_SKIN_OPTIONS.find((option) => option.value === skin)!.label
   const diceCount = result.modules.reduce((total, module) => total + module.dice.length, 0)
   const selectedCount = result.modules.reduce(
     (total, module) => total + module.dice.filter((die) => die.selected).length,

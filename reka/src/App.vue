@@ -23,11 +23,14 @@ import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
 import {
+  DICE_SKIN_OPTIONS,
   createIncomingDiceMessagePlaybackRequest,
   createDiceMessagePlaybackRequest,
   findDiceMessageElement,
   isDiceAggregatePending,
+  resolveDiceSkin,
   shouldOfferDiceContinue,
+  type DiceSkin,
   type DicePlaybackMode,
   type DicePlaybackRequest,
 } from '@/dice/domain/dicePlayback'
@@ -65,7 +68,11 @@ function createMessagePlaybackRequest(
   offerContinueAfterComplete = false,
 ): DicePlaybackRequest {
   const previousId = dicePlaybackRequest.value?.id || 0
-  const request = createDiceMessagePlaybackRequest(previousId, aggregate, 'classic')
+  const request = createDiceMessagePlaybackRequest(
+    previousId,
+    aggregate,
+    workspace.userInfo.value?.diceSkin,
+  )
   return { ...request, mode, autoPlay, offerContinueAfterComplete }
 }
 
@@ -93,7 +100,7 @@ function openIncomingDiceMessage(aggregate: DiceRollAggregate) {
     dicePlaybackRequest.value = createIncomingDiceMessagePlaybackRequest(
       dicePlaybackRequest.value?.id || 0,
       aggregate,
-      'classic',
+      workspace.userInfo.value?.diceSkin,
     )
     dicePlayerOpen.value = true
   } catch (error) {
@@ -174,7 +181,7 @@ const detailComposerOpen = ref(false)
 const detailComposerPhase = ref<'closed' | 'moving' | 'expanded'>('closed')
 const templateReturnToSettings = ref(false)
 const saveRemark = ref('')
-const accountForm = reactive({ username: '', email: '', birthday: '', diceSkin: '' })
+const accountForm = reactive({ username: '', email: '', birthday: '', diceSkin: 'classic' as DiceSkin })
 const passwordForm = reactive({ email: '', newPassword: '', confirmPassword: '', code: '' })
 const selectedTemplatePreview = ref<WorldTemplate | null>(null)
 const selectedTemplateUsage = ref<WorldTemplateUsage | null>(null)
@@ -529,7 +536,7 @@ async function exportWorld() {
   const id = workspace.selectedWorldId.value; if (!id) return
   await run(async () => { const text = await api.exportWorld(id); const blob = new Blob([text], { type: 'application/json' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${workspace.selectedWorld.value?.name || 'galchat-world'}.json`; link.click(); URL.revokeObjectURL(link.href) })
 }
-async function openAccount() { await run(async () => { await workspace.loadUserInfo(); const info = workspace.userInfo.value; Object.assign(accountForm, { username: info?.username || '', email: info?.email || '', birthday: info?.birthday || '', diceSkin: info?.diceSkin || '' }); dialogs.account = true }) }
+async function openAccount() { await run(async () => { await workspace.loadUserInfo(); const info = workspace.userInfo.value; Object.assign(accountForm, { username: info?.username || '', email: info?.email || '', birthday: info?.birthday || '', diceSkin: resolveDiceSkin(info?.diceSkin) }); dialogs.account = true }) }
 async function openPassword() { await run(async () => { await workspace.loadUserInfo(); Object.assign(passwordForm, { email: workspace.userInfo.value?.email || '', newPassword: '', confirmPassword: '', code: '' }); dialogs.password = true }) }
 async function sendPasswordCode() { await run(async () => { await api.sendPasswordCode(passwordForm.email); notify('验证码已发送', '', 'success') }) }
 async function changePassword() {
@@ -840,7 +847,7 @@ async function changePassword() {
     <div class="restore-summary"><strong>{{ workspace.worldSave.value?.remark || '未填写存档备注' }}</strong><span>{{ workspace.worldSave.value?.savedAt || '未知存档时间' }}</span><p>这项操作不可撤销，请确认当前进度已不再需要。</p></div>
     <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.loadSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
   </BaseDialog>
-  <BaseDialog v-model="dialogs.account" title="账号资料"><div class="form-stack"><label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label><label class="field"><span>邮箱（不可在此修改）</span><input v-model="accountForm.email" disabled /></label><label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label><label class="field"><span>骰子皮肤标识（预留）</span><input v-model.trim="accountForm.diceSkin" maxlength="50" placeholder="非空标识，最长 50 个字符" /><small>后端目前只保存该标识，当前前端尚未应用皮肤效果。</small></label></div><template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template></BaseDialog>
+  <BaseDialog v-model="dialogs.account" title="账号资料"><div class="form-stack"><label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label><label class="field"><span>邮箱（不可在此修改）</span><input v-model="accountForm.email" disabled /></label><label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label><label class="field"><span>骰子皮肤</span><select v-model="accountForm.diceSkin"><option v-for="option in DICE_SKIN_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><small>保存后，新打开的掷骰动画会使用这套皮肤。</small></label></div><template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.password" title="修改密码" description="验证码发送到当前账户邮箱，5 分钟内有效。"><div class="form-stack"><label class="field"><span>账户邮箱</span><input v-model="passwordForm.email" disabled /></label><label class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="passwordForm.code" inputmode="numeric" maxlength="6" /><button class="button secondary" @click="sendPasswordCode">发送验证码</button></div></label><label class="field"><span>新密码</span><input v-model="passwordForm.newPassword" type="password" placeholder="请输入非空新密码" /></label><label class="field"><span>确认新密码</span><input v-model="passwordForm.confirmPassword" type="password" /></label></div><template #footer><button class="button primary" :disabled="!passwordForm.code || !passwordForm.newPassword || !passwordForm.confirmPassword" @click="run(changePassword, 'password')">更新密码</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.end" title="关闭会话" description="服务端会生成会话总结并将状态设为已关闭，之后不能继续发送消息。"><template #footer><button class="button ghost" @click="dialogs.end = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.closeConversation, 'end')">确认关闭</button></template></BaseDialog>
   <TrpgCharacterBindingDialog

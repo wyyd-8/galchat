@@ -610,6 +610,42 @@ test('creates a new immutable playback request when the same result is replayed'
   assert.equal(first.result.modules[0].dice[0].value, 4)
 })
 
+test('offers the three persisted account dice skins with their player labels', () => {
+  const options = Reflect.get(diceState, 'DICE_SKIN_OPTIONS')
+
+  assert.deepEqual(options, [
+    { value: 'classic', label: '经典' },
+    { value: 'galaxy', label: '星穹' },
+    { value: 'moonwhite', label: '月白冰晶' },
+  ])
+})
+
+test('parses supported account dice skins and falls back to classic for unknown values', () => {
+  const resolveDiceSkin = Reflect.get(diceState, 'resolveDiceSkin') as
+    | ((value: unknown) => string)
+    | undefined
+
+  assert.deepEqual(
+    ['classic', 'galaxy', 'moonwhite'].map((value) => resolveDiceSkin?.(value)),
+    ['classic', 'galaxy', 'moonwhite'],
+  )
+  assert.equal(resolveDiceSkin?.('future-skin'), 'classic')
+  assert.equal(resolveDiceSkin?.(''), 'classic')
+  assert.equal(resolveDiceSkin?.(null), 'classic')
+})
+
+test('normalizes an unrecognized account skin before creating a playback request', () => {
+  const createRequest = createDicePlaybackRequest as unknown as (
+    previousId: number,
+    result: DiceResult,
+    skin: unknown,
+  ) => DicePlaybackRequest
+
+  const request = createRequest(0, createDiceDebugPreset('group'), 'removed-skin')
+
+  assert.equal(request.skin, 'classic')
+})
+
 test('creates a playback request from a Vue reactive result', () => {
   const formResult = reactive(createDiceDebugPreset('normal-percentile'))
 

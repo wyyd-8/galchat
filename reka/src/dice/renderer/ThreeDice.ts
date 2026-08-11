@@ -6,8 +6,10 @@ import {
   randomIdleQuaternion,
   type IdleSpinTarget,
 } from './idleSpin'
+import { resolveNormalDiePresentation } from './normalDiePresentation'
 import { continuousRotationTarget, interpolateRotation } from './rollRotation'
 import { settleCameraDistance, settleScaleFactor } from './settleScale'
+import { formatDiceGroupLabel } from '../domain/diceGroupLabel'
 
 export interface DiceRollValue {
   sides: number
@@ -23,6 +25,7 @@ export interface DiceRollModule {
   modifier: 'NORMAL' | 'ADVANTAGE' | 'DOUBLE_ADVANTAGE' | 'DISADVANTAGE' | 'DOUBLE_DISADVANTAGE'
   dice: DiceRollValue[]
   result: number
+  placeholder?: boolean
 }
 
 export interface DiceRollResult {
@@ -430,14 +433,17 @@ function normalDie(value: DiceRollValue, skin: DiceSkin): Promise<RenderedDie> {
   if (!Number.isInteger(value.value) || value.value < 1 || value.value > value.sides) {
     throw new Error(`D${value.sides} 结果 ${value.value} 无效`)
   }
-  if (value.sides === 10) {
-    const faceLabel = value.value === 10 ? '0' : String(value.value)
-    return createDie(MODEL_CONFIGS['d10-ones'], faceLabel, String(value.value), 'D10', value.value, skin)
-  }
-  const key = `d${value.sides}` as ModelKey
-  const config = MODEL_CONFIGS[key]
+  const presentation = resolveNormalDiePresentation(value.sides, value.value)
+  const config = MODEL_CONFIGS[presentation.modelKey as ModelKey]
   if (!config) throw new Error(`暂不支持 D${value.sides} 的动画模型`)
-  return createDie(config, String(value.value), String(value.value), `D${value.sides}`, value.value, skin)
+  return createDie(
+    config,
+    presentation.faceLabel,
+    presentation.displayValue,
+    presentation.typeLabelText,
+    value.value,
+    skin,
+  )
 }
 
 function uprightTarget(normal: THREE.Vector3, up: THREE.Vector3): THREE.Quaternion {
@@ -531,9 +537,18 @@ async function animateDie(die: RenderedDie, delay: number): Promise<void> {
   }).finished
 }
 
-function moduleHeading(module: DiceRollModule): HTMLElement {
+function moduleHeading(
+  module: DiceRollModule,
+  moduleIndex: number,
+  showDetails = true,
+): HTMLElement {
   const heading = document.createElement('header')
   heading.className = 'module-heading'
+  const groupLabel = document.createElement('small')
+  groupLabel.className = 'dice-module-group-label'
+  groupLabel.textContent = formatDiceGroupLabel(moduleIndex, 1)
+  heading.append(groupLabel)
+  if (!showDetails) return heading
   const expression = document.createElement('strong')
   expression.textContent = module.expression
   const total = document.createElement('span')
@@ -545,6 +560,7 @@ function moduleHeading(module: DiceRollModule): HTMLElement {
 async function createPercentileModule(
   module: DiceRollModule,
   skin: DiceSkin,
+  moduleIndex: number,
 ): Promise<{ element: HTMLElement; dice: RenderedDie[] }> {
   const ones = module.dice.find((die) => die.role === 'PERCENTILE_ONES')
   const tens = module.dice.filter((die) => die.role === 'PERCENTILE_TENS')
@@ -553,7 +569,7 @@ async function createPercentileModule(
 
   const element = document.createElement('section')
   element.className = 'dice-module'
-  element.append(moduleHeading(module))
+  element.append(moduleHeading(module, moduleIndex))
   const roll = document.createElement('div')
   roll.className = 'percentile-roll'
   const tensGroup = document.createElement('div')
@@ -599,11 +615,29 @@ async function createPercentileModule(
 async function createModule(
   module: DiceRollModule,
   skin: DiceSkin,
+  moduleIndex: number,
 ): Promise<{ element: HTMLElement; dice: RenderedDie[] }> {
-  if (module.diceSides === 100) return createPercentileModule(module, skin)
+  if (module.placeholder) {
+    const element = document.createElement('section')
+    element.className = 'dice-module is-value-placeholder'
+    const heading = moduleHeading(module, moduleIndex, false)
+    const row = document.createElement('div')
+    row.className = 'dice-row'
+    const slot = document.createElement('div')
+    slot.className = 'die-slot die-slot-placeholder is-settled'
+    slot.setAttribute('aria-label', `数值结果 ${module.result}`)
+    const valueLabel = document.createElement('output')
+    valueLabel.className = 'die-value'
+    valueLabel.textContent = String(module.result)
+    slot.append(valueLabel)
+    row.append(slot)
+    element.append(heading, row)
+    return { element, dice: [] }
+  }
+  if (module.diceSides === 100) return createPercentileModule(module, skin, moduleIndex)
   const element = document.createElement('section')
   element.className = 'dice-module'
-  element.append(moduleHeading(module))
+  element.append(moduleHeading(module, moduleIndex))
   const row = document.createElement('div')
   row.className = 'dice-row'
   const dice = await Promise.all(module.dice.map((die) => normalDie(die, skin)))
@@ -635,7 +669,9 @@ export class ThreeDiceBoard {
     const generation = ++this.preparationGeneration
     this.idleSpin.stop()
     this.preparedResult = undefined
-    const modules = await Promise.all(result.modules.map((module) => createModule(module, this.skin)))
+    const modules = await Promise.all(result.modules.map((module, moduleIndex) => (
+      createModule(module, this.skin, moduleIndex)
+    )))
     const nextDice = modules.flatMap((module) => module.dice)
     if (generation !== this.preparationGeneration) {
       nextDice.forEach((die) => die.dispose())

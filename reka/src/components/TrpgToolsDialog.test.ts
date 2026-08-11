@@ -115,3 +115,30 @@ test('renders save and load actions in separate cards', async () => {
   assert.match(textContent(savedRemark), /存档备注/)
   assert.match(textContent(savedRemark), /save\.remark/)
 })
+
+test('exposes backend-shaped dice debugging in a dedicated tools tab', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const root = baseParse(template)
+
+  const debugTab = findElement(root, (element) => element.tag === 'TabsTrigger'
+    && hasAttribute(element, 'value', 'dice-debug'))
+  const debugPanel = findElement(root, (element) => element.tag === 'TabsContent'
+    && hasAttribute(element, 'value', 'dice-debug'))
+  const debugComponent = debugPanel && findElement(
+    debugPanel as unknown as RootNode,
+    (element) => element.tag === 'DiceDebugPanel',
+  )
+
+  assert.ok(debugTab, 'the tools dialog should expose a dice debug tab')
+  assert.match(textContent(debugTab), /骰子调试/)
+  assert.ok(debugPanel, 'the tools dialog should contain the dice debug panel')
+  assert.ok(debugComponent, 'the debug panel should render the backend scenario launcher')
+  assert.ok(debugComponent.props.some((prop) => prop.type === NodeTypes.DIRECTIVE
+    && prop.name === 'on'
+    && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+    && prop.arg.content === 'play'
+    && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+    && prop.exp.content.includes("emit('debugDice', aggregate)")))
+})

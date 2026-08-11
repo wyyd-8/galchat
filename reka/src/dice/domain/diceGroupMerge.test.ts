@@ -3,7 +3,13 @@ import test from 'node:test'
 import {
   createDiceGroupMergePlan,
   createDiceValueMergeTokenLayout,
+  shouldMergeDiceModuleValues,
 } from './diceGroupMerge.ts'
+
+test('keeps placeholder values below their empty dice slots', () => {
+  assert.equal(shouldMergeDiceModuleValues(true), false)
+  assert.equal(shouldMergeDiceModuleValues(false), true)
+})
 
 test('moves only value labels to the measured center of their group', () => {
   assert.deepEqual(createDiceGroupMergePlan([100, 260, 420], 260, 0), {

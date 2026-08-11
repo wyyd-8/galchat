@@ -93,6 +93,17 @@ function openDiceMessage(aggregate: DiceRollAggregate) {
   }
 }
 
+function openDiceDebug(aggregate: DiceRollAggregate) {
+  try {
+    diceMessageAggregate.value = null
+    diceShowContinue.value = false
+    dicePlaybackRequest.value = createMessagePlaybackRequest(aggregate, 'play')
+    dicePlayerOpen.value = true
+  } catch (error) {
+    notify('无法打开骰子调试', errorMessage(error), 'danger')
+  }
+}
+
 function openIncomingDiceMessage(aggregate: DiceRollAggregate) {
   try {
     diceMessageAggregate.value = aggregate
@@ -858,7 +869,7 @@ async function changePassword() {
     :participant-ids="workspace.participantIds.value"
     @complete="completeTrpgBinding"
   />
-  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" @restored="restoreTrpg" @open-dice="openDiceMessage" @locate-dice="locateDiceMessage" />
+  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" @restored="restoreTrpg" @open-dice="openDiceMessage" @debug-dice="openDiceDebug" @locate-dice="locateDiceMessage" />
   <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" />
   <NoticeToast />
 </template>

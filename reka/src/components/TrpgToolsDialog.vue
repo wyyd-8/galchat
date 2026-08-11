@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, BookUser, Check, Dices, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, UserRound } from '@lucide/vue'
+import { Activity, BookUser, Check, Dices, FlaskConical, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, UserRound } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import DiceDebugPanel from '@/dice/components/DiceDebugPanel.vue'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import { api } from '@/api/client'
 import type {
@@ -21,7 +22,12 @@ const props = defineProps<{
   participantIds: number[]
   messages: GroupMessage[]
 }>()
-const emit = defineEmits<{ restored: []; openDice: [aggregate: DiceRollAggregate]; locateDice: [messageId: number] }>()
+const emit = defineEmits<{
+  restored: []
+  openDice: [aggregate: DiceRollAggregate]
+  debugDice: [aggregate: DiceRollAggregate]
+  locateDice: [messageId: number]
+}>()
 
 const busy = ref(false)
 const contextUsage = ref<ContextWindowUsage | null>(null)
@@ -117,6 +123,7 @@ watch(() => props.conversation.id, () => {
         <TabsTrigger value="save"><Save :size="15" />存档</TabsTrigger>
         <TabsTrigger value="card"><BookUser :size="15" />人物卡</TabsTrigger>
         <TabsTrigger value="dice"><Dices :size="15" />骰子</TabsTrigger>
+        <TabsTrigger value="dice-debug"><FlaskConical :size="15" />骰子调试</TabsTrigger>
       </TabsList>
 
       <TabsContent value="status" class="tabs-content tool-section">
@@ -219,6 +226,10 @@ watch(() => props.conversation.id, () => {
           <strong>当前聊天还没有掷骰记录</strong>
           <p>跑团中产生的掷骰会自动出现在这里。</p>
         </div>
+      </TabsContent>
+
+      <TabsContent value="dice-debug" class="tabs-content tool-section">
+        <DiceDebugPanel @play="(aggregate) => emit('debugDice', aggregate)" />
       </TabsContent>
 
     </TabsRoot>

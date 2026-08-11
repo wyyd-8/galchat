@@ -8,6 +8,10 @@ export interface DiceGroupMergePlan {
 interface RectPosition { left: number; top: number }
 interface RectSize extends RectPosition { width: number; height: number }
 
+export function shouldMergeDiceModuleValues(placeholder: boolean): boolean {
+  return !placeholder
+}
+
 export function createDiceValueMergeTokenLayout(
   valueRect: RectSize,
   moduleRect: RectPosition,

@@ -228,6 +228,51 @@ test('offers an explicit continue action below replay after the first player rol
   )), true)
 })
 
+test('removes the replay action after an all-placeholder result completes', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+
+  const replay = findElementByClass(baseParse(template), 'dice-player-replay')
+  assert.ok(replay, 'the player should render a conditional roll action')
+  assert.equal(replay.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'if'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content === 'showRollAction'
+  )), true)
+})
+
+test('uses a neutral value state instead of success or failure for numeric cards', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+
+  const resultBox = findElementByClass(baseParse(template), 'dice-group-result-box')
+  assert.ok(resultBox, 'the player should render participant result cards')
+  assert.equal(resultBox.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'bind'
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.content === 'class'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content.includes("isValueRoll ? 'is-value'")
+  )), true)
+})
+
+test('shows the corresponding dice group number below every participant name', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+
+  const groupNumber = findElementByClass(baseParse(template), 'dice-group-result-number')
+  assert.ok(groupNumber, 'participant result cards should show their dice group number')
+  assert.match(
+    groupNumber.children.map((child) => child.loc.source).join(''),
+    /formatDiceGroupLabel\(request\.presentation\.groups\[index\]!\.moduleStart, request\.presentation\.groups\[index\]!\.moduleCount\)/,
+  )
+})
+
 test('places the dice player and its overlay on a foreground dialog layer', async () => {
   const playerSource = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const playerTemplate = playerSource.match(/<template>([\s\S]*)<\/template>/)?.[1]

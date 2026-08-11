@@ -31,6 +31,36 @@ function diceMessagePresentation(
   return createPresentation?.(aggregate)
 }
 
+function valueRollAggregate(
+  toolName: 'rollDamage' | 'rollSanLoss' | 'rollHealing',
+  type: 'DAMAGE' | 'SAN_LOSS' | 'HEALING',
+  entries: Array<{ name: string; result: DiceResult }>,
+): DiceRollAggregate {
+  return {
+    summary: {
+      id: 9300,
+      conversationId: 1,
+      reason: '数值结算',
+      totalResult: '已完成',
+      roundCount: 1,
+      status: 'COMPLETED',
+      toolName,
+    },
+    results: entries.map((entry, index) => ({
+      id: 9310 + index,
+      summaryId: 9300,
+      roundNo: 1,
+      displayOrder: index + 1,
+      displayType: type,
+      reason: '数值结算',
+      resultData: entry.result,
+      resolution: { type, outcome: { characterName: entry.name } },
+      resolvedAt: '2026-08-12T12:00:00',
+    })),
+    semanticResult: '已完成',
+  }
+}
+
 test('shows pending dice messages in gray regardless of their eventual result type', () => {
   const aggregate = createDiceDebugAggregatePreset('opposed-check')
   aggregate.summary.status = 'PENDING'
@@ -398,21 +428,155 @@ test('creates a persisted single check through the same participant presentation
   assert.equal(summary?.formulaValue, '1 人参与 · 侦查 · 分别展示')
 })
 
-test('keeps ordinary single dice outside the participant outcome presentation', () => {
+test('uses the participant value presentation for an ordinary single damage die', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
   aggregate.results = [{
     ...aggregate.results[0]!,
     displayType: 'DAMAGE',
-    resolution: { type: 'DAMAGE', outcome: { damage: 4 } },
+    resolution: { type: 'DAMAGE', outcome: { characterName: '林恩' } },
   }]
   const createMessagePlayback = Reflect.get(diceState, 'createDiceMessagePlaybackRequest') as
     | ((previousId: number, value: DiceRollAggregate, skin: 'classic') => ReturnType<typeof createDicePlaybackRequest>)
     | undefined
 
   const request = createMessagePlayback?.(0, aggregate, 'classic')
+  const summary = request
+    ? createDicePlayerSummary(request.result, request.skin, request.presentation)
+    : undefined
 
-  assert.equal(request?.presentation, undefined)
-  assert.equal(request?.result.result, 27)
+  assert.equal(request?.presentation?.kind, 'value-roll')
+  assert.deepEqual(summary?.groups, [
+    { label: '林恩', expression: '1D100', result: '-27', diceCount: 2 },
+  ])
+})
+
+test('creates a single constant damage result with a negative placeholder card', () => {
+  const aggregate = valueRollAggregate('rollDamage', 'DAMAGE', [{
+    name: '林恩',
+    result: { formula: '4', modules: [], result: 4 },
+  }])
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.equal(request.presentation?.kind, 'value-roll')
+  assert.deepEqual(request.result.modules.map((module) => ({
+    placeholder: module.placeholder,
+    diceCount: module.dice.length,
+    result: module.result,
+  })), [
+    { placeholder: true, diceCount: 0, result: 4 },
+  ])
+  assert.deepEqual(summary.groups, [
+    { label: '林恩', expression: '4', result: '-4', diceCount: 0 },
+  ])
+})
+
+test('keeps mixed value results aligned when one participant has no physical dice', () => {
+  const aggregate = valueRollAggregate('rollSanLoss', 'SAN_LOSS', [
+    { name: '林恩', result: { formula: '4', modules: [], result: 4 } },
+    {
+      name: '陈默',
+      result: {
+        formula: '1D6 + 1D4',
+        modules: [
+          {
+            expression: '1D6', diceCount: 1, diceSides: 6, modifier: 'NORMAL',
+            dice: [{ sides: 6, value: 4, role: 'NORMAL', selected: true }], result: 4,
+          },
+          {
+            expression: '1D4', diceCount: 1, diceSides: 4, modifier: 'NORMAL',
+            dice: [{ sides: 4, value: 2, role: 'NORMAL', selected: true }], result: 2,
+          },
+        ],
+        result: 6,
+      },
+    },
+  ])
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.deepEqual(request.result.modules.map((module) => module.placeholder === true), [true, false, false])
+  assert.deepEqual(request.presentation?.groups.map((group) => ({
+    moduleStart: group.moduleStart,
+    moduleCount: group.moduleCount,
+  })), [
+    { moduleStart: 0, moduleCount: 1 },
+    { moduleStart: 1, moduleCount: 2 },
+  ])
+  assert.deepEqual(summary.groups, [
+    { label: '林恩', expression: '4', result: '-4', diceCount: 0 },
+    { label: '陈默', expression: '1D6 + 1D4', result: '-6', diceCount: 2 },
+  ])
+})
+
+test('never offers a roll action when every value result is a constant placeholder', () => {
+  const allPlaceholders = diceState.createDiceMessagePlaybackRequest(
+    0,
+    valueRollAggregate('rollHealing', 'HEALING', [
+      { name: '林恩', result: { formula: '2', modules: [], result: 2 } },
+      { name: '陈默', result: { formula: '0', modules: [], result: 0 } },
+    ]),
+    'classic',
+  )
+  const mixed = diceState.createDiceMessagePlaybackRequest(
+    1,
+    valueRollAggregate('rollHealing', 'HEALING', [{
+      name: '林恩',
+      result: createDiceDebugPreset('group'),
+    }]),
+    'classic',
+  )
+  const allPlaceholderSummary = createDicePlayerSummary(
+    allPlaceholders.result,
+    allPlaceholders.skin,
+    allPlaceholders.presentation,
+  )
+
+  assert.deepEqual(allPlaceholderSummary.groups.map((group) => group.result), ['+2', '0'])
+  assert.equal(diceState.shouldShowDiceRollAction('complete', allPlaceholders.result), false)
+  assert.equal(diceState.shouldShowDiceRollAction('ready', allPlaceholders.result), false)
+  assert.equal(diceState.shouldShowDiceRollAction('complete', mixed.result), true)
+})
+
+test('opens single and multiplayer constant values as settled results', () => {
+  const single = diceState.createDiceMessagePlaybackRequest(
+    0,
+    valueRollAggregate('rollDamage', 'DAMAGE', [
+      { name: '林恩', result: { formula: '4', modules: [], result: 4 } },
+    ]),
+    'classic',
+  )
+  const multiple = diceState.createDiceMessagePlaybackRequest(
+    1,
+    valueRollAggregate('rollHealing', 'HEALING', [
+      { name: '林恩', result: { formula: '2', modules: [], result: 2 } },
+      { name: '陈默', result: { formula: '0', modules: [], result: 0 } },
+    ]),
+    'classic',
+  )
+
+  assert.equal(diceState.resolveDicePlayerMode({ ...single, mode: 'play' }), 'settled')
+  assert.equal(diceState.resolveDicePlayerMode({ ...multiple, mode: 'pending' }), 'settled')
+  assert.deepEqual(
+    diceState.createDicePlayerPreparedResult({ ...multiple, mode: 'pending' }),
+    multiple.result,
+  )
+})
+
+test('keeps mixed constant and physical dice values in their requested playback mode', () => {
+  const mixed = diceState.createDiceMessagePlaybackRequest(
+    0,
+    valueRollAggregate('rollSanLoss', 'SAN_LOSS', [
+      { name: '林恩', result: { formula: '4', modules: [], result: 4 } },
+      { name: '陈默', result: createDiceDebugPreset('group') },
+    ]),
+    'classic',
+  )
+
+  assert.equal(diceState.resolveDicePlayerMode({ ...mixed, mode: 'pending' }), 'pending')
+  assert.equal(diceState.shouldShowDiceRollAction('ready', mixed.result), true)
 })
 
 test('applies the selected damage window style to aggregate debug playback', () => {

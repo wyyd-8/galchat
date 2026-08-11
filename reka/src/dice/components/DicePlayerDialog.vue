@@ -10,6 +10,8 @@ import {
   createGroupOutcomeVisibility,
   createDicePlayerStatus,
   createDicePlayerSummary,
+  resolveDicePlayerMode,
+  shouldShowDiceRollAction,
   type DicePlaybackRequest,
   type DiceGroupOutcomePhase,
   type DicePlayerPhase,
@@ -17,11 +19,13 @@ import {
 import {
   createDiceGroupMergePlan,
   createDiceValueMergeTokenLayout,
+  shouldMergeDiceModuleValues,
 } from '@/dice/domain/diceGroupMerge'
 import {
   createDicePlayerLayout,
   createDicePlayerWindowWidth,
 } from '@/dice/domain/dicePlayerLayout'
+import { formatDiceGroupLabel } from '@/dice/domain/diceGroupLabel'
 import type {
   DiceRollResult,
   ThreeDiceBoard,
@@ -54,9 +58,13 @@ const dialogDescription = computed(() => summary.value
   : '准备这次掷骰判定')
 const isMultiplayerCheck = computed(() => props.request?.presentation?.kind === 'multiplayer-check')
 const isOpposedCheck = computed(() => props.request?.presentation?.kind === 'opposed-check')
-const hasAggregateOutcome = computed(() => isMultiplayerCheck.value || isOpposedCheck.value)
-const isSeparateGroupCheck = computed(() => isMultiplayerCheck.value
+const isValueRoll = computed(() => props.request?.presentation?.kind === 'value-roll')
+const hasAggregateOutcome = computed(() => isMultiplayerCheck.value || isOpposedCheck.value || isValueRoll.value)
+const isSeparateGroupCheck = computed(() => (isMultiplayerCheck.value || isValueRoll.value)
   && props.request?.presentation?.groupRule === 'SEPARATE')
+const showRollAction = computed(() => props.request
+  ? shouldShowDiceRollAction(status.value, props.request.result)
+  : false)
 const hasOpposedWinner = computed(() => props.request?.presentation?.groups.some((group) => group.winner) === true)
 const groupOutcomeVisibility = computed(() => createGroupOutcomeVisibility(
   groupOutcomePhase.value,
@@ -182,6 +190,7 @@ function prepareDiceValueMerges(request: DicePlaybackRequest, playGeneration: nu
   clearDiceValueMergeTimers()
   const modules = Array.from(tray.value.querySelectorAll<HTMLElement>('.dice-module'))
   modules.forEach((moduleElement, groupIndex) => {
+    if (!shouldMergeDiceModuleValues(moduleElement.classList.contains('is-value-placeholder'))) return
     const values = Array.from(moduleElement.querySelectorAll<HTMLElement>('.die-value'))
     const mergeTarget = moduleElement.querySelector<HTMLElement>('.dice-row, .percentile-roll')
     const targetRect = (mergeTarget || moduleElement).getBoundingClientRect()
@@ -219,7 +228,7 @@ async function prepare(request: DicePlaybackRequest) {
   if (!tray.value || currentGeneration !== generation) return
 
   try {
-    const mode = request.mode || 'play'
+    const mode = resolveDicePlayerMode(request)
     const initial = createDicePlayerInitialState(
       mode,
       request.presentation?.kind,
@@ -397,7 +406,7 @@ onBeforeUnmount(() => {
                 class="dice-group-result-box"
                 :class="[
                   groupOutcomeVisibility.revealIndividualResults
-                    ? request.presentation.groups[index]?.success ? 'is-success' : 'is-failure'
+                    ? isValueRoll ? 'is-value' : request.presentation.groups[index]?.success ? 'is-success' : 'is-failure'
                     : 'is-concealed',
                   {
                     'is-winner': isWinnerHighlighted && request.presentation.groups[index]?.winner,
@@ -405,7 +414,11 @@ onBeforeUnmount(() => {
                   },
                 ]"
               >
-                <span><strong>{{ group.label }}</strong><small>{{ group.expression }}</small></span>
+                <span>
+                  <strong>{{ group.label }}</strong>
+                  <small class="dice-group-result-number">{{ formatDiceGroupLabel(request.presentation.groups[index]!.moduleStart, request.presentation.groups[index]!.moduleCount) }}</small>
+                  <small>{{ group.expression }}</small>
+                </span>
                 <b v-if="groupOutcomeVisibility.revealIndividualResults">{{ group.result }}</b>
               </article>
               <div
@@ -472,8 +485,9 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
-      <div class="dice-player-actions" :class="{ 'has-continue': showContinue }">
+      <div v-if="showRollAction || showContinue" class="dice-player-actions" :class="{ 'has-continue': showContinue }">
         <button
+          v-if="showRollAction"
           class="button secondary dice-player-replay"
           type="button"
           :disabled="presentation.actionDisabled"

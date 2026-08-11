@@ -25,9 +25,12 @@ export interface DicePlaybackGroupPresentation {
   outcomeLabel: string
   success: boolean
   winner?: boolean
+  moduleStart: number
+  moduleCount: number
+  rollResult?: number
 }
 export interface DicePlaybackPresentation {
-  kind: 'multiplayer-check' | 'opposed-check'
+  kind: 'multiplayer-check' | 'opposed-check' | 'value-roll'
   resultLabel: string
   resultValue: string
   formulaLabel: string
@@ -128,6 +131,7 @@ const SUCCESSFUL_CHECK_OUTCOMES = new Set([
 ])
 
 const PARTICIPANT_CHECK_TYPES = new Set(['CHECK', 'SAN_CHECK', 'OPPOSED_CHECK'])
+const VALUE_ROLL_TYPES = new Set(['DAMAGE', 'SAN_LOSS', 'HEALING'])
 
 function checkOutcomeLabel(outcome: Record<string, unknown>): string {
   const category = typeof outcome.category === 'string' ? outcome.category : undefined
@@ -283,9 +287,14 @@ export function createStandbyDiceResult(result: DiceResult): DiceResult {
 }
 
 export function createDicePlayerPreparedResult(request: DicePlaybackRequest): DiceResult {
-  return request.mode === 'pending'
+  return resolveDicePlayerMode(request) === 'pending'
     ? createStandbyDiceResult(request.result)
     : request.result
+}
+
+export function resolveDicePlayerMode(request: DicePlaybackRequest): DicePlaybackMode {
+  const hasPhysicalDice = request.result.modules.some((module) => module.dice.length > 0)
+  return hasPhysicalDice ? request.mode || 'play' : 'settled'
 }
 
 interface DiceMessageReference {
@@ -348,7 +357,11 @@ export function findDiceMessageElement<T extends { dataset: { messageId?: string
   return Array.from(elements).find((element) => element.dataset.messageId === String(messageId))
 }
 
-function aggregateGroup(detail: DiceRollDetail, index: number): DicePlaybackGroupPresentation {
+function aggregateGroup(
+  detail: DiceRollDetail & { resultData: DiceResult },
+  index: number,
+  moduleStart: number,
+): DicePlaybackGroupPresentation {
   const outcome = detail.resolution?.outcome || {}
   return {
     label: typeof outcome.characterName === 'string'
@@ -358,6 +371,77 @@ function aggregateGroup(detail: DiceRollDetail, index: number): DicePlaybackGrou
     outcomeLabel: checkOutcomeLabel(outcome),
     success: typeof outcome.category === 'string'
       && SUCCESSFUL_CHECK_OUTCOMES.has(outcome.category),
+    moduleStart,
+    moduleCount: detail.resultData.modules.length,
+    rollResult: detail.resultData.result,
+  }
+}
+
+function signedValue(type: string | undefined, value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '?'
+  if (value === 0) return '0'
+  return `${type === 'HEALING' ? '+' : '-'}${Math.abs(value)}`
+}
+
+function valuePlaceholder(
+  detail: DiceRollDetail & { resultData: DiceResult },
+): DiceResult['modules'][number] {
+  return {
+    expression: detail.resultData.formula,
+    diceCount: 0,
+    diceSides: 0,
+    modifier: 'NORMAL',
+    dice: [],
+    result: detail.resultData.result,
+    placeholder: true,
+  }
+}
+
+function createDiceValuePlaybackRequest(
+  previousId: number,
+  aggregate: DiceRollAggregate,
+  details: Array<DiceRollDetail & { resultData: DiceResult }>,
+  skin: unknown,
+): DicePlaybackRequest {
+  const modules: DiceResult['modules'] = []
+  const groups = details.map((detail, index) => {
+    const moduleStart = modules.length
+    const detailModules = detail.resultData.modules.length
+      ? detail.resultData.modules
+      : [valuePlaceholder(detail)]
+    modules.push(...detailModules)
+    const outcome = detail.resolution?.outcome || {}
+    return {
+      label: typeof outcome.characterName === 'string'
+        ? outcome.characterName
+        : detail.reason || `参与者 ${index + 1}`,
+      checkName: detail.resultData.formula,
+      outcomeLabel: signedValue(detail.resolution?.type || detail.displayType, detail.resultData.result),
+      success: false,
+      moduleStart,
+      moduleCount: detailModules.length,
+      rollResult: detail.resultData.result,
+    }
+  })
+  const result: DiceResult = {
+    formula: details.map((detail) => detail.resultData.formula).join(' / '),
+    modules,
+  }
+  return {
+    id: previousId + 1,
+    result: JSON.parse(JSON.stringify(result)) as DiceResult,
+    skin: resolveDiceSkin(skin),
+    reason: aggregate.summary.reason,
+    toolName: aggregate.summary.toolName,
+    presentation: {
+      kind: 'value-roll',
+      resultLabel: '分别结果',
+      resultValue: aggregate.semanticResult || aggregate.summary.totalResult || '已完成',
+      formulaLabel: '参与者',
+      formulaValue: `${groups.length} 人参与`,
+      groups,
+      groupRule: 'SEPARATE',
+    },
   }
 }
 
@@ -397,8 +481,10 @@ export function createDiceAggregatePlaybackRequest(
     ?? 'SEPARATE'
   const aggregateResult = aggregate.semanticResult || aggregate.summary.totalResult || '已完成'
   const winnerName = opposed ? aggregateResult.match(/^(.+?)获胜(?:；|$)/)?.[1] : undefined
+  let moduleStart = 0
   const groups = details.map((detail, index) => {
-    const group = aggregateGroup(detail, index)
+    const group = aggregateGroup(detail, index, moduleStart)
+    moduleStart += detail.resultData.modules.length
     return opposed ? { ...group, winner: group.label === winnerName } : group
   })
   const checkNames = [...new Set(groups.map((group) => group.checkName))]
@@ -457,6 +543,12 @@ export function createDiceMessagePlaybackRequest(
   const participantCheck = details.every((detail) => PARTICIPANT_CHECK_TYPES.has(
     detail.resolution?.type || detail.displayType || '',
   ))
+  const valueRoll = details.every((detail) => VALUE_ROLL_TYPES.has(
+    detail.resolution?.type || detail.displayType || '',
+  ))
+  if (valueRoll) {
+    return createDiceValuePlaybackRequest(previousId, aggregate, details, skin)
+  }
   if (participantCheck || details.length > 1) {
     return createDiceAggregatePlaybackRequest(previousId, aggregate, skin)
   }
@@ -499,6 +591,8 @@ export function createDicePlayerSummary(
   const modifiers = new Set(result.modules.map((module) => module.modifier || 'NORMAL'))
   const modifierLabel = presentation?.kind === 'opposed-check'
     ? '对抗检定'
+    : presentation?.kind === 'value-roll'
+      ? presentation.groups.length === 1 ? '单人掷骰' : '多人掷骰'
     : presentation?.kind === 'multiplayer-check'
       ? presentation.groups.length === 1 ? '单人检定' : '多人检定'
       : modifiers.size === 1
@@ -521,14 +615,24 @@ export function createDicePlayerSummary(
     selectionLabel: discardedCount > 0
       ? `${selectedCount} 颗计入 · ${discardedCount} 颗舍弃`
       : `${diceCount} 颗全部计入`,
-    groups: result.modules.map((module, index) => ({
-      label: presentation?.groups[index]?.label || `第 ${index + 1} 组`,
-      expression: presentation?.groups[index]?.checkName || module.expression,
-      result: presentation?.groups[index]
-        ? `${Number.isFinite(module.result) ? module.result : '—'} · ${presentation.groups[index].outcomeLabel}`
-        : Number.isFinite(module.result) ? module.result as number : '—',
-      diceCount: module.dice.length,
-    })),
+    groups: presentation
+      ? presentation.groups.map((group) => {
+          const modules = result.modules.slice(group.moduleStart, group.moduleStart + group.moduleCount)
+          return {
+            label: group.label,
+            expression: group.checkName,
+            result: presentation.kind === 'value-roll'
+              ? group.outcomeLabel
+              : `${Number.isFinite(group.rollResult) ? group.rollResult : '—'} · ${group.outcomeLabel}`,
+            diceCount: modules.reduce((total, module) => total + module.dice.length, 0),
+          }
+        })
+      : result.modules.map((module, index) => ({
+          label: `第 ${index + 1} 组`,
+          expression: module.expression,
+          result: Number.isFinite(module.result) ? module.result as number : '—',
+          diceCount: module.dice.length,
+        })),
     equation: `${result.formula} = ${settledResult}`,
     resultLabel: presentation?.resultLabel || '最终结果',
     resultValue: presentation?.resultValue || settledResult,
@@ -546,4 +650,8 @@ export function createDicePlayerStatus(phase: DicePlayerPhase): DicePlayerStatus
     complete: { label: '判定完成', hint: '最终点数已锁定', revealResult: true, showDieValues: true, actionLabel: '重放动画', actionDisabled: false },
     error: { label: '播放中断', hint: '已保留结果，可以重新准备', revealResult: true, showDieValues: false, actionLabel: '重新准备', actionDisabled: false },
   }[phase]
+}
+
+export function shouldShowDiceRollAction(_phase: DicePlayerPhase, result: DiceResult): boolean {
+  return result.modules.some((module) => module.dice.length > 0)
 }

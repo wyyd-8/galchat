@@ -544,6 +544,24 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-history-empty svg { margin-bottom: 9px; color: var(--pine); }
 .dice-history-empty strong { color: var(--ink); font-size: 13px; }
 .dice-history-empty p { margin: 5px 0 0; font-size: 10px; }
+.dice-debug-panel { display: grid; gap: 12px; }
+.dice-debug-intro { padding: 13px 15px; border: 1px solid rgba(41,79,73,.13); border-radius: 11px; display: flex; align-items: center; gap: 11px; color: var(--pine); background: var(--pine-soft); }
+.dice-debug-intro span, .dice-debug-intro strong, .dice-debug-intro small { display: block; }
+.dice-debug-intro strong { font-size: 11px; }
+.dice-debug-intro small { margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.dice-debug-tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.dice-debug-tool-card, .dice-debug-constant-card { padding: 13px 14px; border: 1px solid var(--line); border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface); }
+.dice-debug-tool-card > span, .dice-debug-tool-card > span > *, .dice-debug-constant-card > span, .dice-debug-constant-card > span > * { display: block; }
+.dice-debug-tool-card strong, .dice-debug-constant-card strong { font-size: 11px; }
+.dice-debug-tool-card code { width: fit-content; margin-top: 3px; padding: 2px 5px; border-radius: 4px; color: #64716a; background: #efeee8; font-size: 8px; }
+.dice-debug-tool-card small, .dice-debug-constant-card small { margin-top: 5px; color: var(--muted); font-size: 8px; line-height: 1.5; }
+.dice-debug-tool-card > div, .dice-debug-constant-card > div { flex: 0 0 auto; display: flex; gap: 6px; }
+.dice-debug-tool-card .button, .dice-debug-constant-card .button { min-width: 72px; padding: 7px 9px; font-size: 9px; }
+.dice-debug-constant-card { border-color: rgba(119,93,52,.2); background: #faf7f0; }
+@media (max-width: 760px) {
+  .dice-debug-tool-grid { grid-template-columns: 1fr; }
+  .dice-debug-tool-card, .dice-debug-constant-card { align-items: flex-start; flex-direction: column; }
+}
 .dice-player-window { width: min(980px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100vh - 24px); overflow: hidden; border-color: rgba(46,64,57,.18); border-radius: 22px; background: #f8f6f0; box-shadow: 0 38px 100px rgba(25,34,30,.28), 0 8px 24px rgba(31,38,34,.1); transition: width 260ms cubic-bezier(.2,.78,.24,1); }
 .dice-player-window .dialog-header { min-height: 76px; padding: 15px 24px 14px; border-bottom: 1px solid rgba(70,76,70,.1); align-items: center; background: rgba(255,254,250,.96); }
 .dice-player-window .dialog-title { font-family: var(--font-display); font-size: 22px; letter-spacing: -.01em; }
@@ -585,14 +603,14 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-player-state strong { color: #39443f; font-size: 10px; }
 .dice-player-state small { margin-top: 2px; color: #7b817c; font-size: 8px; }
 .dice-player-modifier { padding: 7px 10px; border: 1px solid rgba(var(--dice-accent-rgb),.14); border-radius: 999px; color: var(--dice-accent); background: rgba(255,255,255,.56); font-size: 9px; font-weight: 700; letter-spacing: .08em; backdrop-filter: blur(12px); }
-.dice-player-tray { position: relative; z-index: 1; width: 100%; min-height: 360px; padding: 58px 22px 42px; display: flex; flex-direction: column; align-items: safe center; justify-content: center; gap: 10px; overflow-x: auto; counter-reset: dice-module; scrollbar-color: rgba(var(--dice-accent-rgb),.26) transparent; scrollbar-width: thin; }
+.dice-player-tray { position: relative; z-index: 1; width: 100%; min-height: 360px; padding: 58px 22px 42px; display: flex; flex-direction: column; align-items: safe center; justify-content: center; gap: 10px; overflow-x: auto; scrollbar-color: rgba(var(--dice-accent-rgb),.26) transparent; scrollbar-width: thin; }
 .dice-player-row { width: max-content; display: flex; align-items: center; justify-content: center; gap: 8px; }
 .dice-player-surface .empty-tray { color: var(--muted); font-size: 12px; }
-.dice-player-surface .dice-module { min-width: max-content; position: relative; padding: 10px 10px 4px; border: 1px solid rgba(var(--dice-accent-rgb),.1); border-radius: 18px; flex: 0 0 auto; counter-increment: dice-module; background: rgba(255,255,255,.3); box-shadow: inset 0 1px 0 rgba(255,255,255,.42); }
+.dice-player-surface .dice-module { min-width: max-content; position: relative; padding: 10px 10px 4px; border: 1px solid rgba(var(--dice-accent-rgb),.1); border-radius: 18px; flex: 0 0 auto; background: rgba(255,255,255,.3); box-shadow: inset 0 1px 0 rgba(255,255,255,.42); }
 .dice-player-surface .dice-module::after { width: 52px; height: 30px; position: absolute; z-index: 8; bottom: 9px; left: 50%; border: 1px solid rgba(var(--dice-accent-rgb),.18); border-radius: 999px; display: grid; place-items: center; content: attr(data-merge-total); color: #fff; background: linear-gradient(145deg, rgba(var(--dice-accent-rgb),.96), rgba(var(--dice-accent-rgb),.78)); box-shadow: 0 9px 22px rgba(var(--dice-accent-rgb),.2), inset 0 1px 0 rgba(255,255,255,.24); font-family: var(--font-display); font-size: 15px; font-weight: 700; line-height: 1; opacity: 0; pointer-events: none; transform: translate(-50%, 7px) scale(.72); }
 .dice-player-surface .module-heading { min-height: 27px; padding: 0 4px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; color: #53615a; }
 .dice-player-surface .module-heading strong { display: flex; align-items: center; gap: 6px; font-family: var(--font-display); font-size: 11px; }
-.dice-player-surface .module-heading strong::before { padding: 3px 6px; border-radius: 999px; content: '第 ' counter(dice-module) ' 组'; color: var(--dice-accent); background: rgba(var(--dice-accent-rgb),.09); font-family: var(--font-ui); font-size: 7px; font-weight: 700; letter-spacing: .05em; }
+.dice-player-surface .dice-module-group-label { padding: 3px 6px; border-radius: 999px; color: var(--dice-accent); background: rgba(var(--dice-accent-rgb),.09); font-family: var(--font-ui); font-size: 7px; font-weight: 700; letter-spacing: .05em; white-space: nowrap; }
 .dice-player-surface .module-heading span { color: #68736c; font-size: 8px; opacity: 0; transform: translateY(3px); transition: opacity 180ms ease, transform 180ms ease; }
 .dice-player-surface.show-die-values .module-heading span { opacity: 1; transform: translateY(0); }
 .dice-player-surface .dice-row, .dice-player-surface .percentile-roll, .dice-player-surface .percentile-tens { display: flex; align-items: center; justify-content: center; }
@@ -644,10 +662,18 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-group-result-box > span strong, .dice-group-result-box > span small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dice-group-result-box > span strong { color: #3f4944; font-size: 10px; }
 .dice-group-result-box > span small { margin-top: 3px; color: #838982; font-size: 8px; }
+.dice-group-result-box > span .dice-group-result-number { color: var(--dice-accent); font-weight: 700; }
 .dice-group-result-box > b { max-width: 76px; color: var(--pine); font-size: 10px; line-height: 1.4; text-align: right; }
 .dice-group-result-box.is-concealed { border-style: dashed; border-color: rgba(72,82,76,.14); background: #f4f4f0; box-shadow: none; }
 .dice-group-result-box.is-failure { border-color: rgba(138,63,72,.13); background: #faf2f2; }
 .dice-group-result-box.is-failure > b { color: var(--wine); }
+.dice-group-result-box.is-value { background: rgba(255,255,255,.42); }
+.dice-player-window--damage .dice-group-result-box.is-value { border-color: rgba(93,35,40,.2); }
+.dice-player-window--damage .dice-group-result-box.is-value > b { color: #7e3038; }
+.dice-player-window--sanity .dice-group-result-box.is-value { border-color: rgba(47,64,96,.22); }
+.dice-player-window--sanity .dice-group-result-box.is-value > b { color: #35496f; }
+.dice-player-window--healing .dice-group-result-box.is-value { border-color: rgba(82,99,74,.2); }
+.dice-player-window--healing .dice-group-result-box.is-value > b { color: #526348; }
 .dice-group-outcome-flow.is-opposed .dice-group-result-box { max-width: 154px; }
 .dice-opposed-versus { flex: 0 0 44px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 5px; color: #886c3d; transition: opacity 420ms ease, filter 420ms ease, transform 520ms cubic-bezier(.22,.78,.2,1); }
 .dice-opposed-versus i { height: 1px; background: linear-gradient(90deg, transparent, rgba(136,108,61,.55)); }

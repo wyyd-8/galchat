@@ -159,7 +159,7 @@ export interface InvestigatorCardSummary {
 }
 
 export interface DiceValue { sides: number; value?: number; role?: string; selected: boolean }
-export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number }
+export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number; placeholder?: boolean }
 export interface DiceResult { formula: string; modules: DiceModule[]; result?: number }
 export interface DiceResolution { type?: string; sourceResultId?: number; groupRule?: 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
 export interface DiceRollSummary { id: number; conversationId: number; reason?: string; totalResult?: string; roundCount?: number; status: string; toolName?: string; createdAt?: string; updatedAt?: string }

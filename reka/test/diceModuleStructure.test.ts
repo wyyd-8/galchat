@@ -184,12 +184,14 @@ test('keeps baked cinnabar gold detail atlases free of black bleed', async () =>
   }
 })
 
-test('removes the standalone and embedded dice demos', async () => {
+test('keeps dice debugging inside the TRPG tools instead of a standalone demo', async () => {
   await assert.rejects(access(new URL('../../dice-lab/', import.meta.url)))
-  await assert.rejects(access(new URL('../src/dice/components/DiceDebugPanel.vue', import.meta.url)))
+  await access(new URL('../src/dice/components/DiceDebugPanel.vue', import.meta.url))
 
   const toolsSource = await readFile(new URL('../src/components/TrpgToolsDialog.vue', import.meta.url), 'utf8')
-  assert.doesNotMatch(toolsSource, /DiceDebugPanel|dice-debug|骰子调试/)
+  assert.match(toolsSource, /DiceDebugPanel/)
+  assert.match(toolsSource, /value="dice-debug"/)
+  assert.match(toolsSource, /骰子调试/)
 })
 
 test('routes frontend consumers through the dice feature hierarchy', async () => {

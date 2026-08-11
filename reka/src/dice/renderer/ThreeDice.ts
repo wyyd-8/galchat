@@ -32,7 +32,7 @@ export interface DiceRollResult {
 }
 
 type ModelKey = 'd4' | 'd6' | 'd8' | 'd10-ones' | 'd10-tens' | 'd12' | 'd20'
-export type DiceSkin = 'classic' | 'galaxy' | 'moonwhite'
+export type DiceSkin = 'classic' | 'galaxy' | 'moonwhite' | 'cinnabar'
 
 interface DiceModelConfig {
   key: ModelKey
@@ -130,6 +130,16 @@ const MOONWHITE_MODEL_URLS: Record<ModelKey, string> = {
   'd10-tens': new URL('../assets/models/moonwhite/D10_百分骰_00-90_月白冰晶_baked.glb', import.meta.url).href,
   d12: new URL('../assets/models/moonwhite/D12_十二面骰_月白冰晶_baked.glb', import.meta.url).href,
   d20: new URL('../assets/models/moonwhite/D20_二十面骰_月白冰晶_baked.glb', import.meta.url).href,
+}
+
+const CINNABAR_MODEL_URLS: Record<ModelKey, string> = {
+  d4: new URL('../assets/models/cinnabar/D4_四面骰_朱砂鎏金_baked.glb', import.meta.url).href,
+  d6: new URL('../assets/models/cinnabar/D6_六面骰_朱砂鎏金_baked.glb', import.meta.url).href,
+  d8: new URL('../assets/models/cinnabar/D8_八面骰_朱砂鎏金_baked.glb', import.meta.url).href,
+  'd10-ones': new URL('../assets/models/cinnabar/D10_个位骰_0-9_朱砂鎏金_baked.glb', import.meta.url).href,
+  'd10-tens': new URL('../assets/models/cinnabar/D10_百分骰_00-90_朱砂鎏金_baked.glb', import.meta.url).href,
+  d12: new URL('../assets/models/cinnabar/D12_十二面骰_朱砂鎏金_baked.glb', import.meta.url).href,
+  d20: new URL('../assets/models/cinnabar/D20_二十面骰_朱砂鎏金_baked.glb', import.meta.url).href,
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -249,6 +259,7 @@ function createMoonwhiteMist(
 function modelUrl(config: DiceModelConfig, skin: DiceSkin): string {
   if (skin === 'galaxy') return GALAXY_MODEL_URLS[config.key]
   if (skin === 'moonwhite') return MOONWHITE_MODEL_URLS[config.key]
+  if (skin === 'cinnabar') return CINNABAR_MODEL_URLS[config.key]
   return config.url
 }
 
@@ -374,7 +385,7 @@ async function createDie(
   renderer.setSize(168, 168, false)
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = skin === 'galaxy' ? 1.26 : skin === 'moonwhite' ? 1.18 : 1.12
+  renderer.toneMappingExposure = skin === 'galaxy' ? 1.26 : skin === 'moonwhite' ? 1.18 : skin === 'cinnabar' ? 1.16 : 1.12
   renderer.domElement.className = 'three-die-canvas'
   renderer.domElement.dataset.frontValue = ''
   renderer.domElement.dataset.modelSource = config.key
@@ -383,12 +394,12 @@ async function createDie(
   const scene = new THREE.Scene()
   const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20)
   camera.position.set(0, 0, settleCameraDistance(4))
-  const groundColor = skin === 'moonwhite' ? 0x244d73 : 0x392552
+  const groundColor = skin === 'moonwhite' ? 0x244d73 : skin === 'cinnabar' ? 0x5b261c : 0x392552
   scene.add(new THREE.HemisphereLight(0xffffff, groundColor, 2.25))
-  const keyLight = new THREE.DirectionalLight(skin === 'moonwhite' ? 0xdaf5ff : 0xffffff, 3.4)
+  const keyLight = new THREE.DirectionalLight(skin === 'moonwhite' ? 0xdaf5ff : skin === 'cinnabar' ? 0xffe1a6 : 0xffffff, 3.4)
   keyLight.position.set(-2.5, 4, 5)
   scene.add(keyLight)
-  const rimLight = new THREE.DirectionalLight(skin === 'moonwhite' ? 0xa8d8ff : 0x9d6ee7, 2.1)
+  const rimLight = new THREE.DirectionalLight(skin === 'moonwhite' ? 0xa8d8ff : skin === 'cinnabar' ? 0xffc15c : 0x9d6ee7, 2.1)
   rimLight.position.set(4, -2, 2)
   scene.add(rimLight)
 

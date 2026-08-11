@@ -4,6 +4,7 @@ export const DICE_SKIN_OPTIONS = [
   { value: 'classic', label: '经典' },
   { value: 'galaxy', label: '星穹' },
   { value: 'moonwhite', label: '月白冰晶' },
+  { value: 'cinnabar', label: '朱砂鎏金' },
 ] as const
 
 export type DiceSkin = typeof DICE_SKIN_OPTIONS[number]['value']

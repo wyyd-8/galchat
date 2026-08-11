@@ -31,6 +31,12 @@ import static org.mockito.Mockito.when;
 
 class GroupTurnCheckpointServiceTest {
 
+    @org.junit.jupiter.api.BeforeAll
+    static void initMybatisPlusTableInfo() {
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(
+                GroupChatReplyStep.class);
+    }
+
     @Test
     void invalidTurnStepContextCannotTriggerDestructiveRecovery() {
         Fixture fixture = fixture(GroupTurnCheckpointService.STEP_START);
@@ -80,8 +86,9 @@ class GroupTurnCheckpointServiceTest {
                 org.mockito.ArgumentMatchers.any());
         verify(fixture.messageMapper()).delete(
                 org.mockito.ArgumentMatchers.any());
-        verify(fixture.stepMapper()).updateById(completed);
-        verify(fixture.stepMapper()).updateById(failed);
+        verify(fixture.stepMapper(), org.mockito.Mockito.times(2)).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
         verify(fixture.turnMapper()).updateById(fixture.turn());
         verify(fixture.checkpointMapper()).deleteById(7L);
     }
@@ -118,6 +125,7 @@ class GroupTurnCheckpointServiceTest {
                 .setId(103L)
                 .setTurnId(101L)
                 .setOutputMessageId(203L)
+                .setErrorMessage("模型调用失败")
                 .setStatus(GroupChatConstant.STATUS_FAILED);
         when(checkpointMapper.selectById(7L)).thenReturn(
                 new GroupTurnCheckpoint()
@@ -135,11 +143,14 @@ class GroupTurnCheckpointServiceTest {
         assertThat(step.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_PENDING);
         assertThat(step.getOutputMessageId()).isNull();
+        assertThat(step.getErrorMessage()).isNull();
         assertThat(turn.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_RUNNING);
         verify(messageMapper).deleteAfterCheckpoint(103L, 202L);
         verify(toolCallMapper).deleteAfterCheckpoint(103L, 9L);
-        verify(stepMapper).updateById(step);
+        verify(stepMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
         verify(turnMapper).updateById(turn);
     }
 

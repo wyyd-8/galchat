@@ -366,14 +366,21 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private void restoreCharacterStates(Long userWorldId,
                                         List<UserWorldSaveSnapshotDTO.CharacterStateSnapshot> characterStates) {
         for (UserWorldSaveSnapshotDTO.CharacterStateSnapshot state : emptyIfNull(characterStates)) {
-            userCharacterInfoMapper.update(new UserCharacterInfo()
-                            .setCharacterName(state.getCharacterName())
-                            .setCharacterImage(state.getCharacterImage())
-                            .setLastChatTime(state.getLastChatTime())
-                            .setLastChatContent(state.getLastChatContent())
-                            .setFavorValue(state.getFavorValue())
-                            .setUserInfoPrompt(state.getUserInfoPrompt()),
+            userCharacterInfoMapper.update(null,
                     new LambdaUpdateWrapper<UserCharacterInfo>()
+                            .set(UserCharacterInfo::getCharacterName,
+                                    state.getCharacterName())
+                            .set(UserCharacterInfo::getCharacterImage,
+                                    state.getCharacterImage())
+                            .set(UserCharacterInfo::getLastChatTime,
+                                    state.getLastChatTime())
+                            .set(UserCharacterInfo::getLastChatContent,
+                                    state.getLastChatContent())
+                            .set(UserCharacterInfo::getFavorValue,
+                                    state.getFavorValue())
+                            .set(UserCharacterInfo::getUserInfoPrompt,
+                                    Objects.toString(
+                                            state.getUserInfoPrompt(), ""))
                             .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                             .eq(UserCharacterInfo::getCharacterId, state.getCharacterId()));
         }

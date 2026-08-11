@@ -47,6 +47,8 @@ class GroupReplyPlanServiceTest {
                 assistant, TrpgRuntimeChildScene.class);
         TableInfoHelper.initTableInfo(
                 assistant, GroupReplyPlanItem.class);
+        TableInfoHelper.initTableInfo(
+                assistant, GroupConversation.class);
     }
 
     @Test
@@ -63,6 +65,9 @@ class GroupReplyPlanServiceTest {
 
         verify(fixture.runtimeChildSceneMapper).delete(any());
         assertThat(conversation.getActiveReplyPlanId()).isNull();
+        verify(fixture.conversationMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -302,6 +307,9 @@ class GroupReplyPlanServiceTest {
         assertThat(result).isNull();
         assertThat(conversation.getActiveReplyPlanId()).isNull();
         verify(fixture.planMapper).deleteById(10L);
+        verify(fixture.conversationMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test

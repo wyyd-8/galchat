@@ -1,5 +1,6 @@
 package com.me.galchat.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.WorldTemplate;
@@ -127,15 +128,19 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
         CharacterTemplate oldCharacterTemplate = getCharacterTemplateByWorldId(worldId, id);
         String image = characterTemplate.getImage() == null ? null : ImageSecurityUtils.normalizeOssImageUrl(characterTemplate.getImage());
 
-        CharacterTemplate updateCharacterTemplate = new CharacterTemplate()
-                .setId(oldCharacterTemplate.getId())
-                .setName(characterTemplate.getName())
-                .setImage(image)
-                .setBackground(characterTemplate.getBackground())
-                .setPersonality(characterTemplate.getPersonality())
-                .setCocPlayStyle(characterTemplate.getCocPlayStyle())
-                .setFavorability(characterTemplate.getFavorability())
-                .setInitFavor(characterTemplate.getInitFavor());
-        updateById(updateCharacterTemplate);
+        baseMapper.update(null, new LambdaUpdateWrapper<CharacterTemplate>()
+                .eq(CharacterTemplate::getId, oldCharacterTemplate.getId())
+                .set(CharacterTemplate::getName, characterTemplate.getName())
+                .set(CharacterTemplate::getImage, image)
+                .set(CharacterTemplate::getBackground,
+                        characterTemplate.getBackground())
+                .set(CharacterTemplate::getPersonality,
+                        characterTemplate.getPersonality())
+                .set(CharacterTemplate::getCocPlayStyle,
+                        characterTemplate.getCocPlayStyle())
+                .set(CharacterTemplate::getFavorability,
+                        characterTemplate.getFavorability())
+                .set(CharacterTemplate::getInitFavor,
+                        characterTemplate.getInitFavor()));
     }
 }

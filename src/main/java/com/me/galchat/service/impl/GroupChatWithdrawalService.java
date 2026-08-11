@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.FavorBindingType;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.constant.RedisConstant;
@@ -129,7 +130,12 @@ public class GroupChatWithdrawalService {
                 .setStatus(GroupChatConstant.STATUS_WITHDRAWN)
                 .setRevision(Objects.requireNonNullElse(turn.getRevision(), 0) + 1)
                 .setUpdatedAt(LocalDateTime.now());
-        turnMapper.updateById(turn);
+        turnMapper.update(null, new LambdaUpdateWrapper<GroupChatTurn>()
+                .eq(GroupChatTurn::getId, turn.getId())
+                .set(GroupChatTurn::getTriggerMessageId, null)
+                .set(GroupChatTurn::getStatus, turn.getStatus())
+                .set(GroupChatTurn::getRevision, turn.getRevision())
+                .set(GroupChatTurn::getUpdatedAt, turn.getUpdatedAt()));
     }
 
     private void rollbackFavor(Long userWorldId, List<Long> stepIds) {

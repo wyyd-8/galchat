@@ -46,6 +46,12 @@ class CharacterCardCreationServiceTest {
     private CocCharacterWeaponMapper weaponMapper;
     private CocCharacterProfileMapper profileMapper;
 
+    @org.junit.jupiter.api.BeforeAll
+    static void initMybatisPlusTableInfo() {
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(
+                CocCharacterCreationDraft.class);
+    }
+
     @BeforeEach
     void setCurrentUser() {
         CurrentHolder.setCurrentId(7);
@@ -211,6 +217,10 @@ class CharacterCardCreationServiceTest {
         verify(profileMapper).insert(any(com.me.galchat.domain.po.CocCharacterProfile.class));
         assertThat(persisted.getStatus()).isEqualTo("COMPLETED");
         assertThat(persisted.getResultCharacterId()).isEqualTo(900L);
+        assertThat(persisted.getNextAction()).isNull();
+        verify(draftMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     private CocCharacterCreationDraft capturedDraft() {
@@ -255,6 +265,9 @@ class CharacterCardCreationServiceTest {
             return 1;
         }).when(draftMapper).insert(any(CocCharacterCreationDraft.class));
         when(draftMapper.updateById(any(CocCharacterCreationDraft.class))).thenReturn(1);
+        when(draftMapper.update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any())).thenReturn(1);
         when(characterMapper.selectList(any())).thenReturn(List.of());
 
         return new CharacterCardCreationService(

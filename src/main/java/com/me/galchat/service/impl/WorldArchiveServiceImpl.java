@@ -139,7 +139,7 @@ public class WorldArchiveServiceImpl implements IWorldArchiveService {
                 .setImage(archiveWorld.getImage())
                 .setAuthor(archiveWorld.getAuthor())
                 .setBackground(archiveWorld.getBackground())
-                .setVisible(!Boolean.FALSE.equals(archiveWorld.getVisible())));
+                .setVisible(archiveWorld.getVisible()));
 
         vectorStoreCleanupMapper.deleteWorldDetailsByWorldId(worldId);
         worldDetailService.remove(new LambdaQueryWrapper<WorldDetail>()

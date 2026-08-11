@@ -43,6 +43,12 @@ import static org.mockito.Mockito.when;
 
 class TrpgTurnExecutionServiceTest {
 
+    @org.junit.jupiter.api.BeforeAll
+    static void initMybatisPlusTableInfo() {
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(
+                GroupChatReplyStep.class);
+    }
+
     @Test
     void unconsciousPlayerAttackPausesForRecoveryBeforeRequestingAction()
             throws Exception {
@@ -202,6 +208,7 @@ class TrpgTurnExecutionServiceTest {
                         .setActionType(
                                 GroupChatConstant.ACTION_TRPG_SCENE)
                         .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                        .setErrorMessage("前序步骤失败")
                         .setStatus(GroupChatConstant.STATUS_BLOCKED);
         when(conversationService.requireAuthorized(7L))
                 .thenReturn(conversation);
@@ -252,6 +259,10 @@ class TrpgTurnExecutionServiceTest {
         assertThat(failed.getOutputMessageId()).isNull();
         assertThat(blocked.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_PENDING);
+        assertThat(blocked.getErrorMessage()).isNull();
+        verify(stepMapper, org.mockito.Mockito.atLeastOnce()).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test

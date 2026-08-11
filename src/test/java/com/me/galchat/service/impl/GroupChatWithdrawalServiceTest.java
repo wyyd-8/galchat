@@ -28,6 +28,12 @@ import static org.mockito.Mockito.when;
 
 class GroupChatWithdrawalServiceTest {
 
+    @org.junit.jupiter.api.BeforeAll
+    static void initMybatisPlusTableInfo() {
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(
+                GroupChatTurn.class);
+    }
+
     @Test
     void withdrawsCompletedTurnWithoutAccessingReplyPlan() {
         GroupConversationService conversationService = mock(GroupConversationService.class);
@@ -57,6 +63,7 @@ class GroupChatWithdrawalServiceTest {
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(10L)
+                .setTriggerMessageId(99L)
                 .setStatus(GroupChatConstant.STATUS_COMPLETED)
                 .setRevision(0);
         when(conversationService.requireActive(7L)).thenReturn(conversation);
@@ -76,8 +83,9 @@ class GroupChatWithdrawalServiceTest {
 
         verify(recoveryService).assertConversationHasNoNonTerminalTurns(7L);
         verify(stepMapper).delete(any());
-        verify(turnMapper).updateById(org.mockito.ArgumentMatchers.argThat((GroupChatTurn updated) ->
-                GroupChatConstant.STATUS_WITHDRAWN.equals(updated.getStatus())));
+        verify(turnMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.mapper.CocCharacterMapper;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +44,26 @@ public class TrpgTemporaryInsanityService {
                         remaining - LARGE_SCENE_HOURS);
             }
             character.setUpdatedAt(LocalDateTime.now());
-            if (characterMapper.updateById(character) == 0) {
+            int updated;
+            if (remaining <= LARGE_SCENE_HOURS) {
+                updated = characterMapper.update(null,
+                        new LambdaUpdateWrapper<CocCharacter>()
+                                .eq(CocCharacter::getId,
+                                        character.getId())
+                                .set(CocCharacter::getTemporaryInsanity,
+                                        false)
+                                .set(CocCharacter
+                                                ::getTemporaryInsanityPhase,
+                                        null)
+                                .set(CocCharacter
+                                                ::getTemporaryInsanityRemainingHours,
+                                        null)
+                                .set(CocCharacter::getUpdatedAt,
+                                        character.getUpdatedAt()));
+            } else {
+                updated = characterMapper.updateById(character);
+            }
+            if (updated == 0) {
                 throw new IllegalStateException("临时疯狂状态更新时间失败");
             }
         }

@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.DiceRollSummary;
@@ -171,7 +172,7 @@ public class GroupTurnCheckpointService {
                         : GroupChatConstant.STATUS_PENDING)
                 .setErrorMessage(null)
                 .setUpdatedAt(now);
-        stepMapper.updateById(step);
+        persistResetStep(step);
         turn.setStatus(waitingDice
                         ? GroupChatConstant.STATUS_WAITING_DICE
                         : GroupChatConstant.STATUS_RUNNING)
@@ -217,13 +218,26 @@ public class GroupTurnCheckpointService {
                         .setOutputMessageId(null)
                         .setErrorMessage(null)
                         .setUpdatedAt(now);
-                stepMapper.updateById(current);
+                persistResetStep(current);
             }
         }
         turn.setStatus(GroupChatConstant.STATUS_RUNNING)
                 .setUpdatedAt(now);
         turnMapper.updateById(turn);
         checkpointMapper.deleteById(turn.getConversationId());
+    }
+
+    private void persistResetStep(GroupChatReplyStep step) {
+        stepMapper.update(null,
+                new LambdaUpdateWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getId, step.getId())
+                        .set(GroupChatReplyStep::getStatus,
+                                step.getStatus())
+                        .set(GroupChatReplyStep::getOutputMessageId,
+                                null)
+                        .set(GroupChatReplyStep::getErrorMessage, null)
+                        .set(GroupChatReplyStep::getUpdatedAt,
+                                step.getUpdatedAt()));
     }
 
     private void rollbackAttributeAdjustments(

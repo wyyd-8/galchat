@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.CocBackgroundPromptConstant;
 import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.constant.GroupChatConstant;
@@ -360,6 +361,17 @@ public class CharacterCardCreationService {
                 .setUpdatedAt(LocalDateTime.now());
         if (draftMapper.updateById(draft) == 0) {
             throw new UserRequestException("人物卡草稿更新失败");
+        }
+        if (draft.getNextAction() == null) {
+            int cleared = draftMapper.update(null,
+                    new LambdaUpdateWrapper<CocCharacterCreationDraft>()
+                            .eq(CocCharacterCreationDraft::getId,
+                                    draft.getId())
+                            .set(CocCharacterCreationDraft::getNextAction,
+                                    null));
+            if (cleared == 0) {
+                throw new UserRequestException("人物卡草稿更新失败");
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.CharacterCardCreateDTO;
@@ -177,9 +178,13 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
                 requireCharacterByName(runId, characterName);
         String normalizedNotes = quickNotes == null
                 || quickNotes.isBlank() ? null : quickNotes.trim();
-        character.setQuickNotes(normalizedNotes)
-                .setUpdatedAt(java.time.LocalDateTime.now());
-        if (characterMapper.updateById(character) == 0) {
+        int updated = characterMapper.update(null,
+                new LambdaUpdateWrapper<CocCharacter>()
+                        .eq(CocCharacter::getId, character.getId())
+                        .set(CocCharacter::getQuickNotes, normalizedNotes)
+                        .set(CocCharacter::getUpdatedAt,
+                                java.time.LocalDateTime.now()));
+        if (updated == 0) {
             throw new UserRequestException("人物卡不存在");
         }
     }

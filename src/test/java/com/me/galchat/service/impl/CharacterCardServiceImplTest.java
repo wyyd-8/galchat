@@ -1,5 +1,6 @@
 package com.me.galchat.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterSkill;
@@ -22,6 +23,7 @@ import com.me.galchat.mapper.CharacterTemplateMapper;
 import com.me.galchat.mapper.UserInfoMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.support.MybatisPlusTestSupport;
 import com.me.galchat.utils.CurrentHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +56,7 @@ class CharacterCardServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        MybatisPlusTestSupport.initialize(CocCharacter.class);
         characterMapper = mock(CocCharacterMapper.class);
         skillMapper = mock(CocCharacterSkillMapper.class);
         skillDefMapper = mock(CocSkillDefMapper.class);
@@ -358,12 +361,16 @@ class CharacterCardServiceImplTest {
         CocCharacter card = new CocCharacter()
                 .setId(71L).setRunId(5L).setName("林恩");
         when(characterMapper.selectList(any())).thenReturn(List.of(card));
-        when(characterMapper.updateById(card)).thenReturn(1);
+        when(characterMapper.update(isNull(), any(Wrapper.class)))
+                .thenReturn(1);
 
         service.updateQuickNotes(5L, " 林恩 ", " 已感染第一阶段 ");
 
-        assertThat(card.getQuickNotes()).isEqualTo("已感染第一阶段");
-        verify(characterMapper).updateById(card);
+        var captor = org.mockito.ArgumentCaptor.forClass(Wrapper.class);
+        verify(characterMapper).update(isNull(), captor.capture());
+        assertThat(((AbstractWrapper<?, ?, ?>) captor.getValue())
+                .getParamNameValuePairs().values())
+                .contains("已感染第一阶段");
     }
 
     @Test

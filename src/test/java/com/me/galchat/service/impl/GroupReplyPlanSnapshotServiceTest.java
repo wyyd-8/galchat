@@ -24,6 +24,12 @@ import static org.mockito.Mockito.when;
 
 class GroupReplyPlanSnapshotServiceTest {
 
+    @org.junit.jupiter.api.BeforeAll
+    static void initMybatisPlusTableInfo() {
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(
+                GroupConversation.class);
+    }
+
     @Test
     void captureExcludesTrpgConversationsFromWorldSave() {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
@@ -127,7 +133,36 @@ class GroupReplyPlanSnapshotServiceTest {
         verify(itemMapper).insert(itemCaptor.capture());
         assertThat(itemCaptor.getValue().getSubjectCharacterId()).isNull();
         assertThat(itemCaptor.getValue().getActorId()).isEqualTo(9L);
-        verify(conversationMapper).updateById(conversation);
+        verify(conversationMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void restoreWithoutPlanExplicitlyClearsPreviousPlanAndClosedTime() {
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanSnapshotService service = service(
+                conversationMapper, planMapper,
+                mock(GroupReplyPlanItemMapper.class));
+        GroupConversation conversation = activeConversation(
+                7L, 90L, GroupChatConstant.MODE_CHAT)
+                .setClosedAt(java.time.LocalDateTime.now());
+        when(conversationMapper.selectById(7L)).thenReturn(conversation);
+        when(planMapper.selectList(any())).thenReturn(List.of(
+                new GroupReplyPlan().setId(90L).setConversationId(7L)));
+        var snapshot = new UserWorldSaveSnapshotDTO
+                .GroupConversationPlanSnapshot()
+                .setConversationId(7L);
+
+        service.restore(1L, List.of(snapshot));
+
+        assertThat(conversation.getActiveReplyPlanId()).isNull();
+        assertThat(conversation.getClosedAt()).isNull();
+        verify(conversationMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     private GroupReplyPlanSnapshotService service(

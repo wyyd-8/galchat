@@ -1,5 +1,6 @@
 package com.me.galchat.domain.po;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -21,6 +22,7 @@ public class TrpgSave implements Serializable {
     private Long id;
     private Long userId;
     private Long conversationId;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String remark;
     private LocalDateTime savedAt;
     private Integer formatVersion;

@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.GroupReplyPlanDTO;
 import com.me.galchat.domain.po.GroupChatMember;
@@ -214,6 +215,7 @@ public class GroupReplyPlanService {
                     .in(GroupReplyPlan::getId, planIds));
         }
         conversation.setActiveReplyPlanId(null);
+        updateActivePlan(conversation, null, conversation.getUpdatedAt());
     }
 
     private GroupReplyPlanVO replaceLocked(GroupConversation conversation, GroupReplyPlanDTO request) {
@@ -330,16 +332,33 @@ public class GroupReplyPlanService {
             Long resumePlanId = resumePlan == null
                     ? null : resumePlan.getId();
             conversation.setActiveReplyPlanId(resumePlanId).setUpdatedAt(LocalDateTime.now());
-            conversationMapper.updateById(conversation);
+            updateActivePlan(conversation, resumePlanId,
+                    conversation.getUpdatedAt());
             return resumePlan == null ? null : toVO(resumePlan);
         }
         if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(active.getSource())) {
             conversation.setActiveReplyPlanId(nextPlan == null ? null : nextPlan.getId())
                     .setUpdatedAt(LocalDateTime.now());
-            conversationMapper.updateById(conversation);
+            updateActivePlan(conversation,
+                    conversation.getActiveReplyPlanId(),
+                    conversation.getUpdatedAt());
             return nextPlan == null ? null : toVO(nextPlan);
         }
         return toVO(createDefaultPlan(conversation));
+    }
+
+    private void updateActivePlan(
+            GroupConversation conversation, Long activePlanId,
+            LocalDateTime updatedAt) {
+        LambdaUpdateWrapper<GroupConversation> update =
+                new LambdaUpdateWrapper<GroupConversation>()
+                        .eq(GroupConversation::getId, conversation.getId())
+                        .set(GroupConversation::getActiveReplyPlanId,
+                                activePlanId);
+        if (updatedAt != null) {
+            update.set(GroupConversation::getUpdatedAt, updatedAt);
+        }
+        conversationMapper.update(null, update);
     }
 
     private void insertItems(Long planId, List<GroupReplyPlanDTO.Group> groups, LocalDateTime now) {

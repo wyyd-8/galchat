@@ -259,7 +259,9 @@ class WorldArchiveServiceImplTest {
 
         assertThat(result.isConfirmationRequired()).isFalse();
         assertThat(result.isReplaced()).isTrue();
-        verify(worldTemplateService).updateWorldTemplate(eq(1L), eq(20L), any(WorldTemplate.class));
+        ArgumentCaptor<WorldTemplate> world = ArgumentCaptor.forClass(WorldTemplate.class);
+        verify(worldTemplateService).updateWorldTemplate(eq(1L), eq(20L), world.capture());
+        assertThat(world.getValue().getVisible()).isNull();
         verify(vectorStoreCleanupMapper).deleteWorldDetailsByWorldId(20L);
         verify(worldDetailService).remove(any(Wrapper.class));
         verify(worldDetailService).createWorldDetail(eq(1L), eq(20L), any(WorldDetail.class));

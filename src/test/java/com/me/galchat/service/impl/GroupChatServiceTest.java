@@ -67,6 +67,12 @@ import static org.mockito.Mockito.when;
 
 class GroupChatServiceTest {
 
+    @org.junit.jupiter.api.BeforeAll
+    static void initMybatisPlusTableInfo() {
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(
+                GroupChatReplyStep.class);
+    }
+
     @Test
     void publishingScenesEmitsGameTimeBeforeOptionsWithoutPublicTimeMessage() {
         DeepSeekChatModel model = mock(DeepSeekChatModel.class);
@@ -230,6 +236,7 @@ class GroupChatServiceTest {
                 .setSpeakerId(9L)
                 .setGroupKey("scene:21").setGroupName("书房")
                 .setGroupOrder(1).setItemOrder(1)
+                .setErrorMessage("上一次模型调用失败")
                 .setStatus(GroupChatConstant.STATUS_PENDING);
         GroupActionSpec action = new GroupActionSpec(
                 step.getActionType(), step.getSpeakerType(),
@@ -296,6 +303,10 @@ class GroupChatServiceTest {
         verify(checkpointService).recordBoundary(
                 turn, step,
                 GroupTurnCheckpointService.COMPLETED);
+        assertThat(step.getErrorMessage()).isNull();
+        verify(stepMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -601,8 +612,10 @@ class GroupChatServiceTest {
         assertThat(events).extracting(GroupChatEvent::getEventType).containsExactly(
                 GroupChatConstant.EVENT_TURN_ACCEPTED,
                 GroupChatConstant.EVENT_REPLY_FAILED);
-        verify(stepMapper).updateById(org.mockito.ArgumentMatchers.argThat((GroupChatReplyStep step) ->
-                GroupChatConstant.STATUS_FAILED.equals(step.getStatus())));
+        assertThat(events.getLast().getError()).contains("context failed");
+        verify(stepMapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
         verify(messageMapper, never()).insert(org.mockito.ArgumentMatchers.argThat((GroupChatMessage message) ->
                 GroupChatConstant.STATUS_STREAMING.equals(message.getStatus())));
         verify(recoveryService).cancelPendingSteps(201L, "context failed");

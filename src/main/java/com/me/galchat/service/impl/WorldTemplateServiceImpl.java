@@ -1,5 +1,6 @@
 package com.me.galchat.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.domain.po.WorldTemplate;
 import com.me.galchat.exception.UserAuthException;
@@ -93,13 +94,13 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
         }
         WorldTemplate oldWorldTemplate = getOwnWorldTemplate(userId, id);
         String image = worldTemplate.getImage() == null ? null : ImageSecurityUtils.normalizeOssImageUrl(worldTemplate.getImage());
-        WorldTemplate updateWorldTemplate = new WorldTemplate()
-                .setId(oldWorldTemplate.getId())
-                .setName(worldTemplate.getName())
-                .setImage(image)
-                .setAuthor(worldTemplate.getAuthor())
-                .setBackground(worldTemplate.getBackground())
-                .setVisible(worldTemplate.getVisible());
-        updateById(updateWorldTemplate);
+        baseMapper.update(null, new LambdaUpdateWrapper<WorldTemplate>()
+                .eq(WorldTemplate::getId, oldWorldTemplate.getId())
+                .set(WorldTemplate::getName, worldTemplate.getName())
+                .set(WorldTemplate::getImage, image)
+                .set(WorldTemplate::getAuthor, worldTemplate.getAuthor())
+                .set(WorldTemplate::getBackground,
+                        worldTemplate.getBackground())
+                .set(WorldTemplate::getVisible, worldTemplate.getVisible()));
     }
 }

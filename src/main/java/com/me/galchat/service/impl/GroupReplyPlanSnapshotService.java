@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.GroupReplyPlanDTO;
 import com.me.galchat.domain.dto.UserWorldSaveSnapshotDTO;
@@ -89,7 +90,17 @@ public class GroupReplyPlanSnapshotService {
                     .setStatus(GroupChatConstant.STATUS_ACTIVE)
                     .setClosedAt(null)
                     .setUpdatedAt(LocalDateTime.now());
-            conversationMapper.updateById(conversation);
+            conversationMapper.update(null,
+                    new LambdaUpdateWrapper<GroupConversation>()
+                            .eq(GroupConversation::getId,
+                                    conversation.getId())
+                            .set(GroupConversation::getActiveReplyPlanId,
+                                    activePlanId)
+                            .set(GroupConversation::getStatus,
+                                    GroupChatConstant.STATUS_ACTIVE)
+                            .set(GroupConversation::getClosedAt, null)
+                            .set(GroupConversation::getUpdatedAt,
+                                    conversation.getUpdatedAt()));
         }
     }
 

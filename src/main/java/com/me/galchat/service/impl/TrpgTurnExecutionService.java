@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
@@ -413,7 +414,7 @@ public class TrpgTurnExecutionService {
         step.setStatus(GroupChatConstant.STATUS_PENDING)
                 .setErrorMessage(null)
                 .setUpdatedAt(now);
-        stepMapper.updateById(step);
+        persistRetryableStep(step);
         turn.setStatus(GroupChatConstant.STATUS_RUNNING)
                 .setUpdatedAt(now);
         turnMapper.updateById(turn);
@@ -507,7 +508,7 @@ public class TrpgTurnExecutionService {
             blocked.setStatus(GroupChatConstant.STATUS_PENDING)
                     .setErrorMessage(null)
                     .setUpdatedAt(now);
-            stepMapper.updateById(blocked);
+            persistRetryableStep(blocked);
         }
         if (!GroupChatConstant.STATUS_WAITING_DICE.equals(
                 turn.getStatus())) {
@@ -516,6 +517,17 @@ public class TrpgTurnExecutionService {
             turnMapper.updateById(turn);
         }
         return false;
+    }
+
+    private void persistRetryableStep(GroupChatReplyStep step) {
+        stepMapper.update(null,
+                new LambdaUpdateWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getId, step.getId())
+                        .set(GroupChatReplyStep::getStatus,
+                                step.getStatus())
+                        .set(GroupChatReplyStep::getErrorMessage, null)
+                        .set(GroupChatReplyStep::getUpdatedAt,
+                                step.getUpdatedAt()));
     }
 
     public GroupCurrentTurnVO current(Long conversationId) {

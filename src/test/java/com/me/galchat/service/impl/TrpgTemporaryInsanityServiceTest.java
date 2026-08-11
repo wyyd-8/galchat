@@ -14,6 +14,12 @@ import static org.mockito.Mockito.when;
 
 class TrpgTemporaryInsanityServiceTest {
 
+    @org.junit.jupiter.api.BeforeAll
+    static void initMybatisPlusTableInfo() {
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(
+                CocCharacter.class);
+    }
+
     @Test
     void subtractsThreeHoursAndClearsDurationsAtTheBoundary() {
         CocCharacterMapper mapper = mock(CocCharacterMapper.class);
@@ -24,6 +30,9 @@ class TrpgTemporaryInsanityServiceTest {
         when(mapper.selectList(any())).thenReturn(
                 List.of(continuing, expiring));
         when(mapper.updateById(any(CocCharacter.class))).thenReturn(1);
+        when(mapper.update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any())).thenReturn(1);
 
         service.advanceAfterLargeScene(7L);
 
@@ -36,7 +45,9 @@ class TrpgTemporaryInsanityServiceTest {
         assertThat(expiring.getTemporaryInsanityPhase()).isNull();
         assertThat(expiring.getTemporaryInsanityRemainingHours()).isNull();
         verify(mapper).updateById(continuing);
-        verify(mapper).updateById(expiring);
+        verify(mapper).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
     }
 
     private CocCharacter temporaryInsanity(Long id, int hours) {

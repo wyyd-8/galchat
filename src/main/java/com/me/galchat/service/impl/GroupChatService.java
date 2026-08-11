@@ -980,7 +980,13 @@ public class GroupChatService {
 
     private void updateStepStatus(GroupChatReplyStep step, String status, String error) {
         step.setStatus(status).setErrorMessage(error).setUpdatedAt(LocalDateTime.now());
-        stepMapper.updateById(step);
+        stepMapper.update(null,
+                new LambdaUpdateWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getId, step.getId())
+                        .set(GroupChatReplyStep::getStatus, status)
+                        .set(GroupChatReplyStep::getErrorMessage, error)
+                        .set(GroupChatReplyStep::getUpdatedAt,
+                                step.getUpdatedAt()));
     }
 
     void completeTurn(GroupChatTurn turn) {

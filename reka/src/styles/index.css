@@ -506,6 +506,9 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .context-meter.danger i { background: var(--wine); }
 .tool-card > small { color: var(--muted); font-size: 9px; }
 .tool-actions { margin-top: 14px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.save-remark { padding: 9px; border-radius: 8px; background: #efeee8; }
+.save-remark small { color: var(--muted); font-size: 8px; }
+.save-remark p { margin: 3px 0 0; font-size: 10px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .investigator-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
 .investigator-grid > span { padding: 9px; border-radius: 8px; display: grid; grid-template-columns: 1fr auto; background: #efeee8; }
 .investigator-grid strong { font-size: 10px; }

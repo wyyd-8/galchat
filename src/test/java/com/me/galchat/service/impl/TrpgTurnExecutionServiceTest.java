@@ -11,6 +11,7 @@ import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupCurrentTurnVO;
+import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.decision.GroupAgentDecisionStore;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
@@ -18,6 +19,7 @@ import com.me.galchat.groupchat.runtime.GroupRuntimeRegistry;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.service.ITrpgSaveService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -72,7 +74,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                 mock(GroupTurnCheckpointService.class),
-                unconsciousRecovery);
+                unconsciousRecovery,
+                mock(ITrpgSaveService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
@@ -164,7 +167,8 @@ class TrpgTurnExecutionServiceTest {
                         mock(TrpgCombatLifecycleService.class),
                         mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                         checkpointService,
-                        mock(TrpgUnconsciousRecoveryService.class));
+                        mock(TrpgUnconsciousRecoveryService.class),
+                        mock(ITrpgSaveService.class));
         GroupConversation conversation =
                 new GroupConversation()
                         .setId(7L)
@@ -293,7 +297,8 @@ class TrpgTurnExecutionServiceTest {
                         combatLifecycleService,
                         mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                         checkpointService,
-                        mock(TrpgUnconsciousRecoveryService.class));
+                        mock(TrpgUnconsciousRecoveryService.class),
+                        mock(ITrpgSaveService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -410,7 +415,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                 mock(GroupTurnCheckpointService.class),
-                mock(TrpgUnconsciousRecoveryService.class));
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setUserWorldId(3L)
@@ -562,7 +568,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                 mock(GroupTurnCheckpointService.class),
-                mock(TrpgUnconsciousRecoveryService.class));
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setUserWorldId(3L)
@@ -702,7 +709,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                 mock(GroupTurnCheckpointService.class),
-                mock(TrpgUnconsciousRecoveryService.class));
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -812,7 +820,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                 mock(GroupTurnCheckpointService.class),
-                mock(TrpgUnconsciousRecoveryService.class));
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
@@ -917,7 +926,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                 mock(GroupTurnCheckpointService.class),
-                mock(TrpgUnconsciousRecoveryService.class));
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
@@ -1005,7 +1015,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
                 mock(GroupTurnCheckpointService.class),
-                mock(TrpgUnconsciousRecoveryService.class));
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(mode);
@@ -1073,7 +1084,8 @@ class TrpgTurnExecutionServiceTest {
                         mock(com.me.galchat.mapper
                                 .GroupReplyPlanMapper.class),
                         mock(GroupTurnCheckpointService.class),
-                        mock(TrpgUnconsciousRecoveryService.class));
+                        mock(TrpgUnconsciousRecoveryService.class),
+                        mock(ITrpgSaveService.class));
         when(lockService.tryLock(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
@@ -1113,6 +1125,149 @@ class TrpgTurnExecutionServiceTest {
         verify(messageMapper, never())
                 .insert(any(GroupChatMessage.class));
         verifyNoInteractions(selectionService, lifecycleService);
+    }
+
+    @Test
+    void newCombatTurnSavesBeforeAdvancingRoundAndCreatingTurn() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupTurnPlanResolver planResolver =
+                mock(GroupTurnPlanResolver.class);
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        TrpgCombatLifecycleService combatLifecycleService =
+                mock(TrpgCombatLifecycleService.class);
+        com.me.galchat.mapper.GroupReplyPlanMapper replyPlanMapper =
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class);
+        ITrpgSaveService saveService = mock(ITrpgSaveService.class);
+        TrpgParticipantService participantService =
+                mock(TrpgParticipantService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setActiveReplyPlanId(31L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn completed = new GroupChatTurn()
+                .setId(101L)
+                .setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turnMapper.selectList(any())).thenReturn(List.of(completed));
+        when(stepMapper.selectList(any())).thenReturn(List.of());
+        when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        when(participantService.listInvestigators(conversation))
+                .thenReturn(List.of());
+        when(planResolver.resolve(conversation, runtime))
+                .thenReturn(new GroupTurnPlanResolver.ResolvedTurnPlan(
+                        GroupChatConstant.PLAN_SOURCE_COMBAT,
+                        41L,
+                        List.of()));
+        when(replyPlanMapper.selectById(31L)).thenReturn(
+                new com.me.galchat.domain.po.GroupReplyPlan()
+                        .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT));
+        when(turnMapper.insert(any(GroupChatTurn.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatTurn>getArgument(0).setId(102L);
+                    return 1;
+                });
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversationService, lockService, planResolver,
+                runtimeRegistry, turnMapper, stepMapper,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                mock(GroupChatService.class),
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                participantService,
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                combatLifecycleService, replyPlanMapper,
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                saveService);
+
+        service.continueTurn(7L, new GroupTurnContinueDTO())
+                .collectList().block();
+
+        var order = org.mockito.Mockito.inOrder(
+                saveService, combatLifecycleService, turnMapper);
+        order.verify(saveService).saveBeforeTurn(conversation);
+        order.verify(combatLifecycleService)
+                .startNextRoundUnderLock(conversation);
+        order.verify(turnMapper).insert(any(GroupChatTurn.class));
+    }
+
+    @Test
+    void waitingTurnDoesNotOverwriteTheAutoCheckpoint() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        ITrpgSaveService saveService = mock(ITrpgSaveService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn waiting = new GroupChatTurn()
+                .setId(101L)
+                .setConversationId(7L)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turnMapper.selectList(any())).thenReturn(List.of(waiting));
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversationService, lockService,
+                mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class), turnMapper,
+                mock(GroupChatReplyStepMapper.class),
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                mock(GroupChatService.class),
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                saveService);
+
+        assertThatThrownBy(() -> service.continueTurn(
+                7L, new GroupTurnContinueDTO()).collectList().block())
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("等待用户调查员行动");
+
+        verifyNoInteractions(saveService);
     }
 
     private void assertDuplicateRejected(Runnable action) {

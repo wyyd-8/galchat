@@ -25,6 +25,7 @@ import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.service.ITrpgSaveService;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -62,6 +63,7 @@ public class TrpgTurnExecutionService {
     private final GroupTurnCheckpointService checkpointService;
     private final TrpgUnconsciousRecoveryService
             unconsciousRecoveryService;
+    private final ITrpgSaveService trpgSaveService;
 
     public Flux<GroupChatEvent> continueTurn(
             Long conversationId,
@@ -103,6 +105,7 @@ public class TrpgTurnExecutionService {
                     GroupChatTurn previousTurn = turn;
                     PreparedTurn prepared =
                             transactionTemplate.execute(status -> {
+                                trpgSaveService.saveBeforeTurn(conversation);
                                 if (previousTurn != null
                                         && GroupChatConstant
                                         .PLAN_SOURCE_COMBAT.equals(
@@ -169,7 +172,8 @@ public class TrpgTurnExecutionService {
             GroupReplyPlanMapper replyPlanMapper,
             GroupTurnCheckpointService checkpointService,
             TrpgUnconsciousRecoveryService
-                    unconsciousRecoveryService) {
+                    unconsciousRecoveryService,
+            ITrpgSaveService trpgSaveService) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.planResolver = planResolver;
@@ -192,6 +196,7 @@ public class TrpgTurnExecutionService {
         this.checkpointService = checkpointService;
         this.unconsciousRecoveryService =
                 unconsciousRecoveryService;
+        this.trpgSaveService = trpgSaveService;
     }
 
     public Flux<GroupChatEvent> retry(

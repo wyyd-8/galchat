@@ -154,6 +154,7 @@ export const api = {
   trpgSave: (id: number) => request<TrpgSave | null>(`/trpg-saves/${id}`),
   saveTrpg: (id: number, remark: string) => request<TrpgSave>(`/trpg-saves/${id}`, { method: 'POST', body: body({ remark }) }),
   loadTrpg: (id: number) => request<void>(`/trpg-saves/${id}/load`, { method: 'POST' }),
+  rollbackTrpgTurn: (id: number) => request<void>(`/trpg-saves/${id}/rollback-turn`, { method: 'POST' }),
 }
 
 export async function streamChat(payload: ChatMessagePayload, onMessage: (message: ChatFlux) => void) {

@@ -43,6 +43,13 @@ public class TrpgSaveController {
         return Result.success();
     }
 
+    @PostMapping("/{conversationId}/rollback-turn")
+    public Result rollbackTurn(@PathVariable Long conversationId) {
+        checkConversationId(conversationId);
+        trpgSaveService.rollbackTurn(currentUserId(), conversationId);
+        return Result.success();
+    }
+
     private void checkConversationId(Long conversationId) {
         if (conversationId == null) {
             throw new UserRequestException("跑团群聊id不能为空");

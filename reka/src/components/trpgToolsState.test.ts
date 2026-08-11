@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { nextTick, ref } from 'vue'
 import type { Character, InvestigatorCardSummary } from '../api/types.ts'
 import * as trpgToolsState from './trpgToolsState.ts'
 
@@ -71,4 +72,30 @@ test('uses the third-stage dialog width only while the character-card tab is sel
   assert.equal(toolDialogContentClass('card'), 'trpg-binding-dialog')
   assert.equal(toolDialogContentClass('status'), '')
   assert.equal(toolDialogContentClass('dice'), '')
+})
+
+test('clears pending destructive confirmations when the tools dialog closes', async () => {
+  const open = ref(true)
+  const selectedTab = ref('status')
+  const confirmations = trpgToolsState.useToolConfirmations(open, selectedTab)
+  confirmations.confirmRollback.value = true
+
+  open.value = false
+  await nextTick()
+
+  assert.equal(confirmations.confirmRollback.value, false)
+})
+
+test('clears pending destructive confirmations when switching tools', async () => {
+  const open = ref(true)
+  const selectedTab = ref('status')
+  const confirmations = trpgToolsState.useToolConfirmations(open, selectedTab)
+  confirmations.confirmRollback.value = true
+  confirmations.confirmLoad.value = true
+
+  selectedTab.value = 'dice'
+  await nextTick()
+
+  assert.equal(confirmations.confirmRollback.value, false)
+  assert.equal(confirmations.confirmLoad.value, false)
 })

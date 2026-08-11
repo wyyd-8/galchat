@@ -1,3 +1,4 @@
+import { ref, watch, type Ref } from 'vue'
 import type { Character, InvestigatorCardSummary } from '../api/types.ts'
 
 export interface ToolCharacterTarget {
@@ -11,6 +12,18 @@ export interface ToolCharacterTarget {
 
 export function toolDialogContentClass(tab: string): string {
   return tab === 'card' ? 'trpg-binding-dialog' : ''
+}
+
+export function useToolConfirmations(open: Ref<boolean>, selectedTab: Ref<string>) {
+  const confirmLoad = ref(false)
+  const confirmRollback = ref(false)
+
+  watch([open, selectedTab], () => {
+    confirmLoad.value = false
+    confirmRollback.value = false
+  })
+
+  return { confirmLoad, confirmRollback }
 }
 
 export function buildToolCharacterTargets(

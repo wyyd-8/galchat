@@ -6,10 +6,12 @@ import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
+import com.me.galchat.domain.po.TrpgAutoSave;
 import com.me.galchat.domain.po.TrpgSave;
 import com.me.galchat.domain.vo.TrpgSaveOverviewVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.mapper.TrpgAutoSaveMapper;
 import com.me.galchat.mapper.TrpgSaveMapper;
 import com.me.galchat.service.ITrpgSaveService;
 import com.me.galchat.service.ITrpgSaveSnapshotService;
@@ -32,6 +34,7 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
     private final IUserWorldPrefixService userWorldPrefixService;
     private final GroupConversationMapper conversationMapper;
     private final TrpgSaveMapper saveMapper;
+    private final TrpgAutoSaveMapper autoSaveMapper;
     private final ITrpgSaveSnapshotService snapshotService;
     private final GroupTurnRecoveryService recoveryService;
     private final GroupConversationLockService lockService;
@@ -73,6 +76,42 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
                 userId, conversationId, true);
         TrpgSave save = requireSave(userId, conversationId);
         TrpgSaveSnapshotDTO snapshot = save.getSnapshot();
+        validateSnapshot(conversation, snapshot);
+        GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
+        try {
+            recoveryService.assertConversationHasNoNonTerminalTurns(
+                    conversationId);
+            transactionTemplate.executeWithoutResult(status ->
+                    snapshotService.restoreDatabase(conversation, snapshot));
+            snapshotService.restoreDerivedState(conversation, snapshot);
+        } finally {
+            lockService.unlock(lock);
+        }
+    }
+
+    @Override
+    public void saveBeforeTurn(GroupConversation conversation) {
+        TrpgSaveSnapshotDTO snapshot = snapshotService.capture(conversation);
+        if (snapshot == null
+                || !Objects.equals(snapshot.getFormatVersion(), FORMAT_VERSION)) {
+            throw new IllegalStateException("跑团自动存档快照格式不正确");
+        }
+        autoSaveMapper.upsert(new TrpgAutoSave()
+                .setConversationId(conversation.getId())
+                .setSavedAt(LocalDateTime.now())
+                .setFormatVersion(FORMAT_VERSION)
+                .setSnapshot(snapshot));
+    }
+
+    @Override
+    public void rollbackTurn(Long userId, Long conversationId) {
+        GroupConversation conversation = requireTrpgConversation(
+                userId, conversationId, true);
+        TrpgAutoSave autoSave = autoSaveMapper.selectById(conversationId);
+        if (autoSave == null) {
+            throw new UserRequestException("当前跑团没有可回滚的行动轮存档");
+        }
+        TrpgSaveSnapshotDTO snapshot = autoSave.getSnapshot();
         validateSnapshot(conversation, snapshot);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {

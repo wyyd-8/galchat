@@ -442,7 +442,7 @@ CREATE TABLE dice_roll_result (
     character_id BIGINT,
     round_no INT NOT NULL,
     display_order INT NOT NULL,
-    display_type VARCHAR(20),
+    display_type VARCHAR(32),
     reason TEXT NOT NULL,
     result_data JSONB NOT NULL,
     resolution_data JSONB NOT NULL
@@ -858,3 +858,10 @@ CREATE UNIQUE INDEX uk_trpg_save_conversation
 
 CREATE INDEX idx_trpg_save_user
     ON trpg_save (user_id, saved_at DESC);
+
+CREATE TABLE trpg_auto_save (
+    conversation_id BIGINT PRIMARY KEY,
+    saved_at TIMESTAMP NOT NULL,
+    format_version INT NOT NULL,
+    snapshot JSONB NOT NULL
+);

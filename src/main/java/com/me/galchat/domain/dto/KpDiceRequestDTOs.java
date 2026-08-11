@@ -16,7 +16,7 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Check(
-            @ToolParam(description = "本次检定的原因，会作为掷骰概要和前端展示文本")
+            @ToolParam(description = "用简短短语概括本次检定原因；不要复述行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(
                     description = "检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
@@ -27,7 +27,7 @@ public final class KpDiceRequestDTOs {
     }
 
     public record GroupCheck(
-            @ToolParam(description = "本次群体检定的原因，会作为掷骰概要和前端展示文本")
+            @ToolParam(description = "用简短短语概括本次群体检定原因；不要复述行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(
                     description = "检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
@@ -54,7 +54,7 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Opposed(
-            @ToolParam(description = "本次对抗检定的原因，会作为掷骰概要和前端展示文本")
+            @ToolParam(description = "用简短短语概括本次对抗原因；不要复述行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(description = "参与对抗的角色及其检定项，至少包含两个不同角色")
             List<CheckTarget> targets,
@@ -65,21 +65,21 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Pushed(
-            @ToolParam(description = "发起孤注一掷的原因或玩家采取的新行动")
+            @ToolParam(description = "用简短短语概括孤注一掷原因或玩家的新行动；不要复述完整行动过程、规则或预期结果")
             String reason,
             @ToolParam(description = "需要对最近一次失败检定进行孤注一掷的角色名列表")
             List<String> characterNames) {
     }
 
     public record SanCheck(
-            @ToolParam(description = "触发理智检定的原因，会作为掷骰概要和前端展示文本")
+            @ToolParam(description = "用简短短语概括触发理智检定的原因；不要复述完整场景、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(description = "需要按当前SAN值进行理智检定的角色名列表")
             List<String> characterNames) {
     }
 
     public record SanLoss(
-            @ToolParam(description = "造成理智损失的原因，会作为新增掷骰轮的展示文本")
+            @ToolParam(description = "用简短短语概括理智损失原因；不要复述完整场景、规则或结果。会作为新增掷骰轮的展示文本")
             String reason,
             @ToolParam(description = "上一轮理智检定成功时使用的SAN损失表达式，例如0或1")
             String successFormula,
@@ -88,7 +88,7 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Damage(
-            @ToolParam(description = "造成伤害的原因，会作为掷骰概要或新增掷骰轮的展示文本")
+            @ToolParam(description = "用简短短语概括伤害原因；不要复述行动过程、规则或结果。会作为掷骰概要或新增掷骰轮的展示文本")
             String reason,
             @ToolParam(description = "伤害来源模式：STANDALONE独立伤害，FOLLOW_UP前置检定成功后的伤害")
             DamageSourceMode sourceMode,
@@ -108,7 +108,7 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Healing(
-            @ToolParam(description = "恢复生命的原因，会作为掷骰概要或新增掷骰轮的展示文本")
+            @ToolParam(description = "用简短短语概括恢复生命的原因；不要复述行动过程、规则或结果。会作为掷骰概要或新增掷骰轮的展示文本")
             String reason,
             @ToolParam(description = "回血来源模式：STANDALONE无来源回血，FOLLOW_UP单次检定成功后的回血")
             HealingSourceMode sourceMode,

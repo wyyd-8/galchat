@@ -590,7 +590,7 @@ AI 调查员还可以按快速开始规则生成服务端草稿。开始生成�
 
 查询时会从掷骰摘要关联到群聊并校验访问权；执行玩家掷骰时还要求关联群聊处于活动状态。已经结算的玩家骰位会幂等返回已有结果。
 
-## 10. 存档与读档（6 个）
+## 10. 存档与读档（7 个）
 
 ### 10.1 世界级存档
 
@@ -611,12 +611,15 @@ AI 调查员还可以按快速开始规则生成服务端草稿。开始生成�
 | `GET /trpg-saves/{conversationId}` | 路径 ID | `TrpgSaveOverviewVO` 或 `null` | 获取 TRPG 存档概览 |
 | `POST /trpg-saves/{conversationId}` | 可省略请求体；`{ "remark": string }` | `TrpgSaveOverviewVO` | 覆盖/创建当前 TRPG 存档 |
 | `POST /trpg-saves/{conversationId}/load` | 无 | 无 | 恢复会话、人物卡、行动轮、骰子和 Redis 运行状态 |
+| `POST /trpg-saves/{conversationId}/rollback-turn` | 无 | 无 | 回滚到最近一次行动轮开始前的自动存档 |
 
 `TrpgSaveOverviewVO` 字段：`id/conversationId/conversationTitle/remark/savedAt/formatVersion/activePlanSource/activeSceneId/investigators`。每个 `investigators` 项含 `characterId/name/hpCurrent/hpMax/sanCurrent/sanMax/mpCurrent/mpMax/unconscious/dying/dead`。
 
 当前 TRPG 存档格式版本为 1；备注会去除首尾空格并最多保留前 200 个字符。
 
 TRPG 读档同样会删除存档点之后产生的数据并恢复快照；执行前应停止当前流式行动轮并由用户确认。
+
+系统在每次新建 TRPG 行动轮前覆盖该会话的自动存档，覆盖场景选择、探索、战斗等行动轮来源。`rollback-turn` 只恢复、不自动创建或重跑行动轮，也不消费自动存档，因此可以重复恢复到同一存档点；下一次新建行动轮时才会覆盖该存档。该接口也可恢复已经误结束的跑团会话，但有未完成行动轮或正在生成回复时会拒绝执行。
 
 ## 11. 图片上传（1 个）
 

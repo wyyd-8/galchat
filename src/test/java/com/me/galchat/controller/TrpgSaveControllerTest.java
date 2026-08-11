@@ -36,4 +36,17 @@ class TrpgSaveControllerTest {
         assertThat(result.getData()).isSameAs(overview);
         verify(service).save(7L, 51L, dto);
     }
+
+    @Test
+    void rollbackTurnUsesCurrentUserAndConversationId() {
+        ITrpgSaveService service = mock(ITrpgSaveService.class);
+        TrpgSaveController controller = new TrpgSaveController(service);
+        CurrentHolder.setCurrentId(7);
+
+        Result result = controller.rollbackTurn(51L);
+
+        assertThat(result.getCode()).isEqualTo(1);
+        assertThat(result.getData()).isNull();
+        verify(service).rollbackTurn(7L, 51L);
+    }
 }

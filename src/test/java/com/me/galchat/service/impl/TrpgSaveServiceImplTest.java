@@ -5,9 +5,11 @@ import com.me.galchat.domain.dto.TrpgSaveCreateDTO;
 import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.TrpgAutoSave;
 import com.me.galchat.domain.po.TrpgSave;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.mapper.TrpgAutoSaveMapper;
 import com.me.galchat.mapper.TrpgSaveMapper;
 import com.me.galchat.service.ITrpgSaveSnapshotService;
 import com.me.galchat.service.IUserWorldPrefixService;
@@ -33,6 +35,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -45,6 +48,8 @@ class TrpgSaveServiceImplTest {
     private GroupConversationMapper conversationMapper;
     @Mock
     private TrpgSaveMapper saveMapper;
+    @Mock
+    private TrpgAutoSaveMapper autoSaveMapper;
     @Mock
     private ITrpgSaveSnapshotService snapshotService;
     @Mock
@@ -62,6 +67,7 @@ class TrpgSaveServiceImplTest {
                 userWorldPrefixService,
                 conversationMapper,
                 saveMapper,
+                autoSaveMapper,
                 snapshotService,
                 recoveryService,
                 lockService,
@@ -194,6 +200,69 @@ class TrpgSaveServiceImplTest {
         verify(recoveryService).assertConversationHasNoNonTerminalTurns(51L);
     }
 
+    @Test
+    void saveBeforeTurnOverwritesTheConversationAutoCheckpoint() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        TrpgSaveSnapshotDTO snapshot = snapshot(51L);
+        when(snapshotService.capture(conversation)).thenReturn(snapshot);
+
+        service.saveBeforeTurn(conversation);
+
+        ArgumentCaptor<TrpgAutoSave> captor =
+                ArgumentCaptor.forClass(TrpgAutoSave.class);
+        verify(autoSaveMapper).upsert(captor.capture());
+        assertThat(captor.getValue().getConversationId()).isEqualTo(51L);
+        assertThat(captor.getValue().getFormatVersion()).isEqualTo(1);
+        assertThat(captor.getValue().getSnapshot()).isSameAs(snapshot);
+        assertThat(captor.getValue().getSavedAt()).isNotNull();
+    }
+
+    @Test
+    void rollbackTurnRestoresClosedRunAndKeepsTheAutoCheckpoint() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_CLOSED);
+        TrpgSaveSnapshotDTO snapshot = snapshot(51L);
+        TrpgAutoSave autoSave = new TrpgAutoSave()
+                .setConversationId(51L)
+                .setFormatVersion(1)
+                .setSnapshot(snapshot);
+        when(conversationMapper.selectById(51L)).thenReturn(conversation);
+        when(autoSaveMapper.selectById(51L)).thenReturn(autoSave);
+        when(lockService.tryLock(51L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+
+        service.rollbackTurn(7L, 51L);
+        service.rollbackTurn(7L, 51L);
+
+        var order = inOrder(snapshotService);
+        order.verify(snapshotService).restoreDatabase(conversation, snapshot);
+        order.verify(snapshotService).restoreDerivedState(conversation, snapshot);
+        order.verify(snapshotService).restoreDatabase(conversation, snapshot);
+        order.verify(snapshotService).restoreDerivedState(conversation, snapshot);
+        verify(autoSaveMapper, times(2)).selectById(51L);
+        verify(autoSaveMapper, never()).deleteById(51L);
+        verify(recoveryService, times(2))
+                .assertConversationHasNoNonTerminalTurns(51L);
+    }
+
+    @Test
+    void rollbackTurnRejectsMissingAutoCheckpointBeforeLocking() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        when(conversationMapper.selectById(51L)).thenReturn(conversation);
+        when(autoSaveMapper.selectById(51L)).thenReturn(null);
+
+        assertThatThrownBy(() -> service.rollbackTurn(7L, 51L))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("没有可回滚");
+
+        verify(lockService, never()).tryLock(any());
+        verify(snapshotService, never()).restoreDatabase(any(), any());
+    }
+
     private GroupConversation conversation(Long id, String mode) {
         return new GroupConversation()
                 .setId(id)
@@ -210,5 +279,14 @@ class TrpgSaveServiceImplTest {
                 .setId(id)
                 .setActorType(actorType)
                 .setName(name);
+    }
+
+    private TrpgSaveSnapshotDTO snapshot(Long conversationId) {
+        return new TrpgSaveSnapshotDTO()
+                .setFormatVersion(1)
+                .setConversationId(conversationId)
+                .setUserWorldId(12L)
+                .setWorldId(4L)
+                .setModuleId(8L);
     }
 }

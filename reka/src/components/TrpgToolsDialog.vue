@@ -11,7 +11,7 @@ import type {
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { listDiceMessagesNewestFirst } from '@/dice/domain/dicePlayback'
-import { buildToolCharacterTargets, toolDialogContentClass } from '@/components/trpgToolsState'
+import { buildToolCharacterTargets, toolDialogContentClass, useToolConfirmations } from '@/components/trpgToolsState'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{
@@ -27,10 +27,10 @@ const busy = ref(false)
 const contextUsage = ref<ContextWindowUsage | null>(null)
 const save = ref<TrpgSave | null>(null)
 const saveRemark = ref('')
-const confirmLoad = ref(false)
 const cards = ref<InvestigatorCardSummary[]>([])
 const selectedKey = ref('player')
 const selectedToolTab = ref('status')
+const { confirmLoad, confirmRollback } = useToolConfirmations(open, selectedToolTab)
 const card = ref<CharacterCard | null>(null)
 const cardText = ref('')
 
@@ -76,13 +76,22 @@ async function createCard() {
   cardText.value = ''; await refreshCards(); notify('人物卡已导入', createdCard.character.name, 'success')
 }
 async function saveSnapshot() {
-  save.value = await api.saveTrpg(props.conversation.id, saveRemark.value); confirmLoad.value = false
+  save.value = await api.saveTrpg(props.conversation.id, saveRemark.value)
+  confirmLoad.value = false; confirmRollback.value = false
   notify('跑团存档已保存', '', 'success')
 }
 async function loadSnapshot() {
-  if (!confirmLoad.value) { confirmLoad.value = true; return }
+  if (!confirmLoad.value) { confirmLoad.value = true; confirmRollback.value = false; return }
   await api.loadTrpg(props.conversation.id); confirmLoad.value = false; await refreshOverview(); emit('restored')
   notify('跑团存档已读取', '存档点之后的进度已回滚', 'success')
+}
+async function rollbackTurn() {
+  if (!confirmRollback.value) { confirmRollback.value = true; confirmLoad.value = false; return }
+  await api.rollbackTrpgTurn(props.conversation.id)
+  confirmRollback.value = false
+  await refreshOverview()
+  emit('restored')
+  notify('最近一轮已回滚', '可以从该行动轮开始前重新继续跑团', 'success')
 }
 async function selectTarget(key: string) {
   if (busy.value || selectedKey.value === key) return
@@ -95,6 +104,8 @@ watch(() => props.conversation.id, () => {
   selectedKey.value = 'player'
   cards.value = []
   card.value = null
+  confirmLoad.value = false
+  confirmRollback.value = false
 })
 </script>
 
@@ -102,7 +113,8 @@ watch(() => props.conversation.id, () => {
   <BaseDialog v-model="open" title="跑团工具" :description="`${conversation.title} · ${module?.name || `模组 #${conversation.moduleId || '未记录'}`}`" size="lg" :content-class="dialogContentClass">
     <TabsRoot v-model="selectedToolTab" class="tabs trpg-tools">
       <TabsList class="tabs-list">
-        <TabsTrigger value="status"><Activity :size="15" />状态与存档</TabsTrigger>
+        <TabsTrigger value="status"><Activity :size="15" />状态</TabsTrigger>
+        <TabsTrigger value="save"><Save :size="15" />存档</TabsTrigger>
         <TabsTrigger value="card"><BookUser :size="15" />人物卡</TabsTrigger>
         <TabsTrigger value="dice"><Dices :size="15" />骰子</TabsTrigger>
       </TabsList>
@@ -113,10 +125,22 @@ watch(() => props.conversation.id, () => {
           <div class="context-meter" :class="contextTone"><i :style="{ width: `${Math.min(contextPercent, 100)}%` }" /></div><small>{{ contextPercent }}% · {{ contextUsage ? `更新于 ${time(contextUsage.updatedAt)}` : '模型执行一次跑团行动后显示' }}</small>
         </section>
         <section class="tool-card">
-          <div class="tool-card-heading"><span><strong>跑团存档</strong><small>{{ save ? `${time(save.savedAt)} · 格式 v${save.formatVersion || 1}` : '尚未创建存档' }}</small></span><Save :size="18" /></div>
+          <div class="tool-card-heading"><span><strong>行动轮自动存档</strong><small>每次开始新行动轮前自动覆盖</small></span><button class="button danger" :disabled="busy" @click="execute(rollbackTurn)"><RotateCcw :size="16" />{{ confirmRollback ? '再次点击确认回滚' : '回滚最近一轮' }}</button></div>
+          <p v-if="confirmRollback" class="destructive-note">将删除自动存档点之后的行动轮、消息、骰子和人物状态；如跑团已误结束，也会恢复到结束前状态。</p>
+        </section>
+      </TabsContent>
+
+      <TabsContent value="save" class="tabs-content tool-section">
+        <section class="tool-card">
+          <div class="tool-card-heading"><span><strong>保存跑团存档</strong><small>记录当前跑团进度</small></span><Save :size="18" /></div>
           <label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="3" maxlength="200" placeholder="记录当前场景、线索或风险…" /></label>
+          <div class="tool-actions"><button class="button secondary" :disabled="busy" @click="execute(saveSnapshot)"><Save :size="16" />{{ save ? '覆盖存档' : '创建存档' }}</button></div>
+        </section>
+        <section class="tool-card">
+          <div class="tool-card-heading"><span><strong>读取存档</strong><small>{{ save ? `${time(save.savedAt)} · 格式 v${save.formatVersion || 1}` : '尚未创建存档' }}</small></span><RotateCcw :size="18" /></div>
+          <div v-if="save" class="save-remark"><small>存档备注</small><p>{{ save.remark || '无备注' }}</p></div>
           <div v-if="save?.investigators?.length" class="investigator-grid"><span v-for="item in save.investigators" :key="item.characterId"><strong>{{ item.name }}</strong><small>HP {{ item.hpCurrent }}/{{ item.hpMax }} · SAN {{ item.sanCurrent }}/{{ item.sanMax }} · MP {{ item.mpCurrent }}/{{ item.mpMax }}</small><em v-if="item.dead">死亡</em><em v-else-if="item.dying">濒死</em><em v-else-if="item.unconscious">昏迷</em></span></div>
-          <div class="tool-actions"><button class="button secondary" :disabled="busy" @click="execute(saveSnapshot)"><Save :size="16" />{{ save ? '覆盖存档' : '创建存档' }}</button><button class="button" :class="confirmLoad ? 'danger' : 'ghost'" :disabled="!save || busy" @click="execute(loadSnapshot)"><RotateCcw :size="16" />{{ confirmLoad ? '再次点击确认读档' : '读取存档' }}</button></div>
+          <div class="tool-actions"><button class="button" :class="confirmLoad ? 'danger' : 'ghost'" :disabled="!save || busy" @click="execute(loadSnapshot)"><RotateCcw :size="16" />{{ confirmLoad ? '再次点击确认读档' : '读取存档' }}</button></div>
           <p v-if="confirmLoad" class="destructive-note">读档会删除存档点之后的行动轮、消息、骰子和人物状态，此操作不可撤销。</p>
         </section>
       </TabsContent>

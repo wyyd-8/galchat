@@ -428,6 +428,28 @@ test('creates a persisted single check through the same participant presentation
   assert.equal(summary?.formulaValue, '1 人参与 · 侦查 · 分别展示')
 })
 
+test('uses pending participant display fields instead of the roll title', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.summary.reason = '追踪受伤足迹并观察周围环境'
+  aggregate.summary.status = 'PENDING'
+  aggregate.results = [aggregate.results[0]!]
+  aggregate.results[0]!.reason = aggregate.summary.reason
+  aggregate.results[0]!.resolvedAt = undefined
+  aggregate.results[0]!.resultData!.result = undefined
+  Object.assign(aggregate.results[0]!.resolution!, {
+    characterName: '康特·奈尔',
+    checkName: '侦查',
+    outcome: undefined,
+  })
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.deepEqual(summary.groups, [
+    { label: '康特·奈尔', expression: '侦查', result: '— · 已结算', diceCount: 2 },
+  ])
+})
+
 test('uses the participant value presentation for an ordinary single damage die', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
   aggregate.results = [{

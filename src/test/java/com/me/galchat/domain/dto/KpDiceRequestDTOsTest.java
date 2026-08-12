@@ -33,6 +33,13 @@ class KpDiceRequestDTOsTest {
                 .containsExactly("reason", "sourceMode", "mode", "targets");
     }
 
+    @Test
+    void checkTargetAcceptsMultipleCandidateCheckNames() {
+        assertThat(KpDiceRequestDTOs.CheckTarget.class.getRecordComponents())
+                .extracting(component -> component.getName())
+                .containsExactly("characterName", "checkNames", "modifier");
+    }
+
     private boolean lacksDescription(Field field) {
         ToolParam toolParam = field.getAnnotation(ToolParam.class);
         return toolParam == null || toolParam.description().isBlank();

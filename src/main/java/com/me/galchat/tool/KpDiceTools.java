@@ -24,7 +24,8 @@ public class KpDiceTools {
 
     @Tool(
             name = "requestCheck",
-            description = "发起单人属性/技能检定；后端读取角色卡目标值并直接给出成功或失败。",
+            description = "发起单人属性/技能检定；可为该角色提供多个候选检定项，"
+                    + "后端取角色卡中数值最高的一项，只掷一次并直接给出成功或失败。",
             returnDirect = true)
     public KpDiceToolResult requestCheck(
             @ToolParam(description = "检定原因、难度和角色检定项")
@@ -41,6 +42,8 @@ public class KpDiceTools {
                     + "任一成功适用于聆听等一人发现即可的检定；"
                     + "全部成功适用于潜行等所有人都必须通过的检定；"
                     + "分离表示分别展示、不计算群体结论，不确定时使用分离。"
+                    + "每个角色只能出现一次；若同一角色可用多个检定项，"
+                    + "放入该角色的同一个候选列表，后端取最高值且只掷一次。"
                     + "该规则仅供前端展示，不改变后端返回的各角色检定结果。",
             returnDirect = true)
     public KpDiceToolResult requestGroupCheck(

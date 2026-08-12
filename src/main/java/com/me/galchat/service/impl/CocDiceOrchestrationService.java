@@ -103,12 +103,12 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             KpDiceRequestDTOs.CheckTarget target = targets.get(index);
             CocDiceCharacterVO card = characterCardService.requireDiceCharacter(
                     runId, target.characterName().trim());
-            int targetValue = requireCheckValue(card, target.checkName());
+            CheckSelection check = selectHighestCheck(card, target.checkNames());
             CocPercentileModifier modifier = normalizeModifier(target.modifier());
             DiceRollResultCreateDTO draft = checkDraft(
                     card,
-                    target.checkName().trim(),
-                    targetValue,
+                    check.name(),
+                    check.value(),
                     difficulty,
                     modifier,
                     false,
@@ -146,11 +146,11 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             KpDiceRequestDTOs.CheckTarget target = targets.get(index);
             CocDiceCharacterVO card = characterCardService.requireDiceCharacter(
                     runId, target.characterName().trim());
-            int targetValue = requireCheckValue(card, target.checkName());
+            CheckSelection check = selectHighestCheck(card, target.checkNames());
             drafts.add(checkDraft(
                     card,
-                    target.checkName().trim(),
-                    targetValue,
+                    check.name(),
+                    check.value(),
                     CocCheckDifficulty.REGULAR,
                     normalizeModifier(target.modifier()),
                     false,
@@ -1268,7 +1268,10 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         Set<String> names = new HashSet<>();
         for (KpDiceRequestDTOs.CheckTarget target : targets) {
             if (target == null || !StringUtils.hasText(target.characterName())
-                    || !StringUtils.hasText(target.checkName())) {
+                    || target.checkNames() == null
+                    || target.checkNames().isEmpty()
+                    || target.checkNames().stream().anyMatch(
+                            checkName -> !StringUtils.hasText(checkName))) {
                 throw new UserRequestException("检定角色名和检定项不能为空");
             }
             if (!names.add(target.characterName().trim())) {
@@ -1438,6 +1441,22 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     "角色“" + card.name() + "”没有可用的“" + checkName.trim() + "”检定值");
         }
         return value;
+    }
+
+    private CheckSelection selectHighestCheck(
+            CocDiceCharacterVO card, List<String> checkNames) {
+        CheckSelection highest = null;
+        for (String checkName : checkNames) {
+            String normalizedName = checkName.trim();
+            int value = requireCheckValue(card, normalizedName);
+            if (highest == null || value > highest.value()) {
+                highest = new CheckSelection(normalizedName, value);
+            }
+        }
+        return highest;
+    }
+
+    private record CheckSelection(String name, int value) {
     }
 
     private CocPercentileModifier normalizeModifier(CocPercentileModifier modifier) {

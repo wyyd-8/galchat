@@ -2,6 +2,7 @@ package com.me.galchat.domain.vo;
 
 import com.me.galchat.domain.po.DiceRollResult;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 import java.time.LocalDateTime;
@@ -10,6 +11,31 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DiceRollDetailVOTest {
+
+    @Test
+    void pendingDetailExposesParticipantDisplayFieldsWithoutInternalRuleValues()
+            throws Exception {
+        DiceResolutionDataVO resolution = DiceResolutionDataVO.pending(
+                "CHECK",
+                null,
+                Map.of(
+                        "cardId", 77L,
+                        "characterName", "康特·奈尔",
+                        "checkName", "侦查",
+                        "targetValue", 70));
+        DiceRollResult entity = new DiceRollResult()
+                .setId(1L)
+                .setReason("追踪受伤足迹并观察周围环境")
+                .setResolutionData(resolution);
+
+        String json = JsonMapper.builder().build()
+                .writeValueAsString(DiceRollDetailVO.from(entity));
+
+        assertThat(json)
+                .contains("\"characterName\":\"康特·奈尔\"")
+                .contains("\"checkName\":\"侦查\"")
+                .doesNotContain("cardId", "targetValue");
+    }
 
     @Test
     void detailExposesOutcomeButNotInternalRuleSnapshot() {

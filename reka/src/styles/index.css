@@ -212,10 +212,11 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .chat-message { margin-bottom: 26px; display: flex; align-items: flex-start; gap: 12px; }
 .chat-message.user { justify-content: flex-end; }
 .chat-message.narrator, .chat-message.system_event { justify-content: center; }
-.chat-message.dice_roll { justify-content: center; }
-.dice-message-card { --dice-message-accent: #4f7291; box-sizing: border-box; width: 100%; min-height: 54px; padding: 11px 15px; border: 2px solid var(--dice-message-accent); border-radius: 12px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: #30342f; background: color-mix(in srgb, var(--dice-message-accent) 5%, #faf8f2); box-shadow: 0 5px 18px rgba(48,44,35,.06); cursor: pointer; transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+.chat-message.dice_roll { min-width: 0; justify-content: center; }
+.dice-message-card { --dice-message-accent: #4f7291; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 54px; padding: 11px 15px; overflow: hidden; border: 2px solid var(--dice-message-accent); border-radius: 12px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: #30342f; background: color-mix(in srgb, var(--dice-message-accent) 5%, #faf8f2); box-shadow: 0 5px 18px rgba(48,44,35,.06); cursor: pointer; transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
 .dice-message-card:hover { border-color: var(--dice-message-accent); box-shadow: 0 8px 22px rgba(48,44,35,.1); transform: translateY(-1px); }
-.dice-message-title { min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; font-family: var(--font-display); font-size: 13px; font-weight: 700; text-decoration-line: underline; text-decoration-color: var(--dice-message-accent); text-decoration-thickness: 1.5px; text-underline-offset: 4px; text-overflow: ellipsis; white-space: nowrap; }
+.dice-message-title { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 8px; overflow: hidden; font-family: var(--font-display); font-size: 13px; font-weight: 700; text-decoration-line: underline; text-decoration-color: var(--dice-message-accent); text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
+.dice-message-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dice-message-title svg { flex: 0 0 auto; color: var(--dice-message-accent); }
 .dice-message-status { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; color: var(--dice-message-accent); font-size: 10px; font-weight: 700; }
 .dice-message-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent); }
@@ -535,7 +536,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .sheet-columns strong { font-size: 10px; }
 .sheet-columns p { margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.65; }
 .dice-history-list { width: 100%; display: grid; gap: 9px; }
-.dice-history-item { position: relative; }
+.dice-history-item { min-width: 0; position: relative; }
 .dice-history-item .dice-message-card { padding-right: 58px; }
 .dice-history-locate { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; position: absolute; top: 50%; right: 14px; z-index: 1; display: grid; place-items: center; color: #64716a; background: rgba(255,255,255,.46); cursor: pointer; transform: translateY(-50%); transition: color 150ms ease, background 150ms ease, transform 150ms ease; }
 .dice-history-locate:hover { color: var(--pine); background: rgba(255,255,255,.88); transform: translateY(-50%) scale(1.06); }

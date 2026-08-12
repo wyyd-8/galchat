@@ -288,6 +288,13 @@ export function useWorkspace() {
     if (!group.items.some((item) => item.actorId === actorId)) group.items.push({ order: group.items.length + 1, actorType: 'character', actorId })
   }
 
+  function findEventMessage(event: GroupChatEvent): GroupMessage | undefined {
+    if (event.messageId != null) {
+      return messages.value.find((item) => item.id === event.messageId)
+    }
+    return messages.value.find((item) => item.replyStepId === event.replyStepId)
+  }
+
   function applyEvent(event: GroupChatEvent) {
     const step = event.replyStepId
     if (event.eventType === 'game_time.changed' && selectedConversationId.value) {
@@ -304,7 +311,7 @@ export function useWorkspace() {
       latestDiceRoll.value = aggregate
       incomingDiceRoll.value = aggregate
       diceRollCache.set(aggregate.summary.id, Promise.resolve(aggregate))
-      const message = messages.value.find((item) => item.replyStepId === step)
+      const message = findEventMessage(event)
       if (message) Object.assign(message, {
         messageKind: 'dice_roll',
         content: '',
@@ -314,7 +321,7 @@ export function useWorkspace() {
     }
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
-      const existing = messages.value.find((item) => item.replyStepId === step)
+      const existing = findEventMessage(event)
       if (existing) {
         Object.assign(existing, { id: event.messageId || tempMessageId--, turnId: event.turnId,
           speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
@@ -328,15 +335,15 @@ export function useWorkspace() {
     } else if (event.eventType === 'reasoning.delta' && step) {
       reasoning[step] = (reasoning[step] || '') + (event.delta || '')
     } else if (event.eventType === 'decision.delta' && step) {
-      const message = messages.value.find((item) => item.replyStepId === step)
+      const message = findEventMessage(event)
       if (message) message.decisionContent = (message.decisionContent || '') + (event.delta || '')
     } else if (event.eventType === 'decision.completed' && step) {
-      const message = messages.value.find((item) => item.replyStepId === step)
+      const message = findEventMessage(event)
       if (message) message.decisionContent = event.content ?? message.decisionContent
     } else if (event.eventType === 'message.delta' && step) {
-      const message = messages.value.find((item) => item.replyStepId === step); if (message) message.content += event.delta || ''
+      const message = findEventMessage(event); if (message) message.content += event.delta || ''
     } else if (event.eventType === 'message.completed' && step) {
-      let message = messages.value.find((item) => item.replyStepId === step)
+      let message = findEventMessage(event)
       if (!message) {
         message = { id: event.messageId || tempMessageId--, conversationId: selectedConversationId.value!, turnId: event.turnId, replyStepId: step,
           speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name,
@@ -360,7 +367,7 @@ export function useWorkspace() {
     } else if (event.eventType === 'turn.completed') {
       currentTurn.value = null
     } else if (event.eventType === 'reply.failed' && step) {
-      const message = messages.value.find((item) => item.replyStepId === step)
+      const message = findEventMessage(event)
       if (message) { message.status = 'failed'; message.content ||= event.error || '回复生成失败' }
     } else if (event.eventType === 'reply.failed' && event.error) {
       notify('本轮回复中断', event.error, 'danger')

@@ -22,7 +22,7 @@ public final class KpDiceRequestDTOs {
                     description = "检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
                     required = false)
             CocCheckDifficulty difficulty,
-            @ToolParam(description = "参与单人检定的角色及其检定项")
+            @ToolParam(description = "参与单人检定的角色及候选检定项；多个候选项只掷一次并使用其中最高值")
             CheckTarget target) {
     }
 
@@ -38,19 +38,29 @@ public final class KpDiceRequestDTOs {
                     + "ALL_SUCCESS全部成功才通过，例如群体潜行；"
                     + "SEPARATE分别展示、不计算群体结论；不确定时使用SEPARATE（默认）")
             GroupCheckRule groupRule,
-            @ToolParam(description = "参与群体检定的角色及其检定项")
+            @ToolParam(description = "参与群体检定的角色及候选检定项；每个角色只能出现一次，"
+                    + "同一角色的多个候选项必须放入同一个CheckTarget，后端只掷一次并使用其中最高值")
             List<CheckTarget> targets) {
     }
 
     public record CheckTarget(
             @ToolParam(description = "参与检定的角色名，必须与当前跑团中的角色卡名称一致")
             String characterName,
-            @ToolParam(description = "角色卡上的属性或技能名称，例如力量、侦查、手枪")
-            String checkName,
+            @ToolParam(description = "角色卡上的候选属性或技能名称，例如力量、侦查、手枪；后端使用其中检定值最高的一项")
+            List<String> checkNames,
             @ToolParam(
                     description = "百分骰修正：NORMAL无修正，BONUS_1/BONUS_2奖励骰，PENALTY_1/PENALTY_2惩罚骰；省略时为NORMAL",
                     required = false)
             CocPercentileModifier modifier) {
+
+        public CheckTarget(
+                String characterName,
+                String checkName,
+                CocPercentileModifier modifier) {
+            this(characterName,
+                    checkName == null ? null : List.of(checkName),
+                    modifier);
+        }
     }
 
     public record Opposed(

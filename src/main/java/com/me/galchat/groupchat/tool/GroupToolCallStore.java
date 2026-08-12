@@ -14,6 +14,8 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.model.tool.ToolExecutionResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -29,6 +31,8 @@ import java.util.UUID;
 
 @Component
 public class GroupToolCallStore implements DiceFollowUpLocator {
+
+    private static final Logger logger = LoggerFactory.getLogger(GroupToolCallStore.class);
 
     private final GroupChatToolCallMapper mapper;
     private final ObjectMapper objectMapper;
@@ -174,6 +178,9 @@ public class GroupToolCallStore implements DiceFollowUpLocator {
             }
             return result.summary().getId();
         } catch (JacksonException exception) {
+            logger.error(
+                    "掷骰工具返回结果解析失败，responseLength={}，responseData={}",
+                    responseData.length(), responseData, exception);
             throw new UserRequestException("掷骰工具返回结果无法解析");
         }
     }

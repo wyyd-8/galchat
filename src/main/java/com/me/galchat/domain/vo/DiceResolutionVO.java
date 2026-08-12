@@ -11,6 +11,8 @@ public class DiceResolutionVO {
     private String type;
     private Long sourceResultId;
     private String groupRule;
+    private String characterName;
+    private String checkName;
     private Map<String, Object> outcome;
     private Map<String, Object> effect;
 }

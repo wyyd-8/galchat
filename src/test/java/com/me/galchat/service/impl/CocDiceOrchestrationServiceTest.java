@@ -145,6 +145,60 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
+    void singleCheckUsesHighestValueAmongCandidateCheckNames() {
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(
+                card(11L, null, "林恩", Map.of("追踪", 40, "侦查", 70)));
+        stubCreate(7L);
+
+        service.requestCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Check(
+                        "寻找足迹",
+                        CocCheckDifficulty.REGULAR,
+                        new KpDiceRequestDTOs.CheckTarget(
+                                "林恩",
+                                List.of("追踪", "侦查"),
+                                CocPercentileModifier.NORMAL)));
+
+        assertThat(createdDrafts()).singleElement().satisfies(draft ->
+                assertThat(draft.getResolutionData().getRule())
+                        .containsEntry("checkName", "侦查")
+                        .containsEntry("targetValue", 70));
+    }
+
+    @Test
+    void groupCheckUsesEachCharactersHighestCandidateCheckValue() {
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(
+                card(11L, null, "林恩", Map.of("追踪", 40, "侦查", 70)));
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(
+                card(12L, 12L, "陈默", Map.of("追踪", 65, "侦查", 35)));
+        stubCreate(7L);
+
+        service.requestGroupCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.GroupCheck(
+                        "寻找足迹",
+                        CocCheckDifficulty.REGULAR,
+                        null,
+                        List.of(
+                                new KpDiceRequestDTOs.CheckTarget(
+                                        "林恩", List.of("追踪", "侦查"),
+                                        CocPercentileModifier.NORMAL),
+                                new KpDiceRequestDTOs.CheckTarget(
+                                        "陈默", List.of("追踪", "侦查"),
+                                        CocPercentileModifier.NORMAL))));
+
+        assertThat(createdDrafts())
+                .extracting(draft -> draft.getResolutionData().getRule().get("checkName"))
+                .containsExactly("侦查", "追踪");
+        assertThat(createdDrafts())
+                .extracting(draft -> draft.getResolutionData().getRule().get("targetValue"))
+                .containsExactly(70, 65);
+    }
+
+    @Test
     void groupCheckRequiresAtLeastTwoCharacters() {
         assertThatThrownBy(() -> service.requestGroupCheck(
                 7L,
@@ -1343,6 +1397,16 @@ class CocDiceOrchestrationServiceTest {
                 characterName, checkName, CocPercentileModifier.NORMAL);
     }
 
+    @SuppressWarnings("unchecked")
+    private List<DiceRollResultCreateDTO> createdDrafts() {
+        return (List<DiceRollResultCreateDTO>) org.mockito.Mockito.mockingDetails(internal)
+                .getInvocations().stream()
+                .filter(invocation -> invocation.getMethod().getName().equals("createDiceRoll"))
+                .findFirst()
+                .orElseThrow()
+                .getArgument(2);
+    }
+
     private CocDiceCharacterVO player(String name, int checkValue) {
         return card(11L, null, name, checkValue);
     }
@@ -1353,12 +1417,20 @@ class CocDiceOrchestrationServiceTest {
 
     private CocDiceCharacterVO card(
             Long cardId, Long participantId, String name, int checkValue) {
+        return card(cardId, participantId, name, Map.of("侦查", checkValue));
+    }
+
+    private CocDiceCharacterVO card(
+            Long cardId,
+            Long participantId,
+            String name,
+            Map<String, Integer> checkValues) {
         return new CocDiceCharacterVO(
                 cardId,
                 participantId == null ? "PLAYER" : "BOT",
                 participantId,
                 name,
-                Map.of("侦查", checkValue),
+                checkValues,
                 10,
                 10,
                 60,

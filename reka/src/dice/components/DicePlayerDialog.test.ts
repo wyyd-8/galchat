@@ -315,6 +315,31 @@ test('stretches each dice message card across the chat message row', async () =>
   assert.match(card, /box-sizing:\s*border-box/)
 })
 
+test('truncates long dice summaries to the width available in each card host', async () => {
+  const source = await readFile(new URL('./DiceRollMessage.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DiceRollMessage should contain a template')
+
+  const titleText = findElementByClass(baseParse(template), 'dice-message-title-text')
+  assert.ok(titleText, 'the summary text needs its own shrinkable box for ellipsis rendering')
+
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  const card = cssRule(styles, '.dice-message-card')
+  const title = cssRule(styles, '.dice-message-title')
+  const titleTextRule = cssRule(styles, '.dice-message-title-text')
+  const chatHost = cssRule(styles, '.chat-message.dice_roll')
+  const toolHost = cssRule(styles, '.dice-history-item')
+
+  assert.match(card, /max-width:\s*100%/)
+  assert.match(title, /flex:\s*1\s+1\s+auto/)
+  assert.match(titleTextRule, /min-width:\s*0/)
+  assert.match(titleTextRule, /overflow:\s*hidden/)
+  assert.match(titleTextRule, /text-overflow:\s*ellipsis/)
+  assert.match(titleTextRule, /white-space:\s*nowrap/)
+  assert.match(chatHost, /min-width:\s*0/)
+  assert.match(toolHost, /min-width:\s*0/)
+})
+
 test('uses the semantic accent for the dice card border, icon, underline, and status', async () => {
   const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
   const card = cssRule(styles, '.dice-message-card')

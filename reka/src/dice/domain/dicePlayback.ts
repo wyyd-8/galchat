@@ -366,8 +366,12 @@ function aggregateGroup(
   return {
     label: typeof outcome.characterName === 'string'
       ? outcome.characterName
+      : detail.resolution?.characterName
+        ? detail.resolution.characterName
       : detail.reason || `参与者 ${index + 1}`,
-    checkName: typeof outcome.checkName === 'string' ? outcome.checkName : detail.displayType || '检定',
+    checkName: typeof outcome.checkName === 'string'
+      ? outcome.checkName
+      : detail.resolution?.checkName || detail.displayType || '检定',
     outcomeLabel: checkOutcomeLabel(outcome),
     success: typeof outcome.category === 'string'
       && SUCCESSFUL_CHECK_OUTCOMES.has(outcome.category),

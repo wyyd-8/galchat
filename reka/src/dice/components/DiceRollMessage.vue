@@ -18,7 +18,10 @@ const presentation = computed(() => createDiceMessagePresentation(props.aggregat
     :class="`is-${presentation.tone}`"
     @click="emit('open')"
   >
-    <span class="dice-message-title"><Dices v-if="showIcon" :size="15" />{{ presentation.title }}</span>
+    <span class="dice-message-title">
+      <Dices v-if="showIcon" :size="15" />
+      <span class="dice-message-title-text">{{ presentation.title }}</span>
+    </span>
     <span class="dice-message-status"><i />{{ presentation.statusLabel }}</span>
   </button>
 </template>

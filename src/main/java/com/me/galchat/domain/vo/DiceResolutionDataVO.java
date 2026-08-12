@@ -26,10 +26,14 @@ public class DiceResolutionDataVO {
 
     public DiceResolutionVO publicView() {
         Object savedGroupRule = rule == null ? null : rule.get("groupRule");
+        Object savedCharacterName = rule == null ? null : rule.get("characterName");
+        Object savedCheckName = rule == null ? null : rule.get("checkName");
         return new DiceResolutionVO(
                 type,
                 sourceResultId,
                 savedGroupRule instanceof String value ? value : null,
+                savedCharacterName instanceof String value ? value : null,
+                savedCheckName instanceof String value ? value : null,
                 outcome,
                 effect);
     }

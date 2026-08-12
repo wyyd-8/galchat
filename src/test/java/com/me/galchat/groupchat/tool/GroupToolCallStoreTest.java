@@ -1,10 +1,15 @@
 package com.me.galchat.groupchat.tool;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.me.galchat.domain.po.GroupChatToolCall;
+import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.service.impl.GroupTurnCheckpointService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -17,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -24,6 +30,50 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GroupToolCallStoreTest {
+
+    @Test
+    void logsRawDiceToolResponseAndJacksonCauseWhenParsingFails() {
+        GroupChatToolCallMapper mapper = mock(GroupChatToolCallMapper.class);
+        GroupToolCallStore store = new GroupToolCallStore(
+                mapper, JsonMapper.builder().build(),
+                mock(GroupTurnCheckpointService.class));
+        when(mapper.nextToolStepNo(41L)).thenReturn(1);
+        AssistantMessage assistant = AssistantMessage.builder()
+                .content("")
+                .toolCalls(List.of(new AssistantMessage.ToolCall(
+                        "call-1", "function", "requestGroupCheck", "{}")))
+                .build();
+        ChatResponse response = new ChatResponse(List.of(new Generation(assistant)));
+        String malformedResponse = "{not-json";
+        ToolResponseMessage toolResponse = ToolResponseMessage.builder()
+                .responses(List.of(new ToolResponseMessage.ToolResponse(
+                        "call-1", "requestGroupCheck", malformedResponse)))
+                .build();
+        ToolExecutionResult result = mock(ToolExecutionResult.class);
+        when(result.conversationHistory()).thenReturn(List.of(toolResponse));
+        Logger logger = (Logger) LoggerFactory.getLogger(GroupToolCallStore.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try {
+            assertThatThrownBy(() -> store.saveExecution(41L, response, result))
+                    .isInstanceOf(UserRequestException.class)
+                    .hasMessage("掷骰工具返回结果无法解析");
+
+            assertThat(appender.list).singleElement().satisfies(event -> {
+                assertThat(event.getFormattedMessage())
+                        .contains("掷骰工具返回结果解析失败")
+                        .contains("responseData={not-json");
+                assertThat(event.getThrowableProxy()).isNotNull();
+                assertThat(event.getThrowableProxy().getMessage())
+                        .contains("Unexpected character");
+            });
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
 
     @Test
     void savesToolCallAndItsResponseInOneModelStep() {

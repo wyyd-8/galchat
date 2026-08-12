@@ -89,6 +89,12 @@ public class DecisionActionStreamParser {
 
     public void finish() {
         accept(null);
+        if (state == State.IN_ACTION
+                && ACTION_CLOSE.startsWith(pending.toString())) {
+            pending.append(ACTION_CLOSE,
+                    pending.length(), ACTION_CLOSE.length());
+            accept(null);
+        }
         if (state != State.COMPLETE) {
             fail("决策—行动输出不完整");
         }

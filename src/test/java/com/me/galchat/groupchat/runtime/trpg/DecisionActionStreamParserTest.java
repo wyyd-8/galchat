@@ -60,6 +60,33 @@ class DecisionActionStreamParserTest {
     }
 
     @Test
+    void completesMissingActionClosingTagWhenFinishing() {
+        DecisionActionStreamParser parser =
+                new DecisionActionStreamParser();
+        parser.accept(
+                "<decision>观察窗户。</decision>"
+                        + "<action>我检查窗框。");
+
+        parser.finish();
+
+        assertThat(parser.decision()).isEqualTo("观察窗户。");
+        assertThat(parser.action()).isEqualTo("我检查窗框。");
+    }
+
+    @Test
+    void completesTruncatedActionClosingTagWhenFinishing() {
+        DecisionActionStreamParser parser =
+                new DecisionActionStreamParser();
+        parser.accept(
+                "<decision>观察窗户。</decision>"
+                        + "<action>我检查窗框。</act");
+
+        parser.finish();
+
+        assertThat(parser.action()).isEqualTo("我检查窗框。");
+    }
+
+    @Test
     void rejectsMalformedOrIncompleteProtocols() {
         List<String> malformed = List.of(
                 "正文<decision>判断</decision><action>行动</action>",

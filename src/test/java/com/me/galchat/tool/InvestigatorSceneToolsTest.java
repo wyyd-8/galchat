@@ -38,5 +38,11 @@ class InvestigatorSceneToolsTest {
                 .getMethod("endSceneExploration", ToolContext.class)
                 .getAnnotation(Tool.class);
         assertThat(annotation.returnDirect()).isFalse();
+        assertThat(annotation.description())
+                .contains("结束自己的探索")
+                .contains("结束当前子场景的探索")
+                .contains("不会影响父场景")
+                .doesNotContain("决定离开了")
+                .doesNotContain("后续前往场景");
     }
 }

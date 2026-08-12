@@ -95,7 +95,56 @@ class TrpgChildSceneCommandServiceTest {
     }
 
     @Test
-    void rejectsSecondValidChildSceneRequestFromTheSameKpStep() {
+    void activatesSeveralRecordedChildScenesInCallOrder() {
+        Fixture fixture = fixture();
+        when(fixture.stepMapper().selectList(any()))
+                .thenReturn(List.of(fixture.step()));
+        when(fixture.toolCallMapper().selectList(any()))
+                .thenReturn(List.of(
+                        new GroupChatToolCall()
+                                .setReplyStepId(fixture.step().getId())
+                                .setToolName("startChildScene")
+                                .setToolArguments("""
+                                        {"childSceneName":"钟楼","investigatorNames":["亨利"]}
+                                        """)
+                                .setToolResult("已创建子场景"),
+                        new GroupChatToolCall()
+                                .setReplyStepId(fixture.step().getId())
+                                .setToolName("startChildScene")
+                                .setToolArguments("""
+                                        {"childSceneName":"地下室","investigatorNames":["艾琳"]}
+                                        """)
+                                .setToolResult("已创建子场景")));
+        java.util.concurrent.atomic.AtomicLong ids =
+                new java.util.concurrent.atomic.AtomicLong(40L);
+        when(fixture.planMapper().insert(any(GroupReplyPlan.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupReplyPlan>getArgument(0)
+                            .setId(ids.incrementAndGet());
+                    return 1;
+                });
+
+        boolean activated = fixture.service()
+                .finalizeStartAfterTurn(
+                        fixture.conversation(), fixture.turn());
+
+        assertThat(activated).isTrue();
+        assertThat(fixture.conversation().getActiveReplyPlanId())
+                .isEqualTo(41L);
+        org.mockito.ArgumentCaptor<GroupReplyPlan> plans =
+                org.mockito.ArgumentCaptor.forClass(GroupReplyPlan.class);
+        verify(fixture.planMapper(), org.mockito.Mockito.times(2))
+                .insert(plans.capture());
+        assertThat(plans.getAllValues())
+                .extracting(GroupReplyPlan::getId,
+                        GroupReplyPlan::getNextPlanId)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(41L, 42L),
+                        org.assertj.core.groups.Tuple.tuple(42L, null));
+    }
+
+    @Test
+    void allowsAnotherDisjointChildSceneRequestFromTheSameKpStep() {
         Fixture fixture = fixture();
         when(fixture.toolCallMapper().selectList(any()))
                 .thenReturn(List.of(new GroupChatToolCall()
@@ -106,10 +155,11 @@ class TrpgChildSceneCommandServiceTest {
                                 """)
                         .setToolResult("已创建子场景")));
 
-        assertThatThrownBy(() -> fixture.service().startChildScene(
-                7L, 51L, "另一条林间小路", List.of("艾琳")))
-                .hasMessageContaining("同一回复步骤")
-                .hasMessageContaining("子场景");
+        String result = fixture.service().startChildScene(
+                7L, 51L, "另一条林间小路", List.of("艾琳"));
+
+        assertThat(result).isEqualTo(
+                "已创建子场景“另一条林间小路”，调查员艾琳将进入该场景。");
     }
 
     @Test
@@ -118,6 +168,27 @@ class TrpgChildSceneCommandServiceTest {
 
         assertThat(fixture.service().canStartChildScene(
                 fixture.conversation())).isTrue();
+    }
+
+    @Test
+    void doesNotOfferChildSceneToolInsideAChildScene() {
+        Fixture fixture = fixture();
+        fixture.parent().setParentPlanId(20L);
+
+        assertThat(fixture.service().canStartChildScene(
+                fixture.conversation())).isFalse();
+        assertThat(fixture.service().isActiveChildScene(
+                fixture.conversation())).isTrue();
+    }
+
+    @Test
+    void rejectsMovingAnInvestigatorWhoIsAlreadyInAChildScene() {
+        Fixture fixture = fixture();
+        fixture.parent().setParentPlanId(20L);
+
+        assertThatThrownBy(() -> fixture.service().startChildScene(
+                7L, 51L, "另一处区域", List.of("亨利")))
+                .hasMessage("当前调查员已处于子场景中，请结束当前场景后再进行后续切换");
     }
 
     @Test

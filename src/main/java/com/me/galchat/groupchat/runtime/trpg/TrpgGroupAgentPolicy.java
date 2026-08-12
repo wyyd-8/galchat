@@ -127,6 +127,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 .equals(action.actionType());
         boolean sceneIntro = GroupChatConstant.ACTION_TRPG_SCENE_INTRO
                 .equals(action.actionType());
+        boolean activeChildScene = scenePhase
+                && GroupChatConstant.ACTOR_KP.equals(actor.type())
+                && childSceneCommandService.isActiveChildScene(
+                        conversation);
         boolean proposalLead = scenePhase
                 && !GroupChatConstant.ACTOR_KP.equals(actor.type())
                 && Integer.valueOf(1).equals(action.itemOrder());
@@ -206,7 +210,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
 
                     你正在 TRPG 群聊中扮演%s，当前阶段是%s。
                     不得输出隐藏思考过程。
-                    """.formatted(name, phase)));
+                    """.formatted(name, phase)
+                    + TrpgRulePrompts.investigatorThinkingModeRules()));
         }
         messages.addAll(context.messages());
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
@@ -258,12 +263,25 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         : "根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。")
                         + (scenePhase
                         ? """
-                         确认当前场景应当结算时可调用finishSceneExploration，调用后仍要输出公开收束消息。
-                        动态子场景仅用于调查员决定分头行动，并由你根据当前剧情为行动地点自由命名；
+                         结束当前主场景或子场景时必须调用finishSceneExploration。
+                        结束子场景不会影响父场景。
+                        调用后的公开消息只能说明“XXX决定离开了XX”，不得加入后续前往场景的任何内容。
+                        当一名或多名调查员声明希望前往当前场景的不同地区时，必须调用startChildScene，并由你根据其目的地为动态子场景命名；
                         动态子场景不会加载更多模组信息，而是继承当前大场景的全部模组上下文。
-                        调查员一起行动时应保持在主场景；即使全员进入同一子场景也不会被拒绝，但不推荐这样做。
-                        创建子场景的本次回复须在原有内容基础上明确说明哪些调查员去了哪里。
+                        当前回复对相应调查员只能说明“调查员甲、调查员乙前往某地”，不得涉及新场景的具体内容。
+                        若调查员分别前往不同场景，须针对每个不同场景分别调用一次；同一回复允许且推荐根据不同场景多次调用startChildScene。
+
+                        【子场景工具流程示例】
+                        1. 主场景中，林恩声明去钟楼。调用startChildScene({"childSceneName":"钟楼","investigatorNames":["林恩"]})，本次回复只说“林恩前往钟楼”，不描写钟楼内部。
+                        2. 本次回复完成后，系统自动切换到钟楼子场景。下一轮直接进行钟楼子场景，根据调查员行动正常描述与裁定，无须再次调用startChildScene。
+                        3. 钟楼子场景应结束时，调用finishSceneExploration，本次回复只说“林恩决定离开了钟楼”。
+                        4. 系统随后结束该子场景并返回父场景；父场景不受影响，再按当前上下文继续推进。
                         """
+                        + (activeChildScene
+                        ? """
+                        当前已经处于子场景；此时未提供startChildScene是正常流程。请直接进行当前子场景，不得寻找、虚构或重试startChildScene；需要结束时调用finishSceneExploration。
+                        """
+                        : "")
                         : combatAdjudicate
                         ? combatLifecycleService.adjudicationPrompt(
                                 conversation.getId(), action)

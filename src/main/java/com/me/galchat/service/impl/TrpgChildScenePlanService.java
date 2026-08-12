@@ -37,15 +37,56 @@ public class TrpgChildScenePlanService {
             String sceneName,
             Long createdStepId,
             List<GroupReplyPlanItem> selectedInvestigators) {
+        return startChildrenUnderLock(
+                conversation, parent,
+                List.of(new ChildSceneStart(
+                        sceneName, createdStepId,
+                        selectedInvestigators))).getFirst();
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public List<GroupReplyPlan> startChildrenUnderLock(
+            GroupConversation conversation,
+            GroupReplyPlan parent,
+            List<ChildSceneStart> starts) {
         if (conversation == null || parent == null
-                || sceneName == null || createdStepId == null
-                || selectedInvestigators == null
-                || selectedInvestigators.isEmpty()
+                || starts == null || starts.isEmpty()
                 || !parent.getId().equals(
                 conversation.getActiveReplyPlanId())) {
             throw new UserRequestException("创建子场景参数不完整");
         }
         LocalDateTime now = LocalDateTime.now();
+        java.util.ArrayList<GroupReplyPlan> children =
+                new java.util.ArrayList<>();
+        GroupReplyPlan previous = null;
+        for (ChildSceneStart start : starts) {
+            if (start == null || start.sceneName() == null
+                    || start.createdStepId() == null
+                    || start.selectedInvestigators() == null
+                    || start.selectedInvestigators().isEmpty()) {
+                throw new UserRequestException("创建子场景参数不完整");
+            }
+            GroupReplyPlan child = insertChild(
+                    conversation, parent, start, now);
+            if (previous != null) {
+                previous.setNextPlanId(child.getId())
+                        .setUpdatedAt(now);
+                planMapper.updateById(previous);
+            }
+            children.add(child);
+            previous = child;
+        }
+        conversation.setActiveReplyPlanId(children.getFirst().getId())
+                .setUpdatedAt(now);
+        conversationMapper.updateById(conversation);
+        return List.copyOf(children);
+    }
+
+    private GroupReplyPlan insertChild(
+            GroupConversation conversation,
+            GroupReplyPlan parent,
+            ChildSceneStart start,
+            LocalDateTime now) {
         GroupReplyPlan child = new GroupReplyPlan()
                 .setConversationId(conversation.getId())
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
@@ -57,17 +98,17 @@ public class TrpgChildScenePlanService {
         runtimeSceneMapper.insert(new TrpgRuntimeChildScene()
                 .setPlanId(child.getId())
                 .setConversationId(conversation.getId())
-                .setSceneName(sceneName)
-                .setCreatedStepId(createdStepId)
+                .setSceneName(start.sceneName())
+                .setCreatedStepId(start.createdStepId())
                 .setCreatedAt(now));
         String groupKey = "scene:" + child.getId();
         int order = 1;
         for (GroupReplyPlanItem selected :
-                selectedInvestigators) {
+                start.selectedInvestigators()) {
             itemMapper.insert(new GroupReplyPlanItem()
                     .setPlanId(child.getId())
                     .setGroupKey(groupKey)
-                    .setGroupName(sceneName)
+                    .setGroupName(start.sceneName())
                     .setGroupOrder(1)
                     .setItemOrder(order++)
                     .setActorType(selected.getActorType())
@@ -82,7 +123,7 @@ public class TrpgChildScenePlanService {
         itemMapper.insert(new GroupReplyPlanItem()
                 .setPlanId(child.getId())
                 .setGroupKey(groupKey)
-                .setGroupName(sceneName)
+                .setGroupName(start.sceneName())
                 .setGroupOrder(1)
                 .setItemOrder(order)
                 .setActorType(GroupChatConstant.ACTOR_KP)
@@ -90,9 +131,6 @@ public class TrpgChildScenePlanService {
                         GroupChatConstant.PARTICIPANT_ACTIVE)
                 .setCreatedAt(now)
                 .setUpdatedAt(now));
-        conversation.setActiveReplyPlanId(child.getId())
-                .setUpdatedAt(now);
-        conversationMapper.updateById(conversation);
         return child;
     }
 
@@ -140,10 +178,24 @@ public class TrpgChildScenePlanService {
                                 child.getId()));
         runtimeSceneMapper.deleteById(child.getId());
         planMapper.deleteById(child.getId());
-        conversation.setActiveReplyPlanId(parent.getId())
+        GroupReplyPlan resume = parent;
+        if (child.getNextPlanId() != null) {
+            GroupReplyPlan next = planMapper.selectById(
+                    child.getNextPlanId());
+            if (next == null
+                    || !conversation.getId().equals(
+                    next.getConversationId())
+                    || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                    next.getSource())
+                    || !parent.getId().equals(next.getParentPlanId())) {
+                throw new UserRequestException("下一子场景计划不存在");
+            }
+            resume = next;
+        }
+        conversation.setActiveReplyPlanId(resume.getId())
                 .setUpdatedAt(now);
         conversationMapper.updateById(conversation);
-        return parent;
+        return resume;
     }
 
     private List<GroupReplyPlanItem> orderedItems(Long planId) {
@@ -158,5 +210,11 @@ public class TrpgChildScenePlanService {
         return GroupChatConstant.ACTOR_USER.equals(item.getActorType())
                 || GroupChatConstant.ACTOR_CHARACTER.equals(
                 item.getActorType());
+    }
+
+    public record ChildSceneStart(
+            String sceneName,
+            Long createdStepId,
+            List<GroupReplyPlanItem> selectedInvestigators) {
     }
 }

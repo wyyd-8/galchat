@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -55,19 +56,19 @@ public class TrpgChildSceneCommandService {
             List<String> investigatorNames) {
         SceneExecution execution = requireKpSceneExecution(
                 conversationId, replyStepId);
-        boolean alreadyRequested = recordedStartCalls(replyStepId)
-                .stream()
-                .map(call -> readPreparedStart(
-                        execution, call.getToolArguments()))
-                .anyMatch(java.util.Objects::nonNull);
-        if (alreadyRequested) {
-            throw new UserRequestException(
-                    "同一回复步骤不能重复创建子场景");
-        }
+        requireRootSceneForSwitch(execution.plan());
         String sceneName = normalizeSceneName(childSceneName);
         Selected selected = selectItems(
                 execution, investigatorNames,
                 GroupChatConstant.PARTICIPANT_ACTIVE);
+        List<PreparedChildStart> earlier = recordedStartCalls(
+                replyStepId).stream()
+                .map(call -> readPreparedStart(
+                        execution, call.getToolArguments()))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        ensureDistinctDestinationAndInvestigators(
+                sceneName, selected, earlier);
         return "已创建子场景“" + sceneName
                 + "”，调查员"
                 + String.join("、", selected.names())
@@ -100,22 +101,32 @@ public class TrpgChildSceneCommandService {
             try {
                 execution = requireKpSceneExecution(
                         conversation, step, completedTurn);
+                requireRootSceneForSwitch(execution.plan());
             } catch (UserRequestException ignored) {
                 continue;
             }
-            for (GroupChatToolCall call : recordedStartCalls(
-                    step.getId())) {
+            List<PreparedChildStart> preparedStarts =
+                    new ArrayList<>();
+            for (GroupChatToolCall call :
+                    recordedStartCalls(step.getId())) {
                 PreparedChildStart prepared = readPreparedStart(
                         execution, call.getToolArguments());
-                if (prepared == null) {
-                    continue;
+                if (prepared != null) {
+                    ensureDistinctDestinationAndInvestigators(
+                            prepared.sceneName(), prepared.selected(),
+                            preparedStarts);
+                    preparedStarts.add(prepared);
                 }
-                childPlanService.startChildUnderLock(
-                        execution.conversation(),
-                        execution.plan(),
-                        prepared.sceneName(),
-                        step.getId(),
-                        prepared.selected().items());
+            }
+            if (!preparedStarts.isEmpty()) {
+                childPlanService.startChildrenUnderLock(
+                        execution.conversation(), execution.plan(),
+                        preparedStarts.stream()
+                                .map(prepared -> new TrpgChildScenePlanService
+                                        .ChildSceneStart(
+                                        prepared.sceneName(), step.getId(),
+                                        prepared.selected().items()))
+                                .toList());
                 return true;
             }
         }
@@ -147,7 +158,18 @@ public class TrpgChildSceneCommandService {
             GroupConversation conversation) {
         try {
             GroupReplyPlan scene = requireActiveScene(conversation);
-            return !activeInvestigatorItems(scene.getId()).isEmpty();
+            return scene.getParentPlanId() == null
+                    && !activeInvestigatorItems(scene.getId()).isEmpty();
+        } catch (UserRequestException ignored) {
+            return false;
+        }
+    }
+
+    public boolean isActiveChildScene(
+            GroupConversation conversation) {
+        try {
+            return requireActiveScene(conversation)
+                    .getParentPlanId() != null;
         } catch (UserRequestException ignored) {
             return false;
         }
@@ -249,6 +271,13 @@ public class TrpgChildSceneCommandService {
         return plan;
     }
 
+    private void requireRootSceneForSwitch(GroupReplyPlan scene) {
+        if (scene != null && scene.getParentPlanId() != null) {
+            throw new UserRequestException(
+                    "当前调查员已处于子场景中，请结束当前场景后再进行后续切换");
+        }
+    }
+
     private String normalizeSceneName(String sceneName) {
         if (!StringUtils.hasText(sceneName)) {
             throw new UserRequestException("子场景名称不能为空");
@@ -321,6 +350,30 @@ public class TrpgChildSceneCommandService {
             }
         }
         return List.copyOf(result);
+    }
+
+    private void ensureDistinctDestinationAndInvestigators(
+            String sceneName,
+            Selected selected,
+            List<PreparedChildStart> existing) {
+        Set<GroupActorRef> selectedActors = selected.items().stream()
+                .map(item -> new GroupActorRef(
+                        item.getActorType(), item.getActorId()))
+                .collect(java.util.stream.Collectors.toSet());
+        for (PreparedChildStart prepared : existing) {
+            if (sceneName.equals(prepared.sceneName())) {
+                throw new UserRequestException(
+                        "同一目的地只应调用一次子场景工具");
+            }
+            boolean overlaps = prepared.selected().items().stream()
+                    .map(item -> new GroupActorRef(
+                            item.getActorType(), item.getActorId()))
+                    .anyMatch(selectedActors::contains);
+            if (overlaps) {
+                throw new UserRequestException(
+                        "同一调查员不能在本步骤前往多个子场景");
+            }
+        }
     }
 
     private List<GroupReplyPlanItem> activeInvestigatorItems(

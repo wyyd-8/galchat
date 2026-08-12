@@ -21,7 +21,10 @@ public class InvestigatorSceneTools {
 
     @Tool(
             name = "endSceneExploration",
-            description = "当前调查员确认不再执行场景内行动并结束自己的探索。调用后仍需回复公开消息。")
+            description = """
+                    当前调查员确认不再执行场景内行动并结束自己的探索。调用后仍需回复公开消息。
+                    调查员处于子场景时，也可以调用此工具结束当前子场景的探索，不会影响父场景。
+                    """)
     public String endSceneExploration(ToolContext context) {
         Map<String, Object> values = requireContext(context);
         if (!GroupChatConstant.ACTOR_CHARACTER.equals(

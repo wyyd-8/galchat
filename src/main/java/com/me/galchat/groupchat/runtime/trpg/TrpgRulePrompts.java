@@ -30,4 +30,8 @@ final class TrpgRulePrompts {
                 + InvestigatorRulePromptConstant.INVESTIGATOR_RESIDENT_RULES
                 + "\n</investigator-resident-rules>\n";
     }
+
+    static String investigatorThinkingModeRules() {
+        return InvestigatorRulePromptConstant.INVESTIGATOR_THINKING_MODE_RULES;
+    }
 }

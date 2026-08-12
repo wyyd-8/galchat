@@ -9,6 +9,8 @@ import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMess
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
 import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
+import { syncReasoningDisclosure, type ReasoningPhase } from './reasoningDisclosure'
+import { scrollConversationToLatest } from './reasoningScroll'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
@@ -18,7 +20,7 @@ const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
 const reasoningOpen = reactive<Record<number, boolean>>({})
-const reasoningPhase = new Map<number, 'thinking' | 'main' | 'idle'>()
+const reasoningPhase = new Map<number, ReasoningPhase>()
 const lastScrollTop = ref(0)
 const initialScrollPending = ref(true)
 const timeEditing = ref(false)
@@ -84,10 +86,7 @@ function syncReasoningState() {
     const step = message.replyStepId
     if (!step || !props.reasoning[step]) return
     const phase = message.status === 'streaming' && !message.content.trim() ? 'thinking' : message.content.trim() ? 'main' : 'idle'
-    const previous = reasoningPhase.get(step)
-    if (!previous) reasoningOpen[step] = phase === 'thinking'
-    else if (previous === 'thinking' && phase !== 'thinking') reasoningOpen[step] = false
-    reasoningPhase.set(step, phase)
+    syncReasoningDisclosure(reasoningOpen, reasoningPhase, step, phase)
   })
 }
 
@@ -113,7 +112,7 @@ function scrollToLatest() {
     cancelAnimationFrame(latestScrollFrame)
     latestScrollFrame = requestAnimationFrame(() => {
       const viewport = scroller.value
-      if (viewport) viewport.scrollTop = viewport.scrollHeight
+      if (viewport) scrollConversationToLatest(viewport)
     })
   })
 }
@@ -147,7 +146,7 @@ function handleScroll(event: Event) {
               <div class="message-meta"><strong>{{ message.speakerType === 'user' ? '你' : message.speakerType === 'narrator' ? '叙事' : message.speakerType === 'kp' ? (message.speakerName || 'KP') : message.speakerName || character(message.speakerId)?.characterName || '角色' }}</strong><span v-if="message.status === 'streaming'" class="typing-dot">正在回应</span><span v-if="message.status === 'failed'" class="failed-label">生成失败</span></div>
               <CollapsibleRoot v-if="message.replyStepId && reasoning[message.replyStepId]" v-model:open="reasoningOpen[message.replyStepId]" class="reasoning-block">
                 <CollapsibleTrigger class="reasoning-trigger">思考过程 <ChevronDown :size="14" /></CollapsibleTrigger>
-                <CollapsibleContent class="reasoning-content">{{ reasoning[message.replyStepId] }}</CollapsibleContent>
+                <CollapsibleContent class="reasoning-content" :data-reasoning-streaming="reasoningPhase.get(message.replyStepId) === 'thinking' ? 'true' : undefined">{{ reasoning[message.replyStepId] }}</CollapsibleContent>
               </CollapsibleRoot>
               <div v-if="message.decisionContent" class="decision-block"><span>角色决策</span><p>{{ message.decisionContent }}</p></div>
               <p>{{ message.content }}<span v-if="message.status === 'streaming'" class="stream-caret" /></p>

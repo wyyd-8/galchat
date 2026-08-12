@@ -141,6 +141,51 @@ class TrpgChildScenePlanServiceTest {
         verify(conversationMapper).updateById(conversation);
     }
 
+    @Test
+    void closingChildAdvancesToItsQueuedSiblingBeforeReturningToParent() {
+        GroupReplyPlanMapper planMapper =
+                mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        TrpgRuntimeChildSceneMapper runtimeSceneMapper =
+                mock(TrpgRuntimeChildSceneMapper.class);
+        GroupReplyPlan parent = new GroupReplyPlan()
+                .setId(31L).setConversationId(7L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE);
+        GroupReplyPlan nextChild = new GroupReplyPlan()
+                .setId(42L).setConversationId(7L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setParentPlanId(31L);
+        GroupReplyPlan child = new GroupReplyPlan()
+                .setId(41L).setConversationId(7L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setParentPlanId(31L).setNextPlanId(42L);
+        when(planMapper.selectById(31L)).thenReturn(parent);
+        when(planMapper.selectById(42L)).thenReturn(nextChild);
+        when(itemMapper.selectList(any())).thenReturn(
+                List.of(item(GroupChatConstant.ACTOR_USER, 101L, 1)),
+                List.of(
+                        item(GroupChatConstant.ACTOR_USER, 101L, 1),
+                        item(GroupChatConstant.ACTOR_CHARACTER, 9L, 2)));
+        TrpgChildScenePlanService service =
+                new TrpgChildScenePlanService(
+                        planMapper, itemMapper, conversationMapper,
+                        runtimeSceneMapper);
+        GroupConversation conversation =
+                new GroupConversation().setId(7L)
+                        .setActiveReplyPlanId(41L);
+
+        GroupReplyPlan resumed = service.finishChildUnderLock(
+                conversation, child);
+
+        assertThat(resumed).isSameAs(nextChild);
+        assertThat(conversation.getActiveReplyPlanId()).isEqualTo(42L);
+        verify(planMapper).deleteById(41L);
+        verify(conversationMapper).updateById(conversation);
+    }
+
     private GroupReplyPlanItem item(
             String actorType, Long actorId, int order) {
         return new GroupReplyPlanItem()

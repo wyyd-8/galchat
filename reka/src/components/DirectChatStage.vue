@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ArrowLeft, BrainCircuit, History, LoaderCircle, RotateCcw, Send, Settings2 } from '@lucide/vue'
 import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger } from 'reka-ui'
 import type { Character, DirectMessage, UserWorld } from '@/api/types'
+import { scrollConversationToLatest } from './reasoningScroll'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
@@ -46,7 +47,7 @@ function scrollToLatest() {
     cancelAnimationFrame(latestScrollFrame)
     latestScrollFrame = requestAnimationFrame(() => {
       const viewport = scroller.value
-      if (viewport) viewport.scrollTop = viewport.scrollHeight
+      if (viewport) scrollConversationToLatest(viewport)
     })
   })
 }
@@ -82,7 +83,7 @@ function keydown(event: KeyboardEvent) {
           <button v-else-if="hasOlderMessages" class="load-earlier-button" :disabled="loading.history" @click="emit('loadEarlier')"><LoaderCircle v-if="loading.history" class="spin" :size="14" /><History v-else :size="14" />加载更早记录</button>
           <div v-else-if="!messages.length" class="empty-chat"><BrainCircuit :size="30" /><h2>和 {{ character.characterName }} 开始对话</h2><p>角色会结合世界背景、历史记忆和好感度回应。</p></div>
           <template v-for="message in messages" :key="message.id">
-            <CollapsibleRoot v-if="message.role === 'thinking'" v-model:open="thinkingOpen[message.id]" class="direct-thinking"><CollapsibleTrigger class="reasoning-trigger">思考过程</CollapsibleTrigger><CollapsibleContent class="reasoning-content">{{ message.content }}</CollapsibleContent></CollapsibleRoot>
+            <CollapsibleRoot v-if="message.role === 'thinking'" v-model:open="thinkingOpen[message.id]" class="direct-thinking"><CollapsibleTrigger class="reasoning-trigger">思考过程</CollapsibleTrigger><CollapsibleContent class="reasoning-content" :data-reasoning-streaming="thinkingPhase.get(message.id) === 'thinking' ? 'true' : undefined">{{ message.content }}</CollapsibleContent></CollapsibleRoot>
             <div v-else-if="message.role === 'tool'" class="direct-tool">{{ message.content }}</div>
             <article v-else class="chat-message" :class="message.role">
               <div v-if="message.role === 'assistant'" class="message-avatar" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</div>

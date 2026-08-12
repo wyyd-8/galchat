@@ -247,10 +247,52 @@ class TrpgGroupAgentPolicyTest {
         assertThat(invocation.tools())
                 .contains(childTools, waitingTools);
         assertThat(invocation.prompt().getInstructions().getLast().getText())
-                .contains("分头行动")
+                .contains("结束当前主场景或子场景时必须调用finishSceneExploration")
+                .contains("结束子场景不会影响父场景")
+                .contains("只能说明“XXX决定离开了XX”")
+                .contains("不得加入后续前往场景的任何内容")
+                .contains("声明希望前往当前场景的不同地区时，必须调用")
                 .contains("动态子场景")
                 .contains("继承当前大场景")
-                .contains("一起行动时应保持在主场景");
+                .contains("只能说明")
+                .contains("前往")
+                .contains("不得涉及新场景的具体内容")
+                .contains("允许且推荐")
+                .contains("多次调用")
+                .contains("子场景工具流程示例")
+                .contains("startChildScene({\"childSceneName\":\"钟楼\",\"investigatorNames\":[\"林恩\"]})")
+                .contains("林恩前往钟楼")
+                .contains("直接进行钟楼子场景")
+                .contains("finishSceneExploration")
+                .contains("林恩决定离开了钟楼")
+                .contains("返回父场景");
+
+        when(commandService.canStartChildScene(conversation))
+                .thenReturn(false);
+        when(commandService.hasWaitingInvestigators(conversation))
+                .thenReturn(false);
+        when(commandService.isActiveChildScene(conversation))
+                .thenReturn(true);
+        var childInvocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_TRPG_SCENE,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        "scene:child:1",
+                        "钟楼",
+                        2,
+                        1),
+                new GroupContextMaterial(List.of()));
+
+        assertThat(childInvocation.tools())
+                .doesNotContain(childTools);
+        assertThat(childInvocation.prompt().getInstructions()
+                .getLast().getText())
+                .contains("未提供startChildScene")
+                .contains("已经处于子场景")
+                .contains("直接进行当前子场景")
+                .contains("不得寻找、虚构或重试startChildScene");
     }
 
     @Test
@@ -462,7 +504,9 @@ class TrpgGroupAgentPolicyTest {
                 new GroupContextMaterial(List.of()));
 
         assertThat(invocation.tools()).containsExactly(sceneTools);
-        assertThat(invocation.prompt().getInstructions().getFirst().getText())
+        String investigatorSystem = invocation.prompt().getInstructions()
+                .getFirst().getText();
+        assertThat(investigatorSystem)
                 .contains("<controlled-investigator>艾琳</controlled-investigator>")
                 .contains("<other-investigator name=\"林恩\"")
                 .contains("STR=45", "DEX=60", "图书馆使用=70")
@@ -477,6 +521,12 @@ class TrpgGroupAgentPolicyTest {
                 .contains("结束探索只结束自己的主动行动")
                 .contains("重伤但清醒时仍可行动")
                 .doesNotContain("<kp-resident-rules>");
+        assertThat(investigatorSystem).endsWith("""
+                【思维模式要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
+                1. 禁止使用圆括号包裹内心独白，例如"（心想：……）"或"(内心OS：……)"，所有分析内容直接陈述即可
+                2. 禁止以角色第一人称描写内心活动，例如"我心想""我觉得""我暗自"等，请用分析性语言替代
+                3. 思考内容应聚焦于剧情走向分析和回复内容规划，不要在思考中进行角色扮演式的内心戏表演
+                """.stripTrailing());
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("<decision>")
                 .contains("</decision>")
@@ -488,7 +538,9 @@ class TrpgGroupAgentPolicyTest {
                 .contains("决策必须先于行动")
                 .contains("本轮首位提案者")
                 .contains("首先提出一个具体可执行的计划")
-                .contains("不能替其他调查员决定");
+                .contains("不能替其他调查员决定")
+                .contains("确定不再执行当前场景行动时可调用endSceneExploration")
+                .doesNotContain("调用后的action只能说明“XXX决定离开了XX”");
 
         var contributor = policy.prepare(
                 conversation,

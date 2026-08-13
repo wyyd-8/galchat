@@ -102,7 +102,7 @@ class CocDiceOrchestrationServiceTest {
         assertThat(result.summary().getStatus())
                 .isEqualTo(DiceRollConstant.STATUS_PENDING);
         assertThat(result.semanticResult())
-                .isEqualTo("陈默进行“侦查”检定：常规成功");
+                .isEqualTo("陈默进行“侦查”检定：成功");
         assertThat(result.results())
                 .allSatisfy(detail -> assertThat(detail.getResolution())
                         .hasFieldOrPropertyWithValue("groupRule", "SEPARATE"));

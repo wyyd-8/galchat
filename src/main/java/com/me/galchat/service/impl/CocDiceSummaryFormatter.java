@@ -359,20 +359,7 @@ public class CocDiceSummaryFormatter {
             case CRITICAL_SUCCESS -> "大成功";
             case FAILURE -> "失败";
             case FUMBLE -> "大失败";
-            case SUCCESS -> {
-                String savedRank = nullableString(outcome.get("rank"));
-                if (savedRank == null || savedRank.isBlank()) {
-                    yield "成功";
-                }
-                yield switch (CocDiceRules.CheckRank.valueOf(savedRank)) {
-                    case CRITICAL -> "大成功";
-                    case EXTREME -> "极难成功";
-                    case HARD -> "困难成功";
-                    case REGULAR -> "常规成功";
-                    case FAILURE, FUMBLE -> throw new UserRequestException(
-                            "掷骰结果成功等级无效：" + savedRank);
-                };
-            }
+            case SUCCESS -> "成功";
         };
     }
 }

@@ -444,6 +444,12 @@ class TrpgGroupAgentPolicyTest {
     void investigatorSceneActionReceivesOnlySceneLifecycleTool() {
         ICharacterCardService cardService =
                 mock(ICharacterCardService.class);
+        GroupContextAssembler contextAssembler =
+                mock(GroupContextAssembler.class);
+        when(contextAssembler.actorName(
+                5L, new GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L)))
+                .thenReturn("林登");
         when(cardService.listDiceCharacters(7L)).thenReturn(List.of(
                 card(71L, "林恩", null),
                 card(72L, "艾琳", 9L),
@@ -473,7 +479,7 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class);
         TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
                 mock(ChatClient.class),
-                mock(GroupContextAssembler.class),
+                contextAssembler,
                 cardService,
                 new CharacterCardContextFormatter(),
                 mock(KpDiceTools.class),
@@ -515,6 +521,10 @@ class TrpgGroupAgentPolicyTest {
                 .getFirst().getText();
         assertThat(investigatorSystem)
                 .contains("<controlled-investigator>艾琳</controlled-investigator>")
+                .contains("Agent身份名是“林登”")
+                .contains("操控的调查员名是“艾琳”")
+                .contains("“林登”不是调查员姓名")
+                .contains("对外发言、自称和行动一律使用“艾琳”")
                 .contains("<other-investigator name=\"林恩\"")
                 .contains("STR=45", "DEX=60", "图书馆使用=70")
                 .doesNotContain("<other-investigator name=\"艾琳\"")
@@ -535,13 +545,19 @@ class TrpgGroupAgentPolicyTest {
                 3. 思考内容应聚焦于剧情走向分析和回复内容规划，不要在思考中进行角色扮演式的内心戏表演
                 """.stripTrailing());
         assertThat(invocation.prompt().getInstructions().getLast().getText())
+                .contains("现在轮到艾琳执行当前场景探索行动")
+                .doesNotContain("现在轮到林登执行")
                 .contains("<decision>")
                 .contains("</decision>")
                 .contains("<action>")
                 .contains("</action>")
-                .contains("公开行动通常只用一至两句")
-                .contains("问题数量压到完成当前意图所需的最少")
-                .contains("不追加无关的动作描写、语气渲染、履历、自我评价、能力说明、重复理由或后续计划")
+                .contains("像桌边玩家声明行动，不写成小说段落")
+                .contains("action通常只写一句，最多50个汉字")
+                .contains("默认在直接说的话与动作声明之间二选一")
+                .contains("<action>我去书房搜索。</action>")
+                .contains("<action>威尔先在门外看一眼。</action>")
+                .contains("<action>我贴右侧向前探路，留意血点和拖痕；你们拉开几步。</action>")
+                .contains("错误：先写台词，再用第三人称重述同一行动")
                 .contains("决策必须先于行动")
                 .contains("本轮首位提案者")
                 .contains("首先提出一个具体可执行的计划")

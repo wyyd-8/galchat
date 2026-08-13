@@ -36,6 +36,8 @@ class TrpgInvestigatorContextAssemblerTest {
 
         assertThat(context)
                 .contains("谨慎、好奇")
+                .contains("Agent身份名（非调查员名）：原角色林登")
+                .doesNotContain("原角色名：")
                 .contains("COC跑团偏好：倾向优先调查无人探索的地点")
                 .contains("跑团偏好是行动建议，不是必须遵守的规则")
                 .contains("林登")

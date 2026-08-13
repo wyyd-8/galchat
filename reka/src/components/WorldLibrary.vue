@@ -10,7 +10,11 @@ function pick(event: Event) { const file = (event.target as HTMLInputElement).fi
 <template>
   <main class="library-page">
     <header class="library-hero">
-      <div><span class="eyebrow"><Sparkles :size="14" /> GALCHAT WORKSPACE</span><h1>让角色在同一个世界里<br />真正彼此回应。</h1><p>与角色单独对话、编排普通群聊，也可按模组推进 CoC 跑团。</p></div>
+      <div class="library-hero-copy">
+        <span class="eyebrow"><Sparkles :size="14" /> GALCHAT WORKSPACE</span>
+        <h1><span class="hero-title-line">让角色身处同一个世界，</span><span class="hero-title-line">让每次回应自然发生。</span></h1>
+        <p>创建世界，连接角色，开始属于你的故事。</p>
+      </div>
       <div class="hero-actions"><button class="button primary" @click="emit('createWorld')"><Plus :size="17" />创建世界</button><label class="button secondary file-button"><Import :size="17" />导入世界模板<input type="file" accept="application/json" @change="pick" /></label></div>
     </header>
     <section class="content-section">

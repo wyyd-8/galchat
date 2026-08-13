@@ -17,7 +17,7 @@ class CocDiceSummaryFormatterTest {
     private final CocDiceSummaryFormatter formatter = new CocDiceSummaryFormatter();
 
     @Test
-    void checkResultIncludesCheckNameAndAchievedRank() {
+    void successfulCheckDoesNotExposeItsInternalRank() {
         DiceRollResult result = check(1L, 1, 1, "康特", "SUCCESS", 48);
         result.getResolutionData().setOutcome(Map.of(
                 "characterName", "康特",
@@ -27,7 +27,7 @@ class CocDiceSummaryFormatterTest {
         result.getResolutionData().getRule().put("checkName", "图书馆使用");
 
         assertThat(formatter.formatRound(List.of(result)))
-                .isEqualTo("康特进行“图书馆使用”检定：常规成功");
+                .isEqualTo("康特进行“图书馆使用”检定：成功");
     }
 
     @Test

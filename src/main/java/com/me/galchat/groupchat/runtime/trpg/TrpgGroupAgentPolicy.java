@@ -120,7 +120,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     public GroupModelInvocation prepare(GroupConversation conversation, GroupActionSpec action,
                                         GroupContextMaterial context) {
         GroupActorRef actor = action.actor();
-        String name = actorName(conversation.getUserWorldId(), actor);
+        String agentName = actorName(conversation.getUserWorldId(), actor);
         boolean selectionPhase = GroupChatConstant.ACTION_TRPG_SCENE_SELECTION
                 .equals(action.actionType());
         boolean scenePhase = GroupChatConstant.ACTION_TRPG_SCENE
@@ -162,6 +162,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 .filter(card -> "PLAYER".equals(card.actorType())
                         || "BOT".equals(card.actorType()))
                 .toList();
+        String investigatorName = GroupChatConstant.ACTOR_KP.equals(
+                actor.type()) ? agentName
+                : controlledInvestigatorName(investigatorCards, action);
         List<Message> messages = new ArrayList<>();
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
             String investigatorCardContext =
@@ -208,9 +211,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     + TrpgRulePrompts.investigatorResidentRules()
                     + """
 
-                    你正在 TRPG 群聊中扮演%s，当前阶段是%s。
+                    你是调查员操控 Agent。Agent身份名是“%s”，操控的调查员名是“%s”。
+                    “%s”不是调查员姓名，只提供性格和决策倾向；你正在 TRPG 群聊中扮演“%s”。
+                    对外发言、自称和行动一律使用“%s”，不得使用Agent身份名代替。当前阶段是%s。
                     不得输出隐藏思考过程。
-                    """.formatted(name, phase)
+                    """.formatted(
+                            agentName, investigatorName, agentName,
+                            investigatorName, investigatorName, phase)
                     + TrpgRulePrompts.investigatorThinkingModeRules()));
         }
         messages.addAll(context.messages());
@@ -290,7 +297,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             }
         } else {
             if (selectionPhase) {
-                messages.add(new UserMessage("现在轮到" + name
+                messages.add(new UserMessage("现在轮到" + investigatorName
                         + "选景。查看KP给出的编号Map和先前调查员的选择结果。"
                         + "在仍有地点未被选择时，推荐优先选择不同地点，但可按角色性格作出不同决定。"
                         + "调用selectExplorationScene并且只传地点编号；工具是returnDirect，"
@@ -303,14 +310,20 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         : "你是本轮后续调查员。阅读本轮此前的提案，可以支持、补充、修改、反对或提出替代计划，"
                         + "也可以只表达认同，或提出能够同时进行的其他行动；"
                         + "不得假设尚未经过KP裁定的行动已经成功。";
-                messages.add(new UserMessage("现在轮到" + name + "执行当前" + phase
+                messages.add(new UserMessage("现在轮到" + investigatorName + "执行当前" + phase
                         + "行动。" + sceneParticipation
                         + "决策必须先于行动，并严格使用以下格式，标签外不得输出正文：\n"
                         + "<decision>一个完整自然语言段落，说明重要观察、线索联系、判断和本轮行动意图</decision>\n"
-                        + "<action>该角色公开说出的话和采取的行动，不要输出发言者标签。"
-                        + "公开行动通常只用一至两句；询问信息时直接说清对象和关键问题，"
-                        + "问题数量压到完成当前意图所需的最少；不追加无关的动作描写、语气渲染、"
-                        + "履历、自我评价、能力说明、重复理由或后续计划</action>\n"
+                        + "<action>像桌边玩家声明行动，不写成小说段落。action通常只写一句，最多50个汉字，"
+                        + "只保留一个核心行动，以及完成它必需的对象、目标或一句协调。"
+                        + "默认在直接说的话与动作声明之间二选一；两者表达同一意图时不得并写。"
+                        + "不拆解姿势、步伐、视线、呼吸、语气或多种感官，不重复decision的观察和理由；"
+                        + "询问时只留完成意图所需的最少问题。不输出发言者标签</action>\n"
+                        + "参考《克苏鲁的呼唤》示例中的桌边声明节奏：\n"
+                        + "<action>我去书房搜索。</action>\n"
+                        + "<action>威尔先在门外看一眼。</action>\n"
+                        + "当前场景的推荐缩写：<action>我贴右侧向前探路，留意血点和拖痕；你们拉开几步。</action>\n"
+                        + "错误：先写台词，再用第三人称重述同一行动；或把“向前侦察”展开成连续的镜头描写。\n"
                         + "action必须落实decision中的意图，不得重新选择目标；不得宣布未知事实、"
                         + "决定其他角色或NPC反应，也不得自行声明检定成功。"
                         + (combatDefense
@@ -388,6 +401,17 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         return GroupChatConstant.ACTOR_CHARACTER.equals(action.actorType())
                 && java.util.Objects.equals(
                 card.participantId(), action.actorId());
+    }
+
+    private String controlledInvestigatorName(
+            List<CocDiceCharacterVO> investigatorCards,
+            GroupActionSpec action) {
+        return investigatorCards.stream()
+                .filter(card -> isControlledInvestigator(card, action))
+                .map(CocDiceCharacterVO::name)
+                .filter(org.springframework.util.StringUtils::hasText)
+                .findFirst()
+                .orElse("当前绑定调查员");
     }
 
     @Override

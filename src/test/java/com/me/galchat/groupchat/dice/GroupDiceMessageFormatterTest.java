@@ -45,16 +45,49 @@ class GroupDiceMessageFormatterTest {
                 .contains(
                         "第2轮",
                         "第3轮",
-                        "康特进行“侦查”检定：常规成功",
-                        "康特进行“幸运”检定：困难成功")
+                        "康特进行“侦查”检定：成功",
+                        "康特进行“幸运”检定：成功")
                 .doesNotContain(
                         "第1轮",
                         "聆听",
+                        "常规成功",
+                        "困难成功",
+                        "极难成功",
                         "1D100",
                         " = 32",
                         " = 21",
                         " = 44",
                         "目标值");
+    }
+
+    @Test
+    void kpContextCollapsesInternalCheckRanksIntoFourOutcomeLevels() {
+        DiceRollSummaryMapper summaryMapper = mock(DiceRollSummaryMapper.class);
+        DiceRollResultMapper resultMapper = mock(DiceRollResultMapper.class);
+        GroupDiceMessageFormatter formatter = formatter(summaryMapper, resultMapper);
+        when(summaryMapper.selectById(501L)).thenReturn(new DiceRollSummary()
+                .setId(501L)
+                .setReason("测试成功等级"));
+        when(resultMapper.selectList(any())).thenReturn(List.of(
+                result(1, "大失败检定", 100, "FUMBLE", "FUMBLE"),
+                result(2, "失败检定", 80, "FAILURE", "FAILURE"),
+                result(3, "常规检定", 40, "SUCCESS", "REGULAR"),
+                result(4, "困难检定", 20, "SUCCESS", "HARD"),
+                result(5, "极难检定", 5, "SUCCESS", "EXTREME"),
+                result(6, "大成功检定", 1, "CRITICAL_SUCCESS", "CRITICAL")));
+
+        String formatted = formatter.format(
+                "{\"summaryId\":501,\"roundNos\":[1,2,3,4,5,6]}");
+
+        assertThat(formatted)
+                .contains(
+                        "大失败检定”检定：大失败",
+                        "失败检定”检定：失败",
+                        "常规检定”检定：成功",
+                        "困难检定”检定：成功",
+                        "极难检定”检定：成功",
+                        "大成功检定”检定：大成功")
+                .doesNotContain("常规成功", "困难成功", "极难成功");
     }
 
     @Test
@@ -112,12 +145,26 @@ class GroupDiceMessageFormatterTest {
     }
 
     private DiceRollResult result(int roundNo, String checkName, int result) {
+        return result(
+                roundNo,
+                checkName,
+                result,
+                "SUCCESS",
+                result == 21 ? "HARD" : "REGULAR");
+    }
+
+    private DiceRollResult result(
+            int roundNo,
+            String checkName,
+            int result,
+            String category,
+            String rank) {
         Map<String, Object> rule = checkRule(checkName);
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("characterName", "康特");
         outcome.put("checkName", checkName);
-        outcome.put("category", "SUCCESS");
-        outcome.put("rank", result == 21 ? "HARD" : "REGULAR");
+        outcome.put("category", category);
+        outcome.put("rank", rank);
         return new DiceRollResult()
                 .setId((long) roundNo)
                 .setSummaryId(501L)

@@ -45,7 +45,8 @@ public class TrpgInvestigatorContextAssembler {
             CharacterTemplate template =
                     templateMapper.selectById(action.actorId());
             if (template != null) {
-                append(result, "原角色名", template.getName());
+                append(result, "Agent身份名（非调查员名）",
+                        template.getName());
                 append(result, "角色性格", template.getPersonality());
                 if (StringUtils.hasText(template.getCocPlayStyle())) {
                     append(result, "COC跑团偏好",

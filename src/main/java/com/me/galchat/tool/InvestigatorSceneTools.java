@@ -36,14 +36,14 @@ public class InvestigatorSceneTools {
                 ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY));
         Long replyStepId = TypeConvertUtils.asLong(values.get(
                 ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY));
-        Long characterId = TypeConvertUtils.asLong(values.get(
-                ChatToolContextConstant.CHARACTER_ID_KEY));
+        Long actorId = TypeConvertUtils.asLong(values.get(
+                ChatToolContextConstant.ACTOR_ID_KEY));
         if (conversationId == null || replyStepId == null
-                || characterId == null) {
+                || actorId == null) {
             throw new UserRequestException("结束探索工具缺少群聊、回复步骤或调查员上下文");
         }
         boolean allReady = lifecycleService.requestInvestigatorFinish(
-                conversationId, replyStepId, characterId);
+                conversationId, replyStepId, actorId);
         return allReady
                 ? "所有调查员均已结束探索，当前场景将进入结算。请用公开消息确认你的行动结束。"
                 : "你的结束探索意向已记录。请用公开消息说明你已完成当前场景的行动。";

@@ -400,9 +400,6 @@ class GroupChatServiceTest {
                         .setFavorSystemStatus("NORMAL"));
         GroupReplyPlanItem planItem = new GroupReplyPlanItem()
                 .setId(20L)
-                .setGroupKey("scene:100")
-                .setGroupName("地下室")
-                .setGroupOrder(1)
                 .setItemOrder(2)
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                 .setActorId(9L);
@@ -411,7 +408,6 @@ class GroupChatServiceTest {
                 100L,
                 "scene:100",
                 "地下室",
-                1,
                 List.of(planItem));
         GroupActionSpec action = new GroupActionSpec(
                 GroupChatConstant.ACTION_CHAT_REPLY,
@@ -579,7 +575,7 @@ class GroupChatServiceTest {
         GroupReplyPlanItem second = planItem(21L, 8L, 2);
         GroupReplyPlanSelection selection = new GroupReplyPlanSelection(
                 GroupChatConstant.PLAN_SOURCE_USER, null,
-                "default", "群聊", 1, List.of(first, second));
+                "default", "群聊", List.of(first, second));
         GroupActionSpec firstAction = action(9L, 1);
         GroupActionSpec secondAction = action(8L, 2);
         when(turnPlanResolver.resolve(conversation, runtime))
@@ -737,7 +733,7 @@ class GroupChatServiceTest {
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         GroupReplyPlanSelection selection = new GroupReplyPlanSelection(
                 GroupChatConstant.PLAN_SOURCE_USER, null,
-                "default", "群聊", 1, List.of());
+                "default", "群聊", List.of());
         GroupActionSpec action = new GroupActionSpec(
                 GroupChatConstant.ACTION_TRPG_SCENE,
                 GroupChatConstant.ACTOR_KP,
@@ -1166,9 +1162,6 @@ class GroupChatServiceTest {
     private GroupReplyPlanItem planItem(Long id, Long actorId, int order) {
         return new GroupReplyPlanItem()
                 .setId(id)
-                .setGroupKey("default")
-                .setGroupName("群聊")
-                .setGroupOrder(1)
                 .setItemOrder(order)
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                 .setActorId(actorId);

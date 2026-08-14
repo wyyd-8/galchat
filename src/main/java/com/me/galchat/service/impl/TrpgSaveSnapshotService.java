@@ -235,6 +235,8 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
         for (GroupReplyPlan plan : plans) {
             if (plan == null || plan.getId() == null
                     || !Objects.equals(plan.getConversationId(), conversation.getId())
+                    || !StringUtils.hasText(plan.getExecutionKey())
+                    || !StringUtils.hasText(plan.getDisplayName())
                     || !planIds.add(plan.getId())) {
                 throw new UserRequestException("跑团回复计划存档不合法");
             }
@@ -271,18 +273,39 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 && !planIds.contains(state.getActiveReplyPlanId())) {
             throw new UserRequestException("跑团活动回复计划存档不合法");
         }
-        for (GroupReplyPlanItem item : safe(snapshot.getReplyPlanItems())) {
-            if (item == null || item.getId() == null
-                    || !planIds.contains(item.getPlanId())) {
-                throw new UserRequestException("跑团回复计划项目存档不合法");
-            }
-        }
         Set<Long> characterIds = new HashSet<>();
         for (CocCharacter character : safe(snapshot.getCharacters())) {
             if (character == null || character.getId() == null
                     || !Objects.equals(character.getRunId(), conversation.getId())
                     || !characterIds.add(character.getId())) {
                 throw new UserRequestException("跑团人物卡存档不合法");
+            }
+        }
+        for (GroupReplyPlanItem item : safe(snapshot.getReplyPlanItems())) {
+            if (item == null || item.getId() == null
+                    || !planIds.contains(item.getPlanId())
+                    || item.getSubjectCharacterId() != null
+                    && !characterIds.contains(
+                    item.getSubjectCharacterId())
+                    || item.getSubjectCharacterId() != null
+                    && !StringUtils.hasText(
+                    item.getSubjectCharacterName())
+                    || item.getSubjectCharacterId() == null
+                    && StringUtils.hasText(
+                    item.getSubjectCharacterName())) {
+                throw new UserRequestException("跑团回复计划项目存档不合法");
+            }
+            GroupReplyPlan itemPlan = planById.get(item.getPlanId());
+            boolean investigator = GroupChatConstant.ACTOR_USER.equals(
+                    item.getActorType())
+                    || GroupChatConstant.ACTOR_CHARACTER.equals(
+                    item.getActorType());
+            if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                    itemPlan.getSource())
+                    && investigator
+                    && item.getSubjectCharacterId() == null) {
+                throw new UserRequestException(
+                        "跑团场景计划项目缺少人物卡");
             }
         }
         validateCharacterChildren(snapshot, characterIds);

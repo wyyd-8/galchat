@@ -6,7 +6,6 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
-import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
@@ -30,8 +29,6 @@ class TrpgSceneParticipantServiceTest {
                 mock(GroupReplyPlanItemMapper.class);
         CocModuleLocationMapper locationMapper =
                 mock(CocModuleLocationMapper.class);
-        TrpgParticipantService investigatorService =
-                mock(TrpgParticipantService.class);
         TrpgRuntimeChildSceneMapper runtimeSceneMapper =
                 mock(TrpgRuntimeChildSceneMapper.class);
         GroupConversation conversation = new GroupConversation()
@@ -56,6 +53,8 @@ class TrpgSceneParticipantServiceTest {
                         GroupChatConstant.PARTICIPANT_ACTIVE),
                 item(GroupChatConstant.ACTOR_CHARACTER, 9L,
                         GroupChatConstant.PARTICIPANT_WAITING),
+                item(GroupChatConstant.ACTOR_CHARACTER, 10L,
+                        GroupChatConstant.PARTICIPANT_READY),
                 item(GroupChatConstant.ACTOR_KP, null, null)));
         when(locationMapper.selectById(21L)).thenReturn(
                 new CocModuleLocation().setId(21L)
@@ -65,22 +64,10 @@ class TrpgSceneParticipantServiceTest {
                         .setPlanId(31L)
                         .setConversationId(7L)
                         .setSceneName("临时藏身处"));
-        when(investigatorService.listInvestigators(conversation))
-                .thenReturn(List.of(
-                        new TrpgParticipantService.Participant(
-                                new GroupActorRef(
-                                        GroupChatConstant.ACTOR_USER,
-                                        101L),
-                                101L, "亨利", "用户"),
-                        new TrpgParticipantService.Participant(
-                                new GroupActorRef(
-                                        GroupChatConstant.ACTOR_CHARACTER,
-                                        9L),
-                                102L, "艾琳", "代理")));
         TrpgSceneParticipantService service =
                 new TrpgSceneParticipantService(
                         planMapper, itemMapper, locationMapper,
-                        investigatorService, runtimeSceneMapper);
+                        runtimeSceneMapper);
 
         TrpgSceneParticipantService.SceneState state =
                 service.state(conversation);
@@ -97,9 +84,20 @@ class TrpgSceneParticipantServiceTest {
             String actorType, Long actorId, String status) {
         return new GroupReplyPlanItem()
                 .setPlanId(31L)
-                .setGroupName("临时藏身处")
                 .setActorType(actorType)
                 .setActorId(actorId)
+                .setSubjectCharacterId(
+                        GroupChatConstant.ACTOR_USER.equals(actorType)
+                                ? actorId
+                                : GroupChatConstant.ACTOR_CHARACTER.equals(
+                                actorType) ? actorId + 100L : null)
+                .setSubjectCharacterName(
+                        actorId == null ? null : switch (actorId.intValue()) {
+                            case 101 -> "亨利";
+                            case 9 -> "艾琳";
+                            case 10 -> "威廉";
+                            default -> null;
+                        })
                 .setParticipantStatus(status);
     }
 }

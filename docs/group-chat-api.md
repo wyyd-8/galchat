@@ -80,6 +80,11 @@ PUT    /group-chat/conversations/{conversationId}/reply-plan
 DELETE /group-chat/conversations/{conversationId}/reply-plan
 ```
 
+`GET` 返回当前群聊下尚未完成的全部计划数组。数组首项固定为活动计划；当前没有计划时返回
+空数组。计划通过 `nextPlanId` 表示同层后续计划、`resumePlanId` 表示战斗结束后的恢复目标、
+`parentPlanId` 表示子场景所属父场景。查询响应不返回后端执行使用的
+`contextId/executionKey`。
+
 `PUT` 使用当前内容覆盖活动计划。普通群聊来源为 `USER`，探索为 `SCENE`，战斗为
 `COMBAT`：
 
@@ -87,22 +92,34 @@ DELETE /group-chat/conversations/{conversationId}/reply-plan
 {
   "source": "COMBAT",
   "contextId": 200,
-  "groups": [
+  "executionKey": "combat:round:1",
+  "displayName": "战斗第1轮",
+  "items": [
     {
-      "key": "round:1",
-      "name": "第1轮",
       "order": 1,
-      "items": [
-        {"order": 1, "actorType": "character", "actorId": 12},
-        {"order": 2, "actorType": "character", "actorId": 11}
-      ]
+      "actorType": "character",
+      "actorId": 12,
+      "subjectCharacterId": 51,
+      "subjectCharacterName": "玛格丽特"
+    },
+    {
+      "order": 2,
+      "actorType": "character",
+      "actorId": 11,
+      "subjectCharacterId": 52,
+      "subjectCharacterName": "亨利"
     }
   ]
 }
 ```
 
-计划项状态由执行器维护：`pending`、`running`、`completed`。失败或客户端取消时恢复为
-`pending`。
+`actorType/actorId` 标识控制者，`subjectCharacterId` 标识实际人物卡。TRPG 中的调查员
+和战斗 NPC 计划项必须绑定人物卡；`subjectCharacterName` 保存计划创建时的人物卡名称快照，
+查询时直接返回且不增加人物卡表查询。不代表具体 NPC 的通用探索 KP 项两者均为空。
+
+查询结果同时返回计划项的 `participantStatus`。`ACTIVE` 表示正常参与后续行动轮，
+`WAITING` 表示暂不进入行动轮，`READY` 表示已经完成当前场景探索；普通群聊和战斗计划项
+通常为 `ACTIVE`。
 
 当活动计划不是战斗计划时，写入 `COMBAT` 会自动记录当前计划作为恢复目标。战斗结束后
 调用 `DELETE`，系统删除战斗计划并恢复原探索计划及其未完成顺序。第一版不支持战斗内

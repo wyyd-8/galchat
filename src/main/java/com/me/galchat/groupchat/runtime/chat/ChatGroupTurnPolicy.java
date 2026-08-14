@@ -19,9 +19,9 @@ public class ChatGroupTurnPolicy implements GroupTurnPolicy {
                         GroupChatConstant.ACTION_CHAT_REPLY,
                         item.getActorType(),
                         item.getActorId(),
-                        item.getGroupKey(),
-                        item.getGroupName(),
-                        item.getGroupOrder(),
+                        selection.executionKey(),
+                        selection.displayName(),
+                        1,
                         item.getItemOrder()))
                 .toList();
     }

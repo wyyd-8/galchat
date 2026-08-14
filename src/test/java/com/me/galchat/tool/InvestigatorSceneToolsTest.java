@@ -28,7 +28,7 @@ class InvestigatorSceneToolsTest {
                 7L,
                 ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY,
                 8L,
-                ChatToolContextConstant.CHARACTER_ID_KEY,
+                ChatToolContextConstant.ACTOR_ID_KEY,
                 9L));
 
         tools.endSceneExploration(context);

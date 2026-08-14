@@ -983,9 +983,7 @@ class TrpgTurnExecutionServiceTest {
                 7L, 101L, 102L, request).collectList().block();
 
         verify(lifecycleService).requestInvestigatorFinish(
-                7L, 102L,
-                new com.me.galchat.groupchat.runtime.GroupActorRef(
-                        GroupChatConstant.ACTOR_USER, 501L));
+                7L, 102L, GroupChatConstant.ACTOR_USER, 501L);
         verify(groupChatService).streamPersistedStep(
                 conversation, turn, kp);
         verify(messageMapper).insert(
@@ -1054,6 +1052,100 @@ class TrpgTurnExecutionServiceTest {
         assertThat(current.status())
                 .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
         assertThat(current.itemOrder()).isEqualTo(1);
+    }
+
+    @Test
+    void currentTurnExposesEveryStepAndDerivesCurrentStepFromRuntimeStatus() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversationService,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class),
+                turnMapper,
+                stepMapper,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                mock(GroupChatService.class),
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L)
+                .setConversationId(7L)
+                .setPlanId(201L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        GroupChatReplyStep completed = new GroupChatReplyStep()
+                .setId(301L)
+                .setTurnId(101L)
+                .setItemOrder(1)
+                .setStepNo(1)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(11L)
+                .setSubjectCharacterId(501L)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        GroupChatReplyStep waiting = new GroupChatReplyStep()
+                .setId(302L)
+                .setTurnId(101L)
+                .setItemOrder(2)
+                .setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setSpeakerId(22L)
+                .setSubjectCharacterId(502L)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        GroupChatReplyStep pending = new GroupChatReplyStep()
+                .setId(303L)
+                .setTurnId(101L)
+                .setItemOrder(3)
+                .setStepNo(3)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(turnMapper.selectList(any())).thenReturn(List.of(turn));
+        when(stepMapper.selectList(any()))
+                .thenReturn(List.of(completed, waiting, pending));
+
+        GroupCurrentTurnVO current = service.current(7L);
+
+        assertThat(current.stepId()).isEqualTo(302L);
+        assertThat(current.itemOrder()).isEqualTo(2);
+        assertThat(current.waitingForUser()).isTrue();
+        assertThat(current.steps()).containsExactly(
+                new com.me.galchat.domain.vo.GroupCurrentTurnStepVO(
+                        301L, 1, GroupChatConstant.ACTOR_CHARACTER,
+                        11L, 501L, GroupChatConstant.STATUS_COMPLETED,
+                        null),
+                new com.me.galchat.domain.vo.GroupCurrentTurnStepVO(
+                        302L, 2, GroupChatConstant.ACTOR_USER,
+                        22L, 502L, GroupChatConstant.STATUS_WAITING_INPUT,
+                        null),
+                new com.me.galchat.domain.vo.GroupCurrentTurnStepVO(
+                        303L, 3, GroupChatConstant.ACTOR_KP,
+                        null, null, GroupChatConstant.STATUS_PENDING,
+                        null));
     }
 
     @Test

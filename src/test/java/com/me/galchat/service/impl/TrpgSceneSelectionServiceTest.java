@@ -434,10 +434,14 @@ class TrpgSceneSelectionServiceTest {
         verify(planMapper, times(2)).insert(planCaptor.capture());
         assertThat(planCaptor.getAllValues())
                 .extracting(GroupReplyPlan::getContextId,
+                        GroupReplyPlan::getExecutionKey,
+                        GroupReplyPlan::getDisplayName,
                         GroupReplyPlan::getNextPlanId)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple(22L, null),
-                        org.assertj.core.groups.Tuple.tuple(21L, 101L));
+                        org.assertj.core.groups.Tuple.tuple(
+                                22L, "scene:22", "医院", null),
+                        org.assertj.core.groups.Tuple.tuple(
+                                21L, "scene:21", "酒店", 101L));
         assertThat(conversation.getActiveReplyPlanId()).isEqualTo(102L);
         var itemCaptor =
                 org.mockito.ArgumentCaptor.forClass(GroupReplyPlanItem.class);
@@ -445,16 +449,22 @@ class TrpgSceneSelectionServiceTest {
         assertThat(itemCaptor.getAllValues())
                 .extracting(GroupReplyPlanItem::getPlanId,
                         GroupReplyPlanItem::getActorType,
-                        GroupReplyPlanItem::getActorId)
+                        GroupReplyPlanItem::getActorId,
+                        GroupReplyPlanItem::getSubjectCharacterId,
+                        GroupReplyPlanItem::getSubjectCharacterName)
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(
-                                101L, GroupChatConstant.ACTOR_CHARACTER, 9L),
+                                101L, GroupChatConstant.ACTOR_CHARACTER, 9L,
+                                201L, "玛格丽特"),
                         org.assertj.core.groups.Tuple.tuple(
-                                101L, GroupChatConstant.ACTOR_KP, null),
+                                101L, GroupChatConstant.ACTOR_KP, null, null,
+                                null),
                         org.assertj.core.groups.Tuple.tuple(
-                                102L, GroupChatConstant.ACTOR_USER, 101L),
+                                102L, GroupChatConstant.ACTOR_USER, 101L,
+                                101L, "林登"),
                         org.assertj.core.groups.Tuple.tuple(
-                                102L, GroupChatConstant.ACTOR_KP, null));
+                                102L, GroupChatConstant.ACTOR_KP, null, null,
+                                null));
         verify(conversationMapper).updateById(conversation);
         verify(store).clear(7L);
     }

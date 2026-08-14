@@ -1,20 +1,22 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Archive, Check, ChevronDown, CircleStop, Clock3, Footprints, GripVertical, History, LoaderCircle, MessageSquareText, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Send, Trash2, UsersRound, X } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Component } from 'vue'
+import { Archive, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, GripVertical, History, LoaderCircle, MessageSquareText, Pause, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Send, Swords, Trash2, UsersRound, X } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
 import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMessage, ReplyPlan, ReplyPlanItem, TrpgGameTimePeriod } from '@/api/types'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
+import TrpgActorRoster from './TrpgActorRoster.vue'
 import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
 import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
 import { syncReasoningDisclosure, type ReasoningPhase } from './reasoningDisclosure'
 import { scrollConversationToLatest } from './reasoningScroll'
+import { buildTrpgExecutionState, type TrpgExecutionScene } from './trpgExecutionState'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; availableCharacters: Character[]; currentTurn: CurrentTurn | null; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>()
+const props = defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>()
 const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; openDice: [aggregate: DiceRollAggregate]; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
@@ -30,8 +32,9 @@ const timePeriods: Array<{ value: TrpgGameTimePeriod; label: string }> = [
   { value: 'NOON', label: '中午' }, { value: 'AFTERNOON', label: '下午' },
   { value: 'EVENING', label: '晚上' }, { value: 'LATE_NIGHT', label: '深夜' },
 ]
-const planItems = computed(() => props.replyPlan.groups[0]?.items || [])
+const planItems = computed(() => props.replyPlan.items)
 const items = computed(() => visibleReplyPlanItems(props.conversation.mode, planItems.value))
+const trpgExecution = computed(() => buildTrpgExecutionState(props.replyPlans, props.currentTurn))
 const loadedPlanSignature = ref('')
 const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && props.currentTurn.inputType === 'message'))
 const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
@@ -49,9 +52,9 @@ const replyTurnActors = computed(() => {
 const emptyDescription = computed(() => props.conversation.mode === 'trpg'
   ? '先在跑团工具中确认玩家与 AI 调查员人物卡，再开始行动轮。'
   : '输入消息后，角色会按照右侧保存的顺序依次回应。')
-const planTitle = computed(() => props.conversation.mode === 'trpg' ? '当前行动顺序' : '回复顺序')
+const planTitle = computed(() => props.conversation.mode === 'trpg' ? trpgExecution.value.title : '回复顺序')
 const planDescription = computed(() => props.conversation.mode === 'trpg'
-  ? '由当前场景或战斗流程生成，仅供查看。'
+  ? `${trpgExecution.value.subtitle} · 由场景或战斗流程实时维护。`
   : '从上到下依次回复；拖动调整，点击移除后保存。')
 const turnButtonLabel = computed(() => {
   if (!props.currentTurn) return '开始行动轮'
@@ -70,7 +73,7 @@ const composerPlaceholder = computed(() => {
 let latestScrollFrame = 0
 
 watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(message.replyStepId && props.reasoning[message.replyStepId])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
-watch(() => props.replyPlan, (plan) => { loadedPlanSignature.value = replyPlanSignature(plan.groups[0]?.items || []) }, { immediate: true, flush: 'sync' })
+watch(() => props.replyPlan, (plan) => { loadedPlanSignature.value = replyPlanSignature(plan.items) }, { immediate: true, flush: 'sync' })
 watch(() => props.conversation.id, () => { lastScrollTop.value = 0; initialScrollPending.value = true; timeEditing.value = false }, { immediate: true })
 watch(() => props.loading, (loading) => {
   if (!loading && initialScrollPending.value) { initialScrollPending.value = false; scrollToLatest() }
@@ -119,6 +122,12 @@ function scrollToLatest() {
 function bindScroller(element: unknown) {
   scroller.value = element instanceof HTMLElement ? element : null
   lastScrollTop.value = scroller.value?.scrollTop ?? 0
+}
+function sceneIcon(scene: TrpgExecutionScene): Component {
+  if (scene.kind === 'combat') return Swords
+  if (scene.status === 'current') return CircleDot
+  if (scene.status === 'waiting-child') return Pause
+  return Circle
 }
 function handleScroll(event: Event) {
   const viewport = event.currentTarget as HTMLElement
@@ -187,10 +196,31 @@ function handleScroll(event: Event) {
         <div class="reply-panel-title"><span><UsersRound :size="18" /><strong>{{ planTitle }}</strong></span><button class="icon-button subtle" @click="planOpen = !planOpen"><ChevronDown :size="17" :class="{ rotated: !planOpen }" /></button></div>
         <p>{{ planDescription }}</p>
         <div v-show="planOpen" class="reply-plan-list">
-          <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}-${item.subjectCharacterId}`" class="reply-plan-item" :draggable="canEditPlan" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
-            <GripVertical v-if="canEditPlan" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="planCharacter(item)?.characterImage ? { backgroundImage: `url(${planCharacter(item)?.characterImage})` } : {}">{{ planCharacter(item)?.characterImage ? '' : planActorName(item).slice(0, 1) }}</span><span class="reply-name">{{ planActorName(item) }}<small>{{ conversation.mode === 'trpg' ? '由跑团流程安排' : `第 ${index + 1} 位回复` }}</small></span><button v-if="canEditPlan" class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
-          </div>
-          <div v-if="!items.length" class="plan-empty">暂无回复角色</div>
+          <template v-if="conversation.mode === 'trpg'">
+            <section v-for="scene in trpgExecution.scenes" :key="scene.plan.id" class="trpg-execution-scene" :class="[scene.kind, scene.status]">
+              <header class="trpg-scene-header">
+                <strong>{{ scene.plan.displayName }}</strong>
+                <span class="trpg-scene-status-icon" :title="scene.statusLabel" role="img" :aria-label="scene.statusLabel"><component :is="sceneIcon(scene)" :size="14" :stroke-width="1.8" /></span>
+              </header>
+              <div v-if="scene.childScenes.length" class="trpg-child-scenes">
+                <section v-for="child in scene.childScenes" :key="child.plan.id" class="trpg-execution-scene child" :class="child.status">
+                  <header class="trpg-scene-header">
+                    <strong>{{ child.plan.displayName }}</strong>
+                    <span class="trpg-scene-status-icon" :title="child.statusLabel" role="img" :aria-label="child.statusLabel"><component :is="sceneIcon(child)" :size="13" :stroke-width="1.8" /></span>
+                  </header>
+                  <TrpgActorRoster :scene="child" />
+                </section>
+              </div>
+              <TrpgActorRoster :scene="scene" />
+            </section>
+            <div v-if="!trpgExecution.scenes.length" class="plan-empty">暂无场景计划</div>
+          </template>
+          <template v-else>
+            <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}-${item.subjectCharacterId}`" class="reply-plan-item" :draggable="canEditPlan" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
+              <GripVertical v-if="canEditPlan" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="planCharacter(item)?.characterImage ? { backgroundImage: `url(${planCharacter(item)?.characterImage})` } : {}">{{ planCharacter(item)?.characterImage ? '' : planActorName(item).slice(0, 1) }}</span><span class="reply-name">{{ planActorName(item) }}<small>第 {{ index + 1 }} 位回复</small></span><button v-if="canEditPlan" class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
+            </div>
+            <div v-if="!items.length" class="plan-empty">暂无回复角色</div>
+          </template>
         </div>
         <div v-if="canEditPlan" class="add-plan-row"><select v-model="addActorId" :disabled="!availableCharacters.length"><option value="">{{ availableCharacters.length ? '添加参与角色' : '没有可添加角色' }}</option><option v-for="item in availableCharacters" :key="item.characterId" :value="String(item.characterId)">{{ item.characterName }}</option></select><button class="icon-button bordered" :disabled="!addActorId" @click="addActor"><Plus :size="17" /></button></div>
         <div v-if="showSavePlan" class="plan-actions"><button class="button secondary save-plan" :disabled="!items.length || sending" @click="emit('savePlan')"><Save :size="16" />保存顺序</button></div>

@@ -80,23 +80,26 @@ public class TrpgInvestigatorContextAssembler {
 
     private CocCharacter requireCard(
             GroupConversation conversation, GroupActionSpec action) {
-        LambdaQueryWrapper<CocCharacter> query =
-                new LambdaQueryWrapper<CocCharacter>()
-                        .eq(CocCharacter::getRunId,
-                                conversation.getId());
-        if (GroupChatConstant.ACTOR_USER.equals(action.actorType())) {
-            query.eq(CocCharacter::getId, action.actorId())
-                    .eq(CocCharacter::getActorType, "PLAYER");
-        } else {
-            query.eq(CocCharacter::getParticipantId,
-                    action.actorId());
-        }
-        List<CocCharacter> cards = characterMapper.selectList(query);
-        if (cards == null || cards.size() != 1) {
+        CocCharacter card = action.subjectCharacterId() == null
+                ? null : characterMapper.selectById(
+                action.subjectCharacterId());
+        boolean userMatches = GroupChatConstant.ACTOR_USER.equals(
+                action.actorType())
+                && "PLAYER".equals(card == null
+                ? null : card.getActorType())
+                && action.actorId().equals(card.getId());
+        boolean agentMatches = GroupChatConstant.ACTOR_CHARACTER.equals(
+                action.actorType())
+                && "BOT".equals(card == null
+                ? null : card.getActorType())
+                && action.actorId().equals(card.getParticipantId());
+        if (card == null
+                || !conversation.getId().equals(card.getRunId())
+                || (!userMatches && !agentMatches)) {
             throw new UserRequestException(
                     "无法唯一确定当前行动调查员的人物卡");
         }
-        return cards.getFirst();
+        return card;
     }
 
     private void appendAttributes(

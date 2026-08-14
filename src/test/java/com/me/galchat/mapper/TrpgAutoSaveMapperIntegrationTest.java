@@ -2,6 +2,7 @@ package com.me.galchat.mapper;
 
 import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
 import com.me.galchat.domain.po.TrpgAutoSave;
+import com.me.galchat.service.impl.TrpgSaveServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,9 +55,9 @@ class TrpgAutoSaveMapperIntegrationTest {
         return new TrpgAutoSave()
                 .setConversationId(conversationId)
                 .setSavedAt(LocalDateTime.now())
-                .setFormatVersion(1)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setSnapshot(new TrpgSaveSnapshotDTO()
-                        .setFormatVersion(1)
+                        .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                         .setConversationId(conversationId)
                         .setUserWorldId(userWorldId));
     }

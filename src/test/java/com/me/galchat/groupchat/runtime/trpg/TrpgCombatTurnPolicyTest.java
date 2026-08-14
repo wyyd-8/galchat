@@ -18,15 +18,12 @@ class TrpgCombatTurnPolicyTest {
                 .setActorType(GroupChatConstant.ACTOR_KP)
                 .setActorId(null)
                 .setSubjectCharacterId(71L)
-                .setGroupKey("combat:round:1")
-                .setGroupName("战斗第1轮")
-                .setGroupOrder(1)
                 .setItemOrder(1);
         GroupReplyPlanSelection selection =
                 new GroupReplyPlanSelection(
                         GroupChatConstant.PLAN_SOURCE_COMBAT,
                         200L, "combat:round:1", "战斗第1轮",
-                        1, List.of(npc));
+                        List.of(npc));
 
         var actions = new TrpgGroupTurnPolicy().plan(
                 new GroupConversation().setId(7L), selection);

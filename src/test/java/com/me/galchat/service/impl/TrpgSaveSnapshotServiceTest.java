@@ -133,12 +133,16 @@ class TrpgSaveSnapshotServiceTest {
                 .setId(100L)
                 .setConversationId(51L)
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
-                .setContextId(301L);
+                .setContextId(301L)
+                .setExecutionKey("scene:301")
+                .setDisplayName("森林");
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setId(101L)
                 .setConversationId(51L)
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
                 .setContextId(301L)
+                .setExecutionKey("scene:101")
+                .setDisplayName("林间临时营地")
                 .setParentPlanId(100L);
         GroupReplyPlanItem item = new GroupReplyPlanItem()
                 .setId(201L)
@@ -260,6 +264,92 @@ class TrpgSaveSnapshotServiceTest {
     }
 
     @Test
+    void restoreRejectsAPlanWithoutExecutionMetadata() {
+        TrpgSaveSnapshotDTO snapshot = baseSnapshot()
+                .setConversationState(
+                        new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
+                                .setStatus(GroupChatConstant.STATUS_ACTIVE))
+                .setReplyPlans(List.of(new GroupReplyPlan()
+                        .setId(101L)
+                        .setConversationId(51L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setContextId(301L)))
+                .setReplyPlanItems(List.of());
+
+        assertThatThrownBy(() -> service.restoreDatabase(
+                conversation(), snapshot))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("回复计划");
+
+        verify(planMapper, never()).delete(any());
+    }
+
+    @Test
+    void restoreRejectsSceneInvestigatorWithoutBoundCharacterCard() {
+        GroupReplyPlan plan = new GroupReplyPlan()
+                .setId(101L)
+                .setConversationId(51L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setContextId(301L)
+                .setExecutionKey("scene:301")
+                .setDisplayName("森林");
+        GroupReplyPlanItem item = new GroupReplyPlanItem()
+                .setId(201L)
+                .setPlanId(101L)
+                .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                .setActorId(9L);
+        TrpgSaveSnapshotDTO snapshot = baseSnapshot()
+                .setConversationState(
+                        new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
+                                .setActiveReplyPlanId(101L)
+                                .setStatus(GroupChatConstant.STATUS_ACTIVE))
+                .setReplyPlans(List.of(plan))
+                .setReplyPlanItems(List.of(item));
+
+        assertThatThrownBy(() -> service.restoreDatabase(
+                conversation(), snapshot))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("缺少人物卡");
+
+        verify(planMapper, never()).delete(any());
+    }
+
+    @Test
+    void restoreRejectsBoundPlanItemWithoutCharacterNameSnapshot() {
+        GroupReplyPlan plan = new GroupReplyPlan()
+                .setId(101L)
+                .setConversationId(51L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setContextId(301L)
+                .setExecutionKey("scene:301")
+                .setDisplayName("森林");
+        GroupReplyPlanItem item = new GroupReplyPlanItem()
+                .setId(201L)
+                .setPlanId(101L)
+                .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                .setActorId(9L)
+                .setSubjectCharacterId(401L);
+        TrpgSaveSnapshotDTO snapshot = baseSnapshot()
+                .setConversationState(
+                        new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
+                                .setActiveReplyPlanId(101L)
+                                .setStatus(GroupChatConstant.STATUS_ACTIVE))
+                .setReplyPlans(List.of(plan))
+                .setReplyPlanItems(List.of(item))
+                .setCharacters(List.of(new CocCharacter()
+                        .setId(401L)
+                        .setRunId(51L)
+                        .setName("林默")));
+
+        assertThatThrownBy(() -> service.restoreDatabase(
+                conversation(), snapshot))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("回复计划项目");
+
+        verify(planMapper, never()).delete(any());
+    }
+
+    @Test
     void restoreRejectsAnIncompleteCursorBeforeDeletingAnything() {
         TrpgSaveSnapshotDTO snapshot = baseSnapshot();
         snapshot.getCursors().setMaxToolCallId(null);
@@ -285,12 +375,16 @@ class TrpgSaveSnapshotServiceTest {
                 .setId(100L)
                 .setConversationId(51L)
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
-                .setContextId(301L);
+                .setContextId(301L)
+                .setExecutionKey("scene:301")
+                .setDisplayName("森林");
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setId(101L)
                 .setConversationId(51L)
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
                 .setContextId(301L)
+                .setExecutionKey("scene:101")
+                .setDisplayName("林间临时营地")
                 .setParentPlanId(100L);
         TrpgRuntimeChildScene runtimeChildScene =
                 new TrpgRuntimeChildScene()

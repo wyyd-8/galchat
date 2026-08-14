@@ -38,12 +38,12 @@ public class TrpgSceneSelectionTools {
         }
         Long conversationId = TypeConvertUtils.asLong(values.get(
                 ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY));
-        Long characterId = TypeConvertUtils.asLong(values.get(
-                ChatToolContextConstant.CHARACTER_ID_KEY));
+        Long actorId = TypeConvertUtils.asLong(values.get(
+                ChatToolContextConstant.ACTOR_ID_KEY));
         Long turnId = TypeConvertUtils.asLong(values.get(
                 ChatToolContextConstant.GROUP_TURN_ID_KEY));
         if (conversationId == null || turnId == null
-                || characterId == null) {
+                || actorId == null) {
             throw new UserRequestException(
                     "选景工具缺少群聊、行动轮或调查员上下文");
         }
@@ -51,7 +51,7 @@ public class TrpgSceneSelectionTools {
                 conversationId, turnId,
                 new GroupActorRef(
                         GroupChatConstant.ACTOR_CHARACTER,
-                        characterId),
+                        actorId),
                 optionNo);
     }
 

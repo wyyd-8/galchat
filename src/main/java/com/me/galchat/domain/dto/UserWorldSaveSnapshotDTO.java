@@ -125,15 +125,8 @@ public class UserWorldSaveSnapshotDTO {
     @Accessors(chain = true)
     public static class ReplyPlanSnapshot {
         private String source;
-        private List<ReplyPlanGroupSnapshot> groups;
-    }
-
-    @Data
-    @Accessors(chain = true)
-    public static class ReplyPlanGroupSnapshot {
-        private String key;
-        private String name;
-        private Integer order;
+        private String executionKey;
+        private String displayName;
         private List<ReplyPlanItemSnapshot> items;
     }
 

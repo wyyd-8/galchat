@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
@@ -33,17 +34,27 @@ public class GroupTurnPlanResolver {
                     selectionService.selectionActions(conversation));
         }
         GroupReplyPlanSelection selection =
-                replyPlanService.currentGroupForExecution(conversation);
-        List<GroupActionSpec> actions =
-                runtime.turnPolicy().plan(conversation, selection);
+                replyPlanService.currentPlanForExecution(conversation);
+        List<GroupActionSpec> actions;
         if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(
                 selection.source())) {
-            actions = sceneLifecycleService.remainingActions(
+            Set<String> readyActors = sceneLifecycleService.readyActors(
                     conversation.getId(),
-                    conversation.getActiveReplyPlanId(),
-                    actions);
+                    conversation.getActiveReplyPlanId());
+            selection = sceneLifecycleService.applyReadyStatuses(
+                    selection, readyActors);
+            actions = runtime.turnPolicy().plan(
+                    conversation, selection);
             actions = proposalOrderService.orderForTurn(
                     conversation, actions);
+            selection = replyPlanService
+                    .replaceSceneExecutionOrderUnderLock(
+                            conversation, actions, readyActors);
+            actions = runtime.turnPolicy().plan(
+                    conversation, selection);
+        } else {
+            actions = runtime.turnPolicy().plan(
+                    conversation, selection);
         }
         return new ResolvedTurnPlan(
                 selection.source(),
@@ -53,6 +64,10 @@ public class GroupTurnPlanResolver {
 
     public void onTurnCompleted(
             GroupConversation conversation, String turnSource) {
+        if (GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
+            replyPlanService.finishActiveUnderLock(conversation);
+            return;
+        }
         if (runLifecycleService.finalizeAfterTurn(conversation)) {
             return;
         }

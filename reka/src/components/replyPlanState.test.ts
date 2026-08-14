@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { ReplyPlanItem } from '../api/types.ts'
-import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState.ts'
+import type { ReplyPlan, ReplyPlanItem } from '../api/types.ts'
+import { activeReplyPlan, replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState.ts'
 
 const item = (actorId: number, order: number): ReplyPlanItem => ({
   actorType: 'character',
   actorId,
   order,
+})
+
+test('uses the first returned plan as the active plan', () => {
+  const active: ReplyPlan = { id: 20, source: 'SCENE', displayName: '地下室', items: [] }
+  const future: ReplyPlan = { id: 30, source: 'SCENE', displayName: '庭院', items: [] }
+
+  assert.equal(activeReplyPlan([active, future]), active)
+  assert.equal(activeReplyPlan([]), null)
 })
 
 test('does not show save for the reply order that was loaded', () => {
@@ -41,8 +49,8 @@ test('uses the signed-in username for a user-controlled investigator', () => {
 })
 
 test('keeps a KP-controlled combat NPC without exposing the KP label', () => {
-  const npc: ReplyPlanItem = { actorType: 'kp', subjectCharacterId: 501, order: 1 }
+  const npc: ReplyPlanItem = { actorType: 'kp', subjectCharacterId: 501, subjectCharacterName: '食尸鬼', order: 1 }
 
   assert.deepEqual(visibleReplyPlanItems('trpg', [npc]), [npc])
-  assert.equal(replyPlanActorName(npc, '爱丽丝'), 'NPC #501')
+  assert.equal(replyPlanActorName(npc, '爱丽丝'), '食尸鬼')
 })

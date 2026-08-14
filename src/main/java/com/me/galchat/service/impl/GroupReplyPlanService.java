@@ -11,6 +11,7 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.domain.vo.GroupReplyPlanVO;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
@@ -24,8 +25,9 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -50,9 +52,53 @@ public class GroupReplyPlanService {
     private final TransactionTemplate transactionTemplate;
     private final TrpgParticipantService participantService;
 
-    public GroupReplyPlanVO getActive(Long conversationId) {
+    public List<GroupReplyPlanVO> listRemaining(Long conversationId) {
         GroupConversation conversation = conversationService.requireAuthorized(conversationId);
-        return toVO(activePlan(conversation));
+        Long activePlanId = conversation.getActiveReplyPlanId();
+        List<GroupReplyPlan> plans = planMapper.selectList(
+                new LambdaQueryWrapper<GroupReplyPlan>()
+                        .eq(GroupReplyPlan::getConversationId,
+                                conversationId)
+                        .orderByAsc(GroupReplyPlan::getId));
+        if (activePlanId == null) {
+            if (!plans.isEmpty()) {
+                throw new UserRequestException(
+                        "回复计划存在但会话缺少活动回复计划");
+            }
+            return List.of();
+        }
+        GroupReplyPlan active = plans.stream()
+                .filter(plan -> activePlanId.equals(plan.getId()))
+                .findFirst()
+                .orElseThrow(() -> new UserRequestException(
+                        "活动回复计划不存在"));
+        List<Long> planIds = plans.stream()
+                .map(GroupReplyPlan::getId)
+                .toList();
+        Map<Long, List<GroupReplyPlanItem>> itemsByPlanId =
+                new HashMap<>();
+        if (!planIds.isEmpty()) {
+            for (GroupReplyPlanItem item : itemMapper.selectList(
+                    new LambdaQueryWrapper<GroupReplyPlanItem>()
+                            .in(GroupReplyPlanItem::getPlanId,
+                                    planIds)
+                            .orderByAsc(GroupReplyPlanItem::getPlanId)
+                            .orderByAsc(GroupReplyPlanItem::getItemOrder)
+                            .orderByAsc(GroupReplyPlanItem::getId))) {
+                itemsByPlanId.computeIfAbsent(
+                        item.getPlanId(), ignored -> new ArrayList<>())
+                        .add(item);
+            }
+        }
+        List<GroupReplyPlanVO> result = new ArrayList<>(plans.size());
+        result.add(toVO(active, itemsByPlanId.getOrDefault(
+                active.getId(), List.of())));
+        plans.stream()
+                .filter(plan -> !activePlanId.equals(plan.getId()))
+                .map(plan -> toVO(plan, itemsByPlanId.getOrDefault(
+                        plan.getId(), List.of())))
+                .forEach(result::add);
+        return List.copyOf(result);
     }
 
     public GroupReplyPlanVO replace(Long conversationId, GroupReplyPlanDTO request) {
@@ -85,23 +131,6 @@ public class GroupReplyPlanService {
                             ? toVO(createDefaultPlan(conversation)) : null;
                 }
                 return finishLocked(conversation, active);
-            });
-        } finally {
-            lockService.unlock(lock);
-        }
-    }
-
-    public GroupReplyPlanVO advanceGroup(Long conversationId) {
-        conversationService.requireAuthorized(conversationId);
-        GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
-        try {
-            GroupConversation conversation = conversationService.requireActive(conversationId);
-            rejectPublicTrpgMutation(conversation);
-            recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
-            return transactionTemplate.execute(status -> {
-                GroupReplyPlan active = activePlan(conversation);
-                rejectPublicCombatPlan(active);
-                return advanceLocked(conversation);
             });
         } finally {
             lockService.unlock(lock);
@@ -145,6 +174,8 @@ public class GroupReplyPlanService {
                 .setConversationId(conversation.getId())
                 .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
                 .setContextId(combatId)
+                .setExecutionKey(combatExecutionKey(round))
+                .setDisplayName(combatDisplayName(round))
                 .setResumePlanId(scene.getId())
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
@@ -170,32 +201,94 @@ public class GroupReplyPlanService {
         itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
                 .eq(GroupReplyPlanItem::getPlanId, combat.getId()));
         insertCombatItems(combat.getId(), round, participants, now);
-        combat.setUpdatedAt(now);
+        combat.setExecutionKey(combatExecutionKey(round))
+                .setDisplayName(combatDisplayName(round))
+                .setUpdatedAt(now);
         planMapper.updateById(combat);
         return toVO(combat);
     }
 
     /** Caller must hold the conversation lock. */
-    public GroupReplyPlanSelection currentGroupForExecution(GroupConversation conversation) {
+    public GroupReplyPlanSelection currentPlanForExecution(GroupConversation conversation) {
         GroupReplyPlan plan = activePlan(conversation);
         if (plan == null) {
             throw new UserRequestException("当前群聊没有可执行的回复计划");
         }
         List<GroupReplyPlanItem> ordered = orderedItems(plan.getId());
         if (ordered.isEmpty()) {
-            throw new UserRequestException("当前回复计划没有可执行分组");
+            throw new UserRequestException("当前回复计划没有可执行项");
         }
-        GroupReplyPlanItem first = ordered.getFirst();
-        List<GroupReplyPlanItem> current = ordered.stream()
-                .filter(item -> first.getGroupKey().equals(item.getGroupKey()))
-                .toList();
         return new GroupReplyPlanSelection(
                 plan.getSource(),
                 plan.getContextId(),
-                first.getGroupKey(),
-                first.getGroupName(),
-                first.getGroupOrder(),
-                current);
+                plan.getExecutionKey(),
+                plan.getDisplayName(),
+                ordered);
+    }
+
+    /**
+     * Persists the next scene turn's execution order. The caller must hold
+     * the conversation lock. Items excluded from the turn stay in the plan
+     * as scene participants, but are shuffled behind every executable item.
+     */
+    public GroupReplyPlanSelection replaceSceneExecutionOrderUnderLock(
+            GroupConversation conversation,
+            List<GroupActionSpec> executableActions,
+            Set<String> readyActors) {
+        GroupReplyPlan plan = activePlan(conversation);
+        if (plan == null || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                plan.getSource())) {
+            throw new UserRequestException("当前没有活动探索场景");
+        }
+        List<GroupReplyPlanItem> remaining = new ArrayList<>(
+                orderedItems(plan.getId()));
+        for (GroupReplyPlanItem item : remaining) {
+            if (isInvestigator(item)
+                    && !GroupChatConstant.PARTICIPANT_WAITING.equals(
+                            item.getParticipantStatus())
+                    && readyActors.contains(
+                            TrpgSceneProgressStore.actorKey(
+                                    item.getSubjectCharacterId()))) {
+                item.setParticipantStatus(
+                        GroupChatConstant.PARTICIPANT_READY);
+            }
+        }
+        List<GroupReplyPlanItem> reordered = new ArrayList<>();
+        for (GroupActionSpec action : executableActions) {
+            GroupReplyPlanItem matched = remaining.stream()
+                    .filter(item -> sameSceneActor(item, action))
+                    .findFirst()
+                    .orElseThrow(() -> new UserRequestException(
+                            "探索执行顺序与回复计划不一致"));
+            reordered.add(matched);
+            remaining.remove(matched);
+        }
+        Collections.shuffle(remaining);
+        reordered.addAll(remaining);
+        LocalDateTime now = LocalDateTime.now();
+        for (int index = 0; index < reordered.size(); index++) {
+            GroupReplyPlanItem item = reordered.get(index);
+            int order = index + 1;
+            item.setItemOrder(order).setUpdatedAt(now);
+            itemMapper.update(null,
+                    new LambdaUpdateWrapper<GroupReplyPlanItem>()
+                            .eq(GroupReplyPlanItem::getId, item.getId())
+                            .eq(GroupReplyPlanItem::getPlanId,
+                                    plan.getId())
+                            .set(GroupReplyPlanItem::getItemOrder, order)
+                            .set(GroupReplyPlanItem::getParticipantStatus,
+                                    item.getParticipantStatus())
+                            .set(GroupReplyPlanItem::getUpdatedAt, now));
+        }
+        plan.setUpdatedAt(now);
+        planMapper.update(null,
+                new LambdaUpdateWrapper<GroupReplyPlan>()
+                        .eq(GroupReplyPlan::getId, plan.getId())
+                        .set(GroupReplyPlan::getUpdatedAt, now));
+        return new GroupReplyPlanSelection(
+                plan.getSource(), plan.getContextId(),
+                plan.getExecutionKey(), plan.getDisplayName(),
+                List.copyOf(reordered));
     }
 
     /** Caller must hold the conversation lock. */
@@ -240,7 +333,10 @@ public class GroupReplyPlanService {
         LocalDateTime now = LocalDateTime.now();
         GroupReplyPlan plan;
         if (replacesActive) {
-            plan = active.setUpdatedAt(now);
+            plan = active
+                    .setExecutionKey(request.getExecutionKey().trim())
+                    .setDisplayName(request.getDisplayName().trim())
+                    .setUpdatedAt(now);
             planMapper.updateById(plan);
             itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
                     .eq(GroupReplyPlanItem::getPlanId, plan.getId()));
@@ -254,6 +350,8 @@ public class GroupReplyPlanService {
                     .setConversationId(conversation.getId())
                     .setSource(source)
                     .setContextId(request.getContextId())
+                    .setExecutionKey(request.getExecutionKey().trim())
+                    .setDisplayName(request.getDisplayName().trim())
                     .setResumePlanId(startsCombat && active != null ? active.getId() : null)
                     .setCreatedAt(now)
                     .setUpdatedAt(now);
@@ -261,35 +359,8 @@ public class GroupReplyPlanService {
             conversation.setActiveReplyPlanId(plan.getId()).setUpdatedAt(now);
             conversationMapper.updateById(conversation);
         }
-        insertItems(plan.getId(), request.getGroups(), now);
+        insertItems(plan.getId(), request.getItems(), now);
         return toVO(plan);
-    }
-
-    private GroupReplyPlanVO advanceLocked(GroupConversation conversation) {
-        GroupReplyPlan active = activePlan(conversation);
-        if (active == null) {
-            throw new UserRequestException("当前群聊没有可推进的回复计划");
-        }
-        if (GroupChatConstant.PLAN_SOURCE_USER.equals(active.getSource())) {
-            throw new UserRequestException("USER回复计划不支持推进分组");
-        }
-        List<GroupReplyPlanItem> ordered = orderedItems(active.getId());
-        if (ordered.isEmpty()) {
-            return finishLocked(conversation, active);
-        }
-        String currentGroupKey = ordered.getFirst().getGroupKey();
-        itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
-                .eq(GroupReplyPlanItem::getPlanId, active.getId())
-                .eq(GroupReplyPlanItem::getGroupKey, currentGroupKey));
-        List<GroupReplyPlanItem> remaining = ordered.stream()
-                .filter(item -> !currentGroupKey.equals(item.getGroupKey()))
-                .toList();
-        if (!remaining.isEmpty()) {
-            active.setUpdatedAt(LocalDateTime.now());
-            planMapper.updateById(active);
-            return toVO(active, remaining);
-        }
-        return finishLocked(conversation, active);
     }
 
     private GroupReplyPlanVO finishLocked(GroupConversation conversation, GroupReplyPlan active) {
@@ -361,27 +432,25 @@ public class GroupReplyPlanService {
         conversationMapper.update(null, update);
     }
 
-    private void insertItems(Long planId, List<GroupReplyPlanDTO.Group> groups, LocalDateTime now) {
-        for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
-            GroupReplyPlanDTO.Group group = groups.get(groupIndex);
-            int groupOrder = group.getOrder() == null ? groupIndex + 1 : group.getOrder();
-            List<GroupReplyPlanDTO.Item> items = group.getItems();
-            for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
-                GroupReplyPlanDTO.Item item = items.get(itemIndex);
-                String actorType = StringUtils.hasText(item.getActorType())
-                        ? item.getActorType().trim().toLowerCase(Locale.ROOT)
-                        : GroupChatConstant.ACTOR_CHARACTER;
-                itemMapper.insert(new GroupReplyPlanItem()
-                        .setPlanId(planId)
-                        .setGroupKey(group.getKey().trim())
-                        .setGroupName(StringUtils.hasText(group.getName()) ? group.getName().trim() : group.getKey().trim())
-                        .setGroupOrder(groupOrder)
-                        .setItemOrder(item.getOrder() == null ? itemIndex + 1 : item.getOrder())
-                        .setActorType(actorType)
-                        .setActorId(item.getActorId())
-                        .setCreatedAt(now)
-                        .setUpdatedAt(now));
-            }
+    private void insertItems(
+            Long planId, List<GroupReplyPlanDTO.Item> items,
+            LocalDateTime now) {
+        for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
+            GroupReplyPlanDTO.Item item = items.get(itemIndex);
+            String actorType = StringUtils.hasText(item.getActorType())
+                    ? item.getActorType().trim().toLowerCase(Locale.ROOT)
+                    : GroupChatConstant.ACTOR_CHARACTER;
+            itemMapper.insert(new GroupReplyPlanItem()
+                    .setPlanId(planId)
+                    .setItemOrder(item.getOrder() == null
+                            ? itemIndex + 1 : item.getOrder())
+                    .setActorType(actorType)
+                    .setActorId(item.getActorId())
+                    .setSubjectCharacterId(item.getSubjectCharacterId())
+                    .setSubjectCharacterName(
+                            item.getSubjectCharacterName())
+                    .setCreatedAt(now)
+                    .setUpdatedAt(now));
         }
     }
 
@@ -390,20 +459,18 @@ public class GroupReplyPlanService {
             int round,
             List<CombatPlanItem> participants,
             LocalDateTime now) {
-        String key = "combat:round:" + round;
         for (int index = 0; index < participants.size(); index++) {
             CombatPlanItem participant = participants.get(index);
             itemMapper.insert(new GroupReplyPlanItem()
                     .setPlanId(planId)
-                    .setGroupKey(key)
-                    .setGroupName("战斗第" + round + "轮")
-                    .setGroupOrder(round)
                     .setItemOrder(participant.order() == null
                             ? index + 1 : participant.order())
                     .setActorType(participant.actorType())
                     .setActorId(participant.actorId())
                     .setSubjectCharacterId(
                             participant.subjectCharacterId())
+                    .setSubjectCharacterName(
+                            participant.subjectCharacterName())
                     .setCreatedAt(now)
                     .setUpdatedAt(now));
         }
@@ -414,6 +481,8 @@ public class GroupReplyPlanService {
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setConversationId(conversation.getId())
                 .setSource(GroupChatConstant.PLAN_SOURCE_USER)
+                .setExecutionKey("default")
+                .setDisplayName("群聊")
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         planMapper.insert(plan);
@@ -424,9 +493,6 @@ public class GroupReplyPlanService {
             }
             itemMapper.insert(new GroupReplyPlanItem()
                     .setPlanId(plan.getId())
-                    .setGroupKey("default")
-                    .setGroupName("群聊")
-                    .setGroupOrder(1)
                     .setItemOrder(order++)
                     .setActorType(member.getActorType())
                     .setActorId(member.getActorId())
@@ -451,30 +517,43 @@ public class GroupReplyPlanService {
     }
 
     private GroupReplyPlanVO toVO(GroupReplyPlan plan, List<GroupReplyPlanItem> items) {
-        Map<String, List<GroupReplyPlanItem>> grouped = new LinkedHashMap<>();
-        for (GroupReplyPlanItem item : items) {
-            grouped.computeIfAbsent(item.getGroupKey(), ignored -> new ArrayList<>()).add(item);
-        }
-        List<GroupReplyPlanVO.Group> groups = grouped.values().stream().map(groupItems -> {
-            GroupReplyPlanItem first = groupItems.getFirst();
-            List<GroupReplyPlanVO.Item> voItems = groupItems.stream()
-                    .map(item -> new GroupReplyPlanVO.Item(item.getId(), item.getItemOrder(), item.getActorType(),
-                            item.getActorId(),
-                            item.getSubjectCharacterId()))
-                    .toList();
-            return new GroupReplyPlanVO.Group(first.getGroupKey(), first.getGroupName(),
-                    first.getGroupOrder(), voItems);
-        }).toList();
-        return new GroupReplyPlanVO(plan.getId(), plan.getSource(), plan.getContextId(),
-                plan.getNextPlanId(), plan.getResumePlanId(), groups);
+        List<GroupReplyPlanVO.Item> voItems = items.stream()
+                .map(item -> new GroupReplyPlanVO.Item(
+                        item.getId(), item.getItemOrder(),
+                        item.getActorType(), item.getActorId(),
+                        item.getSubjectCharacterId(),
+                        item.getSubjectCharacterName(),
+                        item.getParticipantStatus()))
+                .toList();
+        return new GroupReplyPlanVO(
+                plan.getId(), plan.getSource(), plan.getContextId(),
+                plan.getExecutionKey(), plan.getDisplayName(),
+                plan.getNextPlanId(), plan.getResumePlanId(),
+                plan.getParentPlanId(), voItems);
     }
 
     private List<GroupReplyPlanItem> orderedItems(Long planId) {
         return itemMapper.selectList(new LambdaQueryWrapper<GroupReplyPlanItem>()
                 .eq(GroupReplyPlanItem::getPlanId, planId)
-                .orderByAsc(GroupReplyPlanItem::getGroupOrder)
                 .orderByAsc(GroupReplyPlanItem::getItemOrder)
                 .orderByAsc(GroupReplyPlanItem::getId));
+    }
+
+    private boolean sameSceneActor(
+            GroupReplyPlanItem item, GroupActionSpec action) {
+        return java.util.Objects.equals(
+                item.getActorType(), action.actorType())
+                && java.util.Objects.equals(
+                item.getActorId(), action.actorId())
+                && java.util.Objects.equals(
+                item.getSubjectCharacterId(),
+                action.subjectCharacterId());
+    }
+
+    private boolean isInvestigator(GroupReplyPlanItem item) {
+        return GroupChatConstant.ACTOR_USER.equals(item.getActorType())
+                || GroupChatConstant.ACTOR_CHARACTER.equals(
+                        item.getActorType());
     }
 
     void validateStructure(GroupConversation conversation, GroupReplyPlanDTO request) {
@@ -496,84 +575,105 @@ public class GroupReplyPlanService {
         if (!GroupChatConstant.PLAN_SOURCE_USER.equals(source) && request.getContextId() == null) {
             throw new UserRequestException("SCENE或COMBAT回复计划的contextId不能为空");
         }
-        if (CollectionUtils.isEmpty(request.getGroups())) {
-            throw new UserRequestException("回复计划分组不能为空");
+        if (!StringUtils.hasText(request.getExecutionKey())
+                || !StringUtils.hasText(request.getDisplayName())) {
+            throw new UserRequestException("回复计划执行标识和显示名称不能为空");
         }
-        int count = 0;
-        Set<String> groupKeys = new HashSet<>();
-        for (GroupReplyPlanDTO.Group group : request.getGroups()) {
-            if (group == null || !StringUtils.hasText(group.getKey()) || CollectionUtils.isEmpty(group.getItems())) {
-                throw new UserRequestException("回复计划分组及人物不能为空");
+        if (CollectionUtils.isEmpty(request.getItems())) {
+            throw new UserRequestException("回复计划执行项不能为空");
+        }
+        if (request.getItems().size() > GroupChatConstant.MAX_REPLY_STEPS) {
+            throw new UserRequestException("回复计划执行项数量不能超过"
+                    + GroupChatConstant.MAX_REPLY_STEPS);
+        }
+        Set<String> actors = new HashSet<>();
+        for (GroupReplyPlanDTO.Item item : request.getItems()) {
+            if (item == null) {
+                throw new UserRequestException("回复人物不能为空");
             }
-            if (!groupKeys.add(group.getKey().trim())) {
-                throw new UserRequestException("回复计划分组key不能重复");
-            }
-            if (group.getItems().size() > GroupChatConstant.MAX_REPLY_STEPS) {
-                throw new UserRequestException("单个回复计划分组人物数量不能超过"
-                        + GroupChatConstant.MAX_REPLY_STEPS);
-            }
-            count += group.getItems().size();
-            Set<String> actors = new HashSet<>();
-            for (GroupReplyPlanDTO.Item item : group.getItems()) {
-                if (item == null) {
-                    throw new UserRequestException("回复人物不能为空");
-                }
-                String actorType = StringUtils.hasText(item.getActorType())
-                        ? item.getActorType().trim().toLowerCase(Locale.ROOT)
-                        : GroupChatConstant.ACTOR_CHARACTER;
-                if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(source)
-                        && item.getSubjectCharacterId() == null) {
-                    throw new UserRequestException(
-                            "战斗回复人物必须绑定人物卡");
-                }
-                String actorKey = actorType + "\n" + item.getActorId()
-                        + (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(source)
-                        ? "\n" + item.getSubjectCharacterId() : "");
-                if (!actors.add(actorKey)) {
-                    throw new UserRequestException("同一分组中不能重复安排同一人物");
-                }
-                if (GroupChatConstant.ACTOR_KP.equals(actorType)) {
-                    if (!GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) {
-                        throw new UserRequestException("KP只能用于TRPG群聊");
-                    }
-                    if (item.getActorId() != null) {
-                        throw new UserRequestException("KP的actorId必须为空");
-                    }
-                } else if (GroupChatConstant.ACTOR_CHARACTER.equals(actorType)) {
-                    if (item.getActorId() == null) {
-                        throw new UserRequestException("回复人物id不能为空");
-                    }
-                    conversationService.checkReplyMember(
-                            conversation.getId(), actorType, item.getActorId(), false);
-                } else if (GroupChatConstant.ACTOR_USER.equals(actorType)) {
-                    if (!GroupChatConstant.MODE_TRPG.equals(
+            String actorType = StringUtils.hasText(item.getActorType())
+                    ? item.getActorType().trim().toLowerCase(Locale.ROOT)
+                    : GroupChatConstant.ACTOR_CHARACTER;
+            boolean concreteTrpgCharacter =
+                    GroupChatConstant.MODE_TRPG.equals(
                             conversation.getMode())
-                            || item.getActorId() == null) {
-                        throw new UserRequestException(
-                                "用户调查员只能用于TRPG且actorId不能为空");
-                    }
-                    boolean exists = participantService
-                            .listInvestigators(conversation)
-                            .stream()
-                            .anyMatch(participant ->
-                                    GroupChatConstant.ACTOR_USER.equals(
-                                            participant.actor().type())
-                                            && java.util.Objects.equals(
-                                            participant.actor().id(),
-                                            item.getActorId()));
-                    if (!exists) {
-                        throw new UserRequestException(
-                                "用户调查员人物卡不存在");
-                    }
-                } else {
-                    throw new UserRequestException(
-                            "回复人物类型仅支持user、character或kp");
+                    && !GroupChatConstant.ACTOR_KP.equals(actorType);
+            boolean combatCharacter =
+                    GroupChatConstant.PLAN_SOURCE_COMBAT.equals(source);
+            if ((concreteTrpgCharacter || combatCharacter)
+                    && item.getSubjectCharacterId() == null) {
+                throw new UserRequestException(
+                        "TRPG回复人物必须绑定人物卡");
+            }
+            if ((concreteTrpgCharacter || combatCharacter)
+                    && !StringUtils.hasText(
+                    item.getSubjectCharacterName())) {
+                throw new UserRequestException(
+                        "TRPG回复人物必须包含人物卡名称");
+            }
+            String actorKey = actorType + "\n" + item.getActorId()
+                    + (GroupChatConstant.MODE_TRPG.equals(
+                    conversation.getMode())
+                    ? "\n" + item.getSubjectCharacterId() : "");
+            if (!actors.add(actorKey)) {
+                throw new UserRequestException(
+                        "回复计划中不能重复安排同一人物");
+            }
+            if (GroupChatConstant.ACTOR_KP.equals(actorType)) {
+                if (!GroupChatConstant.MODE_TRPG.equals(
+                        conversation.getMode())) {
+                    throw new UserRequestException("KP只能用于TRPG群聊");
                 }
+                if (item.getActorId() != null) {
+                    throw new UserRequestException("KP的actorId必须为空");
+                }
+                if (GroupChatConstant.PLAN_SOURCE_SCENE.equals(source)
+                        && (item.getSubjectCharacterId() != null
+                        || StringUtils.hasText(
+                        item.getSubjectCharacterName()))) {
+                    throw new UserRequestException(
+                            "探索场景KP不能绑定单一人物卡或名称");
+                }
+            } else if (GroupChatConstant.ACTOR_CHARACTER.equals(actorType)) {
+                if (item.getActorId() == null) {
+                    throw new UserRequestException("回复人物id不能为空");
+                }
+                conversationService.checkReplyMember(
+                        conversation.getId(), actorType,
+                        item.getActorId(), false);
+            } else if (GroupChatConstant.ACTOR_USER.equals(actorType)) {
+                if (!GroupChatConstant.MODE_TRPG.equals(
+                        conversation.getMode())
+                        || item.getActorId() == null) {
+                    throw new UserRequestException(
+                            "用户调查员只能用于TRPG且actorId不能为空");
+                }
+                boolean exists = participantService
+                        .listInvestigators(conversation)
+                        .stream()
+                        .anyMatch(participant ->
+                                GroupChatConstant.ACTOR_USER.equals(
+                                        participant.actor().type())
+                                        && java.util.Objects.equals(
+                                        participant.actor().id(),
+                                        item.getActorId()));
+                if (!exists) {
+                    throw new UserRequestException(
+                            "用户调查员人物卡不存在");
+                }
+            } else {
+                throw new UserRequestException(
+                        "回复人物类型仅支持user、character或kp");
             }
         }
-        if (count > 200) {
-            throw new UserRequestException("回复计划人物数量不能超过200");
-        }
+    }
+
+    private String combatExecutionKey(int round) {
+        return "combat:round:" + round;
+    }
+
+    private String combatDisplayName(int round) {
+        return "战斗第" + round + "轮";
     }
 
     private GroupConversationLockService.OwnedLock requireLock(Long conversationId) {
@@ -612,6 +712,7 @@ public class GroupReplyPlanService {
             String actorType,
             Long actorId,
             Long subjectCharacterId,
+            String subjectCharacterName,
             Integer order) {
     }
 }

@@ -2,6 +2,8 @@ package com.me.galchat.domain.dto;
 
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.GroupReplyPlan;
+import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.service.impl.TrpgSaveServiceImpl;
 import com.me.galchat.typehandler.JsonbTypeHandler;
 import org.apache.ibatis.type.JdbcType;
 import org.junit.jupiter.api.Test;
@@ -24,13 +26,20 @@ class TrpgSaveSnapshotJsonTest {
     void jsonbRoundTripKeepsTypedRowsAndPrivateQuickNotesBackup()
             throws Exception {
         TrpgSaveSnapshotDTO snapshot = new TrpgSaveSnapshotDTO()
-                .setFormatVersion(1)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setConversationId(51L)
                 .setCursors(new TrpgSaveSnapshotDTO.CursorSnapshot()
                         .setMaxMessageId(8L))
                 .setReplyPlans(List.of(new GroupReplyPlan()
                         .setId(101L)
-                        .setConversationId(51L)))
+                        .setConversationId(51L)
+                        .setExecutionKey("scene:101")
+                        .setDisplayName("林间营地")))
+                .setReplyPlanItems(List.of(new GroupReplyPlanItem()
+                        .setId(201L)
+                        .setPlanId(101L)
+                        .setSubjectCharacterId(401L)
+                        .setSubjectCharacterName("林默")))
                 .setCharacters(List.of(new CocCharacter()
                         .setId(401L)
                         .setRunId(51L)
@@ -55,9 +64,17 @@ class TrpgSaveSnapshotJsonTest {
 
         assertThat(restored.getCursors().getMaxMessageId()).isEqualTo(8L);
         assertThat(restored.getReplyPlans()).singleElement()
-                .extracting(GroupReplyPlan::getId).isEqualTo(101L);
+                .extracting(GroupReplyPlan::getId,
+                        GroupReplyPlan::getExecutionKey,
+                        GroupReplyPlan::getDisplayName)
+                .containsExactly(101L, "scene:101", "林间营地");
         assertThat(restored.getCharacters()).singleElement()
                 .extracting(CocCharacter::getId).isEqualTo(401L);
+        assertThat(restored.getReplyPlanItems()).singleElement()
+                .extracting(
+                        GroupReplyPlanItem::getSubjectCharacterId,
+                        GroupReplyPlanItem::getSubjectCharacterName)
+                .containsExactly(401L, "林默");
         assertThat(restored.getCharacterQuickNotes())
                 .containsEntry(401L, "藏着钥匙");
     }

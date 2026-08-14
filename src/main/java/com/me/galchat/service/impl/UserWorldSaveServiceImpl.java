@@ -75,7 +75,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
 
-    private static final int FORMAT_VERSION = 6;
+    private static final int FORMAT_VERSION = 7;
     private static final int RECENT_ROUND_COUNT = 3;
 
     private final IUserWorldPrefixService userWorldPrefixService;

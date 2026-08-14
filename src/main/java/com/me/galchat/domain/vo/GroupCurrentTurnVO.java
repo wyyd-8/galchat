@@ -1,5 +1,6 @@
 package com.me.galchat.domain.vo;
 
+import java.util.List;
 import java.util.Map;
 
 public record GroupCurrentTurnVO(
@@ -14,5 +15,6 @@ public record GroupCurrentTurnVO(
         String inputType,
         String sceneName,
         boolean waitingForUser,
-        Map<String, String> sceneOptions) {
+        Map<String, String> sceneOptions,
+        List<GroupCurrentTurnStepVO> steps) {
 }

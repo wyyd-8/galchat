@@ -120,13 +120,13 @@ public class TrpgProposalOrderService {
         GroupChatReplyStep lead = completed.getFirst();
         List<String> queue = new ArrayList<>(state.actorKeys());
         moveToBack(queue,
-                lead.getSpeakerType() + ":" + lead.getSpeakerId());
+                subjectKey(lead.getSubjectCharacterId()));
         safeSave(conversation.getId(),
                 new TrpgProposalOrderStore.State(turn.getId(), queue));
     }
 
     private String actorKey(GroupActionSpec action) {
-        return action.actorType() + ":" + action.actorId();
+        return subjectKey(action.subjectCharacterId());
     }
 
     private boolean isInvestigator(GroupActionSpec action) {
@@ -141,7 +141,7 @@ public class TrpgProposalOrderService {
         for (TrpgParticipantService.Participant participant :
                 participantService.listInvestigators(conversation)) {
             queue.add(TrpgSceneProgressStore.actorKey(
-                    participant.actor()));
+                    participant.cardId()));
         }
         List<GroupChatTurn> turns = turnMapper.selectList(
                 new LambdaQueryWrapper<GroupChatTurn>()
@@ -177,8 +177,8 @@ public class TrpgProposalOrderService {
             for (GroupChatTurn turn : turns) {
                 GroupChatReplyStep lead = leadByTurn.get(turn.getId());
                 if (lead != null) {
-                    moveToBack(queue, lead.getSpeakerType()
-                            + ":" + lead.getSpeakerId());
+                    moveToBack(queue,
+                            subjectKey(lead.getSubjectCharacterId()));
                 }
             }
         }
@@ -190,6 +190,14 @@ public class TrpgProposalOrderService {
         if (queue.remove(actorKey)) {
             queue.add(actorKey);
         }
+    }
+
+    private String subjectKey(Long subjectCharacterId) {
+        if (subjectCharacterId == null) {
+            throw new IllegalStateException(
+                    "场景调查员行动未绑定人物卡");
+        }
+        return TrpgSceneProgressStore.actorKey(subjectCharacterId);
     }
 
     private Optional<TrpgProposalOrderStore.State> safeLoad(

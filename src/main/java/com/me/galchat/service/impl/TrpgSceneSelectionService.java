@@ -50,6 +50,7 @@ public class TrpgSceneSelectionService {
             actions.add(selectionAction(
                     participant.actor().type(),
                     participant.actor().id(),
+                    participant.cardId(),
                     itemOrder++));
         }
         return List.copyOf(actions);
@@ -408,6 +409,8 @@ public class TrpgSceneSelectionService {
                     .setConversationId(conversation.getId())
                     .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
                     .setContextId(location.getId())
+                    .setExecutionKey("scene:" + location.getId())
+                    .setDisplayName(location.getName())
                     .setNextPlanId(nextPlanId)
                     .setCreatedAt(now)
                     .setUpdatedAt(now);
@@ -423,10 +426,17 @@ public class TrpgSceneSelectionService {
 
     private GroupActionSpec selectionAction(
             String actorType, Long actorId, int itemOrder) {
+        return selectionAction(actorType, actorId, null, itemOrder);
+    }
+
+    private GroupActionSpec selectionAction(
+            String actorType, Long actorId, Long subjectCharacterId,
+            int itemOrder) {
         return new GroupActionSpec(
                 GroupChatConstant.ACTION_TRPG_SCENE_SELECTION,
                 actorType,
                 actorId,
+                subjectCharacterId,
                 "scene-selection",
                 "选景",
                 1,
@@ -438,26 +448,22 @@ public class TrpgSceneSelectionService {
             CocModuleLocation location,
             List<TrpgParticipantService.Participant> participants,
             LocalDateTime now) {
-        String groupKey = "scene:" + location.getId();
         int itemOrder = 1;
         for (TrpgParticipantService.Participant participant :
                 participants) {
             itemMapper.insert(new GroupReplyPlanItem()
                     .setPlanId(plan.getId())
-                    .setGroupKey(groupKey)
-                    .setGroupName(location.getName())
-                    .setGroupOrder(1)
                     .setItemOrder(itemOrder++)
                     .setActorType(participant.actor().type())
                     .setActorId(participant.actor().id())
+                    .setSubjectCharacterId(participant.cardId())
+                    .setSubjectCharacterName(
+                            participant.investigatorName())
                     .setCreatedAt(now)
                     .setUpdatedAt(now));
         }
         itemMapper.insert(new GroupReplyPlanItem()
                 .setPlanId(plan.getId())
-                .setGroupKey(groupKey)
-                .setGroupName(location.getName())
-                .setGroupOrder(1)
                 .setItemOrder(itemOrder)
                 .setActorType(GroupChatConstant.ACTOR_KP)
                 .setActorId(null)

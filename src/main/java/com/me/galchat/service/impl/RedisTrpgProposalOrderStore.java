@@ -63,8 +63,7 @@ public class RedisTrpgProposalOrderStore
         Set<String> unique = new HashSet<>();
         for (String actorKey : state.actorKeys()) {
             if (!StringUtils.hasText(actorKey)
-                    || (!actorKey.startsWith("user:")
-                    && !actorKey.startsWith("character:"))
+                    || !actorKey.startsWith("character-card:")
                     || !unique.add(actorKey)) {
                 return false;
             }

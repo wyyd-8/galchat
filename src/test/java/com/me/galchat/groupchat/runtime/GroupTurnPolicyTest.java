@@ -63,18 +63,34 @@ class GroupTurnPolicyTest {
                 .containsExactly(11L);
     }
 
+    @Test
+    void trpgSceneOmitsReadyInvestigatorsFromTheActionRound() {
+        TrpgGroupTurnPolicy policy = new TrpgGroupTurnPolicy();
+        GroupReplyPlanItem active = item(10L, 11L)
+                .setParticipantStatus(GroupChatConstant.PARTICIPANT_ACTIVE);
+        GroupReplyPlanItem ready = item(20L, 12L)
+                .setParticipantStatus(GroupChatConstant.PARTICIPANT_READY);
+
+        assertThat(policy.plan(
+                new GroupConversation().setMode(GroupChatConstant.MODE_TRPG),
+                selection(GroupChatConstant.PLAN_SOURCE_SCENE,
+                        List.of(active, ready))))
+                .extracting(GroupActionSpec::actorId)
+                .containsExactly(11L);
+    }
+
     private GroupReplyPlanSelection selection(String source, List<GroupReplyPlanItem> items) {
-        return new GroupReplyPlanSelection(source, 100L, "default", "群聊", 1, items);
+        return new GroupReplyPlanSelection(
+                source, 100L, "default", "群聊", items);
     }
 
     private GroupReplyPlanItem item(Long id, Long actorId) {
         return new GroupReplyPlanItem()
                 .setId(id)
-                .setGroupKey("default")
-                .setGroupName("群聊")
-                .setGroupOrder(1)
                 .setItemOrder(id.intValue())
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
-                .setActorId(actorId);
+                .setActorId(actorId)
+                .setParticipantStatus(
+                        GroupChatConstant.PARTICIPANT_ACTIVE);
     }
 }

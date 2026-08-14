@@ -8,19 +8,17 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -30,33 +28,27 @@ public class TrpgSceneParticipantService {
     private final GroupReplyPlanMapper planMapper;
     private final GroupReplyPlanItemMapper itemMapper;
     private final CocModuleLocationMapper locationMapper;
-    private final TrpgParticipantService participantService;
     private final TrpgRuntimeChildSceneMapper runtimeSceneMapper;
 
     public SceneState state(GroupConversation conversation) {
         GroupReplyPlan scene = requireActiveScene(conversation);
-        Map<GroupActorRef, String> names = new HashMap<>();
-        for (TrpgParticipantService.Participant participant :
-                participantService.listInvestigators(conversation)) {
-            names.put(participant.actor(),
-                    participant.investigatorName());
-        }
+        List<GroupReplyPlanItem> items = orderedItems(scene.getId());
         List<String> active = new ArrayList<>();
         List<String> waiting = new ArrayList<>();
-        for (GroupReplyPlanItem item : orderedItems(scene.getId())) {
+        for (GroupReplyPlanItem item : items) {
             if (!isInvestigator(item)) {
                 continue;
             }
-            String name = names.get(new GroupActorRef(
-                    item.getActorType(), item.getActorId()));
-            if (name == null) {
+            String name = item.getSubjectCharacterName();
+            if (!StringUtils.hasText(name)) {
                 throw new UserRequestException(
-                        "场景调查员人物卡不存在");
+                        "场景调查员名称快照不存在");
             }
             if (GroupChatConstant.PARTICIPANT_WAITING.equals(
                     item.getParticipantStatus())) {
                 waiting.add(name);
-            } else {
+            } else if (GroupChatConstant.PARTICIPANT_ACTIVE.equals(
+                    item.getParticipantStatus())) {
                 active.add(name);
             }
         }
@@ -103,7 +95,6 @@ public class TrpgSceneParticipantService {
         return itemMapper.selectList(
                 new LambdaQueryWrapper<GroupReplyPlanItem>()
                         .eq(GroupReplyPlanItem::getPlanId, planId)
-                        .orderByAsc(GroupReplyPlanItem::getGroupOrder)
                         .orderByAsc(GroupReplyPlanItem::getItemOrder)
                         .orderByAsc(GroupReplyPlanItem::getId));
     }

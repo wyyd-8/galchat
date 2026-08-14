@@ -7,9 +7,8 @@ import java.util.List;
 public record GroupReplyPlanSelection(
         String source,
         Long contextId,
-        String groupKey,
-        String groupName,
-        Integer groupOrder,
+        String executionKey,
+        String displayName,
         List<GroupReplyPlanItem> items
 ) {
 }

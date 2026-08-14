@@ -7,7 +7,6 @@ import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
-import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
@@ -63,6 +62,8 @@ class TrpgChildSceneCommandServiceTest {
                 .isEqualTo(GroupChatConstant.PARTICIPANT_ACTIVE);
         verify(fixture.itemMapper()).updateById(
                 fixture.investigatorItems().get(1));
+        verify(fixture.progressStore()).clearReady(
+                7L, 31L, 109L);
     }
 
     @Test
@@ -92,6 +93,8 @@ class TrpgChildSceneCommandServiceTest {
         assertThat(activated).isTrue();
         assertThat(fixture.conversation().getActiveReplyPlanId())
                 .isEqualTo(41L);
+        verify(fixture.progressStore()).clearReady(7L, 31L, 101L);
+        verify(fixture.progressStore()).clearReady(7L, 31L, 109L);
     }
 
     @Test
@@ -215,12 +218,12 @@ class TrpgChildSceneCommandServiceTest {
                 mock(GroupReplyPlanItemMapper.class);
         GroupConversationMapper conversationMapper =
                 mock(GroupConversationMapper.class);
-        TrpgParticipantService participantService =
-                mock(TrpgParticipantService.class);
         TrpgChildScenePlanService planService =
                 new TrpgChildScenePlanService(
                         planMapper, itemMapper, conversationMapper,
                         mock(TrpgRuntimeChildSceneMapper.class));
+        TrpgSceneProgressStore progressStore =
+                mock(TrpgSceneProgressStore.class);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(5L)
                 .setActiveReplyPlanId(31L)
@@ -251,28 +254,16 @@ class TrpgChildSceneCommandServiceTest {
                     add(new GroupReplyPlanItem()
                             .setActorType(GroupChatConstant.ACTOR_KP));
                 }});
-        when(participantService.listInvestigators(conversation))
-                .thenReturn(List.of(
-                        new TrpgParticipantService.Participant(
-                                new GroupActorRef(
-                                        GroupChatConstant.ACTOR_USER,
-                                        101L),
-                                101L, "亨利", "用户"),
-                        new TrpgParticipantService.Participant(
-                                new GroupActorRef(
-                                        GroupChatConstant.ACTOR_CHARACTER,
-                                        9L),
-                                102L, "艾琳", "代理")));
         TrpgChildSceneCommandService service =
                 new TrpgChildSceneCommandService(
                         conversationService, stepMapper, turnMapper,
                         planMapper, itemMapper,
-                        participantService, planService,
+                        planService, progressStore,
                         toolCallMapper, new ObjectMapper());
         return new Fixture(
                 service, stepMapper, toolCallMapper, planMapper,
                 itemMapper, conversation, step, turn,
-                parent, investigatorItems);
+                parent, investigatorItems, progressStore);
     }
 
     private GroupReplyPlanItem item(
@@ -280,12 +271,15 @@ class TrpgChildSceneCommandServiceTest {
         return new GroupReplyPlanItem()
                 .setId((long) order)
                 .setPlanId(31L)
-                .setGroupKey("scene:21")
-                .setGroupName("教堂")
-                .setGroupOrder(1)
                 .setItemOrder(order)
                 .setActorType(actorType)
                 .setActorId(actorId)
+                .setSubjectCharacterId(
+                        GroupChatConstant.ACTOR_USER.equals(actorType)
+                                ? actorId : actorId + 100L)
+                .setSubjectCharacterName(
+                        GroupChatConstant.ACTOR_USER.equals(actorType)
+                                ? "亨利" : "艾琳")
                 .setParticipantStatus(
                         GroupChatConstant.PARTICIPANT_ACTIVE);
     }
@@ -300,6 +294,7 @@ class TrpgChildSceneCommandServiceTest {
             GroupChatReplyStep step,
             GroupChatTurn turn,
             GroupReplyPlan parent,
-            List<GroupReplyPlanItem> investigatorItems) {
+            List<GroupReplyPlanItem> investigatorItems,
+            TrpgSceneProgressStore progressStore) {
     }
 }

@@ -50,7 +50,8 @@ class TrpgSceneLifecycleServiceTest {
         when(stepMapper.selectById(41L)).thenReturn(
                 new GroupChatReplyStep().setId(41L).setTurnId(51L)
                         .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
-                        .setSpeakerId(9L));
+                        .setSpeakerId(9L)
+                        .setSubjectCharacterId(109L));
         when(turnMapper.selectById(51L)).thenReturn(
                 new GroupChatTurn().setId(51L).setConversationId(7L)
                         .setPlanId(10L)
@@ -100,7 +101,8 @@ class TrpgSceneLifecycleServiceTest {
         when(stepMapper.selectById(41L)).thenReturn(
                 new GroupChatReplyStep().setId(41L).setTurnId(51L)
                         .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
-                        .setSpeakerId(9L));
+                        .setSpeakerId(9L)
+                        .setSubjectCharacterId(109L));
         when(turnMapper.selectById(51L)).thenReturn(
                 new GroupChatTurn().setId(51L).setConversationId(7L)
                         .setPlanId(10L)
@@ -111,20 +113,17 @@ class TrpgSceneLifecycleServiceTest {
                         .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
                         .setContextId(21L));
         when(itemMapper.selectList(any())).thenReturn(List.of(
-                item(9L), item(8L),
+                item(9L, 109L), item(8L, 108L),
                 new GroupReplyPlanItem()
                         .setActorType(GroupChatConstant.ACTOR_KP)));
         when(progressStore.readyActors(7L, 10L))
                 .thenReturn(Set.of(
-                        "character:8", "character:9"));
+                        "character-card:108", "character-card:109"));
 
         assertThat(service.requestInvestigatorFinish(
                 7L, 41L, 9L)).isTrue();
 
-        verify(progressStore).markReady(
-                7L, 10L,
-                new com.me.galchat.groupchat.runtime.GroupActorRef(
-                        GroupChatConstant.ACTOR_CHARACTER, 9L));
+        verify(progressStore).markReady(7L, 10L, 109L);
         verify(progressStore).requestFinish(7L, 10L);
         verify(recoveryService).cancelPendingInvestigatorSteps(
                 51L, "所有调查员已结束当前场景探索");
@@ -229,9 +228,10 @@ class TrpgSceneLifecycleServiceTest {
         org.mockito.Mockito.verifyNoInteractions(insanityService);
     }
 
-    private GroupReplyPlanItem item(Long actorId) {
+    private GroupReplyPlanItem item(Long actorId, Long cardId) {
         return new GroupReplyPlanItem()
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
-                .setActorId(actorId);
+                .setActorId(actorId)
+                .setSubjectCharacterId(cardId);
     }
 }

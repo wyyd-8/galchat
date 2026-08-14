@@ -10,7 +10,6 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
@@ -40,8 +39,8 @@ public class TrpgChildSceneCommandService {
     private final GroupChatTurnMapper turnMapper;
     private final GroupReplyPlanMapper planMapper;
     private final GroupReplyPlanItemMapper itemMapper;
-    private final TrpgParticipantService participantService;
     private final TrpgChildScenePlanService childPlanService;
+    private final TrpgSceneProgressStore progressStore;
     private final GroupChatToolCallMapper toolCallMapper;
     private final ObjectMapper objectMapper;
 
@@ -127,6 +126,14 @@ public class TrpgChildSceneCommandService {
                                         prepared.sceneName(), step.getId(),
                                         prepared.selected().items()))
                                 .toList());
+                preparedStarts.stream()
+                        .flatMap(prepared -> prepared.selected().items()
+                                .stream())
+                        .map(GroupReplyPlanItem::getSubjectCharacterId)
+                        .distinct()
+                        .forEach(characterId -> progressStore.clearReady(
+                                execution.conversation().getId(),
+                                execution.plan().getId(), characterId));
                 return true;
             }
         }
@@ -149,6 +156,9 @@ public class TrpgChildSceneCommandService {
                             GroupChatConstant.PARTICIPANT_ACTIVE)
                     .setUpdatedAt(now);
             itemMapper.updateById(item);
+            progressStore.clearReady(
+                    conversationId, execution.plan().getId(),
+                    item.getSubjectCharacterId());
         }
         return String.join("、", selected.names())
                 + "已结束等待，将从下一轮开始正常参与行动。";
@@ -294,33 +304,24 @@ public class TrpgChildSceneCommandService {
             List<String> suppliedNames,
             String requiredStatus) {
         List<String> names = normalizeNames(suppliedNames);
-        Map<GroupActorRef, String> nameByActor =
-                new LinkedHashMap<>();
-        for (TrpgParticipantService.Participant participant :
-                participantService.listInvestigators(
-                        execution.conversation())) {
-            nameByActor.put(participant.actor(),
-                    participant.investigatorName());
-        }
+        List<GroupReplyPlanItem> investigatorItems =
+                investigatorItems(execution.plan().getId());
         Map<String, List<GroupReplyPlanItem>> itemsByName =
                 new LinkedHashMap<>();
         for (GroupReplyPlanItem item :
-                investigatorItems(execution.plan().getId())) {
-            String actualStatus =
-                    GroupChatConstant.PARTICIPANT_WAITING.equals(
-                            item.getParticipantStatus())
-                            ? GroupChatConstant.PARTICIPANT_WAITING
-                            : GroupChatConstant.PARTICIPANT_ACTIVE;
+                investigatorItems) {
+            String actualStatus = item.getParticipantStatus();
             if (!requiredStatus.equals(actualStatus)) {
                 continue;
             }
-            String name = nameByActor.get(new GroupActorRef(
-                    item.getActorType(), item.getActorId()));
-            if (name != null) {
-                itemsByName.computeIfAbsent(
-                        name, ignored -> new ArrayList<>())
-                        .add(item);
+            String name = item.getSubjectCharacterName();
+            if (!StringUtils.hasText(name)) {
+                throw new UserRequestException(
+                        "场景调查员名称快照不存在");
             }
+            itemsByName.computeIfAbsent(
+                    name, ignored -> new ArrayList<>())
+                    .add(item);
         }
         List<GroupReplyPlanItem> selected = new ArrayList<>();
         for (String name : names) {
@@ -356,9 +357,8 @@ public class TrpgChildSceneCommandService {
             String sceneName,
             Selected selected,
             List<PreparedChildStart> existing) {
-        Set<GroupActorRef> selectedActors = selected.items().stream()
-                .map(item -> new GroupActorRef(
-                        item.getActorType(), item.getActorId()))
+        Set<Long> selectedCharacters = selected.items().stream()
+                .map(GroupReplyPlanItem::getSubjectCharacterId)
                 .collect(java.util.stream.Collectors.toSet());
         for (PreparedChildStart prepared : existing) {
             if (sceneName.equals(prepared.sceneName())) {
@@ -366,9 +366,8 @@ public class TrpgChildSceneCommandService {
                         "同一目的地只应调用一次子场景工具");
             }
             boolean overlaps = prepared.selected().items().stream()
-                    .map(item -> new GroupActorRef(
-                            item.getActorType(), item.getActorId()))
-                    .anyMatch(selectedActors::contains);
+                    .map(GroupReplyPlanItem::getSubjectCharacterId)
+                    .anyMatch(selectedCharacters::contains);
             if (overlaps) {
                 throw new UserRequestException(
                         "同一调查员不能在本步骤前往多个子场景");
@@ -380,7 +379,7 @@ public class TrpgChildSceneCommandService {
             Long planId) {
         return investigatorItems(planId).stream()
                 .filter(item ->
-                        !GroupChatConstant.PARTICIPANT_WAITING.equals(
+                        GroupChatConstant.PARTICIPANT_ACTIVE.equals(
                                 item.getParticipantStatus()))
                 .toList();
     }

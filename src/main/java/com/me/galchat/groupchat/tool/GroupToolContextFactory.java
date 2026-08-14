@@ -42,11 +42,18 @@ public class GroupToolContextFactory {
         context.put(ChatToolContextConstant.USER_WORLD_ID_KEY, conversation.getUserWorldId());
         context.put(ChatToolContextConstant.GROUP_CONVERSATION_ID_KEY, conversation.getId());
         context.put(ChatToolContextConstant.ACTOR_TYPE_KEY, action.actorType());
+        if (action.actorId() != null) {
+            context.put(ChatToolContextConstant.ACTOR_ID_KEY,
+                    action.actorId());
+        }
         if (action.subjectCharacterId() != null) {
             context.put(ChatToolContextConstant.SUBJECT_CHARACTER_ID_KEY,
                     action.subjectCharacterId());
+            context.put(ChatToolContextConstant.CHARACTER_ID_KEY,
+                    action.subjectCharacterId());
         }
-        if (action.actorId() != null) {
+        if (action.subjectCharacterId() == null
+                && action.actorId() != null) {
             context.put(ChatToolContextConstant.CHARACTER_ID_KEY, action.actorId());
         }
         context.put(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, replyStepId);

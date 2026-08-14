@@ -56,6 +56,7 @@ public final class GroupChatConstant {
 
     public static final String PARTICIPANT_ACTIVE = "ACTIVE";
     public static final String PARTICIPANT_WAITING = "WAITING";
+    public static final String PARTICIPANT_READY = "READY";
 
     public static final String EVENT_TURN_ACCEPTED = "turn.accepted";
     public static final String EVENT_REPLY_STARTED = "reply.started";
@@ -77,6 +78,7 @@ public final class GroupChatConstant {
     public static final String EVENT_TURN_COMPLETED = "turn.completed";
     public static final String EVENT_TURN_WAITING_INPUT = "turn.waiting_input";
     public static final String EVENT_TURN_PAUSED = "turn.paused";
+    public static final String EVENT_STREAM_CAUGHT_UP = "stream.caught_up";
     public static final String EVENT_COMBAT_STARTED = "combat.started";
     public static final String EVENT_COMBAT_COMPLETED = "combat.completed";
 

@@ -8,15 +8,9 @@ import java.util.List;
 public class GroupReplyPlanDTO {
     private String source;
     private Long contextId;
-    private List<Group> groups;
-
-    @Data
-    public static class Group {
-        private String key;
-        private String name;
-        private Integer order;
-        private List<Item> items;
-    }
+    private String executionKey;
+    private String displayName;
+    private List<Item> items;
 
     @Data
     public static class Item {
@@ -24,5 +18,6 @@ public class GroupReplyPlanDTO {
         private String actorType;
         private Long actorId;
         private Long subjectCharacterId;
+        private String subjectCharacterName;
     }
 }

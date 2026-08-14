@@ -31,8 +31,8 @@ class TrpgProposalOrderServiceTest {
         when(store.load(51L)).thenReturn(Optional.of(
                 new TrpgProposalOrderStore.State(
                         40L,
-                        List.of("character:12", "user:71",
-                                "character:11"))));
+                        List.of("character-card:112", "character-card:71",
+                                "character-card:111"))));
         TrpgProposalOrderService service =
                 new TrpgProposalOrderService(
                         store,
@@ -43,9 +43,9 @@ class TrpgProposalOrderServiceTest {
         List<GroupActionSpec> ordered = service.orderForTurn(
                 new GroupConversation().setId(51L),
                 List.of(
-                        action(GroupChatConstant.ACTOR_USER, 71L, 1),
-                        action(GroupChatConstant.ACTOR_CHARACTER, 11L, 2),
-                        action(GroupChatConstant.ACTOR_CHARACTER, 12L, 3),
+                        action(GroupChatConstant.ACTOR_USER, 71L, 71L, 1),
+                        action(GroupChatConstant.ACTOR_CHARACTER, 11L, 111L, 2),
+                        action(GroupChatConstant.ACTOR_CHARACTER, 12L, 112L, 3),
                         action(GroupChatConstant.ACTOR_KP, null, 4)));
 
         assertThat(ordered)
@@ -72,7 +72,7 @@ class TrpgProposalOrderServiceTest {
                 .thenReturn(40L);
         when(store.load(51L)).thenReturn(Optional.of(
                 new TrpgProposalOrderStore.State(
-                        40L, List.of("user:71", "character:11"))));
+                        40L, List.of("character-card:71", "character-card:111"))));
         TrpgProposalOrderService service =
                 new TrpgProposalOrderService(
                         store,
@@ -83,15 +83,16 @@ class TrpgProposalOrderServiceTest {
         List<GroupActionSpec> ordered = service.orderForTurn(
                 new GroupConversation().setId(51L),
                 List.of(
-                        action(GroupChatConstant.ACTOR_CHARACTER, 12L, 1),
-                        action(GroupChatConstant.ACTOR_USER, 71L, 2),
+                        action(GroupChatConstant.ACTOR_CHARACTER, 12L, 112L, 1),
+                        action(GroupChatConstant.ACTOR_USER, 71L, 71L, 2),
                         action(GroupChatConstant.ACTOR_KP, null, 3)));
 
         assertThat(ordered).extracting(GroupActionSpec::actorId)
                 .containsExactly(71L, 12L, null);
         verify(store).save(51L, new TrpgProposalOrderStore.State(
                 40L,
-                List.of("user:71", "character:11", "character:12")));
+                List.of("character-card:71", "character-card:111",
+                        "character-card:112")));
     }
 
     @Test
@@ -99,7 +100,8 @@ class TrpgProposalOrderServiceTest {
         InMemoryStore store = new InMemoryStore();
         store.save(51L, new TrpgProposalOrderStore.State(
                 20L,
-                List.of("user:71", "character:11", "character:12")));
+                List.of("character-card:71", "character-card:111",
+                        "character-card:112")));
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
         GroupChatReplyStepMapper stepMapper =
                 mock(GroupChatReplyStepMapper.class);
@@ -128,9 +130,9 @@ class TrpgProposalOrderServiceTest {
         List<GroupActionSpec> ordered = service.orderForTurn(
                 conversation,
                 List.of(
-                        action(GroupChatConstant.ACTOR_USER, 71L, 1),
-                        action(GroupChatConstant.ACTOR_CHARACTER, 12L, 2),
-                        action(GroupChatConstant.ACTOR_CHARACTER, 11L, 3),
+                        action(GroupChatConstant.ACTOR_USER, 71L, 71L, 1),
+                        action(GroupChatConstant.ACTOR_CHARACTER, 12L, 112L, 2),
+                        action(GroupChatConstant.ACTOR_CHARACTER, 11L, 111L, 3),
                         action(GroupChatConstant.ACTOR_KP, null, 4)));
 
         assertThat(ordered).extracting(GroupActionSpec::actorId)
@@ -138,8 +140,8 @@ class TrpgProposalOrderServiceTest {
         assertThat(store.load(51L)).contains(
                 new TrpgProposalOrderStore.State(
                         30L,
-                        List.of("character:11", "user:71",
-                                "character:12")));
+                        List.of("character-card:111", "character-card:71",
+                                "character-card:112")));
     }
 
     @Test
@@ -147,7 +149,8 @@ class TrpgProposalOrderServiceTest {
         InMemoryStore store = new InMemoryStore();
         store.save(51L, new TrpgProposalOrderStore.State(
                 40L,
-                List.of("character:12", "user:71", "character:11")));
+                List.of("character-card:112", "character-card:71",
+                        "character-card:111")));
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
         GroupChatReplyStepMapper stepMapper =
                 mock(GroupChatReplyStepMapper.class);
@@ -168,8 +171,9 @@ class TrpgProposalOrderServiceTest {
         assertThat(store.load(51L)).contains(
                 new TrpgProposalOrderStore.State(
                         41L,
-                        List.of("user:71", "character:11",
-                                "character:12")));
+                        List.of("character-card:71",
+                                "character-card:111",
+                                "character-card:112")));
     }
 
     @Test
@@ -195,8 +199,8 @@ class TrpgProposalOrderServiceTest {
         List<GroupActionSpec> ordered = service.orderForTurn(
                 conversation,
                 List.of(
-                        action(GroupChatConstant.ACTOR_CHARACTER, 11L, 1),
-                        action(GroupChatConstant.ACTOR_USER, 71L, 2),
+                        action(GroupChatConstant.ACTOR_CHARACTER, 11L, 111L, 1),
+                        action(GroupChatConstant.ACTOR_USER, 71L, 71L, 2),
                         action(GroupChatConstant.ACTOR_KP, null, 3)));
 
         assertThat(ordered).extracting(GroupActionSpec::actorId)
@@ -205,10 +209,16 @@ class TrpgProposalOrderServiceTest {
 
     private GroupActionSpec action(
             String actorType, Long actorId, int itemOrder) {
+        return action(actorType, actorId, null, itemOrder);
+    }
+
+    private GroupActionSpec action(
+            String actorType, Long actorId, Long cardId, int itemOrder) {
         return new GroupActionSpec(
                 GroupChatConstant.ACTION_TRPG_SCENE,
                 actorType,
                 actorId,
+                cardId,
                 "scene:301",
                 "书房",
                 1,
@@ -231,6 +241,11 @@ class TrpgProposalOrderServiceTest {
                 .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
                 .setSpeakerType(actorType)
                 .setSpeakerId(actorId)
+                .setSubjectCharacterId(
+                        GroupChatConstant.ACTOR_USER.equals(actorType)
+                                ? 71L
+                                : GroupChatConstant.ACTOR_CHARACTER.equals(
+                                actorType) ? actorId + 100L : null)
                 .setStatus(GroupChatConstant.STATUS_COMPLETED);
     }
 
@@ -238,7 +253,8 @@ class TrpgProposalOrderServiceTest {
             String actorType, Long actorId) {
         return new TrpgParticipantService.Participant(
                 new GroupActorRef(actorType, actorId),
-                actorId,
+                GroupChatConstant.ACTOR_USER.equals(actorType)
+                        ? actorId : actorId + 100L,
                 actorType + actorId,
                 actorType);
     }

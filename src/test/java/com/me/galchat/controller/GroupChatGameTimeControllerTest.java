@@ -4,6 +4,7 @@ import com.me.galchat.constant.TrpgGameTimePeriod;
 import com.me.galchat.domain.dto.TrpgGameTimeUpdateDTO;
 import com.me.galchat.domain.vo.TrpgGameTimeVO;
 import com.me.galchat.service.impl.GroupChatService;
+import com.me.galchat.service.impl.GroupGenerationStreamRegistry;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
 import com.me.galchat.service.impl.GroupConversationService;
@@ -37,6 +38,7 @@ class GroupChatGameTimeControllerTest {
                 mock(GroupConversationService.class),
                 mock(GroupConversationLifecycleService.class),
                 mock(GroupChatService.class),
+                mock(GroupGenerationStreamRegistry.class),
                 mock(GroupChatWithdrawalService.class),
                 mock(GroupReplyPlanService.class),
                 mock(TrpgContextWindowService.class),

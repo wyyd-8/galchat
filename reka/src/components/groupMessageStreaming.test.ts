@@ -128,7 +128,7 @@ test('keeps continued streaming output below the dice message from the same repl
       }))
     }
     api.groupMessages = async () => []
-    api.replyPlan = async () => ({ source: 'USER', groups: [] })
+    api.replyPlan = async () => [{ source: 'USER', displayName: '群聊', items: [] }]
     api.currentTurn = async () => null
 
     await workspace.startTrpgTurn()

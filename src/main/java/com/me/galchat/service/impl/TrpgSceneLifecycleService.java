@@ -10,7 +10,7 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
-import com.me.galchat.groupchat.runtime.GroupActorRef;
+import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
@@ -39,53 +39,65 @@ public class TrpgSceneLifecycleService {
     private final TrpgChildScenePlanService childScenePlanService;
     private final TrpgTemporaryInsanityService temporaryInsanityService;
 
-    public List<GroupActionSpec> remainingActions(
-            Long conversationId,
-            Long scenePlanId,
-            List<GroupActionSpec> actions) {
-        Set<String> readyActors = progressStore.readyActors(
-                conversationId, scenePlanId);
+    public GroupReplyPlanSelection applyReadyStatuses(
+            GroupReplyPlanSelection selection,
+            Set<String> readyActors) {
         if (readyActors.isEmpty()) {
-            return List.copyOf(actions);
+            return selection;
         }
-        return actions.stream()
-                .filter(action ->
-                        (!GroupChatConstant.ACTOR_CHARACTER.equals(
-                                action.actorType())
-                                && !GroupChatConstant.ACTOR_USER.equals(
-                                        action.actorType()))
-                                || !readyActors.contains(
-                                        TrpgSceneProgressStore.actorKey(
-                                                action.actor())))
-                .toList();
+        for (GroupReplyPlanItem item : selection.items()) {
+            if ((GroupChatConstant.ACTOR_USER.equals(
+                    item.getActorType())
+                    || GroupChatConstant.ACTOR_CHARACTER.equals(
+                            item.getActorType()))
+                    && !GroupChatConstant.PARTICIPANT_WAITING.equals(
+                            item.getParticipantStatus())
+                    && readyActors.contains(
+                            TrpgSceneProgressStore.actorKey(
+                                    item.getSubjectCharacterId()))) {
+                item.setParticipantStatus(
+                        GroupChatConstant.PARTICIPANT_READY);
+            }
+        }
+        return selection;
+    }
+
+    public Set<String> readyActors(
+            Long conversationId, Long scenePlanId) {
+        return progressStore.readyActors(
+                conversationId, scenePlanId);
     }
 
     public boolean requestInvestigatorFinish(
             Long conversationId, Long replyStepId, Long characterId) {
         return requestInvestigatorFinish(
                 conversationId, replyStepId,
-                new GroupActorRef(
-                        GroupChatConstant.ACTOR_CHARACTER,
-                        characterId));
+                GroupChatConstant.ACTOR_CHARACTER, characterId);
     }
 
     public boolean requestInvestigatorFinish(
             Long conversationId,
             Long replyStepId,
-            GroupActorRef actor) {
+            String actorType,
+            Long actorId) {
         SceneExecution execution = requireSceneExecution(
                 conversationId, replyStepId);
-        if (!Objects.equals(actor.type(),
+        if (!Objects.equals(actorType,
                 execution.step().getSpeakerType())
-                || !Objects.equals(actor.id(),
+                || !Objects.equals(actorId,
                 execution.step().getSpeakerId())
-                || (!GroupChatConstant.ACTOR_CHARACTER.equals(actor.type())
-                && !GroupChatConstant.ACTOR_USER.equals(actor.type()))) {
+                || (!GroupChatConstant.ACTOR_CHARACTER.equals(actorType)
+                && !GroupChatConstant.ACTOR_USER.equals(actorType))) {
             throw new UserAuthException(
                     "只能由当前调查员结束自己的场景探索");
         }
+        if (execution.step().getSubjectCharacterId() == null) {
+            throw new UserRequestException(
+                    "当前调查员行动未绑定人物卡");
+        }
         progressStore.markReady(
-                conversationId, execution.plan().getId(), actor);
+                conversationId, execution.plan().getId(),
+                execution.step().getSubjectCharacterId());
         Set<String> participantActors = itemMapper.selectList(
                         new LambdaQueryWrapper<GroupReplyPlanItem>()
                                 .eq(GroupReplyPlanItem::getPlanId,
@@ -94,11 +106,9 @@ public class TrpgSceneLifecycleService {
                                         GroupChatConstant.ACTOR_USER,
                                         GroupChatConstant.ACTOR_CHARACTER))
                 .stream()
-                .filter(item -> item.getActorId() != null)
+                .filter(item -> item.getSubjectCharacterId() != null)
                 .map(item -> TrpgSceneProgressStore.actorKey(
-                        new GroupActorRef(
-                                item.getActorType(),
-                                item.getActorId())))
+                        item.getSubjectCharacterId()))
                 .collect(Collectors.toSet());
         Set<String> readyActors = progressStore.readyActors(
                 conversationId, execution.plan().getId());

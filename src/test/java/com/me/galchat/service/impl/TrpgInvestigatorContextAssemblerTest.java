@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 class TrpgInvestigatorContextAssemblerTest {
 
@@ -75,6 +76,17 @@ class TrpgInvestigatorContextAssemblerTest {
                 .doesNotContain("世界背景秘密");
     }
 
+    @Test
+    void resolvesTheBoundCardByPrimaryKey() {
+        Fixture fixture = fixture();
+
+        fixture.assembler().format(
+                fixture.conversation(),
+                action(GroupChatConstant.ACTION_TRPG_SCENE));
+
+        verify(fixture.characterMapper()).selectById(51L);
+    }
+
     private Fixture fixture() {
         CocCharacterMapper characterMapper =
                 mock(CocCharacterMapper.class);
@@ -92,6 +104,7 @@ class TrpgInvestigatorContextAssemblerTest {
                 .setId(51L)
                 .setRunId(5L)
                 .setParticipantId(9L)
+                .setActorType("BOT")
                 .setName("林登")
                 .setOccupation("记者")
                 .setStr(45).setCon(55).setSiz(50).setDex(60)
@@ -100,7 +113,7 @@ class TrpgInvestigatorContextAssemblerTest {
                 .setSanCurrent(48).setSanMax(55)
                 .setMpCurrent(8).setMpMax(11)
                 .setLuckCurrent(40);
-        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(characterMapper.selectById(51L)).thenReturn(card);
         when(templateMapper.selectById(9L)).thenReturn(
                 new CharacterTemplate()
                         .setId(9L)
@@ -148,8 +161,9 @@ class TrpgInvestigatorContextAssemblerTest {
                         profileMapper, weaponMapper,
                         skillDefMapper,
                         new CharacterSkillResolver()),
+                characterMapper,
                 new GroupConversation()
-                        .setId(7L)
+                        .setId(5L)
                         .setUserWorldId(5L));
     }
 
@@ -158,6 +172,7 @@ class TrpgInvestigatorContextAssemblerTest {
                 actionType,
                 GroupChatConstant.ACTOR_CHARACTER,
                 9L,
+                51L,
                 "scene:21",
                 "酒店",
                 1,
@@ -166,6 +181,7 @@ class TrpgInvestigatorContextAssemblerTest {
 
     private record Fixture(
             TrpgInvestigatorContextAssembler assembler,
+            CocCharacterMapper characterMapper,
             GroupConversation conversation) {
     }
 }

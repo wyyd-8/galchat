@@ -15,10 +15,8 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -131,15 +129,9 @@ public class GroupReplyPlanSnapshotService {
     private GroupReplyPlanDTO toPlanDTO(UserWorldSaveSnapshotDTO.ReplyPlanSnapshot snapshot) {
         GroupReplyPlanDTO dto = new GroupReplyPlanDTO();
         dto.setSource(snapshot.getSource());
-        dto.setGroups(safe(snapshot.getGroups()).stream().map(groupSnapshot -> {
-            if (groupSnapshot == null) {
-                return (GroupReplyPlanDTO.Group) null;
-            }
-            GroupReplyPlanDTO.Group group = new GroupReplyPlanDTO.Group();
-            group.setKey(groupSnapshot.getKey());
-            group.setName(groupSnapshot.getName());
-            group.setOrder(groupSnapshot.getOrder());
-            group.setItems(safe(groupSnapshot.getItems()).stream().map(itemSnapshot -> {
+        dto.setExecutionKey(snapshot.getExecutionKey());
+        dto.setDisplayName(snapshot.getDisplayName());
+        dto.setItems(safe(snapshot.getItems()).stream().map(itemSnapshot -> {
                 if (itemSnapshot == null) {
                     return (GroupReplyPlanDTO.Item) null;
                 }
@@ -148,36 +140,22 @@ public class GroupReplyPlanSnapshotService {
                 item.setActorType(itemSnapshot.getActorType());
                 item.setActorId(itemSnapshot.getActorId());
                 return item;
-            }).toList());
-            return group;
         }).toList());
         return dto;
     }
 
     private UserWorldSaveSnapshotDTO.ReplyPlanSnapshot structuralSnapshot(GroupReplyPlan plan) {
         List<GroupReplyPlanItem> items = orderedItems(plan.getId());
-        Map<String, List<GroupReplyPlanItem>> grouped = new LinkedHashMap<>();
-        for (GroupReplyPlanItem item : items) {
-            grouped.computeIfAbsent(item.getGroupKey(), ignored -> new ArrayList<>()).add(item);
-        }
-        List<UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot> groups = grouped.values().stream()
-                .map(groupItems -> {
-                    GroupReplyPlanItem first = groupItems.getFirst();
-                    return new UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot()
-                            .setKey(first.getGroupKey())
-                            .setName(first.getGroupName())
-                            .setOrder(first.getGroupOrder())
-                            .setItems(groupItems.stream()
-                                    .map(item -> new UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot()
-                                            .setOrder(item.getItemOrder())
-                                            .setActorType(item.getActorType())
-                                            .setActorId(item.getActorId()))
-                                    .toList());
-                })
-                .toList();
         return new UserWorldSaveSnapshotDTO.ReplyPlanSnapshot()
                 .setSource(plan.getSource())
-                .setGroups(groups);
+                .setExecutionKey(plan.getExecutionKey())
+                .setDisplayName(plan.getDisplayName())
+                .setItems(items.stream()
+                        .map(item -> new UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot()
+                                .setOrder(item.getItemOrder())
+                                .setActorType(item.getActorType())
+                                .setActorId(item.getActorId()))
+                        .toList());
     }
 
     private void clearCurrentPlans(Long conversationId) {
@@ -202,30 +180,26 @@ public class GroupReplyPlanSnapshotService {
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setConversationId(conversationId)
                 .setSource(GroupChatConstant.PLAN_SOURCE_USER)
+                .setExecutionKey(snapshot.getExecutionKey().trim())
+                .setDisplayName(snapshot.getDisplayName().trim())
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         planMapper.insert(plan);
-        List<UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot> groups = safe(snapshot.getGroups());
-        for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
-            UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot group = groups.get(groupIndex);
-            String groupKey = group.getKey().trim();
-            List<UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot> items = safe(group.getItems());
-            for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
-                UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot item = items.get(itemIndex);
-                itemMapper.insert(new GroupReplyPlanItem()
-                        .setPlanId(plan.getId())
-                        .setGroupKey(groupKey)
-                        .setGroupName(StringUtils.hasText(group.getName())
-                                ? group.getName().trim() : groupKey)
-                        .setGroupOrder(group.getOrder() == null ? groupIndex + 1 : group.getOrder())
-                        .setItemOrder(item.getOrder() == null ? itemIndex + 1 : item.getOrder())
-                        .setActorType(StringUtils.hasText(item.getActorType())
-                                ? item.getActorType().trim().toLowerCase(Locale.ROOT)
-                                : GroupChatConstant.ACTOR_CHARACTER)
-                        .setActorId(item.getActorId())
-                        .setCreatedAt(now)
-                        .setUpdatedAt(now));
-            }
+        List<UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot> items =
+                safe(snapshot.getItems());
+        for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
+            UserWorldSaveSnapshotDTO.ReplyPlanItemSnapshot item =
+                    items.get(itemIndex);
+            itemMapper.insert(new GroupReplyPlanItem()
+                    .setPlanId(plan.getId())
+                    .setItemOrder(item.getOrder() == null
+                            ? itemIndex + 1 : item.getOrder())
+                    .setActorType(StringUtils.hasText(item.getActorType())
+                            ? item.getActorType().trim().toLowerCase(Locale.ROOT)
+                            : GroupChatConstant.ACTOR_CHARACTER)
+                    .setActorId(item.getActorId())
+                    .setCreatedAt(now)
+                    .setUpdatedAt(now));
         }
         return plan.getId();
     }
@@ -233,7 +207,6 @@ public class GroupReplyPlanSnapshotService {
     private List<GroupReplyPlanItem> orderedItems(Long planId) {
         return itemMapper.selectList(new LambdaQueryWrapper<GroupReplyPlanItem>()
                 .eq(GroupReplyPlanItem::getPlanId, planId)
-                .orderByAsc(GroupReplyPlanItem::getGroupOrder)
                 .orderByAsc(GroupReplyPlanItem::getItemOrder)
                 .orderByAsc(GroupReplyPlanItem::getId));
     }

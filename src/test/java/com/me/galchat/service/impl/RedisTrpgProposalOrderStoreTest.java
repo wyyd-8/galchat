@@ -27,7 +27,7 @@ class RedisTrpgProposalOrderStoreTest {
         when(values.get(
                 "trpg:group:proposal-order:51:state"))
                 .thenReturn("""
-                        {"cursorTurnId":40,"actorKeys":["character:12","user:71"]}
+                        {"cursorTurnId":40,"actorKeys":["character-card:112","character-card:71"]}
                         """);
         RedisTrpgProposalOrderStore store =
                 new RedisTrpgProposalOrderStore(
@@ -36,7 +36,7 @@ class RedisTrpgProposalOrderStoreTest {
         assertThat(store.load(51L)).contains(
                 new TrpgProposalOrderStore.State(
                         40L,
-                        List.of("character:12", "user:71")));
+                        List.of("character-card:112", "character-card:71")));
     }
 
     @Test
@@ -52,7 +52,7 @@ class RedisTrpgProposalOrderStoreTest {
 
         store.save(51L, new TrpgProposalOrderStore.State(
                 41L,
-                List.of("user:71", "character:12")));
+                List.of("character-card:71", "character-card:112")));
 
         ArgumentCaptor<String> json =
                 ArgumentCaptor.forClass(String.class);
@@ -66,6 +66,6 @@ class RedisTrpgProposalOrderStoreTest {
                 .isEqualTo(41L);
         assertThat(written.get("actorKeys"))
                 .extracting(JsonNode::textValue)
-                .containsExactly("user:71", "character:12");
+                .containsExactly("character-card:71", "character-card:112");
     }
 }

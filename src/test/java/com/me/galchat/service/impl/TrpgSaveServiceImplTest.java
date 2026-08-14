@@ -100,7 +100,7 @@ class TrpgSaveServiceImplTest {
     void savePersistsAConversationScopedCheckpoint() {
         GroupConversation conversation = conversation(51L, GroupChatConstant.MODE_TRPG);
         TrpgSaveSnapshotDTO snapshot = new TrpgSaveSnapshotDTO()
-                .setFormatVersion(1)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setConversationId(51L)
                 .setUserWorldId(12L)
                 .setWorldId(4L)
@@ -119,7 +119,8 @@ class TrpgSaveServiceImplTest {
         assertThat(saved.getUserId()).isEqualTo(7L);
         assertThat(saved.getConversationId()).isEqualTo(51L);
         assertThat(saved.getRemark()).isEqualTo("门后");
-        assertThat(saved.getFormatVersion()).isEqualTo(1);
+        assertThat(saved.getFormatVersion())
+                .isEqualTo(TrpgSaveServiceImpl.FORMAT_VERSION);
         assertThat(saved.getSnapshot()).isSameAs(snapshot);
         assertThat(saved.getSavedAt()).isNotNull();
         verify(recoveryService).assertConversationHasNoNonTerminalTurns(51L);
@@ -155,10 +156,10 @@ class TrpgSaveServiceImplTest {
         TrpgSave save = new TrpgSave()
                 .setUserId(7L)
                 .setConversationId(51L)
-                .setFormatVersion(1)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setSavedAt(LocalDateTime.now())
                 .setSnapshot(new TrpgSaveSnapshotDTO()
-                        .setFormatVersion(1)
+                        .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                         .setConversationId(99L)
                         .setUserWorldId(12L)
                         .setWorldId(4L)
@@ -177,7 +178,7 @@ class TrpgSaveServiceImplTest {
     void loadRestoresDatabaseThenRunScopedDerivedState() {
         GroupConversation conversation = conversation(51L, GroupChatConstant.MODE_TRPG);
         TrpgSaveSnapshotDTO snapshot = new TrpgSaveSnapshotDTO()
-                .setFormatVersion(1)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setConversationId(51L)
                 .setUserWorldId(12L)
                 .setWorldId(4L)
@@ -185,7 +186,7 @@ class TrpgSaveServiceImplTest {
         TrpgSave save = new TrpgSave()
                 .setUserId(7L)
                 .setConversationId(51L)
-                .setFormatVersion(1)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setSnapshot(snapshot);
         when(conversationMapper.selectById(51L)).thenReturn(conversation);
         when(saveMapper.selectByConversationId(51L)).thenReturn(save);
@@ -213,7 +214,8 @@ class TrpgSaveServiceImplTest {
                 ArgumentCaptor.forClass(TrpgAutoSave.class);
         verify(autoSaveMapper).upsert(captor.capture());
         assertThat(captor.getValue().getConversationId()).isEqualTo(51L);
-        assertThat(captor.getValue().getFormatVersion()).isEqualTo(1);
+        assertThat(captor.getValue().getFormatVersion())
+                .isEqualTo(TrpgSaveServiceImpl.FORMAT_VERSION);
         assertThat(captor.getValue().getSnapshot()).isSameAs(snapshot);
         assertThat(captor.getValue().getSavedAt()).isNotNull();
     }
@@ -226,7 +228,7 @@ class TrpgSaveServiceImplTest {
         TrpgSaveSnapshotDTO snapshot = snapshot(51L);
         TrpgAutoSave autoSave = new TrpgAutoSave()
                 .setConversationId(51L)
-                .setFormatVersion(1)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setSnapshot(snapshot);
         when(conversationMapper.selectById(51L)).thenReturn(conversation);
         when(autoSaveMapper.selectById(51L)).thenReturn(autoSave);
@@ -283,7 +285,7 @@ class TrpgSaveServiceImplTest {
 
     private TrpgSaveSnapshotDTO snapshot(Long conversationId) {
         return new TrpgSaveSnapshotDTO()
-                .setFormatVersion(1)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setConversationId(conversationId)
                 .setUserWorldId(12L)
                 .setWorldId(4L)

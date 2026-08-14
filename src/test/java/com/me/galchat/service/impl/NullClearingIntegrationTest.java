@@ -63,10 +63,12 @@ class NullClearingIntegrationTest {
                 GroupChatConstant.STATUS_ACTIVE, -9201L);
         jdbcTemplate.update("""
                 INSERT INTO group_reply_plan
-                    (id, conversation_id, source)
-                VALUES (?, ?, ?)
+                    (id, conversation_id, source,
+                     execution_key, display_name)
+                VALUES (?, ?, ?, ?, ?)
                 """, -9201L, -9101L,
-                GroupChatConstant.PLAN_SOURCE_SCENE);
+                GroupChatConstant.PLAN_SOURCE_SCENE,
+                "scene:test", "测试场景");
         GroupConversation conversation =
                 jdbcTemplate.queryForObject("""
                                 SELECT id, mode, status,
@@ -289,28 +291,39 @@ class NullClearingIntegrationTest {
 
     private void createTemporaryPlanTables() {
         jdbcTemplate.execute("""
-                CREATE TEMP TABLE group_conversation
-                ON COMMIT DROP AS
-                SELECT * FROM public.group_conversation
-                WITH NO DATA
+                CREATE TEMP TABLE group_conversation (
+                    id BIGINT PRIMARY KEY,
+                    mode VARCHAR(20) NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    active_reply_plan_id BIGINT,
+                    updated_at TIMESTAMP
+                ) ON COMMIT DROP
                 """);
         jdbcTemplate.execute("""
-                CREATE TEMP TABLE group_reply_plan
-                ON COMMIT DROP AS
-                SELECT * FROM public.group_reply_plan
-                WITH NO DATA
+                CREATE TEMP TABLE group_reply_plan (
+                    id BIGINT PRIMARY KEY,
+                    conversation_id BIGINT NOT NULL,
+                    source VARCHAR(20) NOT NULL,
+                    context_id BIGINT,
+                    execution_key VARCHAR(100) NOT NULL,
+                    display_name VARCHAR(200) NOT NULL,
+                    parent_plan_id BIGINT,
+                    resume_plan_id BIGINT,
+                    next_plan_id BIGINT,
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP
+                ) ON COMMIT DROP
                 """);
         jdbcTemplate.execute("""
-                CREATE TEMP TABLE group_reply_plan_item
-                ON COMMIT DROP AS
-                SELECT * FROM public.group_reply_plan_item
-                WITH NO DATA
+                CREATE TEMP TABLE group_reply_plan_item (
+                    id BIGINT PRIMARY KEY,
+                    plan_id BIGINT NOT NULL
+                ) ON COMMIT DROP
                 """);
         jdbcTemplate.execute("""
-                CREATE TEMP TABLE trpg_runtime_child_scene
-                ON COMMIT DROP AS
-                SELECT * FROM public.trpg_runtime_child_scene
-                WITH NO DATA
+                CREATE TEMP TABLE trpg_runtime_child_scene (
+                    plan_id BIGINT PRIMARY KEY
+                ) ON COMMIT DROP
                 """);
     }
 

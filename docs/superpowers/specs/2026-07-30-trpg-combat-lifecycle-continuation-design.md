@@ -163,21 +163,22 @@ startCombat(participantNames, orderMode)
 
 ### 7.2 Plan item 与人物卡主体
 
-`group_reply_plan_item` 增加可空字段 `subject_character_id`。普通群聊和现有场景计划不依赖该字段；战斗 plan item 必须填写。
+`group_reply_plan_item` 增加可空字段 `subject_character_id` 与 `subject_character_name`。普通群聊不依赖这两个字段；TRPG 中所有有具体人物主体的 plan item 必须填写，通用探索 KP 项允许为空。
 
 映射为：
 
-| 人物卡 | `actorType` | `actorId` | `subjectCharacterId` |
-| --- | --- | --- | --- |
-| 用户调查员 | `user` | PLAYER 人物卡 ID | PLAYER 人物卡 ID |
-| Agent 调查员 | `character` | `participantId` | BOT 人物卡 ID |
-| NPC | `kp` | `null` | NPC 人物卡 ID |
+| 人物卡 | `actorType` | `actorId` | `subjectCharacterId` | `subjectCharacterName` |
+| --- | --- | --- | --- | --- |
+| 用户调查员 | `user` | PLAYER 人物卡 ID | PLAYER 人物卡 ID | 创建计划时的卡名 |
+| Agent 调查员 | `character` | `participantId` | BOT 人物卡 ID | 创建计划时的卡名 |
+| NPC | `kp` | `null` | NPC 人物卡 ID | 创建计划时的卡名 |
+| 通用探索 KP | `kp` | `null` | `null` | `null` |
 
-`actorType/actorId` 表示由谁生成或提交行动，`subjectCharacterId` 表示该行动属于哪张人物卡。多名 NPC 因 `subjectCharacterId` 不同而拥有不同攻击位，但都由 KP Agent 执行。
+`actorType/actorId` 表示由谁生成或提交行动，`subjectCharacterId` 表示该行动属于哪张人物卡。`subjectCharacterName` 是创建计划时的展示快照，不参与身份判断，避免查询计划或按名称管理场景时额外查询人物卡表。多名 NPC 因 `subjectCharacterId` 不同而拥有不同攻击位，但都由 KP Agent 执行。
 
 `GroupActionSpec` 和 `GroupChatReplyStep` 同步增加 `subjectCharacterId`，使人物卡绑定在计划生成、持久化步骤、失败恢复和提示词重建过程中不丢失。
 
-普通计划继续按 `(actorType, actorId)` 校验同组唯一性；内部创建的 COMBAT plan 按 `subjectCharacterId` 校验参战人物和攻击位唯一性，因此允许同一组内存在多条 `actorType=kp, actorId=null` 的 NPC 项。
+普通聊天计划继续按 `(actorType, actorId)` 校验同组唯一性；TRPG 计划按 `subjectCharacterId` 区分具体人物，因此允许同一战斗组内存在多条 `actorType=kp, actorId=null` 的 NPC 项。
 
 ## 8. 战斗轮序
 

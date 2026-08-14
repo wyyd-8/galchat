@@ -7,7 +7,6 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
@@ -91,6 +90,8 @@ public class TrpgChildScenePlanService {
                 .setConversationId(conversation.getId())
                 .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
                 .setContextId(parent.getContextId())
+                .setExecutionKey("scene:" + parent.getId() + ":child")
+                .setDisplayName(start.sceneName())
                 .setParentPlanId(parent.getId())
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
@@ -101,20 +102,20 @@ public class TrpgChildScenePlanService {
                 .setSceneName(start.sceneName())
                 .setCreatedStepId(start.createdStepId())
                 .setCreatedAt(now));
-        String groupKey = "scene:" + child.getId();
+        child.setExecutionKey("scene:" + child.getId());
+        planMapper.updateById(child);
         int order = 1;
         for (GroupReplyPlanItem selected :
                 start.selectedInvestigators()) {
             itemMapper.insert(new GroupReplyPlanItem()
                     .setPlanId(child.getId())
-                    .setGroupKey(groupKey)
-                    .setGroupName(start.sceneName())
-                    .setGroupOrder(1)
                     .setItemOrder(order++)
                     .setActorType(selected.getActorType())
                     .setActorId(selected.getActorId())
                     .setSubjectCharacterId(
                             selected.getSubjectCharacterId())
+                    .setSubjectCharacterName(
+                            selected.getSubjectCharacterName())
                     .setParticipantStatus(
                             GroupChatConstant.PARTICIPANT_ACTIVE)
                     .setCreatedAt(now)
@@ -122,9 +123,6 @@ public class TrpgChildScenePlanService {
         }
         itemMapper.insert(new GroupReplyPlanItem()
                 .setPlanId(child.getId())
-                .setGroupKey(groupKey)
-                .setGroupName(start.sceneName())
-                .setGroupOrder(1)
                 .setItemOrder(order)
                 .setActorType(GroupChatConstant.ACTOR_KP)
                 .setParticipantStatus(
@@ -153,18 +151,16 @@ public class TrpgChildScenePlanService {
                 parent.getSource())) {
             throw new UserRequestException("父场景计划不存在");
         }
-        Set<GroupActorRef> childActors = orderedItems(child.getId())
+        Set<Long> childCharacters = orderedItems(child.getId())
                 .stream()
                 .filter(this::isInvestigator)
-                .map(item -> new GroupActorRef(
-                        item.getActorType(), item.getActorId()))
+                .map(GroupReplyPlanItem::getSubjectCharacterId)
                 .collect(Collectors.toSet());
         LocalDateTime now = LocalDateTime.now();
         for (GroupReplyPlanItem parentItem :
                 orderedItems(parent.getId())) {
-            if (!childActors.contains(new GroupActorRef(
-                    parentItem.getActorType(),
-                    parentItem.getActorId()))) {
+            if (!childCharacters.contains(
+                    parentItem.getSubjectCharacterId())) {
                 continue;
             }
             parentItem.setParticipantStatus(

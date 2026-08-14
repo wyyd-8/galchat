@@ -1,6 +1,6 @@
 import type {
   ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
-  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, Session, TrpgGameTime, TrpgGameTimePeriod, TrpgSave, UserInfo, UserToken,
+  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanRequest, Session, TrpgGameTime, TrpgGameTimePeriod, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
 } from './types'
@@ -123,10 +123,9 @@ export const api = {
     request<TrpgGameTime>(`/group-chat/conversations/${id}/game-time`, { method: 'PUT', body: body(payload) }),
   groupMessages: (id: number, beforeId?: number, size = 50) => request<GroupMessage[]>(`/group-chat/conversations/${id}/messages?size=${size}${beforeId ? `&beforeId=${beforeId}` : ''}`),
   withdrawGroupTurn: (id: number) => request<void>(`/group-chat/conversations/${id}/withdraw`, { method: 'POST' }),
-  replyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`),
-  saveReplyPlan: (id: number, plan: ReplyPlan) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
-  finishReplyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),
-  advanceReplyPlan: (id: number) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan/advance`, { method: 'POST' }),
+  replyPlan: (id: number) => request<ReplyPlan[]>(`/group-chat/conversations/${id}/reply-plan`),
+  saveReplyPlan: (id: number, plan: ReplyPlanRequest) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
+  finishReplyPlan: (id: number) => request<ReplyPlan | null>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),
   currentTurn: (id: number) => request<CurrentTurn | null>(`/group-chat/conversations/${id}/turns/current`),
 
   investigatorCards: (runId: number) => request<InvestigatorCardSummary[]>(`/character-cards/investigators?${new URLSearchParams({ runId: String(runId) })}`),
@@ -198,8 +197,8 @@ export async function streamGroupMessage(id: number, payload: { clientRequestId:
   return streamGroupTurn(`/group-chat/conversations/${id}/messages`, payload, onEvent)
 }
 
-async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: GroupChatEvent) => void) {
-  const response = await raw(path, { method: 'POST', body: body(payload), headers: { Accept: 'text/event-stream' } })
+async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: GroupChatEvent) => void, method = 'POST') {
+  const response = await raw(path, { method, body: payload === undefined ? undefined : body(payload), headers: { Accept: 'text/event-stream' } })
   if (!response.body) return
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
   const consume = (block: string) => {
@@ -216,6 +215,11 @@ async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: 
   buffer += decoder.decode(); if (buffer.trim()) consume(buffer)
 }
 
+export const streamGroupGeneration = {
+  resume: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/generations/${encodeURIComponent(clientRequestId)}`, undefined, onEvent, 'GET'),
+}
+
 export const streamTrpgTurn = {
   continue: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
     streamGroupTurn(`/group-chat/conversations/${id}/turns/continue`, { clientRequestId }, onEvent),
@@ -225,6 +229,6 @@ export const streamTrpgTurn = {
     streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/selection`, payload, onEvent),
   endExploration: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
     streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/end-exploration`, { clientRequestId }, onEvent),
-  retry: (id: number, turnId: number, stepId: number, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/retry`, undefined, onEvent),
+  retry: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/retry`, { clientRequestId }, onEvent),
 }

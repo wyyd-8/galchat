@@ -17,13 +17,11 @@ public class GroupReplyPlanItem implements Serializable {
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
     private Long planId;
-    private String groupKey;
-    private String groupName;
-    private Integer groupOrder;
     private Integer itemOrder;
     private String actorType;
     private Long actorId;
     private Long subjectCharacterId;
+    private String subjectCharacterName;
     private String participantStatus;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

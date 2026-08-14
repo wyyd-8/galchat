@@ -81,7 +81,7 @@ export interface GroupMessage {
 }
 export interface GroupSpeaker { type: string; id?: number; name?: string; avatar?: string }
 export interface GroupChatEvent {
-  eventType: 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
+  eventType: 'stream.caught_up' | 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
   actionType?: string; groupName?: string; itemOrder?: number; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string; toolName?: string
   diceRoll?: DiceRollAggregate
@@ -92,12 +92,23 @@ export interface GroupChatEvent {
 export interface CurrentTurn {
   turnId: number; planId?: number; planSource?: string; planContextId?: number; status: string
   stepId?: number; actionType?: string; itemOrder?: number; inputType?: 'message' | 'selection' | 'continue' | 'dice'; sceneName?: string
-  waitingForUser: boolean; sceneOptions: Record<string, string>
+  waitingForUser: boolean; sceneOptions: Record<string, string>; steps: CurrentTurnStep[]
 }
-export interface ReplyPlanItem { id?: number; order: number; actorType: string; actorId?: number; subjectCharacterId?: number }
-export interface ReplyPlanGroup { key: string; name: string; order: number; items: ReplyPlanItem[] }
+export interface CurrentTurnStep {
+  stepId: number; itemOrder: number; actorType: string; actorId?: number; subjectCharacterId?: number
+  status: string; error?: string
+}
+export type ReplyPlanParticipantStatus = 'ACTIVE' | 'WAITING' | 'READY'
+export interface ReplyPlanItem {
+  id?: number; order: number; actorType: string; actorId?: number; subjectCharacterId?: number; subjectCharacterName?: string
+  participantStatus?: ReplyPlanParticipantStatus
+}
 export interface ReplyPlan {
-  id?: number; source: 'USER' | 'SCENE' | 'COMBAT'; contextId?: number; nextPlanId?: number; resumePlanId?: number; groups: ReplyPlanGroup[]
+  id?: number; source: 'USER' | 'SCENE' | 'COMBAT'; displayName: string
+  nextPlanId?: number; resumePlanId?: number; parentPlanId?: number; items: ReplyPlanItem[]
+}
+export interface ReplyPlanRequest {
+  source: 'USER' | 'SCENE' | 'COMBAT'; contextId?: number; executionKey: string; displayName: string; items: ReplyPlanItem[]
 }
 
 export interface ContextWindowUsage {

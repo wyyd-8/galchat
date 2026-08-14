@@ -10,6 +10,7 @@ import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.dto.TrpgGameTimeUpdateDTO;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.service.impl.GroupChatService;
+import com.me.galchat.service.impl.GroupGenerationStreamRegistry;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
@@ -40,6 +41,7 @@ public class GroupChatController {
     private final GroupConversationService conversationService;
     private final GroupConversationLifecycleService lifecycleService;
     private final GroupChatService groupChatService;
+    private final GroupGenerationStreamRegistry generationStreamRegistry;
     private final GroupChatWithdrawalService withdrawalService;
     private final GroupReplyPlanService replyPlanService;
     private final TrpgContextWindowService contextWindowService;
@@ -89,7 +91,21 @@ public class GroupChatController {
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<GroupChatEvent> chat(@PathVariable Long conversationId,
                                      @RequestBody GroupChatRequestDTO request) {
-        return groupChatService.chat(conversationId, request);
+        return generationStreamRegistry.start(
+                conversationId,
+                request == null ? null : request.getClientRequestId(),
+                groupChatService.chat(conversationId, request));
+    }
+
+    @GetMapping(
+            value = "/conversations/{conversationId}/generations/{clientRequestId}",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> resumeGeneration(
+            @PathVariable Long conversationId,
+            @PathVariable String clientRequestId) {
+        conversationService.requireAuthorized(conversationId);
+        return generationStreamRegistry.resume(
+                conversationId, clientRequestId);
     }
 
     @PostMapping(
@@ -98,8 +114,11 @@ public class GroupChatController {
     public Flux<GroupChatEvent> continueTurn(
             @PathVariable Long conversationId,
             @RequestBody GroupTurnContinueDTO request) {
-        return turnExecutionService.continueTurn(
-                conversationId, request);
+        return generationStreamRegistry.start(
+                conversationId,
+                request == null ? null : request.getClientRequestId(),
+                turnExecutionService.continueTurn(
+                        conversationId, request));
     }
 
     @PostMapping(
@@ -108,9 +127,13 @@ public class GroupChatController {
     public Flux<GroupChatEvent> retryTurnStep(
             @PathVariable Long conversationId,
             @PathVariable Long turnId,
-            @PathVariable Long stepId) {
-        return turnExecutionService.retry(
-                conversationId, turnId, stepId);
+            @PathVariable Long stepId,
+            @RequestBody(required = false) GroupTurnContinueDTO request) {
+        return generationStreamRegistry.start(
+                conversationId,
+                request == null ? null : request.getClientRequestId(),
+                turnExecutionService.retry(
+                        conversationId, turnId, stepId));
     }
 
     @GetMapping("/conversations/{conversationId}/turns/current")
@@ -127,8 +150,11 @@ public class GroupChatController {
             @PathVariable Long turnId,
             @PathVariable Long stepId,
             @RequestBody GroupChatRequestDTO request) {
-        return turnExecutionService.submitMessage(
-                conversationId, turnId, stepId, request);
+        return generationStreamRegistry.start(
+                conversationId,
+                request == null ? null : request.getClientRequestId(),
+                turnExecutionService.submitMessage(
+                        conversationId, turnId, stepId, request));
     }
 
     @PostMapping(
@@ -139,8 +165,11 @@ public class GroupChatController {
             @PathVariable Long turnId,
             @PathVariable Long stepId,
             @RequestBody GroupSceneSelectionDTO request) {
-        return turnExecutionService.submitSelection(
-                conversationId, turnId, stepId, request);
+        return generationStreamRegistry.start(
+                conversationId,
+                request == null ? null : request.getClientRequestId(),
+                turnExecutionService.submitSelection(
+                        conversationId, turnId, stepId, request));
     }
 
     @PostMapping(
@@ -151,8 +180,11 @@ public class GroupChatController {
             @PathVariable Long turnId,
             @PathVariable Long stepId,
             @RequestBody GroupEndExplorationDTO request) {
-        return turnExecutionService.endExploration(
-                conversationId, turnId, stepId, request);
+        return generationStreamRegistry.start(
+                conversationId,
+                request == null ? null : request.getClientRequestId(),
+                turnExecutionService.endExploration(
+                        conversationId, turnId, stepId, request));
     }
 
     @GetMapping("/conversations/{conversationId}/messages")
@@ -170,7 +202,8 @@ public class GroupChatController {
 
     @GetMapping("/conversations/{conversationId}/reply-plan")
     public Result getReplyPlan(@PathVariable Long conversationId) {
-        return Result.success(replyPlanService.getActive(conversationId));
+        return Result.success(
+                replyPlanService.listRemaining(conversationId));
     }
 
     @PutMapping("/conversations/{conversationId}/reply-plan")
@@ -184,8 +217,4 @@ public class GroupChatController {
         return Result.success(replyPlanService.finishActive(conversationId));
     }
 
-    @PostMapping("/conversations/{conversationId}/reply-plan/advance")
-    public Result advanceReplyPlan(@PathVariable Long conversationId) {
-        return Result.success(replyPlanService.advanceGroup(conversationId));
-    }
 }

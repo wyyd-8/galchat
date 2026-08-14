@@ -419,6 +419,19 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `sceneName` | string/null | 当前分组/场景名 |
 | `waitingForUser` | boolean | 是否在等待用户调查员输入 |
 | `sceneOptions` | object<string,string> | 选景编号到地点名的映射 |
+| `steps` | array | 本轮全部步骤，按 `stepNo` 升序返回 |
+
+`steps` 元素字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `stepId` | integer | 步骤 ID |
+| `itemOrder` | integer | 对应计划项顺序 |
+| `actorType` | string | `user/character/kp` |
+| `actorId` | integer/null | 实际执行者 ID |
+| `subjectCharacterId` | integer/null | 该步骤代表的调查员或 NPC 人物卡 ID |
+| `status` | string | `pending/running/waiting_input/waiting_dice/paused/completed/failed/cancelled/blocked` |
+| `error` | string/null | 失败或受阻原因 |
 
 ### 7.3 回复计划
 
@@ -426,10 +439,9 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 
 | 方法与路径 | 请求 | `data` | 说明 |
 | --- | --- | --- | --- |
-| `GET /group-chat/conversations/{conversationId}/reply-plan` | 无 | `GroupReplyPlanVO` 或 `null` | 获取活动计划 |
+| `GET /group-chat/conversations/{conversationId}/reply-plan` | 无 | `GroupReplyPlanVO[]` | 获取全部剩余计划；首项为活动计划，无计划时为空数组 |
 | `PUT /group-chat/conversations/{conversationId}/reply-plan` | `GroupReplyPlanRequest` | `GroupReplyPlanVO` | 覆盖活动计划 |
 | `DELETE /group-chat/conversations/{conversationId}/reply-plan` | 无 | `GroupReplyPlanVO` 或 `null` | 结束当前计划；普通群聊会建立默认计划 |
-| `POST /group-chat/conversations/{conversationId}/reply-plan/advance` | 无 | `GroupReplyPlanVO` | 推进到下一计划分组 |
 
 请求示例：
 
@@ -437,25 +449,32 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 {
   "source": "USER",
   "contextId": null,
-  "groups": [
+  "executionKey": "default",
+  "displayName": "群聊",
+  "items": [
     {
-      "key": "default",
-      "name": "群聊",
       "order": 1,
-      "items": [
-        {
-          "order": 1,
-          "actorType": "character",
-          "actorId": 12,
-          "subjectCharacterId": null
-        }
-      ]
+      "actorType": "character",
+      "actorId": 12,
+      "subjectCharacterId": null,
+      "subjectCharacterName": null
     }
   ]
 }
 ```
 
-组 `key` 必须唯一，每组最多 12 项，总项数最多 200；同一组不能重复同一人物。普通群聊来源必须为 `USER`。响应在请求结构外增加计划 `id/nextPlanId/resumePlanId` 和每项 `id`。
+每个计划只有一组执行项；最多 12 项，且不能重复同一人物。普通群聊来源必须为
+`USER`。`GET` 查询响应不返回内部使用的 `contextId/executionKey`，计划字段为
+`id/source/displayName/nextPlanId/resumePlanId/parentPlanId/items`。数组首项固定为当前活动计划，
+其余计划通过 `nextPlanId/resumePlanId/parentPlanId` 重建后续顺序、战斗恢复关系和父子场景关系。
+每项返回 `id/order/actorType/actorId/subjectCharacterId/subjectCharacterName/participantStatus`。
+
+`actorType/actorId` 表示控制或执行行动的主体；`subjectCharacterId`
+表示实际行动的 `coc_character.id`。TRPG 中所有有具体人物主体的计划项都必须绑定
+`subjectCharacterId`：用户调查员绑定 PLAYER 卡，Agent 调查员绑定 BOT 卡，战斗 NPC
+绑定 NPC 卡。`subjectCharacterName` 是计划创建时的人物卡名称快照，查询计划时可直接展示，
+不会额外查询人物卡表，也不参与身份判断。通用探索 KP 项不代表某一名 NPC，因此这两个字段
+均为空。普通聊天计划不使用这两个字段。
 
 ### 7.4 GroupChatEvent
 

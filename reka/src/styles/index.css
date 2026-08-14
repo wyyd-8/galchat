@@ -275,6 +275,35 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .reply-panel-title strong { font-size: 13px; }
 .reply-panel > p { margin: 8px 0 18px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .reply-plan-list { display: grid; gap: 6px; }
+.trpg-execution-scene { --scene-accent: #a47745; --scene-border: #d1b58f; --scene-fill: #f7efe2; padding: 11px; border: 1px solid var(--scene-border); border-radius: 11px; background: var(--scene-fill); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--scene-accent) 72%, transparent); }
+.trpg-execution-scene.main { --scene-accent: #a47745; --scene-border: #d1b58f; --scene-fill: #f7efe2; }
+.trpg-execution-scene.child { --scene-accent: #52786d; --scene-border: #9eb9b0; --scene-fill: #eaf2ef; padding: 9px; border-radius: 8px; }
+.trpg-execution-scene.combat { --scene-accent: #87535b; --scene-border: #bd9298; --scene-fill: #f5eaeb; }
+.trpg-execution-scene.current { border-color: var(--scene-accent); box-shadow: inset 3px 0 0 var(--scene-accent), 0 0 0 2px color-mix(in srgb, var(--scene-accent) 18%, transparent); }
+.trpg-execution-scene.waiting { filter: saturate(.78); }
+.trpg-scene-header { min-height: 22px; display: grid; grid-template-columns: minmax(0, 1fr) 20px; align-items: center; gap: 7px; }
+.trpg-scene-header strong { min-width: 0; overflow: hidden; color: color-mix(in srgb, var(--scene-accent) 58%, var(--ink)); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.trpg-scene-status-icon { width: 20px; height: 20px; display: inline-grid; place-items: center; color: color-mix(in srgb, var(--scene-accent) 72%, #777); }
+.trpg-execution-scene.current > .trpg-scene-header .trpg-scene-status-icon { color: var(--scene-accent); }
+.trpg-child-scenes { margin: 9px 0; display: grid; gap: 7px; }
+.trpg-actor-roster { margin-top: 7px; display: grid; gap: 4px; }
+.trpg-actor-row { min-height: 29px; padding: 5px 6px 5px 8px; border: 1px solid color-mix(in srgb, var(--scene-accent) 18%, var(--line)); border-radius: 7px; display: grid; grid-template-columns: minmax(0, 1fr) 20px; align-items: center; gap: 6px; background: rgba(255,255,255,.54); transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.trpg-actor-row .trpg-actor-name { min-width: 0; overflow: hidden; color: var(--ink); font-size: 9px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.trpg-status-icon { width: 20px; height: 20px; display: inline-grid; place-items: center; color: #8b8b83; }
+.trpg-actor-row.running, .trpg-actor-row.waiting_input, .trpg-actor-row.waiting_dice { border-color: #7fa195; background: #f2f8f5; box-shadow: inset 2px 0 0 #64877a; }
+.trpg-actor-row.running .trpg-status-icon, .trpg-actor-row.waiting_input .trpg-status-icon, .trpg-actor-row.waiting_dice .trpg-status-icon { color: #52786d; }
+.trpg-actor-row.completed { opacity: .66; }
+.trpg-actor-row.completed .trpg-status-icon { color: #5f7d68; }
+.trpg-actor-row.failed, .trpg-actor-row.blocked { border-color: #b98288; background: #f8eeee; }
+.trpg-actor-row.failed .trpg-status-icon, .trpg-actor-row.blocked .trpg-status-icon { color: var(--wine); }
+.trpg-actor-row.scene-paused, .trpg-actor-row.waiting-scene { opacity: .72; }
+.trpg-participant-group { margin-top: 7px; padding: 4px; border: 1px solid #c7c8c3; border-radius: 8px; display: grid; background: #e8e9e6; }
+.trpg-participant-group .trpg-actor-row { min-height: 27px; padding-right: 3px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.trpg-participant-group .trpg-actor-row + .trpg-actor-row { border-top: 1px solid rgba(100,100,95,.15); }
+.trpg-participant-group.waiting .trpg-actor-row { opacity: .72; }
+.trpg-participant-group.waiting .trpg-status-icon { color: #777a76; }
+.trpg-participant-group.ready { border-color: #a8c3ad; background: #e3eee5; }
+.trpg-participant-group.ready .trpg-status-icon { color: #55765d; }
 .scene-selection-panel { margin: 10px 14px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); display: grid; gap: 8px; }
 .scene-selection-panel > span { color: var(--muted); font-size: 13px; }
 .scene-selection-options { display: flex; flex-wrap: wrap; gap: 8px; }

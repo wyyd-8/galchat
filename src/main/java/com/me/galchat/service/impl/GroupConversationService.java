@@ -184,15 +184,14 @@ public class GroupConversationService {
         GroupReplyPlan plan = new GroupReplyPlan()
                 .setConversationId(conversation.getId())
                 .setSource(GroupChatConstant.PLAN_SOURCE_USER)
+                .setExecutionKey("default")
+                .setDisplayName("群聊")
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         replyPlanMapper.insert(plan);
         for (int i = 0; i < characterIds.size(); i++) {
             replyPlanItemMapper.insert(new GroupReplyPlanItem()
                     .setPlanId(plan.getId())
-                    .setGroupKey("default")
-                    .setGroupName("群聊")
-                    .setGroupOrder(1)
                     .setItemOrder(i + 1)
                     .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                     .setActorId(characterIds.get(i))

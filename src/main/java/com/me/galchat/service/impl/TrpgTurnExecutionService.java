@@ -15,6 +15,7 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupCurrentTurnVO;
+import com.me.galchat.domain.vo.GroupCurrentTurnStepVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
@@ -553,16 +554,13 @@ public class TrpgTurnExecutionService {
         List<GroupChatReplyStep> steps = stepMapper.selectList(
                 new LambdaQueryWrapper<GroupChatReplyStep>()
                         .eq(GroupChatReplyStep::getTurnId, turn.getId())
-                        .in(GroupChatReplyStep::getStatus,
-                                GroupChatConstant.STATUS_RUNNING,
-                                GroupChatConstant.STATUS_WAITING_INPUT,
-                                GroupChatConstant.STATUS_PAUSED,
-                                GroupChatConstant.STATUS_WAITING_DICE,
-                                GroupChatConstant.STATUS_FAILED)
-                        .orderByAsc(GroupChatReplyStep::getStepNo)
-                        .last("limit 1"));
-        GroupChatReplyStep step = steps == null || steps.isEmpty()
-                ? null : steps.getFirst();
+                        .orderByAsc(GroupChatReplyStep::getStepNo));
+        List<GroupChatReplyStep> allSteps = steps == null
+                ? List.of() : steps;
+        GroupChatReplyStep step = allSteps.stream()
+                .filter(this::isCurrentStep)
+                .findFirst()
+                .orElse(null);
         boolean waiting = step != null
                 && GroupChatConstant.STATUS_WAITING_INPUT.equals(
                         step.getStatus())
@@ -595,7 +593,25 @@ public class TrpgTurnExecutionService {
                 inputType,
                 step == null ? null : step.getGroupName(),
                 waiting,
-                options);
+                options,
+                allSteps.stream()
+                        .map(item -> new GroupCurrentTurnStepVO(
+                                item.getId(), item.getItemOrder(),
+                                item.getSpeakerType(), item.getSpeakerId(),
+                                item.getSubjectCharacterId(),
+                                item.getStatus(), item.getErrorMessage()))
+                        .toList());
+    }
+
+    private boolean isCurrentStep(GroupChatReplyStep step) {
+        return GroupChatConstant.STATUS_RUNNING.equals(step.getStatus())
+                || GroupChatConstant.STATUS_WAITING_INPUT.equals(
+                step.getStatus())
+                || GroupChatConstant.STATUS_PAUSED.equals(step.getStatus())
+                || GroupChatConstant.STATUS_WAITING_DICE.equals(
+                step.getStatus())
+                || GroupChatConstant.STATUS_FAILED.equals(step.getStatus())
+                || GroupChatConstant.STATUS_BLOCKED.equals(step.getStatus());
     }
 
     public Flux<GroupChatEvent> submitMessage(
@@ -734,9 +750,8 @@ public class TrpgTurnExecutionService {
                 }
                 sceneLifecycleService.requestInvestigatorFinish(
                         conversationId, stepId,
-                        new GroupActorRef(
-                                GroupChatConstant.ACTOR_USER,
-                                userStep.getSpeakerId()));
+                        GroupChatConstant.ACTOR_USER,
+                        userStep.getSpeakerId());
                 GroupChatMessage message = transactionTemplate.execute(
                         status -> completeStructuredUserStep(
                                 conversation, turn, userStep,

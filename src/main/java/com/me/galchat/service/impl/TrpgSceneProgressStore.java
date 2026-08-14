@@ -2,7 +2,6 @@ package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.RedisConstant;
 import lombok.RequiredArgsConstructor;
-import com.me.galchat.groupchat.runtime.GroupActorRef;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -18,16 +17,12 @@ public class TrpgSceneProgressStore {
 
     private final StringRedisTemplate redisTemplate;
 
-    public void markCharacterReady(
-            Long conversationId, Long sceneId, Long characterId) {
-        markReady(conversationId, sceneId, new GroupActorRef(
-                "character", characterId));
-    }
-
     public void markReady(
-            Long conversationId, Long sceneId, GroupActorRef actor) {
+            Long conversationId, Long sceneId,
+            Long subjectCharacterId) {
         String key = readyKey(conversationId, sceneId);
-        redisTemplate.opsForSet().add(key, actorKey(actor));
+        redisTemplate.opsForSet().add(
+                key, actorKey(subjectCharacterId));
         redisTemplate.expire(key, TTL);
     }
 
@@ -40,10 +35,9 @@ public class TrpgSceneProgressStore {
         }
         Set<Long> result = new LinkedHashSet<>();
         for (String value : values) {
-            String id = value.startsWith("character:")
-                    ? value.substring("character:".length()) : value;
-            if (!value.startsWith("user:")) {
-                result.add(Long.valueOf(id));
+            if (value.startsWith("character-card:")) {
+                result.add(Long.valueOf(value.substring(
+                        "character-card:".length())));
             }
         }
         return Set.copyOf(result);
@@ -56,8 +50,20 @@ public class TrpgSceneProgressStore {
         return values == null ? Set.of() : Set.copyOf(values);
     }
 
-    public static String actorKey(GroupActorRef actor) {
-        return actor.type() + ":" + actor.id();
+    public void clearReady(
+            Long conversationId, Long sceneId,
+            Long subjectCharacterId) {
+        redisTemplate.opsForSet().remove(
+                readyKey(conversationId, sceneId),
+                actorKey(subjectCharacterId));
+    }
+
+    public static String actorKey(Long subjectCharacterId) {
+        if (subjectCharacterId == null) {
+            throw new IllegalArgumentException(
+                    "人物卡ID不能为空");
+        }
+        return "character-card:" + subjectCharacterId;
     }
 
     public void requestFinish(Long conversationId, Long sceneId) {

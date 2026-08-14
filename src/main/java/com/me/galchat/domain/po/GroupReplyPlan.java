@@ -19,6 +19,8 @@ public class GroupReplyPlan implements Serializable {
     private Long conversationId;
     private String source;
     private Long contextId;
+    private String executionKey;
+    private String displayName;
     private Long nextPlanId;
     private Long resumePlanId;
     private Long parentPlanId;

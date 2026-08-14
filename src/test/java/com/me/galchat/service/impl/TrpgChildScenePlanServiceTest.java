@@ -63,6 +63,8 @@ class TrpgChildScenePlanServiceTest {
 
         assertThat(child.getParentPlanId()).isEqualTo(31L);
         assertThat(child.getContextId()).isEqualTo(21L);
+        assertThat(child.getExecutionKey()).isEqualTo("scene:41");
+        assertThat(child.getDisplayName()).isEqualTo("阁楼");
         assertThat(conversation.getActiveReplyPlanId())
                 .isEqualTo(child.getId());
         ArgumentCaptor<TrpgRuntimeChildScene> sceneCaptor =
@@ -81,11 +83,19 @@ class TrpgChildScenePlanServiceTest {
         verify(itemMapper,
                 org.mockito.Mockito.times(3)).insert(captor.capture());
         assertThat(captor.getAllValues())
-                .extracting(GroupReplyPlanItem::getParticipantStatus)
+                .extracting(GroupReplyPlanItem::getParticipantStatus,
+                        GroupReplyPlanItem::getSubjectCharacterId,
+                        GroupReplyPlanItem::getSubjectCharacterName)
                 .containsExactly(
-                        GroupChatConstant.PARTICIPANT_ACTIVE,
-                        GroupChatConstant.PARTICIPANT_ACTIVE,
-                        GroupChatConstant.PARTICIPANT_ACTIVE);
+                        org.assertj.core.groups.Tuple.tuple(
+                                GroupChatConstant.PARTICIPANT_ACTIVE, 101L,
+                                "亨利"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                GroupChatConstant.PARTICIPANT_ACTIVE, 109L,
+                                "艾琳"),
+                        org.assertj.core.groups.Tuple.tuple(
+                                GroupChatConstant.PARTICIPANT_ACTIVE, null,
+                                null));
         verify(conversationMapper).updateById(conversation);
     }
 
@@ -142,6 +152,45 @@ class TrpgChildScenePlanServiceTest {
     }
 
     @Test
+    void closingChildMatchesParentByBoundCardInsteadOfController() {
+        GroupReplyPlanMapper planMapper =
+                mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        GroupReplyPlan parent = new GroupReplyPlan()
+                .setId(31L).setConversationId(7L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE);
+        GroupReplyPlan child = new GroupReplyPlan()
+                .setId(41L).setConversationId(7L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setParentPlanId(31L);
+        GroupReplyPlanItem childItem = item(
+                GroupChatConstant.ACTOR_CHARACTER, 9L, 1)
+                .setSubjectCharacterId(109L);
+        GroupReplyPlanItem parentItem = item(
+                GroupChatConstant.ACTOR_CHARACTER, 99L, 1)
+                .setSubjectCharacterId(109L);
+        when(planMapper.selectById(31L)).thenReturn(parent);
+        when(itemMapper.selectList(any())).thenReturn(
+                List.of(childItem), List.of(parentItem));
+        TrpgChildScenePlanService service =
+                new TrpgChildScenePlanService(
+                        planMapper, itemMapper, conversationMapper,
+                        mock(TrpgRuntimeChildSceneMapper.class));
+
+        service.finishChildUnderLock(
+                new GroupConversation().setId(7L)
+                        .setActiveReplyPlanId(41L),
+                child);
+
+        assertThat(parentItem.getParticipantStatus())
+                .isEqualTo(GroupChatConstant.PARTICIPANT_WAITING);
+        verify(itemMapper).updateById(parentItem);
+    }
+
+    @Test
     void closingChildAdvancesToItsQueuedSiblingBeforeReturningToParent() {
         GroupReplyPlanMapper planMapper =
                 mock(GroupReplyPlanMapper.class);
@@ -191,12 +240,15 @@ class TrpgChildScenePlanServiceTest {
         return new GroupReplyPlanItem()
                 .setId((long) order)
                 .setPlanId(31L)
-                .setGroupKey("scene")
-                .setGroupName("场景")
-                .setGroupOrder(1)
                 .setItemOrder(order)
                 .setActorType(actorType)
                 .setActorId(actorId)
+                .setSubjectCharacterId(
+                        GroupChatConstant.ACTOR_USER.equals(actorType)
+                                ? actorId : actorId + 100L)
+                .setSubjectCharacterName(
+                        GroupChatConstant.ACTOR_USER.equals(actorType)
+                                ? "亨利" : "艾琳")
                 .setParticipantStatus(
                         GroupChatConstant.PARTICIPANT_ACTIVE);
     }

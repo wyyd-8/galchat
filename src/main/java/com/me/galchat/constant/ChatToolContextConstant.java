@@ -6,6 +6,7 @@ public final class ChatToolContextConstant {
     public static final String USER_ID_KEY = "userId";
     public static final String USER_WORLD_ID_KEY = "userWorldId";
     public static final String ACTOR_TYPE_KEY = "actorType";
+    public static final String ACTOR_ID_KEY = "actorId";
     public static final String CHARACTER_ID_KEY = "characterId";
     public static final String SUBJECT_CHARACTER_ID_KEY =
             "subjectCharacterId";

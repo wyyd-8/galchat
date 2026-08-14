@@ -42,7 +42,9 @@ class GroupReplyPlanSnapshotServiceTest {
         when(conversationMapper.selectList(any())).thenReturn(List.of(chat, trpg));
         when(planMapper.selectById(10L)).thenReturn(
                 new GroupReplyPlan().setId(10L).setConversationId(7L)
-                        .setSource(GroupChatConstant.PLAN_SOURCE_USER));
+                        .setSource(GroupChatConstant.PLAN_SOURCE_USER)
+                        .setExecutionKey("default")
+                        .setDisplayName("群聊"));
         when(itemMapper.selectList(any())).thenReturn(List.of(item(11L, 10L, 9L)));
 
         List<UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot> snapshots =
@@ -51,6 +53,11 @@ class GroupReplyPlanSnapshotServiceTest {
         assertThat(snapshots)
                 .extracting(UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot::getConversationId)
                 .containsExactly(7L);
+        assertThat(snapshots.getFirst().getActivePlan())
+                .extracting(
+                        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot::getExecutionKey,
+                        UserWorldSaveSnapshotDTO.ReplyPlanSnapshot::getDisplayName)
+                .containsExactly("default", "群聊");
         verify(planMapper, never()).selectById(20L);
     }
 
@@ -112,22 +119,25 @@ class GroupReplyPlanSnapshotServiceTest {
                         .setOrder(1)
                         .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                         .setActorId(9L);
-        UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot group =
-                new UserWorldSaveSnapshotDTO.ReplyPlanGroupSnapshot()
-                        .setKey("default")
-                        .setName("群聊")
-                        .setOrder(1)
-                        .setItems(List.of(item));
         UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot snapshot =
                 new UserWorldSaveSnapshotDTO.GroupConversationPlanSnapshot()
                         .setConversationId(7L)
                         .setActivePlan(new UserWorldSaveSnapshotDTO.ReplyPlanSnapshot()
                                 .setSource(GroupChatConstant.PLAN_SOURCE_USER)
-                                .setGroups(List.of(group)));
+                                .setExecutionKey("default")
+                                .setDisplayName("群聊")
+                                .setItems(List.of(item)));
 
         service.restore(1L, List.of(snapshot));
 
         assertThat(conversation.getActiveReplyPlanId()).isEqualTo(101L);
+        ArgumentCaptor<GroupReplyPlan> planCaptor =
+                ArgumentCaptor.forClass(GroupReplyPlan.class);
+        verify(planMapper).insert(planCaptor.capture());
+        assertThat(planCaptor.getValue())
+                .extracting(GroupReplyPlan::getExecutionKey,
+                        GroupReplyPlan::getDisplayName)
+                .containsExactly("default", "群聊");
         ArgumentCaptor<GroupReplyPlanItem> itemCaptor =
                 ArgumentCaptor.forClass(GroupReplyPlanItem.class);
         verify(itemMapper).insert(itemCaptor.capture());
@@ -188,9 +198,6 @@ class GroupReplyPlanSnapshotServiceTest {
         return new GroupReplyPlanItem()
                 .setId(id)
                 .setPlanId(planId)
-                .setGroupKey("default")
-                .setGroupName("群聊")
-                .setGroupOrder(1)
                 .setItemOrder(1)
                 .setActorType(GroupChatConstant.ACTOR_CHARACTER)
                 .setActorId(actorId);

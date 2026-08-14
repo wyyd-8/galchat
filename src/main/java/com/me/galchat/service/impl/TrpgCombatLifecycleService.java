@@ -743,6 +743,7 @@ public class TrpgCombatLifecycleService {
                                                 item.actorType(),
                                                 item.actorId(),
                                                 item.subjectCharacterId(),
+                                                item.subjectCharacterName(),
                                                 index + 1));
                             }
                             return List.copyOf(ordered);
@@ -754,13 +755,14 @@ public class TrpgCombatLifecycleService {
         return switch (card.getActorType()) {
             case "PLAYER" -> new GroupReplyPlanService.CombatPlanItem(
                     GroupChatConstant.ACTOR_USER, card.getId(),
-                    card.getId(), order);
+                    card.getId(), card.getName(), order);
             case "BOT" -> new GroupReplyPlanService.CombatPlanItem(
                     GroupChatConstant.ACTOR_CHARACTER,
-                    card.getParticipantId(), card.getId(), order);
+                    card.getParticipantId(), card.getId(),
+                    card.getName(), order);
             case "NPC" -> new GroupReplyPlanService.CombatPlanItem(
                     GroupChatConstant.ACTOR_KP, null,
-                    card.getId(), order);
+                    card.getId(), card.getName(), order);
             default -> throw new UserRequestException(
                     "不支持的战斗人物卡类型：" + card.getActorType());
         };

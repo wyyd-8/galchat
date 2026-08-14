@@ -29,7 +29,7 @@ class TrpgSceneSelectionToolsTest {
                 7L,
                 ChatToolContextConstant.GROUP_TURN_ID_KEY,
                 30L,
-                ChatToolContextConstant.CHARACTER_ID_KEY,
+                ChatToolContextConstant.ACTOR_ID_KEY,
                 9L));
 
         tools.selectExplorationScene("2", context);

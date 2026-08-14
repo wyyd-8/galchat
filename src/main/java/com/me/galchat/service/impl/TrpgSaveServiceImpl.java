@@ -29,7 +29,7 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class TrpgSaveServiceImpl implements ITrpgSaveService {
 
-    public static final int FORMAT_VERSION = 1;
+    public static final int FORMAT_VERSION = 2;
 
     private final IUserWorldPrefixService userWorldPrefixService;
     private final GroupConversationMapper conversationMapper;

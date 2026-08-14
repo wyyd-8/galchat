@@ -6,6 +6,8 @@ import {
   createDicePlayerWindowClass,
   createDicePlayerInitialState,
   createDiceAutoPlayPlan,
+  createDiceModuleOutcomeToneMap,
+  createDiceOutcomeVfxPlan,
   createDicePlayerPreparedResult,
   createGroupOutcomeVisibility,
   createDicePlayerStatus,
@@ -14,6 +16,7 @@ import {
   shouldShowDiceRollAction,
   type DicePlaybackRequest,
   type DiceGroupOutcomePhase,
+  type DiceOutcomeTone,
   type DicePlayerPhase,
 } from '@/dice/domain/dicePlayback'
 import {
@@ -22,8 +25,10 @@ import {
   shouldMergeDiceModuleValues,
 } from '@/dice/domain/diceGroupMerge'
 import {
+  createDiceOutcomeVfxLayout,
   createDicePlayerLayout,
   createDicePlayerWindowWidth,
+  mergeDiceOutcomeVfxRects,
 } from '@/dice/domain/dicePlayerLayout'
 import { formatDiceGroupLabel } from '@/dice/domain/diceGroupLabel'
 import type {
@@ -36,6 +41,7 @@ const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: 
 const emit = defineEmits<{ roll: []; complete: []; continue: [] }>()
 
 const tray = ref<HTMLElement | null>(null)
+const surface = ref<HTMLElement | null>(null)
 const status = ref<DicePlayerPhase>('idle')
 const groupOutcomePhase = ref<DiceGroupOutcomePhase>('concealed')
 const error = ref('')
@@ -44,6 +50,32 @@ let board: ThreeDiceBoard | undefined
 let generation = 0
 let valueMergeTimers: number[] = []
 let groupOutcomeTimers: number[] = []
+let outcomeVfxTimers: number[] = []
+
+type SpecialOutcomeTone = Extract<DiceOutcomeTone, 'critical-success' | 'fumble'>
+interface OutcomeVfxParticle {
+  id: number
+  style: Record<string, string>
+}
+interface OutcomeVfxView {
+  id: string
+  tone: SpecialOutcomeTone
+  style: Record<string, string>
+  particles: OutcomeVfxParticle[]
+}
+
+const outcomeEffects = ref<OutcomeVfxView[]>([])
+const OUTCOME_FOG_VECTORS = [
+  { x: -.43, y: -.08, size: .23, delay: 0 },
+  { x: -.31, y: -.34, size: .19, delay: 55 },
+  { x: -.06, y: -.43, size: .24, delay: 90 },
+  { x: .24, y: -.36, size: .18, delay: 35 },
+  { x: .44, y: -.12, size: .22, delay: 115 },
+  { x: .36, y: .19, size: .2, delay: 70 },
+  { x: .08, y: .34, size: .25, delay: 130 },
+  { x: -.27, y: .27, size: .21, delay: 80 },
+  { x: .02, y: -.2, size: .16, delay: 150 },
+] as const
 
 const summary = computed(() => props.request
   ? createDicePlayerSummary(props.request.result, props.request.skin, props.request.presentation)
@@ -76,6 +108,64 @@ function clearGroupOutcomeTimers() {
   groupOutcomeTimers.forEach((timer) => window.clearTimeout(timer))
   groupOutcomeTimers = []
   groupOutcomePhase.value = 'concealed'
+}
+
+function clearOutcomeVfx() {
+  outcomeVfxTimers.forEach((timer) => window.clearTimeout(timer))
+  outcomeVfxTimers = []
+  outcomeEffects.value = []
+}
+
+function applyDiceModuleOutcomeTones(request?: DicePlaybackRequest) {
+  if (!tray.value) return
+  const toneMap = createDiceModuleOutcomeToneMap(request?.presentation)
+  const modules = Array.from(tray.value.querySelectorAll<HTMLElement>('.dice-module'))
+  modules.forEach((module, moduleIndex) => {
+    const tone = toneMap[moduleIndex]
+    if (tone) module.dataset.outcomeTone = tone
+    else delete module.dataset.outcomeTone
+  })
+}
+
+function playOutcomeVfx(request: DicePlaybackRequest, playGeneration: number) {
+  clearOutcomeVfx()
+  if (!surface.value || !tray.value) return
+  const plans = createDiceOutcomeVfxPlan(request.presentation)
+  if (!plans.length) return
+
+  const surfaceRect = surface.value.getBoundingClientRect()
+  const modules = Array.from(tray.value.querySelectorAll<HTMLElement>('.dice-module'))
+  outcomeEffects.value = plans.flatMap((plan, effectIndex) => {
+    const groupRect = mergeDiceOutcomeVfxRects(
+      modules
+        .slice(plan.moduleStart, plan.moduleStart + plan.moduleCount)
+        .map((module) => module.getBoundingClientRect()),
+    )
+    if (!groupRect) return []
+    const layout = createDiceOutcomeVfxLayout(plan.scope, groupRect, surfaceRect)
+    return [{
+      id: `${playGeneration}-${effectIndex}-${plan.tone}`,
+      tone: plan.tone,
+      style: {
+        '--vfx-left': `${layout.leftPx}px`,
+        '--vfx-top': `${layout.topPx}px`,
+        '--vfx-size': `${layout.sizePx}px`,
+      },
+      particles: OUTCOME_FOG_VECTORS.map((particle, particleIndex) => ({
+        id: particleIndex,
+        style: {
+          '--fog-x': `${particle.x * layout.sizePx}px`,
+          '--fog-y': `${particle.y * layout.sizePx}px`,
+          '--fog-size': `${particle.size * layout.sizePx}px`,
+          '--fog-delay': `${particle.delay}ms`,
+        },
+      })),
+    }]
+  })
+  if (!outcomeEffects.value.length) return
+  outcomeVfxTimers.push(window.setTimeout(() => {
+    if (generation === playGeneration) outcomeEffects.value = []
+  }, 1_450))
 }
 
 function scheduleGroupOutcomeMerge(request: DicePlaybackRequest, playGeneration: number) {
@@ -146,6 +236,8 @@ function clearDiceValueMergeTimers() {
 function retireBoard() {
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
+  clearOutcomeVfx()
+  applyDiceModuleOutcomeTones()
   if (!board) return
   const staleBoard = board
   board = undefined
@@ -220,6 +312,8 @@ async function prepare(request: DicePlaybackRequest) {
   const currentGeneration = ++generation
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
+  clearOutcomeVfx()
+  applyDiceModuleOutcomeTones()
   dialogWidthPx.value = 980
   open.value = true
   status.value = 'loading'
@@ -253,6 +347,7 @@ async function prepare(request: DicePlaybackRequest) {
     if (mode === 'settled') {
       await activeBoard.showResult(playableResult)
       if (currentGeneration !== generation) return
+      applyDiceModuleOutcomeTones(request)
       status.value = 'complete'
       return
     }
@@ -280,6 +375,8 @@ async function roll() {
   const needsPreparation = status.value === 'complete'
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
+  clearOutcomeVfx()
+  applyDiceModuleOutcomeTones()
   status.value = 'playing'
   error.value = ''
 
@@ -292,6 +389,8 @@ async function roll() {
     }
     await board.playResult(playableResult)
     if (currentGeneration !== generation) return
+    applyDiceModuleOutcomeTones(request)
+    playOutcomeVfx(request, currentGeneration)
     prepareDiceValueMerges(request, currentGeneration)
     status.value = 'complete'
     scheduleGroupOutcomeMerge(request, currentGeneration)
@@ -300,6 +399,8 @@ async function roll() {
     if (currentGeneration !== generation) return
     status.value = 'error'
     clearGroupOutcomeTimers()
+    clearOutcomeVfx()
+    applyDiceModuleOutcomeTones()
     error.value = cause instanceof Error ? cause.message : '骰子动画播放失败'
   }
 }
@@ -329,6 +430,7 @@ onBeforeUnmount(() => {
   generation += 1
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
+  clearOutcomeVfx()
   disposeBoard()
 })
 </script>
@@ -344,6 +446,7 @@ onBeforeUnmount(() => {
     :content-style="dialogContentStyle"
   >
     <section
+      ref="surface"
       class="dice-player-surface"
       :class="[
         `is-${status}`,
@@ -365,6 +468,23 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <span class="dice-player-modifier">{{ summary.modifierLabel }}</span>
+      </div>
+      <div v-if="outcomeEffects.length" class="dice-outcome-vfx-layer" aria-hidden="true">
+        <div
+          v-for="effect in outcomeEffects"
+          :key="effect.id"
+          class="dice-outcome-vfx-burst"
+          :class="`is-${effect.tone}`"
+          :style="effect.style"
+        >
+          <i class="dice-outcome-vfx-core" />
+          <i
+            v-for="particle in effect.particles"
+            :key="particle.id"
+            class="dice-outcome-vfx-fog"
+            :style="particle.style"
+          />
+        </div>
       </div>
       <div ref="tray" class="dice-player-tray" />
       <div v-if="summary" class="dice-player-selection">
@@ -406,7 +526,10 @@ onBeforeUnmount(() => {
                 class="dice-group-result-box"
                 :class="[
                   groupOutcomeVisibility.revealIndividualResults
-                    ? isValueRoll ? 'is-value' : request.presentation.groups[index]?.success ? 'is-success' : 'is-failure'
+                    ? isValueRoll ? 'is-value'
+                      : request.presentation.groups[index]?.outcomeTone !== 'none'
+                        ? `is-${request.presentation.groups[index]?.outcomeTone}`
+                        : request.presentation.groups[index]?.success ? 'is-success' : 'is-failure'
                     : 'is-concealed',
                   {
                     'is-winner': isWinnerHighlighted && request.presentation.groups[index]?.winner,

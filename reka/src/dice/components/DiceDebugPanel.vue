@@ -3,6 +3,7 @@ import { Braces, Play } from '@lucide/vue'
 import type { DiceRollAggregate } from '@/api/types'
 import {
   DICE_DEBUG_CONSTANT_SCENARIOS,
+  DICE_DEBUG_OUTCOME_SCENARIOS,
   DICE_DEBUG_TOOL_GROUPS,
   createDiceDebugAggregate,
 } from '@/dice/debug/diceDebugScenarios'
@@ -44,6 +45,25 @@ function play(id: string) {
         </div>
       </article>
     </div>
+
+    <section class="dice-debug-outcome-card">
+      <span>
+        <strong>特殊结果特效</strong>
+        <small>验证单人舞台级雾效，以及多人时只作用于特殊结果参与者的局部雾效。</small>
+      </span>
+      <div>
+        <button
+          v-for="scenario in DICE_DEBUG_OUTCOME_SCENARIOS"
+          :key="scenario.id"
+          type="button"
+          class="button dice-debug-outcome-action"
+          :class="`is-${scenario.outcomeTone}`"
+          @click="play(scenario.id)"
+        >
+          <Play :size="13" />{{ scenario.label }}
+        </button>
+      </div>
+    </section>
 
     <section class="dice-debug-constant-card">
       <span>

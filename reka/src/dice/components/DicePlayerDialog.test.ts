@@ -260,6 +260,19 @@ test('uses a neutral value state instead of success or failure for numeric cards
   )), true)
 })
 
+test('colors special dice module borders and merged totals with their outcome tone', async () => {
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  const criticalModule = cssRule(styles, '.dice-player-surface .dice-module[data-outcome-tone="critical-success"]')
+  const criticalTotal = cssRule(styles, '.dice-player-surface .dice-module[data-outcome-tone="critical-success"]::after')
+  const fumbleModule = cssRule(styles, '.dice-player-surface .dice-module[data-outcome-tone="fumble"]')
+  const fumbleTotal = cssRule(styles, '.dice-player-surface .dice-module[data-outcome-tone="fumble"]::after')
+
+  assert.match(criticalModule, /border-color:\s*rgba\(184,137,46/)
+  assert.match(criticalTotal, /color:\s*#ffe29a/)
+  assert.match(fumbleModule, /border-color:\s*rgba\(150,42,59/)
+  assert.match(fumbleTotal, /color:\s*#ff9cac/)
+})
+
 test('shows the corresponding dice group number below every participant name', async () => {
   const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]

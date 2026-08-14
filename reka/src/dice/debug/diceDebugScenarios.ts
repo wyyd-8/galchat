@@ -1,4 +1,5 @@
 import type { DiceResult, DiceRollAggregate, DiceRollDetail } from '../../api/types.ts'
+import type { DiceOutcomeTone } from '../domain/dicePlayback.ts'
 
 export type DiceDebugAudience = 'single' | 'multiple'
 export type DiceDebugToolName =
@@ -15,6 +16,10 @@ export interface DiceDebugScenario {
   id: string
   label: string
   audience: DiceDebugAudience
+}
+
+export interface DiceDebugOutcomeScenario extends DiceDebugScenario {
+  outcomeTone: Extract<DiceOutcomeTone, 'critical-success' | 'fumble'>
 }
 
 export interface DiceDebugToolGroup {
@@ -48,6 +53,13 @@ export const DICE_DEBUG_CONSTANT_SCENARIOS: DiceDebugScenario[] = [
   { id: 'constant-value-multiple', label: '多人常量混合', audience: 'multiple' },
 ]
 
+export const DICE_DEBUG_OUTCOME_SCENARIOS: DiceDebugOutcomeScenario[] = [
+  { id: 'outcome-critical-success-single', label: '单人·大成功', audience: 'single', outcomeTone: 'critical-success' },
+  { id: 'outcome-fumble-single', label: '单人·大失败', audience: 'single', outcomeTone: 'fumble' },
+  { id: 'outcome-critical-success-multiple', label: '多人·大成功', audience: 'multiple', outcomeTone: 'critical-success' },
+  { id: 'outcome-fumble-multiple', label: '多人·大失败', audience: 'multiple', outcomeTone: 'fumble' },
+]
+
 const CHARACTER_NAMES = ['林恩', '陈默']
 const CHECK_VALUES = [27, 78]
 const CHECK_CATEGORIES = ['SUCCESS', 'FAILURE']
@@ -62,7 +74,7 @@ function percentileResult(value: number): DiceResult {
       modifier: 'NORMAL',
       dice: [
         { sides: 10, value: value % 10, role: 'PERCENTILE_ONES', selected: true },
-        { sides: 10, value: Math.floor(value / 10), role: 'PERCENTILE_TENS', selected: true },
+        { sides: 10, value: Math.floor(value / 10) % 10, role: 'PERCENTILE_TENS', selected: true },
       ],
       result: value,
     }],
@@ -135,6 +147,8 @@ function checkDetail(
   index: number,
   toolName: DiceDebugToolName,
   reason: string,
+  category = CHECK_CATEGORIES[index]!,
+  value = CHECK_VALUES[index]!,
 ): DiceRollDetail {
   const type = displayType(toolName)
   const groupRule = toolName === 'requestGroupCheck' ? 'ANY_SUCCESS' : 'SEPARATE'
@@ -145,15 +159,15 @@ function checkDetail(
     displayOrder: index + 1,
     displayType: type,
     reason,
-    resultData: percentileResult(CHECK_VALUES[index]!),
+    resultData: percentileResult(value),
     resolution: {
       type,
       groupRule,
       outcome: {
         characterName: CHARACTER_NAMES[index],
         checkName: toolName === 'requestSanCheck' ? '理智' : index === 0 ? '侦查' : '聆听',
-        category: CHECK_CATEGORIES[index],
-        rank: index === 0 ? 'REGULAR' : undefined,
+        category,
+        rank: category === 'SUCCESS' ? 'REGULAR' : undefined,
       },
     },
     resolvedAt: '2026-08-12T12:00:00',
@@ -188,6 +202,7 @@ function scenarioIndex(id: string): number {
   const ids = [
     ...DICE_DEBUG_TOOL_GROUPS.flatMap((group) => group.scenarios.map((scenario) => scenario.id)),
     ...DICE_DEBUG_CONSTANT_SCENARIOS.map((scenario) => scenario.id),
+    ...DICE_DEBUG_OUTCOME_SCENARIOS.map((scenario) => scenario.id),
   ]
   return ids.indexOf(id)
 }
@@ -196,6 +211,36 @@ export function createDiceDebugAggregate(id: string): DiceRollAggregate {
   const index = scenarioIndex(id)
   if (index < 0) throw new Error(`未知的骰子调试场景：${id}`)
   const summaryId = 9_700 + index
+
+  const outcomeScenario = DICE_DEBUG_OUTCOME_SCENARIOS.find((scenario) => scenario.id === id)
+  if (outcomeScenario) {
+    const critical = outcomeScenario.outcomeTone === 'critical-success'
+    const reason = critical ? '特殊结果：大成功' : '特殊结果：大失败'
+    const category = critical ? 'CRITICAL_SUCCESS' : 'FUMBLE'
+    const count = outcomeScenario.audience === 'single' ? 1 : 2
+    const results = [
+      checkDetail(summaryId, 0, 'requestCheck', reason, category, critical ? 1 : 100),
+      ...(count === 2
+        ? [checkDetail(summaryId, 1, 'requestCheck', reason, 'SUCCESS', 35)]
+        : []),
+    ]
+    const semanticResult = count === 1
+      ? `${CHARACTER_NAMES[0]}：${critical ? '大成功' : '大失败'}`
+      : '分别展示'
+    return {
+      summary: {
+        id: summaryId,
+        conversationId: 1,
+        reason,
+        totalResult: semanticResult,
+        roundCount: 1,
+        status: 'COMPLETED',
+        toolName: 'requestCheck',
+      },
+      results,
+      semanticResult,
+    }
+  }
 
   if (id === 'constant-value-single') {
     const reason = '固定伤害调试'

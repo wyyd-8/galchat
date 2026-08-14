@@ -12,8 +12,10 @@ export type DicePlayerPhase = 'idle' | 'loading' | 'ready' | 'playing' | 'comple
 export type DicePlaybackMode = 'pending' | 'play' | 'settled'
 export type DiceGroupRule = 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'
 export type DiceGroupOutcomePhase = 'concealed' | 'individual' | 'highlighted' | 'merging' | 'merged'
+export type DiceOutcomeTone = 'critical-success' | 'success' | 'failure' | 'fumble' | 'none'
+export type DiceSpecialOutcomeTone = Extract<DiceOutcomeTone, 'critical-success' | 'fumble'>
 export type DiceMessageTone = 'pending' | 'damage' | 'sanity' | 'healing' | 'pushed-check'
-  | 'opposed' | 'success' | 'failure' | 'default'
+  | 'opposed' | 'critical-success' | 'success' | 'failure' | 'fumble' | 'default'
 export interface DiceMessagePresentation {
   title: string
   statusLabel: string
@@ -23,6 +25,7 @@ export interface DicePlaybackGroupPresentation {
   label: string
   checkName: string
   outcomeLabel: string
+  outcomeTone: DiceOutcomeTone
   success: boolean
   winner?: boolean
   moduleStart: number
@@ -142,6 +145,18 @@ function checkOutcomeLabel(outcome: Record<string, unknown>): string {
   return CHECK_OUTCOME_LABELS[category] || category
 }
 
+function checkOutcomeTone(outcome: Record<string, unknown>): DiceOutcomeTone {
+  const category = typeof outcome.category === 'string' ? outcome.category : undefined
+  const rank = typeof outcome.rank === 'string' ? outcome.rank : undefined
+  if (category === 'CRITICAL_SUCCESS' || (category === 'SUCCESS' && rank === 'CRITICAL')) {
+    return 'critical-success'
+  }
+  if (category === 'FUMBLE') return 'fumble'
+  if (category && SUCCESSFUL_CHECK_OUTCOMES.has(category)) return 'success'
+  if (category === 'FAILURE') return 'failure'
+  return 'none'
+}
+
 const PERSONALIZED_MESSAGE_TONES: Record<string, DiceMessageTone> = {
   rollDamage: 'damage',
   requestSanCheck: 'sanity',
@@ -193,7 +208,8 @@ export function createDiceMessagePresentation(
     if (opposed) {
       tone = 'opposed'
     } else if (details.length === 1 && categories.length === 1) {
-      tone = SUCCESSFUL_CHECK_OUTCOMES.has(categories[0]!) ? 'success' : 'failure'
+      const singleTone = checkOutcomeTone(details[0]!.resolution?.outcome || {})
+      tone = singleTone === 'none' ? 'default' : singleTone
     } else if (details.length > 1 && groupRule && groupRule !== 'SEPARATE'
         && categories.length === details.length) {
       const succeeded = groupRule === 'ALL_SUCCESS'
@@ -373,6 +389,7 @@ function aggregateGroup(
       ? outcome.checkName
       : detail.resolution?.checkName || detail.displayType || '检定',
     outcomeLabel: checkOutcomeLabel(outcome),
+    outcomeTone: checkOutcomeTone(outcome),
     success: typeof outcome.category === 'string'
       && SUCCESSFUL_CHECK_OUTCOMES.has(outcome.category),
     moduleStart,
@@ -421,6 +438,7 @@ function createDiceValuePlaybackRequest(
         : detail.reason || `参与者 ${index + 1}`,
       checkName: detail.resultData.formula,
       outcomeLabel: signedValue(detail.resolution?.type || detail.displayType, detail.resultData.result),
+      outcomeTone: 'none' as const,
       success: false,
       moduleStart,
       moduleCount: detailModules.length,
@@ -462,6 +480,35 @@ export function createGroupOutcomeVisibility(
     showFinal: revealsAggregate,
     highlightWinner: permitsAggregate && (phase === 'highlighted' || revealsAggregate),
   }
+}
+
+export function createDiceOutcomeVfxPlan(presentation?: DicePlaybackPresentation) {
+  if (!presentation || presentation.kind === 'value-roll') return []
+  const scope = presentation.groups.length === 1 ? 'stage' as const : 'local' as const
+  return presentation.groups.flatMap((group) => (
+    group.outcomeTone === 'critical-success' || group.outcomeTone === 'fumble'
+      ? [{
+          tone: group.outcomeTone,
+          moduleStart: group.moduleStart,
+          moduleCount: group.moduleCount,
+          scope,
+        }]
+      : []
+  ))
+}
+
+export function createDiceModuleOutcomeToneMap(
+  presentation?: DicePlaybackPresentation,
+): Record<number, DiceSpecialOutcomeTone> {
+  const tones: Record<number, DiceSpecialOutcomeTone> = {}
+  if (!presentation || presentation.kind === 'value-roll') return tones
+  presentation.groups.forEach((group) => {
+    if (group.outcomeTone !== 'critical-success' && group.outcomeTone !== 'fumble') return
+    for (let offset = 0; offset < group.moduleCount; offset += 1) {
+      tones[group.moduleStart + offset] = group.outcomeTone
+    }
+  })
+  return tones
 }
 
 export function createDiceAggregatePlaybackRequest(

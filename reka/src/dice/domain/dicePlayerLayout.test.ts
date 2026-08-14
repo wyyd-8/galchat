@@ -4,6 +4,7 @@ import {
   createDicePlayerLayout,
   createDicePlayerWindowWidth,
 } from './dicePlayerLayout.ts'
+import * as dicePlayerLayout from './dicePlayerLayout.ts'
 
 test('keeps three dice groups on one widened row', () => {
   assert.deepEqual(createDicePlayerLayout(3), {
@@ -47,4 +48,51 @@ test('keeps an empty player in a valid single-cell layout', () => {
 test('widens the player to contain its widest balanced row', () => {
   assert.equal(createDicePlayerWindowWidth([1180]), 1226)
   assert.equal(createDicePlayerWindowWidth([680, 930]), 980)
+})
+
+test('centers a single special outcome on the stage and multiplayer outcomes on their group', () => {
+  const createEffectLayout = Reflect.get(dicePlayerLayout, 'createDiceOutcomeVfxLayout') as
+    | ((
+      scope: 'stage' | 'local',
+      group: { left: number; top: number; width: number; height: number },
+      surface: { left: number; top: number; width: number; height: number },
+    ) => { leftPx: number; topPx: number; sizePx: number })
+    | undefined
+  const surface = { left: 100, top: 50, width: 900, height: 400 }
+  const group = { left: 400, top: 150, width: 200, height: 180 }
+
+  assert.equal(typeof createEffectLayout, 'function')
+  assert.deepEqual(createEffectLayout?.('stage', group, surface), {
+    leftPx: 450,
+    topPx: 200,
+    sizePx: 600,
+  })
+  assert.deepEqual(createEffectLayout?.('local', group, surface), {
+    leftPx: 400,
+    topPx: 190,
+    sizePx: 290,
+  })
+})
+
+test('merges every module rectangle belonging to one participant effect', () => {
+  const mergeRects = Reflect.get(dicePlayerLayout, 'mergeDiceOutcomeVfxRects') as
+    | ((rects: Array<{ left: number; top: number; width: number; height: number }>) => {
+      left: number
+      top: number
+      width: number
+      height: number
+    } | undefined)
+    | undefined
+
+  assert.equal(typeof mergeRects, 'function')
+  assert.deepEqual(mergeRects?.([
+    { left: 180, top: 90, width: 120, height: 160 },
+    { left: 320, top: 110, width: 180, height: 130 },
+  ]), {
+    left: 180,
+    top: 90,
+    width: 320,
+    height: 160,
+  })
+  assert.equal(mergeRects?.([]), undefined)
 })

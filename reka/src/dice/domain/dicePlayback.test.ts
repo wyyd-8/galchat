@@ -132,6 +132,17 @@ test('uses green or red for single and merged check outcomes', () => {
   assert.equal(diceMessagePresentation(single)?.tone, 'success')
 })
 
+test('uses distinct persistent card tones for a single critical success or fumble', () => {
+  const critical = createDiceDebugAggregatePreset('multiplayer-check')
+  critical.results = [critical.results[2]!]
+  const fumble = createDiceDebugAggregatePreset('multiplayer-check')
+  fumble.results = [fumble.results[1]!]
+  Object.assign(fumble.results[0]!.resolution?.outcome || {}, { category: 'FUMBLE' })
+
+  assert.equal(diceMessagePresentation(critical)?.tone, 'critical-success')
+  assert.equal(diceMessagePresentation(fumble)?.tone, 'fumble')
+})
+
 test('uses blue for separate multiplayer results', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
   aggregate.results.forEach((detail) => {
@@ -394,6 +405,78 @@ test('creates a multiplayer check playback from backend-shaped roll details', ()
   assert.equal(summary.resultValue, '成功')
   assert.equal(summary.formulaLabel, '检定项目')
   assert.equal(summary.formulaValue, '3 人参与 · 侦查 · 任一成功即通过')
+})
+
+test('preserves critical success and fumble tones for participant effects', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.results = [aggregate.results[2]!, aggregate.results[1]!]
+  Object.assign(aggregate.results[1]!.resolution?.outcome || {}, { category: 'FUMBLE' })
+
+  const request = createDiceAggregatePlaybackRequest(0, aggregate, 'classic')
+
+  assert.deepEqual(
+    request.presentation?.groups.map((group) => ({
+      label: group.label,
+      outcomeTone: group.outcomeTone,
+    })),
+    [
+      { label: '陈默', outcomeTone: 'fumble' },
+      { label: '苏婉', outcomeTone: 'critical-success' },
+    ],
+  )
+})
+
+test('creates local outcome effect plans from the shared participant groups', () => {
+  const createPlan = Reflect.get(diceState, 'createDiceOutcomeVfxPlan') as
+    | ((presentation: ReturnType<typeof createDiceAggregatePlaybackRequest>['presentation']) => Array<{
+      tone: string
+      moduleStart: number
+      moduleCount: number
+      scope: string
+    }>)
+    | undefined
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.results = [aggregate.results[2]!, aggregate.results[1]!]
+  Object.assign(aggregate.results[1]!.resolution?.outcome || {}, { category: 'FUMBLE' })
+  const request = createDiceAggregatePlaybackRequest(0, aggregate, 'classic')
+
+  assert.equal(typeof createPlan, 'function')
+  assert.deepEqual(createPlan?.(request.presentation), [
+    { tone: 'fumble', moduleStart: 0, moduleCount: 1, scope: 'local' },
+    { tone: 'critical-success', moduleStart: 1, moduleCount: 1, scope: 'local' },
+  ])
+
+  const singlePresentation = {
+    ...request.presentation!,
+    groups: [request.presentation!.groups[1]!],
+  }
+  assert.deepEqual(createPlan?.(singlePresentation), [
+    { tone: 'critical-success', moduleStart: 1, moduleCount: 1, scope: 'stage' },
+  ])
+})
+
+test('maps each special participant outcome onto only its corresponding dice modules', () => {
+  const createToneMap = Reflect.get(diceState, 'createDiceModuleOutcomeToneMap') as
+    | ((presentation: ReturnType<typeof createDiceAggregatePlaybackRequest>['presentation']) => Record<number, string>)
+    | undefined
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  const request = createDiceAggregatePlaybackRequest(0, aggregate, 'classic')
+  const presentation = {
+    ...request.presentation!,
+    groups: [
+      { ...request.presentation!.groups[0]!, outcomeTone: 'critical-success' as const, moduleStart: 0, moduleCount: 2 },
+      { ...request.presentation!.groups[1]!, outcomeTone: 'failure' as const, moduleStart: 2, moduleCount: 1 },
+      { ...request.presentation!.groups[2]!, outcomeTone: 'fumble' as const, moduleStart: 3, moduleCount: 2 },
+    ],
+  }
+
+  assert.equal(typeof createToneMap, 'function')
+  assert.deepEqual(createToneMap?.(presentation), {
+    0: 'critical-success',
+    1: 'critical-success',
+    3: 'fumble',
+    4: 'fumble',
+  })
 })
 
 test('creates a persisted single check through the same participant presentation as multiplayer checks', () => {

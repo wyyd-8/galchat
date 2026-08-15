@@ -115,9 +115,11 @@ class TrpgGroupContextPolicyTest {
                 new GroupConversation().setId(7L);
         GroupActionSpec kpAction = action(
                 GroupChatConstant.ACTOR_KP, null);
-        when(runtimeAssembler.format(
+        when(runtimeAssembler.assemble(
                 conversation, kpAction)).thenReturn(
-                "<current-scene-runtime>书房：艾琳</current-scene-runtime>");
+                new TrpgSceneRuntimeContextAssembler.RuntimeContext(
+                        "<current-scene-runtime>书房：艾琳</current-scene-runtime>",
+                        Set.of(72L)));
         TrpgExplorationContextAssembler explorationAssembler =
                 mock(TrpgExplorationContextAssembler.class);
         when(explorationAssembler.assemble(
@@ -130,10 +132,13 @@ class TrpgGroupContextPolicyTest {
                 mock(com.me.galchat.service.impl
                         .TrpgGameTimeContextAssembler.class));
 
-        assertThat(policy.load(conversation, kpAction).messages())
+        var context = policy.load(conversation, kpAction);
+        assertThat(context.messages())
                 .extracting(message -> message.getText())
                 .contains(
                         "<current-scene-runtime>书房：艾琳</current-scene-runtime>");
+        assertThat(context.currentSceneInvestigatorIds())
+                .containsExactly(72L);
     }
 
     @Test

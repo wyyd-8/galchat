@@ -69,6 +69,8 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
     @Override
     public GroupContextMaterial load(GroupConversation conversation, GroupActionSpec action) {
         java.util.List<Message> messages = new java.util.ArrayList<>();
+        java.util.Set<Long> currentSceneInvestigatorIds =
+                java.util.Set.of();
         String gameTime = gameTimeContextAssembler.format(
                 conversation.getId());
         if (StringUtils.hasText(gameTime)) {
@@ -82,11 +84,17 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
             }
             if (!GroupChatConstant.ACTION_TRPG_SCENE_SELECTION
                     .equals(action.actionType())) {
-                String runtimeContext =
-                        sceneRuntimeContextAssembler.format(
+                TrpgSceneRuntimeContextAssembler.RuntimeContext
+                        runtimeContext =
+                        sceneRuntimeContextAssembler.assemble(
                                 conversation, action);
-                if (StringUtils.hasText(runtimeContext)) {
-                    messages.add(new SystemMessage(runtimeContext));
+                if (runtimeContext != null) {
+                    if (StringUtils.hasText(runtimeContext.prompt())) {
+                        messages.add(new SystemMessage(
+                                runtimeContext.prompt()));
+                    }
+                    currentSceneInvestigatorIds =
+                            runtimeContext.activeInvestigatorCharacterIds();
                 }
             }
         }
@@ -106,7 +114,8 @@ public class TrpgGroupContextPolicy implements GroupContextPolicy {
                         ? npcContextSelector.select(conversation, action)
                         : java.util.Set.of();
         return new GroupContextMaterial(
-                java.util.List.copyOf(messages), relevantCharacterIds);
+                java.util.List.copyOf(messages), relevantCharacterIds,
+                currentSceneInvestigatorIds);
     }
 
     private boolean usesPrivateDecisionContext(

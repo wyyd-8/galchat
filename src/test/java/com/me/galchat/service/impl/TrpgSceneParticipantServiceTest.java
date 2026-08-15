@@ -76,6 +76,8 @@ class TrpgSceneParticipantServiceTest {
                 .isEqualTo("森林 - 临时藏身处");
         assertThat(state.activeInvestigatorNames())
                 .containsExactly("亨利");
+        assertThat(state.activeInvestigatorCharacterIds())
+                .containsExactly(101L);
         assertThat(state.waitingInvestigatorNames())
                 .containsExactly("艾琳");
     }

@@ -34,6 +34,7 @@ public class TrpgSceneParticipantService {
         GroupReplyPlan scene = requireActiveScene(conversation);
         List<GroupReplyPlanItem> items = orderedItems(scene.getId());
         List<String> active = new ArrayList<>();
+        List<Long> activeCharacterIds = new ArrayList<>();
         List<String> waiting = new ArrayList<>();
         for (GroupReplyPlanItem item : items) {
             if (!isInvestigator(item)) {
@@ -49,13 +50,19 @@ public class TrpgSceneParticipantService {
                 waiting.add(name);
             } else if (GroupChatConstant.PARTICIPANT_ACTIVE.equals(
                     item.getParticipantStatus())) {
+                if (item.getSubjectCharacterId() == null) {
+                    throw new UserRequestException(
+                            "场景调查员人物卡快照不存在");
+                }
                 active.add(name);
+                activeCharacterIds.add(item.getSubjectCharacterId());
             }
         }
         return new SceneState(
                 scene.getId(),
                 scenePath(conversation.getModuleId(), scene),
                 List.copyOf(active),
+                List.copyOf(activeCharacterIds),
                 List.copyOf(waiting));
     }
 
@@ -149,6 +156,7 @@ public class TrpgSceneParticipantService {
             Long planId,
             String scenePath,
             List<String> activeInvestigatorNames,
+            List<Long> activeInvestigatorCharacterIds,
             List<String> waitingInvestigatorNames) {
     }
 }

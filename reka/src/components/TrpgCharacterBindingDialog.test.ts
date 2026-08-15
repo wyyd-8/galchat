@@ -20,6 +20,29 @@ function findElement(root: RootNode, predicate: (element: ElementNode) => boolea
   return visit(root)
 }
 
+function hasClass(element: ElementNode, className: string): boolean {
+  return element.props.some((prop) => prop.type === NodeTypes.ATTRIBUTE
+    && prop.name === 'class'
+    && prop.value?.content.split(/\s+/).includes(className))
+}
+
+function hasIfExpression(element: ElementNode, expression: string): boolean {
+  return element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE
+    && prop.name === 'if'
+    && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+    && prop.exp.content === expression)
+}
+
+function textContent(node: unknown): string {
+  if (!node || typeof node !== 'object') return ''
+  const candidate = node as { type?: number, content?: unknown, children?: unknown[] }
+  if (candidate.type === NodeTypes.TEXT || candidate.type === NodeTypes.SIMPLE_EXPRESSION) {
+    return typeof candidate.content === 'string' ? candidate.content : ''
+  }
+  if (candidate.type === NodeTypes.INTERPOLATION) return textContent(candidate.content)
+  return (candidate.children || []).map(textContent).join('')
+}
+
 test('offers luck rolling while reviewing a bound card in the third setup stage', async () => {
   const source = await readFile(new URL('./TrpgCharacterBindingDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
@@ -32,4 +55,19 @@ test('offers luck rolling while reviewing a bound card in the third setup stage'
   const luckIcon = sheet && findElement(sheet as unknown as RootNode, (element) => element.tag === 'Dices')
 
   assert.ok(luckIcon, 'the third setup stage should offer luck rolling for a bound card')
+})
+
+test('warns about abnormal weapons in card previews without listing risk tags', async () => {
+  const source = await readFile(new URL('./TrpgCharacterBindingDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgCharacterBindingDialog should contain a template')
+  const sheet = findElement(baseParse(template, { isVoidTag: (tag) => tag === 'br' }), (element) => hasClass(element, 'binding-sheet'))
+  assert.ok(sheet, 'the binding dialog should render the selected character card')
+
+  const warning = findElement(sheet as unknown as RootNode, (element) => hasClass(element, 'weapon-abnormal-note'))
+
+  assert.ok(warning, 'abnormal weapons should show an exploration warning')
+  assert.equal(hasIfExpression(warning, 'weapon.abnormal'), true)
+  assert.match(textContent(warning), /此武器有可能妨碍探索/)
+  assert.doesNotMatch(textContent(sheet), /riskTags|显眼|高噪声/)
 })

@@ -126,7 +126,7 @@ export interface CocCharacter {
   dying?: boolean; dead?: boolean; temporaryInsanity?: boolean; temporaryInsanityPhase?: string
 }
 export interface CocSkill { id: number; characterId: number; displayName: string; category?: string; specialization?: string; baseValue?: number; value: number; isCustom?: boolean }
-export interface CocWeapon { id: number; characterId: number; name: string; skillName?: string; damage?: string; range?: string; attacksPerRound?: string; ammoCapacity?: number; remainingAmmo?: number; malfunction?: string; isBroken?: boolean; notes?: string }
+export interface CocWeapon { id: number; characterId: number; name: string; skillName?: string; damage?: string; range?: string; attacksPerRound?: string; ammoCapacity?: number; remainingAmmo?: number; malfunction?: string; isBroken?: boolean; abnormal?: boolean; notes?: string }
 export interface CocProfile {
   appearance?: string; ideology?: string; significantPeople?: string; meaningfulLocations?: string; treasuredPossessions?: string
   traits?: string; keyConnectionCategory?: string; keyConnectionText?: string

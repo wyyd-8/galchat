@@ -136,4 +136,39 @@ class CharacterCardContextFormatterTest {
                 .contains("弹药2/6")
                 .contains("状态损坏");
     }
+
+    @Test
+    void abnormalWeaponRulesAreEmptyWithoutFlaggedWeapons() {
+        CharacterCardVO card = new CharacterCardVO(
+                new CocCharacter().setName("林恩"), List.of(),
+                List.of(new CocCharacterWeapon()
+                        .setName("左轮手枪")
+                        .setAbnormal(false)
+                        .setRiskTags(List.of())), null);
+
+        assertThat(formatter.formatAbnormalWeaponRules(List.of(card)))
+                .isEmpty();
+    }
+
+    @Test
+    void abnormalWeaponRulesNameOnlyFlaggedWeaponsAndTheirRisks() {
+        CharacterCardVO card = new CharacterCardVO(
+                new CocCharacter().setName("林恩"), List.of(),
+                List.of(
+                        new CocCharacterWeapon()
+                                .setName("左轮手枪")
+                                .setAbnormal(false)
+                                .setRiskTags(List.of()),
+                        new CocCharacterWeapon()
+                                .setName("链锯")
+                                .setAbnormal(true)
+                                .setRiskTags(List.of("显眼", "高噪声"))),
+                null);
+
+        assertThat(formatter.formatAbnormalWeaponRules(List.of(card)))
+                .contains("<kp-abnormal-weapon-rules>")
+                .contains("林恩：链锯（riskTags：显眼、高噪声）")
+                .contains("关键线索不能因此永久消失")
+                .doesNotContain("左轮手枪");
+    }
 }

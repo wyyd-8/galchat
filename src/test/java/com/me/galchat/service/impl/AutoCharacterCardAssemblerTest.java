@@ -159,6 +159,27 @@ class AutoCharacterCardAssemblerTest {
     }
 
     @Test
+    void backgroundMarksCataloguedAbnormalWeaponForLaterKpRules() {
+        AutoCharacterCardAssembler assembler = assembler();
+        CharacterCardGenerationModels.DraftState built = assembler.build(
+                template(), module("现代"), basePlan(), skillDefinitions(),
+                new CharacterCardGenerationModels.BuildRolls(60, List.of(40), List.of()));
+        var background = new CharacterCardGenerationModels.BackgroundPlan(
+                "形象", "信念", "重要之人", "地点", "物品", "特质",
+                "TRAITS", "特质", "CHAINSAW", List.of());
+
+        CharacterCardGenerationModels.DraftState completed = assembler.applyBackground(
+                built, background, backgroundRolls(), effectiveSkills(built));
+
+        assertThat(completed.preview().getWeapons()).singleElement().satisfies(weapon -> {
+            assertThat(weapon.getName()).isEqualTo("链锯");
+            assertThat(weapon.getAbnormal()).isTrue();
+            assertThat(weapon.getRiskTags())
+                    .containsExactly("显眼", "高噪声", "笨重", "破坏现场");
+        });
+    }
+
+    @Test
     void backgroundRejectsMoreThanFiveEquipmentItems() {
         AutoCharacterCardAssembler assembler = assembler();
         CharacterCardGenerationModels.DraftState built = assembler.build(
@@ -287,6 +308,7 @@ class AutoCharacterCardAssemblerTest {
         bases.put("锁匠", 1);
         bases.put("射击:手枪", 20);
         bases.put("射击:步枪/霰弹枪", 25);
+        bases.put("格斗:链锯", 10);
         List<CocSkillDef> result = new ArrayList<>();
         long id = 1;
         for (Map.Entry<String, Integer> entry : bases.entrySet()) {

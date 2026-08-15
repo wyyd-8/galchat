@@ -89,6 +89,51 @@ public class CharacterCardContextFormatter {
                 .toString();
     }
 
+    public String formatAbnormalWeaponRules(List<CharacterCardVO> cards) {
+        if (cards == null || cards.isEmpty()) {
+            return "";
+        }
+        StringBuilder result = new StringBuilder(
+                "<kp-abnormal-weapon-rules>\n异常武器：");
+        StringJoiner weapons = new StringJoiner("；");
+        for (CharacterCardVO card : cards) {
+            if (card == null || card.getCharacter() == null
+                    || card.getWeapons() == null) {
+                continue;
+            }
+            for (CocCharacterWeapon weapon : card.getWeapons()) {
+                if (!Boolean.TRUE.equals(weapon.getAbnormal())
+                        || !StringUtils.hasText(weapon.getName())) {
+                    continue;
+                }
+                StringBuilder value = new StringBuilder()
+                        .append(escape(card.getCharacter().getName()))
+                        .append('：').append(escape(weapon.getName()));
+                if (weapon.getRiskTags() != null
+                        && !weapon.getRiskTags().isEmpty()) {
+                    StringJoiner risks = new StringJoiner("、");
+                    weapon.getRiskTags().stream()
+                            .filter(StringUtils::hasText)
+                            .forEach(tag -> risks.add(escape(tag.trim())));
+                    if (risks.length() > 0) {
+                        value.append("（riskTags：")
+                                .append(risks).append('）');
+                    }
+                }
+                weapons.add(value);
+            }
+        }
+        if (weapons.length() == 0) {
+            return "";
+        }
+        return result.append(weapons)
+                .append("\n仅在这些风险实际影响当前行动时体现调查劣势，例如引人注意、限制通行、妨碍潜行或破坏现场。")
+                .append("不要无理由没收武器或削弱伤害；先提示可见风险并允许调查员选择应对方式。")
+                .append("关键线索不能因此永久消失，可以增加时间、暴露、资源消耗或替代调查成本。")
+                .append("\n</kp-abnormal-weapon-rules>")
+                .toString();
+    }
+
     private void appendOtherInvestigator(
             StringBuilder result, CharacterCardVO card) {
         CocCharacter character = card.getCharacter();

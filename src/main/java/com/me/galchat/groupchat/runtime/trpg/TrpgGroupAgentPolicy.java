@@ -179,15 +179,30 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 : controlledInvestigatorName(investigatorCards, action);
         List<Message> messages = new ArrayList<>();
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
+            List<CocDiceCharacterVO> weaponOwnerCards = scenePhase
+                    ? investigatorCards.stream()
+                            .filter(card -> context
+                                    .currentSceneInvestigatorIds()
+                                    .contains(card.cardId()))
+                            .toList()
+                    : investigatorCards;
+            List<CharacterCardVO> investigatorFullCards =
+                    scenePhase || combatPhase
+                            ? weaponOwnerCards.stream()
+                                    .map(card -> characterCardService.getById(
+                                            card.cardId()))
+                                    .filter(java.util.Objects::nonNull)
+                                    .toList()
+                            : List.of();
             String investigatorCardContext =
                     characterCardFormatter.format(investigatorCards);
             String investigatorWeaponContext = combatPhase
                     ? characterCardFormatter.formatInvestigatorWeaponStates(
-                    investigatorCards.stream()
-                            .map(card -> characterCardService.getById(
-                                    card.cardId()))
-                            .filter(java.util.Objects::nonNull)
-                            .toList())
+                    investigatorFullCards)
+                    : "";
+            String abnormalWeaponRules = scenePhase
+                    ? characterCardFormatter.formatAbnormalWeaponRules(
+                    investigatorFullCards)
                     : "";
             List<CocDiceCharacterVO> npcCards = cards.stream()
                     .filter(card -> "NPC".equals(card.actorType()))
@@ -201,6 +216,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, actor) + "\n"
                     + investigatorCardContext + "\n"
                     + investigatorWeaponContext + "\n"
+                    + abnormalWeaponRules + "\n"
                     + characterCardFormatter.formatNpcs(npcCards)
                     + "\n" + characterCardFormatter.formatActiveNpcs(
                             activeNpcCards)

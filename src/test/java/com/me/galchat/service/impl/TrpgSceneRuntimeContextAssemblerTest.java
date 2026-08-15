@@ -24,6 +24,7 @@ class TrpgSceneRuntimeContextAssemblerTest {
                         31L,
                         "摩根老大的住宅 - 书房",
                         List.of("亨利"),
+                        List.of(71L),
                         List.of("艾琳", "威廉")));
         TrpgSceneRuntimeContextAssembler assembler =
                 new TrpgSceneRuntimeContextAssembler(
@@ -54,6 +55,7 @@ class TrpgSceneRuntimeContextAssemblerTest {
                         31L,
                         "摩根老大的住宅 - 书房",
                         List.of("艾琳", "威廉"),
+                        List.of(72L, 73L),
                         List.of()));
         TrpgSceneRuntimeContextAssembler assembler =
                 new TrpgSceneRuntimeContextAssembler(
@@ -70,5 +72,31 @@ class TrpgSceneRuntimeContextAssemblerTest {
                 .contains("当前为场景引入轮")
                 .contains("引入完成后参与行动的调查员：\n- 艾琳\n- 威廉")
                 .doesNotContain("等待中的调查员");
+    }
+
+    @Test
+    void assembledContextCarriesOnlyActiveInvestigatorCardIds() {
+        TrpgSceneParticipantService participantService =
+                mock(TrpgSceneParticipantService.class);
+        GroupConversation conversation =
+                new GroupConversation().setId(7L);
+        when(participantService.state(conversation)).thenReturn(
+                new TrpgSceneParticipantService.SceneState(
+                        31L, "书房",
+                        List.of("林恩"), List.of(71L),
+                        List.of("艾琳")));
+        TrpgSceneRuntimeContextAssembler assembler =
+                new TrpgSceneRuntimeContextAssembler(participantService);
+
+        TrpgSceneRuntimeContextAssembler.RuntimeContext context =
+                assembler.assemble(
+                        conversation,
+                        new GroupActionSpec(
+                                GroupChatConstant.ACTION_TRPG_SCENE,
+                                GroupChatConstant.ACTOR_KP,
+                                null, "scene:21", "书房", 1, 1));
+
+        assertThat(context.activeInvestigatorCharacterIds())
+                .containsExactly(71L);
     }
 }

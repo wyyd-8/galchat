@@ -59,8 +59,8 @@ class TrpgGroupAgentPolicyTest {
         GroupActorRef kp = new GroupActorRef(GroupChatConstant.ACTOR_KP, null);
         when(contextAssembler.baseSystemPrompt(conversation, kp)).thenReturn("仅世界提示词");
         when(cardService.listDiceCharacters(7L)).thenReturn(List.of(
-                card("林恩", null),
-                card("艾琳", 9L),
+                card(71L, "林恩", null),
+                card(72L, "艾琳", 9L),
                 npcCard("食尸鬼")));
         when(cardService.getById(81L)).thenReturn(new CharacterCardVO(
                 new CocCharacter().setId(81L).setRunId(7L)
@@ -93,7 +93,9 @@ class TrpgGroupAgentPolicyTest {
                         .setDamage("1D10")
                         .setAmmoCapacity(6)
                         .setRemainingAmmo(4)
-                        .setIsBroken(false)),
+                        .setIsBroken(false)
+                        .setAbnormal(true)
+                        .setRiskTags(List.of("显眼", "严格管制"))),
                 null));
 
         TrpgGroupAgentPolicy policy =
@@ -130,7 +132,8 @@ class TrpgGroupAgentPolicyTest {
                         "地下室",
                         1,
                         1),
-                new GroupContextMaterial(List.of(), Set.of(81L)));
+                new GroupContextMaterial(
+                        List.of(), Set.of(81L), Set.of(71L)));
 
         assertThat(invocation.prompt().getInstructions().getFirst().getText())
                 .contains("仅世界提示词")
@@ -146,6 +149,9 @@ class TrpgGroupAgentPolicyTest {
                 .doesNotContain("<investigator-card name=\"食尸鬼\"")
                 .doesNotContain("聆听=20")
                 .contains("基础游戏循环")
+                .contains("<kp-abnormal-weapon-rules>")
+                .contains("林恩：左轮手枪（riskTags：显眼、严格管制）")
+                .contains("关键线索不能因此永久消失")
                 .contains("<kp-skill-index>")
                 .contains("- 侦查：")
                 .contains("- 格斗:斧：")
@@ -177,6 +183,23 @@ class TrpgGroupAgentPolicyTest {
                         kpCombatTools, clarificationTools);
         assertThat(exposedToolNames(invocation.tools()))
                 .contains("requestPushedCheck", "readSkillRules");
+
+        var otherSceneInvocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_TRPG_SCENE,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        "scene:2",
+                        "阁楼",
+                        2,
+                        1),
+                new GroupContextMaterial(
+                        List.of(), Set.of(), Set.of(72L)));
+        assertThat(otherSceneInvocation.prompt().getInstructions()
+                .getFirst().getText())
+                .doesNotContain("<kp-abnormal-weapon-rules>")
+                .doesNotContain("riskTags：显眼、严格管制");
 
         var combatInvocation = policy.prepare(
                 conversation,
@@ -215,6 +238,7 @@ class TrpgGroupAgentPolicyTest {
                 .getFirst().getText())
                 .contains("基础游戏循环")
                 .contains("完整战斗循环")
+                .doesNotContain("<kp-abnormal-weapon-rules>")
                 .contains("<investigator-weapon-states>")
                 .contains("左轮手枪/射击:手枪")
                 .contains("弹药4/6")

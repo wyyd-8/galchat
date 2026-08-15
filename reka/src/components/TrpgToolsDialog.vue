@@ -318,7 +318,7 @@ watch(() => props.conversation.id, () => {
                       <thead><tr><th>武器</th><th>成功率</th><th>伤害</th><th>射程</th><th>次数</th><th>弹药</th><th>故障值</th></tr></thead>
                       <tbody>
                         <tr v-for="weapon in card.weapons" :key="weapon.id" :class="{ broken: weapon.isBroken }">
-                          <td><strong>{{ weapon.name }}</strong><small v-if="weapon.notes">{{ weapon.notes }}</small><em v-if="weapon.isBroken">已损坏</em></td>
+                          <td><strong>{{ weapon.name }}</strong><small v-if="weapon.notes">{{ weapon.notes }}</small><em v-if="weapon.abnormal" class="weapon-abnormal-note">此武器有可能妨碍探索</em><em v-if="weapon.isBroken">已损坏</em></td>
                           <td class="check-rate">{{ formatCheckRate(resolveWeaponCheckValue(weapon, card.skills)) }}</td>
                           <td>{{ shown(weapon.damage) }}</td>
                           <td>{{ shown(weapon.range) }}</td>

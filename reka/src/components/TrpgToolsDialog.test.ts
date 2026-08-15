@@ -32,6 +32,13 @@ function hasAttribute(element: ElementNode, name: string, value: string): boolea
     && prop.value?.content === value)
 }
 
+function hasIfExpression(element: ElementNode, expression: string): boolean {
+  return element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE
+    && prop.name === 'if'
+    && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+    && prop.exp.content === expression)
+}
+
 function textContent(node: unknown): string {
   if (!node || typeof node !== 'object') return ''
   const candidate = node as { type?: number, content?: unknown, children?: unknown[] }
@@ -78,6 +85,22 @@ test('organizes the read-only character sheet into practical data panels', async
   assert.match(sheetText, /弹药/)
   assert.match(sheetText, /故障值/)
   assert.doesNotMatch(sheetText, /成长|贯穿/)
+})
+
+test('warns about abnormal weapons without exposing their internal risk tags', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const combatPanel = findElement(baseParse(template), (element) => element.tag === 'TabsContent'
+    && hasAttribute(element, 'value', 'combat'))
+  assert.ok(combatPanel, 'the character sheet should contain the combat panel')
+
+  const warning = findElement(combatPanel as unknown as RootNode, (element) => hasClass(element, 'weapon-abnormal-note'))
+
+  assert.ok(warning, 'abnormal weapons should show an exploration warning')
+  assert.equal(hasIfExpression(warning, 'weapon.abnormal'), true)
+  assert.match(textContent(warning), /此武器有可能妨碍探索/)
+  assert.doesNotMatch(textContent(combatPanel), /riskTags|显眼|高噪声/)
 })
 
 test('groups each attribute name and code above its value', async () => {

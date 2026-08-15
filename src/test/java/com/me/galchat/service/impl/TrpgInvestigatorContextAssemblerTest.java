@@ -50,6 +50,7 @@ class TrpgInvestigatorContextAssemblerTest {
                 .contains("左轮手枪")
                 .contains("弹药5/6")
                 .contains("状态正常")
+                .doesNotContain("abnormal", "riskTags", "显眼", "高噪声")
                 .contains("撬棍和提灯")
                 .contains("资产：旧报社股份")
                 .contains("消费水平：10")
@@ -149,7 +150,9 @@ class TrpgInvestigatorContextAssemblerTest {
                         .setDamage("1d10")
                         .setAmmoCapacity(6)
                         .setRemainingAmmo(5)
-                        .setIsBroken(false)));
+                        .setIsBroken(false)
+                        .setAbnormal(true)
+                        .setRiskTags(List.of("显眼", "高噪声"))));
         CocSkillDef libraryUse = new CocSkillDef();
         libraryUse.setId(1L);
         libraryUse.setName("图书馆使用");

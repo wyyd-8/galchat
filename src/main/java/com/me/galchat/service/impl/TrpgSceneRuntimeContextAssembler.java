@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
@@ -17,8 +18,22 @@ public class TrpgSceneRuntimeContextAssembler {
     public String format(
             GroupConversation conversation,
             GroupActionSpec action) {
+        return assemble(conversation, action).prompt();
+    }
+
+    public RuntimeContext assemble(
+            GroupConversation conversation,
+            GroupActionSpec action) {
         TrpgSceneParticipantService.SceneState state =
                 participantService.state(conversation);
+        return new RuntimeContext(
+                format(state, action),
+                Set.copyOf(state.activeInvestigatorCharacterIds()));
+    }
+
+    private String format(
+            TrpgSceneParticipantService.SceneState state,
+            GroupActionSpec action) {
         StringBuilder result = new StringBuilder(
                 "<current-scene-runtime>\n当前场景：")
                 .append(state.scenePath()).append("\n\n");
@@ -45,6 +60,11 @@ public class TrpgSceneRuntimeContextAssembler {
         }
         return result.append("</current-scene-runtime>")
                 .toString();
+    }
+
+    public record RuntimeContext(
+            String prompt,
+            Set<Long> activeInvestigatorCharacterIds) {
     }
 
     private void appendNames(

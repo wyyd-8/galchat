@@ -26,6 +26,8 @@ public final class CocWeaponCatalogConstant {
             Integer ammoCapacity,
             String malfunction,
             WeaponEra era,
+            boolean abnormal,
+            List<String> riskTags,
             String notes) {
     }
 
@@ -33,7 +35,10 @@ public final class CocWeaponCatalogConstant {
             entry("BOW", weapon("BOW", "弓箭", "射击:弓", "1D6+半DB", "30m", "1", 1, "97", WeaponEra.BOTH)),
             entry("BRASS_KNUCKLES", weapon("BRASS_KNUCKLES", "黄铜指虎", "斗殴", "1D3+1+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("WHIP", weapon("WHIP", "长鞭", "格斗:鞭", "1D3+半DB", "3m", "1", null, null, WeaponEra.TWENTIES)),
-            entry("CHAINSAW", weapon("CHAINSAW", "链锯", "格斗:链锯", "2D8", "接触", "1", null, "95", WeaponEra.MODERN)),
+            entry("CHAINSAW", abnormalWeapon(
+                    "CHAINSAW", "链锯", "格斗:链锯", "2D8", "接触", "1",
+                    null, "95", WeaponEra.MODERN,
+                    List.of("显眼", "高噪声", "笨重", "破坏现场"))),
             entry("SAP", weapon("SAP", "包革金属棒（大头棍、护身棒）", "斗殴", "1D8+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("LARGE_CLUB", weapon("LARGE_CLUB", "大型棍棒（棒球棒、板球棒、拨火棍）", "斗殴", "1D8+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("POLICE_BATON", weapon("POLICE_BATON", "小型棍棒（警棍）", "斗殴", "1D6+DB", "接触", "1", null, null, WeaponEra.BOTH)),
@@ -99,6 +104,17 @@ public final class CocWeaponCatalogConstant {
             String damage, String range, String attacksPerRound,
             Integer ammoCapacity, String malfunction, WeaponEra era) {
         return new WeaponDefinition(code, name, requiredSkillName, damage,
-                range, attacksPerRound, ammoCapacity, malfunction, era, null);
+                range, attacksPerRound, ammoCapacity, malfunction, era,
+                false, List.of(), null);
+    }
+
+    private static WeaponDefinition abnormalWeapon(
+            String code, String name, String requiredSkillName,
+            String damage, String range, String attacksPerRound,
+            Integer ammoCapacity, String malfunction, WeaponEra era,
+            List<String> riskTags) {
+        return new WeaponDefinition(code, name, requiredSkillName, damage,
+                range, attacksPerRound, ammoCapacity, malfunction, era,
+                true, List.copyOf(riskTags), null);
     }
 }

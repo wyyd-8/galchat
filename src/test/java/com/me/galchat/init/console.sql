@@ -747,6 +747,8 @@ CREATE TABLE coc_character_weapon (
     remaining_ammo INT,
     malfunction VARCHAR(50),
     is_broken BOOLEAN DEFAULT FALSE,
+    abnormal BOOLEAN NOT NULL DEFAULT FALSE,
+    risk_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
     notes TEXT
 );
 

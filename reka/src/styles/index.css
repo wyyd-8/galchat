@@ -628,6 +628,8 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .weapon-data-table td:not(:first-child), .weapon-data-table th:not(:first-child) { text-align: center; white-space: nowrap; }
 .weapon-data-table tr.broken { color: var(--wine); background: #faf0f1; }
 .weapon-data-table td em { margin-top: 3px; padding: 2px 5px; border-radius: 99px; display: inline-block; color: var(--wine); background: #f3e3e5; font-size: 7px; font-style: normal; }
+.weapon-abnormal-note { margin-left: 5px; color: #8a5a12; font-size: 0.78em; font-style: normal; }
+.weapon-data-table td .weapon-abnormal-note { color: #8a5a12; background: #f6ecd7; }
 .sheet-table-empty { height: 86px; color: var(--muted); text-align: center !important; }
 .sheet-equipment-summary { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f0eee7; }
 .sheet-equipment-summary strong { font-size: 8px; }

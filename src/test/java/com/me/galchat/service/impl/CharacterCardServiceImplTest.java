@@ -8,8 +8,10 @@ import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.dto.CharacterCardCreateDTO;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserInfo;
+import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.exception.UserAuthException;
@@ -48,6 +50,7 @@ class CharacterCardServiceImplTest {
 
     private CocCharacterMapper characterMapper;
     private CocCharacterSkillMapper skillMapper;
+    private CocCharacterWeaponMapper weaponMapper;
     private CocSkillDefMapper skillDefMapper;
     private CharacterTemplateMapper characterTemplateMapper;
     private UserInfoMapper userInfoMapper;
@@ -59,12 +62,13 @@ class CharacterCardServiceImplTest {
         MybatisPlusTestSupport.initialize(CocCharacter.class);
         characterMapper = mock(CocCharacterMapper.class);
         skillMapper = mock(CocCharacterSkillMapper.class);
+        weaponMapper = mock(CocCharacterWeaponMapper.class);
         skillDefMapper = mock(CocSkillDefMapper.class);
         characterTemplateMapper = mock(CharacterTemplateMapper.class);
         userInfoMapper = mock(UserInfoMapper.class);
         conversationMapper = mock(GroupConversationMapper.class);
         service = new CharacterCardServiceImpl(characterMapper, skillMapper,
-                mock(CocCharacterWeaponMapper.class), mock(CocCharacterProfileMapper.class), skillDefMapper,
+                weaponMapper, mock(CocCharacterProfileMapper.class), skillDefMapper,
                 new CharacterSkillResolver(),
                 characterTemplateMapper, userInfoMapper,
                 conversationMapper);
@@ -371,6 +375,111 @@ class CharacterCardServiceImplTest {
         assertThat(((AbstractWrapper<?, ?, ?>) captor.getValue())
                 .getParamNameValuePairs().values())
                 .contains("已感染第一阶段");
+    }
+
+    @Test
+    void weaponStateUpdateCanConsumeSeveralRoundsAtOnce() {
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(5L).setName("林恩");
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(71L).setName("汤普森冲锋枪")
+                .setAmmoCapacity(20).setRemainingAmmo(20)
+                .setIsBroken(false);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(weaponMapper.selectByCharacterIdAndNameForUpdate(
+                71L, "汤普森冲锋枪")).thenReturn(List.of(weapon));
+        when(weaponMapper.updateById(weapon)).thenReturn(1);
+
+        KpWeaponStateDTOs.Result result = service.updateWeaponState(
+                5L, "林恩", "汤普森冲锋枪",
+                new KpWeaponStateDTOs.Update(14, false));
+
+        assertThat(weapon.getRemainingAmmo()).isEqualTo(14);
+        assertThat(result.remainingAmmo()).isEqualTo(14);
+        assertThat(result.changed()).isTrue();
+        verify(weaponMapper).updateById(weapon);
+    }
+
+    @Test
+    void weaponStateUpdateCanReloadUpToCapacity() {
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(5L).setName("林恩");
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(71L).setName("左轮手枪")
+                .setAmmoCapacity(6).setRemainingAmmo(1)
+                .setIsBroken(false);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(weaponMapper.selectByCharacterIdAndNameForUpdate(
+                71L, "左轮手枪")).thenReturn(List.of(weapon));
+        when(weaponMapper.updateById(weapon)).thenReturn(1);
+
+        KpWeaponStateDTOs.Result result = service.updateWeaponState(
+                5L, "林恩", "左轮手枪",
+                new KpWeaponStateDTOs.Update(6, false));
+
+        assertThat(weapon.getRemainingAmmo()).isEqualTo(6);
+        assertThat(result.remainingAmmo()).isEqualTo(6);
+        assertThat(result.ammoCapacity()).isEqualTo(6);
+    }
+
+    @Test
+    void repeatedWeaponStateUpdateIsIdempotent() {
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(5L).setName("林恩");
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(71L).setName("左轮手枪")
+                .setAmmoCapacity(6).setRemainingAmmo(5)
+                .setIsBroken(false);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(weaponMapper.selectByCharacterIdAndNameForUpdate(
+                71L, "左轮手枪")).thenReturn(List.of(weapon));
+
+        KpWeaponStateDTOs.Result result = service.updateWeaponState(
+                5L, "林恩", "左轮手枪",
+                new KpWeaponStateDTOs.Update(5, false));
+
+        assertThat(result.changed()).isFalse();
+        org.mockito.Mockito.verify(weaponMapper,
+                org.mockito.Mockito.never()).updateById(
+                        any(CocCharacterWeapon.class));
+    }
+
+    @Test
+    void weaponStateUpdateCannotRepairBrokenWeapon() {
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(5L).setName("林恩");
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(71L).setName("左轮手枪")
+                .setAmmoCapacity(6).setRemainingAmmo(5)
+                .setIsBroken(true);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(weaponMapper.selectByCharacterIdAndNameForUpdate(
+                71L, "左轮手枪")).thenReturn(List.of(weapon));
+
+        assertThatThrownBy(() -> service.updateWeaponState(
+                5L, "林恩", "左轮手枪",
+                new KpWeaponStateDTOs.Update(5, false)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("武器修复不能通过状态更新工具完成");
+    }
+
+    @Test
+    void weaponStateUpdateRejectsAmmoBeyondCapacity() {
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(5L).setName("林恩");
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(71L).setName("左轮手枪")
+                .setAmmoCapacity(6).setRemainingAmmo(5)
+                .setIsBroken(false);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(weaponMapper.selectByCharacterIdAndNameForUpdate(
+                71L, "左轮手枪")).thenReturn(List.of(weapon));
+
+        assertThatThrownBy(() -> service.updateWeaponState(
+                5L, "林恩", "左轮手枪",
+                new KpWeaponStateDTOs.Update(7, false)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("剩余弹药必须在0到弹药容量之间");
     }
 
     @Test

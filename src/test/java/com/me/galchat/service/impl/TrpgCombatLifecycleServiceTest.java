@@ -30,6 +30,61 @@ import static org.mockito.Mockito.when;
 class TrpgCombatLifecycleServiceTest {
 
     @Test
+    void utilityActionRouteAllowsReloadWithoutAnotherParticipantTarget() {
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        var objectMapper = JsonMapper.builder().build();
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupReplyPlanService.class),
+                        planMapper,
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class),
+                        stepMapper,
+                        mock(GroupChatMessageMapper.class),
+                        mock(CocCharacterMapper.class),
+                        combatMapper,
+                        objectMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setActiveReplyPlanId(10L);
+        GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep route = new GroupChatReplyStep()
+                .setId(42L).setTurnId(30L).setStepNo(2)
+                .setSubjectCharacterId(71L)
+                .setActionType(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                        .setContextId(200L));
+        when(combatMapper.selectById(200L)).thenReturn(
+                new TrpgCombat().setId(200L).setConversationId(7L)
+                        .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
+                        .setParticipants(objectMapper.createArrayNode()));
+        GroupChatReplyStep defense = new GroupChatReplyStep()
+                .setId(43L).setTurnId(30L).setStepNo(3)
+                .setItemOrder(3)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_DEFENSE)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(stepMapper.selectList(any())).thenReturn(List.of(defense));
+
+        var decision = service.completeReactionRoute(
+                conversation, turn, route,
+                "{\"actionKind\":\"SELF_OR_UTILITY\","
+                        + "\"insertDefense\":false,\"reason\":\"装填\"}");
+
+        assertThat(decision.targetCharacterId()).isNull();
+        assertThat(decision.targetName()).isNull();
+        assertThat(decision.insertDefense()).isFalse();
+        assertThat(defense.getSubjectCharacterId()).isNull();
+        assertThat(defense.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_CANCELLED);
+    }
+
+    @Test
     void npcAttackRouteAllowsAnUnconsciousOrDyingInvestigatorTarget() {
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);

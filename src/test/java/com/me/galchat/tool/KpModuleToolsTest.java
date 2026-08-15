@@ -3,6 +3,7 @@ package com.me.galchat.tool;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.TrpgMaterialService;
 import com.me.galchat.service.impl.TrpgModuleQueryService;
@@ -47,6 +48,10 @@ class KpModuleToolsTest {
                         10, null, null, null,
                         -5, null, null, null);
         tools.adjustBasicAttributes("林恩", adjustments, context);
+        KpWeaponStateDTOs.Update weaponUpdate =
+                new KpWeaponStateDTOs.Update(3, true);
+        tools.updateWeaponState(
+                "林恩", "左轮手枪", weaponUpdate, context);
 
         verify(materialService).showMaterial(
                 7L, 41L, "玛德琳的信");
@@ -54,6 +59,8 @@ class KpModuleToolsTest {
                 7L, "林恩", "已经感染第一阶段");
         verify(characterCardService).adjustBasicAttributes(
                 7L, "林恩", adjustments);
+        verify(characterCardService).updateWeaponState(
+                7L, "林恩", "左轮手枪", weaponUpdate);
         assertThat(KpModuleTools.class.getMethod(
                         "showMaterial", String.class, ToolContext.class)
                 .getAnnotation(Tool.class).returnDirect()).isFalse();
@@ -65,6 +72,10 @@ class KpModuleToolsTest {
                         "adjustBasicAttributes", String.class,
                         KpCharacterAttributeDTOs.Adjustments.class,
                         ToolContext.class)
+                .getAnnotation(Tool.class).returnDirect()).isFalse();
+        assertThat(KpModuleTools.class.getMethod(
+                        "updateWeaponState", String.class, String.class,
+                        KpWeaponStateDTOs.Update.class, ToolContext.class)
                 .getAnnotation(Tool.class).returnDirect()).isFalse();
     }
 

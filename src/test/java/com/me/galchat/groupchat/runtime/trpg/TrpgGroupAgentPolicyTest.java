@@ -4,6 +4,7 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
+import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
@@ -81,6 +82,19 @@ class TrpgGroupAgentPolicyTest {
                         .setAppearance("弓背、皮肤灰白，利爪沾着泥土。")
                         .setTraits("饥饿、谨慎，会优先拖走落单者。")
                         .setIdeology("保护巢穴并寻找尸体。")));
+        when(cardService.getById(71L)).thenReturn(new CharacterCardVO(
+                new CocCharacter().setId(71L).setRunId(7L)
+                        .setActorType("PLAYER").setName("林恩"),
+                List.of(),
+                List.of(new CocCharacterWeapon()
+                        .setCharacterId(71L)
+                        .setName("左轮手枪")
+                        .setSkillName("射击:手枪")
+                        .setDamage("1D10")
+                        .setAmmoCapacity(6)
+                        .setRemainingAmmo(4)
+                        .setIsBroken(false)),
+                null));
 
         TrpgGroupAgentPolicy policy =
                 new TrpgGroupAgentPolicy(
@@ -170,12 +184,23 @@ class TrpgGroupAgentPolicyTest {
                         1),
                 new GroupContextMaterial(List.of()));
         assertThat(exposedToolNames(combatInvocation.tools()))
-                .contains("readSkillRules")
+                .contains("readSkillRules", "updateWeaponState")
                 .doesNotContain("requestPushedCheck");
         assertThat(combatInvocation.prompt().getInstructions()
                 .getFirst().getText())
                 .contains("基础游戏循环")
-                .contains("完整战斗循环");
+                .contains("完整战斗循环")
+                .contains("<investigator-weapon-states>")
+                .contains("左轮手枪/射击:手枪")
+                .contains("弹药4/6")
+                .contains("每次实际射击后")
+                .contains("updateWeaponState")
+                .contains("一次射出3发")
+                .contains("装填")
+                .contains("大失败")
+                .contains("武器损坏", "误伤", "走火")
+                .doesNotContain("弹药与故障、射程档位")
+                .doesNotContain("不使用射程、抵近、移动修正、装填、连射、自动武器、弹药、故障");
 
         var npcAttack = policy.prepare(
                 conversation,

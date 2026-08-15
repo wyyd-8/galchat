@@ -3,6 +3,7 @@ package com.me.galchat.service.impl;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
+import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import org.junit.jupiter.api.Test;
@@ -107,5 +108,32 @@ class CharacterCardContextFormatterTest {
                 .doesNotContain("力量=", "敏捷=")
                 .doesNotContain("聆听=20")
                 .doesNotContain("不应泄露的队友档案");
+    }
+
+    @Test
+    void investigatorWeaponStateContextIncludesAmmoAndBrokenState() {
+        CocCharacter investigator = new CocCharacter()
+                .setId(71L).setName("林恩");
+        CharacterCardVO card = new CharacterCardVO(
+                investigator, List.of(), List.of(
+                new CocCharacterWeapon()
+                        .setCharacterId(71L)
+                        .setName("左轮手枪")
+                        .setSkillName("射击:手枪")
+                        .setDamage("1D10")
+                        .setAmmoCapacity(6)
+                        .setRemainingAmmo(2)
+                        .setIsBroken(true)), null);
+
+        String text = formatter.formatInvestigatorWeaponStates(
+                List.of(card));
+
+        assertThat(text)
+                .contains("<investigator-weapon-states>")
+                .contains("林恩")
+                .contains("左轮手枪/射击:手枪")
+                .contains("伤害1D10")
+                .contains("弹药2/6")
+                .contains("状态损坏");
     }
 }

@@ -169,6 +169,14 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
             String investigatorCardContext =
                     characterCardFormatter.format(investigatorCards);
+            String investigatorWeaponContext = combatPhase
+                    ? characterCardFormatter.formatInvestigatorWeaponStates(
+                    investigatorCards.stream()
+                            .map(card -> characterCardService.getById(
+                                    card.cardId()))
+                            .filter(java.util.Objects::nonNull)
+                            .toList())
+                    : "";
             List<CocDiceCharacterVO> npcCards = cards.stream()
                     .filter(card -> "NPC".equals(card.actorType()))
                     .toList();
@@ -180,6 +188,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     .toList();
             messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, actor) + "\n"
                     + investigatorCardContext + "\n"
+                    + investigatorWeaponContext + "\n"
                     + characterCardFormatter.formatNpcs(npcCards)
                     + "\n" + characterCardFormatter.formatActiveNpcs(
                             activeNpcCards)
@@ -238,10 +247,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         """));
             } else if (combatRoute) {
                 messages.add(new UserMessage("""
-                        读取紧邻的攻击行动，识别攻击者选择的准确目标，并判断目标是否需要获得闪避、反击或其他即时防守行动。
+                        读取紧邻的行动。攻击、阻拦、急救等涉及另一名参战者的行动使用TARGETED；装填等只影响行动者或其装备的行动使用SELF_OR_UTILITY。
+                        TARGETED必须识别准确目标，并判断目标是否需要获得闪避、反击或其他即时防守行动。
                         只输出一个JSON对象，不要Markdown，不要叙事：
-                        {"targetName":"准确人物卡名称","insertDefense":true,"defenseOptions":["闪避","反击"],"reason":"简短原因"}
-                        目标缺失、歧义、不在参战者中或行动不合法时不要猜测，改为：
+                        {"actionKind":"TARGETED","targetName":"准确人物卡名称","insertDefense":true,"defenseOptions":["闪避","反击"],"reason":"简短原因"}
+                        或：
+                        {"actionKind":"SELF_OR_UTILITY","insertDefense":false,"defenseOptions":[],"reason":"装填等简短原因"}
+                        TARGETED的目标缺失、歧义、不在参战者中或行动不合法时不要猜测，改为：
                         {"error":"明确说明问题"}
                         """));
             } else {
@@ -258,7 +270,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 messages.add(new UserMessage("现在轮到KP推进当前" + phase
                         + "。" + subjectHint
                         + (combatAttack || combatDefense
-                        ? "选择公开上下文中的目标并描述行动；不要在此步骤裁定成败，也不要掷骰。"
+                        ? (combatAttack
+                        ? "攻击或影响他人时选择公开上下文中的准确目标；装填等只影响自身或装备的行动可以不选择他人目标。不要在此步骤裁定成败，也不要掷骰。"
+                        : "选择公开上下文中的目标并描述行动；不要在此步骤裁定成败，也不要掷骰。")
                         + (combatAttack
                         ? " 在规则允许的范围内，不要尝试攻击昏迷/濒死的调查员。"
                         : "")
@@ -335,6 +349,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "决定其他角色或NPC反应，也不得自行声明检定成功。"
                         + (combatDefense
                         ? combatLifecycleService.defensePrompt(action)
+                        : "")
+                        + (combatAttack
+                        ? "装填是合法的完整主动位行动；明确说出要装填的武器。"
                         : "")
                         + (scenePhase
                         ? "确定不再执行当前场景行动时可调用endSceneExploration；"

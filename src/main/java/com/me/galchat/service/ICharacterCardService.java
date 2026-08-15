@@ -2,6 +2,7 @@ package com.me.galchat.service;
 
 import com.me.galchat.domain.dto.CharacterCardCreateDTO;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
@@ -17,6 +18,9 @@ public interface ICharacterCardService {
     DiceRollResultVO rollLuck(Long id);
     CocDiceCharacterVO requireDiceCharacter(Long runId, String characterName);
     void updateQuickNotes(Long runId, String characterName, String quickNotes);
+    KpWeaponStateDTOs.Result updateWeaponState(
+            Long runId, String characterName, String weaponName,
+            KpWeaponStateDTOs.Update update);
     KpCharacterAttributeDTOs.Result adjustBasicAttributes(
             Long runId, String characterName,
             KpCharacterAttributeDTOs.Adjustments adjustments);

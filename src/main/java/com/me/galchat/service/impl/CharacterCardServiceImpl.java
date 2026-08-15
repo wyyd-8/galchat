@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.CharacterCardCreateDTO;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
@@ -187,6 +188,68 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         if (updated == 0) {
             throw new UserRequestException("人物卡不存在");
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KpWeaponStateDTOs.Result updateWeaponState(
+            Long runId, String characterName, String weaponName,
+            KpWeaponStateDTOs.Update update) {
+        if (update == null
+                || update.remainingAmmo() == null
+                && update.broken() == null) {
+            throw new UserRequestException("至少需要提供一个武器状态更新值");
+        }
+        if (weaponName == null || weaponName.isBlank()) {
+            throw new UserRequestException("武器名称不能为空");
+        }
+        CocCharacter character = requireCharacterByName(
+                runId, characterName);
+        List<CocCharacterWeapon> matches =
+                weaponMapper.selectByCharacterIdAndNameForUpdate(
+                        character.getId(), weaponName.trim());
+        if (matches == null || matches.isEmpty()) {
+            throw new UserRequestException("人物卡没有该武器");
+        }
+        if (matches.size() > 1) {
+            throw new UserRequestException("人物卡武器名称不唯一");
+        }
+        CocCharacterWeapon weapon = matches.getFirst();
+        if (update.remainingAmmo() != null) {
+            Integer capacity = weapon.getAmmoCapacity();
+            if (capacity == null) {
+                throw new UserRequestException("该武器不记录弹药");
+            }
+            if (update.remainingAmmo() < 0
+                    || update.remainingAmmo() > capacity) {
+                throw new UserRequestException(
+                        "剩余弹药必须在0到弹药容量之间");
+            }
+        }
+        boolean brokenBefore = Boolean.TRUE.equals(
+                weapon.getIsBroken());
+        if (brokenBefore && Boolean.FALSE.equals(update.broken())) {
+            throw new UserRequestException(
+                    "武器修复不能通过状态更新工具完成");
+        }
+        Integer ammoAfter = update.remainingAmmo() == null
+                ? weapon.getRemainingAmmo() : update.remainingAmmo();
+        boolean brokenAfter = update.broken() == null
+                ? brokenBefore : update.broken();
+        boolean changed = !Objects.equals(
+                weapon.getRemainingAmmo(), ammoAfter)
+                || brokenBefore != brokenAfter;
+        if (changed) {
+            weapon.setRemainingAmmo(ammoAfter)
+                    .setIsBroken(brokenAfter);
+            if (weaponMapper.updateById(weapon) == 0) {
+                throw new UserRequestException("武器不存在");
+            }
+        }
+        return new KpWeaponStateDTOs.Result(
+                character.getName(), weapon.getName(),
+                ammoAfter, weapon.getAmmoCapacity(),
+                brokenAfter, changed);
     }
 
     @Override

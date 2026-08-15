@@ -63,6 +63,32 @@ public class CharacterCardContextFormatter {
         return result.append("\n</other-investigators>").toString();
     }
 
+    public String formatInvestigatorWeaponStates(
+            List<CharacterCardVO> cards) {
+        if (cards == null || cards.isEmpty()) {
+            return "<investigator-weapon-states />";
+        }
+        StringBuilder result = new StringBuilder(
+                "<investigator-weapon-states>");
+        for (CharacterCardVO card : cards) {
+            if (card == null || card.getCharacter() == null
+                    || card.getWeapons() == null
+                    || card.getWeapons().isEmpty()) {
+                continue;
+            }
+            result.append("\n<investigator-weapons name=\"")
+                    .append(escape(card.getCharacter().getName()))
+                    .append("\">");
+            appendWeapons(result, card.getWeapons());
+            result.append("\n</investigator-weapons>");
+        }
+        if (result.length() == "<investigator-weapon-states>".length()) {
+            return "<investigator-weapon-states />";
+        }
+        return result.append("\n</investigator-weapon-states>")
+                .toString();
+    }
+
     private void appendOtherInvestigator(
             StringBuilder result, CharacterCardVO card) {
         CocCharacter character = card.getCharacter();
@@ -272,6 +298,16 @@ public class CharacterCardContextFormatter {
                 value.append(" 伤害").append(escape(
                         weapon.getDamage().trim()));
             }
+            if (weapon.getRemainingAmmo() != null
+                    || weapon.getAmmoCapacity() != null) {
+                value.append(" 弹药")
+                        .append(value(weapon.getRemainingAmmo()))
+                        .append('/')
+                        .append(value(weapon.getAmmoCapacity()));
+            }
+            value.append(" 状态").append(
+                    Boolean.TRUE.equals(weapon.getIsBroken())
+                            ? "损坏" : "正常");
             values.add(value.toString());
         }
         if (values.length() > 0) {

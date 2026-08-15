@@ -3,6 +3,7 @@ package com.me.galchat.tool;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.ICharacterCardService;
@@ -108,6 +109,28 @@ public class KpModuleTools {
         KpContext kp = requireKpContext(context);
         return characterCardService.adjustBasicAttributes(
                 kp.runId(), characterName, adjustments);
+    }
+
+    @Tool(
+            name = "updateWeaponState",
+            description = """
+                    按准确人物卡名称和武器名称提交武器的最新状态。
+                    实际射击后，无论命中、失败还是大失败，都要按射出的数量更新剩余弹药；允许一次消耗多发。
+                    装填时可以增加剩余弹药，但不能超过武器容量。
+                    大失败时由KP决定是否把武器标记为损坏，或改用误伤、走火等其他合理后果。
+                    本工具不能把已损坏武器修复为正常。调用后仍必须继续完成当前裁定。
+                    """)
+    public KpWeaponStateDTOs.Result updateWeaponState(
+            @ToolParam(description = "人物卡准确名称，不能传ID")
+            String characterName,
+            @ToolParam(description = "该人物卡持有的准确武器名称，不能传ID")
+            String weaponName,
+            @ToolParam(description = "需要覆盖保存的剩余弹药和/或损坏状态")
+            KpWeaponStateDTOs.Update update,
+            ToolContext context) {
+        KpContext kp = requireKpContext(context);
+        return characterCardService.updateWeaponState(
+                kp.runId(), characterName, weaponName, update);
     }
 
     private KpContext requireKpContext(ToolContext context) {

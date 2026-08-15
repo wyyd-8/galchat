@@ -48,6 +48,8 @@ class TrpgInvestigatorContextAssemblerTest {
                 .contains("我的导师")
                 .contains("关键联结：重要之人 / 我的导师")
                 .contains("左轮手枪")
+                .contains("弹药5/6")
+                .contains("状态正常")
                 .contains("撬棍和提灯")
                 .contains("资产：旧报社股份")
                 .contains("消费水平：10")
@@ -144,7 +146,10 @@ class TrpgInvestigatorContextAssemblerTest {
         when(weaponMapper.selectList(any())).thenReturn(List.of(
                 new CocCharacterWeapon()
                         .setName("左轮手枪")
-                        .setDamage("1d10")));
+                        .setDamage("1d10")
+                        .setAmmoCapacity(6)
+                        .setRemainingAmmo(5)
+                        .setIsBroken(false)));
         CocSkillDef libraryUse = new CocSkillDef();
         libraryUse.setId(1L);
         libraryUse.setName("图书馆使用");

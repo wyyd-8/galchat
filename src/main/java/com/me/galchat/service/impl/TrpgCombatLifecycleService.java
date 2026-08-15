@@ -74,12 +74,34 @@ public class TrpgCombatLifecycleService {
             throw new UserRequestException(
                     "战斗目标无法确定：" + root.get("error").asText());
         }
+        TrpgCombat combat = requireActiveCombat(conversation);
+        String actionKind = root.get("actionKind") == null
+                ? "TARGETED" : root.get("actionKind").asText();
+        GroupChatReplyStep defense = nextStep(
+                turn.getId(), routeStep.getStepNo());
+        if (defense == null
+                || !GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
+                defense.getActionType())) {
+            throw new IllegalStateException("战斗防守占位步骤不存在");
+        }
+        if ("SELF_OR_UTILITY".equals(actionKind)) {
+            defense.setSubjectCharacterId(null)
+                    .setStatus(GroupChatConstant.STATUS_CANCELLED)
+                    .setUpdatedAt(LocalDateTime.now());
+            stepMapper.updateById(defense);
+            return new RouteDecision(
+                    null, null, false, List.of(),
+                    root.get("reason") == null
+                            ? null : root.get("reason").asText());
+        }
+        if (!"TARGETED".equals(actionKind)) {
+            throw new UserRequestException("KP战斗路由行动类型无效");
+        }
         String targetName = root.get("targetName") == null
                 ? null : root.get("targetName").asText();
         if (!StringUtils.hasText(targetName)) {
             throw new UserRequestException("KP战斗路由缺少目标人物卡");
         }
-        TrpgCombat combat = requireActiveCombat(conversation);
         Long targetId = null;
         for (tools.jackson.databind.JsonNode participant :
                 combat.getParticipants()) {
@@ -104,13 +126,6 @@ public class TrpgCombatLifecycleService {
         if (root.get("defenseOptions") != null) {
             root.get("defenseOptions").forEach(
                     node -> options.add(node.asText()));
-        }
-        GroupChatReplyStep defense = nextStep(
-                turn.getId(), routeStep.getStepNo());
-        if (defense == null
-                || !GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
-                defense.getActionType())) {
-            throw new IllegalStateException("战斗防守占位步骤不存在");
         }
         if (insertDefense
                 && (Boolean.TRUE.equals(target.getDead())

@@ -166,8 +166,11 @@ public class TrpgInvestigatorContextAssembler {
         StringJoiner values = new StringJoiner("；");
         weapons.forEach(weapon -> values.add(
                 weapon.getName() + "（伤害"
-                        + value(weapon.getDamage()) + "，剩余弹药"
-                        + value(weapon.getRemainingAmmo()) + "）"));
+                        + value(weapon.getDamage()) + "，弹药"
+                        + value(weapon.getRemainingAmmo()) + "/"
+                        + value(weapon.getAmmoCapacity()) + "，状态"
+                        + (Boolean.TRUE.equals(weapon.getIsBroken())
+                        ? "损坏" : "正常") + "）"));
         append(result, "武器", values.toString());
     }
 

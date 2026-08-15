@@ -35,6 +35,8 @@ public final class GroupChatConstant {
     public static final String ACTION_COMBAT_ADJUDICATE = "combat_adjudicate";
     public static final String ACTION_COMBAT_UNCONSCIOUS_RECOVERY =
             "combat_unconscious_recovery";
+    public static final String ACTION_TRPG_INTERACTION_RESPONSE =
+            "trpg_interaction_response";
     public static final String ACTION_TRPG_SCENE_SELECTION = "trpg_scene_selection";
 
     public static final String TOPIC_BOUNDARY_SEMANTIC = "semantic";
@@ -50,6 +52,8 @@ public final class GroupChatConstant {
     public static final String STATUS_CANCELLED = "cancelled";
     public static final String STATUS_STREAMING = "streaming";
     public static final String STATUS_WAITING_INPUT = "waiting_input";
+    public static final String STATUS_WAITING_INTERACTION =
+            "waiting_interaction";
     public static final String STATUS_PAUSED = "paused";
     public static final String STATUS_WAITING_DICE = "waiting_dice";
     public static final String STATUS_WITHDRAWN = "withdrawn";

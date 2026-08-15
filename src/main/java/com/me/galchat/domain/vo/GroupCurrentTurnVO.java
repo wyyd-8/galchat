@@ -14,6 +14,9 @@ public record GroupCurrentTurnVO(
         Integer itemOrder,
         String inputType,
         String sceneName,
+        Long promptMessageId,
+        String interactionType,
+        Integer interactionSeq,
         boolean waitingForUser,
         Map<String, String> sceneOptions,
         List<GroupCurrentTurnStepVO> steps) {

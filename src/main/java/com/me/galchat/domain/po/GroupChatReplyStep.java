@@ -22,6 +22,11 @@ public class GroupChatReplyStep implements Serializable {
     private Integer groupOrder;
     private Integer itemOrder;
     private Integer stepNo;
+    private Long parentStepId;
+    private Long rootStepId;
+    private String interactionType;
+    private Integer interactionSeq;
+    private Long promptMessageId;
     private String actionType;
     private String speakerType;
     private Long speakerId;

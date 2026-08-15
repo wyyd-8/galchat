@@ -117,6 +117,9 @@ class TrpgGroupAgentPolicyTest {
                                 .KpWaitingInvestigatorTools.class),
                         mock(com.me.galchat.service.impl
                                 .TrpgChildSceneCommandService.class));
+        var clarificationTools = mock(
+                com.me.galchat.tool.KpClarificationTools.class);
+        policy.setKpClarificationTools(clarificationTools);
         var invocation = policy.prepare(
                 conversation,
                 new GroupActionSpec(
@@ -162,13 +165,16 @@ class TrpgGroupAgentPolicyTest {
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("共同场景提案")
                 .contains("统一裁定")
-                .contains("不要按调查员逐条机械回复");
+                .contains("不要按调查员逐条机械回复")
+                .contains("不确定是否需要追问时不要调用")
+                .contains("团队问题只向真人玩家确认")
+                .contains("可以改变、补充或放弃原行动");
         assertThat(policy.actorName(5L, kp)).isEqualTo("KP");
         assertThat(invocation.tools())
                 .containsExactly(
                         kpDiceTools, kpPushedCheckTools, kpModuleTools,
                         kpSkillRuleTools, kpSceneTools, kpRunTools,
-                        kpCombatTools);
+                        kpCombatTools, clarificationTools);
         assertThat(exposedToolNames(invocation.tools()))
                 .contains("requestPushedCheck", "readSkillRules");
 
@@ -185,7 +191,26 @@ class TrpgGroupAgentPolicyTest {
                 new GroupContextMaterial(List.of()));
         assertThat(exposedToolNames(combatInvocation.tools()))
                 .contains("readSkillRules", "updateWeaponState")
+                .doesNotContain("askForClarification")
                 .doesNotContain("requestPushedCheck");
+
+        var routeInvocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        "combat:1",
+                        "战斗反应路由",
+                        1,
+                        1),
+                new GroupContextMaterial(List.of()));
+        assertThat(routeInvocation.tools())
+                .containsExactly(clarificationTools);
+        assertThat(routeInvocation.prompt().getInstructions()
+                .getLast().getText())
+                .contains("无法唯一确定时调用askForClarification")
+                .contains("不确定是否需要追问时不要调用");
         assertThat(combatInvocation.prompt().getInstructions()
                 .getFirst().getText())
                 .contains("基础游戏循环")

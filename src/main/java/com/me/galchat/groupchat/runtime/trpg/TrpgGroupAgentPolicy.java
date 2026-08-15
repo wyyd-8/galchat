@@ -16,6 +16,7 @@ import com.me.galchat.service.impl.TrpgContextWindowService;
 import com.me.galchat.service.impl.TrpgChildSceneCommandService;
 import com.me.galchat.service.impl.TrpgInvestigatorContextAssembler;
 import com.me.galchat.tool.KpChildSceneTools;
+import com.me.galchat.tool.KpClarificationTools;
 import com.me.galchat.tool.KpDiceTools;
 import com.me.galchat.tool.KpPushedCheckTools;
 import com.me.galchat.tool.InvestigatorSceneTools;
@@ -62,6 +63,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final KpChildSceneTools kpChildSceneTools;
     private final KpWaitingInvestigatorTools kpWaitingInvestigatorTools;
     private final TrpgChildSceneCommandService childSceneCommandService;
+    private KpClarificationTools kpClarificationTools;
 
     @Autowired
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
@@ -116,6 +118,12 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 childSceneCommandService;
     }
 
+    @Autowired
+    void setKpClarificationTools(
+            KpClarificationTools kpClarificationTools) {
+        this.kpClarificationTools = kpClarificationTools;
+    }
+
     @Override
     public GroupModelInvocation prepare(GroupConversation conversation, GroupActionSpec action,
                                         GroupContextMaterial context) {
@@ -144,6 +152,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         boolean combatRoute =
                 GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE
                         .equals(action.actionType());
+        boolean interactionResponse = GroupChatConstant
+                .ACTION_TRPG_INTERACTION_RESPONSE
+                .equals(action.actionType());
         boolean combatPhase = combatAttack || combatDefense
                 || combatAdjudicate || combatRoute
                 || GroupChatConstant.ACTION_TRPG_COMBAT
@@ -154,6 +165,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 : combatDefense ? "战斗防守"
                 : combatRoute ? "战斗反应路由"
                 : combatAdjudicate ? "战斗裁定"
+                : interactionResponse ? "追问回答"
                 : GroupChatConstant.ACTION_TRPG_COMBAT.equals(action.actionType())
                 ? "战斗" : "场景探索";
         List<CocDiceCharacterVO> cards = characterCardService.listDiceCharacters(
@@ -255,7 +267,16 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         {"actionKind":"SELF_OR_UTILITY","insertDefense":false,"defenseOptions":[],"reason":"装填等简短原因"}
                         TARGETED的目标缺失、歧义、不在参战者中或行动不合法时不要猜测，改为：
                         {"error":"明确说明问题"}
+                        如果缺少的信息会实质改变行动路由，调用askForClarification公开追问一个问题；无法唯一确定时调用askForClarification，不要输出error。
+                        工具是returnDirect，调用后立即结束响应。仅在确有必要时追问；不确定是否需要追问时不要调用。
                         """));
+            } else if (interactionResponse) {
+                messages.add(new UserMessage("现在回答KP刚刚公开提出的追问。"
+                        + "你可以补足细节、重新判断、改变行动或放弃原行动；"
+                        + "最新回答将替代与之冲突的旧行动。"
+                        + "严格使用以下格式，标签外不得输出正文：\n"
+                        + "<decision>说明你如何根据追问重新判断；如果无需改变，也说明理由</decision>\n"
+                        + "<action>用调查员口吻直接回答KP，信息足够完整，不受普通行动50字限制</action>"));
             } else {
                 String subjectName = action.subjectCharacterId() == null
                         ? null : cards.stream()
@@ -281,6 +302,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "识别其中的联合行动、协助、兼容行动和冲突意图，以整个场景为单位统一裁定，"
                         + "不要按调查员逐条机械回复。需要掷骰时只调用一个对应工具；"
                         + "恢复同一步骤后继续处理共同提案中尚未裁定的部分。"
+                        + "只有缺失信息会实质改变裁定时才调用askForClarification，一次只问一名调查员一个公开问题；"
+                        + "不确定是否需要追问时不要调用。调查员已经明确理解重大风险时不得重复确认；"
+                        + "团队问题只向真人玩家确认。追问回答可以改变、补充或放弃原行动，最新回答覆盖冲突的旧行动。"
                         : "根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。")
                         + (scenePhase
                         ? """
@@ -364,7 +388,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             List<Object> sceneTools = tools(
                     kpDiceTools, kpPushedCheckTools, kpModuleTools,
                     kpSkillRuleTools, kpSceneTools,
-                    kpRunTools, kpCombatTools);
+                    kpRunTools, kpCombatTools,
+                    kpClarificationTools);
             if (scenePhase) {
                 List<Object> dynamicTools = new ArrayList<>(sceneTools);
                 if (childSceneCommandService.canStartChildScene(
@@ -386,7 +411,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     : combatAdjudicate
                     ? tools(kpDiceTools, kpModuleTools, kpSkillRuleTools,
                             kpRunTools, kpCombatTools)
-                    : combatAttack || combatDefense || combatRoute
+                    : combatRoute
+                    ? tools(kpClarificationTools)
+                    : combatAttack || combatDefense
                     ? List.of()
                     : tools(kpDiceTools, kpModuleTools, kpSkillRuleTools,
                             kpRunTools);

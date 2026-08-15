@@ -27,13 +27,17 @@ public class KpCombatTools {
     public TrpgCombatLifecycleService.StartResult startCombat(
             @ToolParam(description = "准确的人物卡名称列表，至少两名")
             List<String> participantNames,
-            @ToolParam(description = "DEX，或仅第一轮调查员优先的INVESTIGATORS_FIRST")
+            @ToolParam(description = "DEX，或仅第一轮已提前声明攻击的调查员优先的INVESTIGATORS_FIRST")
             String orderMode,
+            @ToolParam(
+                    description = "仅用于INVESTIGATORS_FIRST：提前声明攻击的调查员准确人物卡名称；未声明者不要加入",
+                    required = false)
+            List<String> declaredAttackerNames,
             ToolContext context) {
         KpContext kp = requireKp(context);
         return combatLifecycleService.requestStart(
                 kp.conversationId(), kp.replyStepId(),
-                participantNames, orderMode);
+                participantNames, orderMode, declaredAttackerNames);
     }
 
     @Tool(

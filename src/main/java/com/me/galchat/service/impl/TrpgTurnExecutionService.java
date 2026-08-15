@@ -232,6 +232,9 @@ public class TrpgTurnExecutionService {
                                         .ge(!wholeTurnRestarted,
                                                 GroupChatReplyStep::getStepNo,
                                                 failedStep.getStepNo())
+                                        .isNull(wholeTurnRestarted,
+                                                GroupChatReplyStep
+                                                        ::getParentStepId)
                                         .eq(GroupChatReplyStep::getStatus,
                                                 GroupChatConstant
                                                         .STATUS_PENDING)
@@ -460,6 +463,8 @@ public class TrpgTurnExecutionService {
                 || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
                 step.getActionType())
                 || GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
                 step.getActionType()))) {
             throw new UserRequestException(
                     "只能重试失败的角色行动步骤");
@@ -497,7 +502,8 @@ public class TrpgTurnExecutionService {
                                 GroupChatReplyStep>()
                                 .eq(GroupChatReplyStep::getTurnId,
                                         turn.getId())
-                                .gt(GroupChatReplyStep::getStepNo,
+                                .gt(failedStep.getParentStepId() == null,
+                                        GroupChatReplyStep::getStepNo,
                                         failedStep.getStepNo())
                                 .eq(GroupChatReplyStep::getStatus,
                                         GroupChatConstant
@@ -558,9 +564,13 @@ public class TrpgTurnExecutionService {
         List<GroupChatReplyStep> allSteps = steps == null
                 ? List.of() : steps;
         GroupChatReplyStep step = allSteps.stream()
+                .filter(item -> item.getParentStepId() != null)
                 .filter(this::isCurrentStep)
                 .findFirst()
-                .orElse(null);
+                .orElseGet(() -> allSteps.stream()
+                .filter(this::isCurrentStep)
+                .findFirst()
+                .orElse(null));
         boolean waiting = step != null
                 && GroupChatConstant.STATUS_WAITING_INPUT.equals(
                         step.getStatus())
@@ -573,7 +583,10 @@ public class TrpgTurnExecutionService {
                 : step == null ? null
                 : GroupChatConstant.ACTION_TRPG_SCENE_SELECTION.equals(
                         step.getActionType())
-                ? "selection" : "message";
+                ? "selection"
+                : GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
+                        step.getActionType())
+                ? "clarification" : "message";
         Map<String, String> options = Map.of();
         if ("selection".equals(inputType)) {
             Map<String, String> names = new java.util.LinkedHashMap<>();
@@ -592,6 +605,9 @@ public class TrpgTurnExecutionService {
                 step == null ? null : step.getItemOrder(),
                 inputType,
                 step == null ? null : step.getGroupName(),
+                step == null ? null : step.getPromptMessageId(),
+                step == null ? null : step.getInteractionType(),
+                step == null ? null : step.getInteractionSeq(),
                 waiting,
                 options,
                 allSteps.stream()
@@ -606,7 +622,9 @@ public class TrpgTurnExecutionService {
     private boolean isCurrentStep(GroupChatReplyStep step) {
         return GroupChatConstant.STATUS_RUNNING.equals(step.getStatus())
                 || GroupChatConstant.STATUS_WAITING_INPUT.equals(
-                step.getStatus())
+                    step.getStatus())
+                || GroupChatConstant.STATUS_WAITING_INTERACTION.equals(
+                    step.getStatus())
                 || GroupChatConstant.STATUS_PAUSED.equals(step.getStatus())
                 || GroupChatConstant.STATUS_WAITING_DICE.equals(
                 step.getStatus())
@@ -776,8 +794,14 @@ public class TrpgTurnExecutionService {
             GroupChatReplyStep userStep,
             GroupChatMessage message,
             GroupConversationLockService.OwnedLock lock) {
-        List<GroupChatReplyStep> remaining =
-                stepMapper.selectList(
+        boolean interactionAnswer = userStep.getParentStepId() != null
+                && GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
+                userStep.getActionType());
+        if (interactionAnswer) {
+            resumeInteractionParent(userStep);
+        }
+        List<GroupChatReplyStep> remaining = interactionAnswer
+                ? List.of() : stepMapper.selectList(
                         new LambdaQueryWrapper<GroupChatReplyStep>()
                                 .eq(GroupChatReplyStep::getTurnId,
                                         turn.getId())
@@ -797,8 +821,10 @@ public class TrpgTurnExecutionService {
                         .sequence(message.getSequenceNo())
                         .build());
         return Flux.concat(accepted,
-                        executeScheduledSteps(
-                                conversation, turn, remaining, 0))
+                        interactionAnswer
+                                ? executePendingSteps(conversation, turn)
+                                : executeScheduledSteps(
+                                        conversation, turn, remaining, 0))
                 .doOnError(error ->
                         recoveryService.recoverInterrupted(
                                 conversation.getId()))
@@ -1013,6 +1039,7 @@ public class TrpgTurnExecutionService {
                     new LambdaQueryWrapper<GroupChatReplyStep>()
                             .eq(GroupChatReplyStep::getTurnId,
                                     turn.getId())
+                            .isNull(GroupChatReplyStep::getParentStepId)
                             .eq(GroupChatReplyStep::getStatus,
                                     GroupChatConstant.STATUS_PENDING)
                             .orderByAsc(
@@ -1087,10 +1114,82 @@ public class TrpgTurnExecutionService {
             return groupChatService.streamPersistedStep(
                             conversation, turn, next)
                     .concatWith(Flux.defer(() ->
-                            executeScheduledSteps(
-                                    conversation, turn,
-                                    scheduled, index + 1)));
+                            continueAfterModelStep(
+                                    conversation, turn, next,
+                                    scheduled, index)));
         });
+    }
+
+    private Flux<GroupChatEvent> continueAfterModelStep(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep executed,
+            List<GroupChatReplyStep> scheduled,
+            int index) {
+        GroupChatReplyStep persisted = stepMapper.selectById(
+                executed.getId());
+        GroupChatReplyStep current = persisted == null
+                ? executed : persisted;
+        if (current.getParentStepId() != null
+                && GroupChatConstant.STATUS_COMPLETED.equals(
+                current.getStatus())) {
+            resumeInteractionParent(current);
+            return executePendingSteps(conversation, turn);
+        }
+        if (GroupChatConstant.STATUS_WAITING_INTERACTION.equals(
+                current.getStatus())) {
+            return executeInteractionChild(
+                    conversation, turn, current);
+        }
+        return executeScheduledSteps(
+                conversation, turn, scheduled, index + 1);
+    }
+
+    private Flux<GroupChatEvent> executeInteractionChild(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep parent) {
+        List<GroupChatReplyStep> children = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getParentStepId,
+                                parent.getId())
+                        .in(GroupChatReplyStep::getStatus,
+                                GroupChatConstant.STATUS_PENDING,
+                                GroupChatConstant.STATUS_RUNNING,
+                                GroupChatConstant.STATUS_WAITING_INPUT)
+                        .orderByDesc(
+                                GroupChatReplyStep::getInteractionSeq)
+                        .last("limit 1"));
+        if (children == null || children.isEmpty()) {
+            return Flux.error(new UserRequestException(
+                    "挂起的父步骤没有待处理交互"));
+        }
+        GroupChatReplyStep child = children.getFirst();
+        if (GroupChatConstant.ACTOR_USER.equals(
+                child.getSpeakerType())) {
+            return waitForUser(conversation, turn, child);
+        }
+        return groupChatService.streamPersistedStep(
+                        conversation, turn, child)
+                .concatWith(Flux.defer(() ->
+                        continueAfterModelStep(
+                                conversation, turn, child,
+                                List.of(), 0)));
+    }
+
+    private void resumeInteractionParent(
+            GroupChatReplyStep child) {
+        GroupChatReplyStep parent = stepMapper.selectById(
+                child.getParentStepId());
+        if (parent == null
+                || !child.getTurnId().equals(parent.getTurnId())) {
+            throw new UserRequestException("追问父步骤不存在");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        parent.setStatus(GroupChatConstant.STATUS_PENDING)
+                .setErrorMessage(null)
+                .setUpdatedAt(now);
+        stepMapper.updateById(parent);
     }
 
     private GroupChatEvent pausedEvent(
@@ -1172,6 +1271,9 @@ public class TrpgTurnExecutionService {
                 .groupName(step.getGroupName())
                 .groupOrder(step.getGroupOrder())
                 .itemOrder(step.getItemOrder())
+                .promptMessageId(step.getPromptMessageId())
+                .interactionType(step.getInteractionType())
+                .interactionSeq(step.getInteractionSeq())
                 .speaker(GroupChatEvent.Speaker.builder()
                         .type(step.getSpeakerType())
                         .id(step.getSpeakerId())

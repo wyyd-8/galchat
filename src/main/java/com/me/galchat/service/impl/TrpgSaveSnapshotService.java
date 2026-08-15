@@ -62,6 +62,7 @@ import java.util.stream.Collectors;
 public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
 
     private static final Set<String> RESTORABLE_TURN_STATUSES = Set.of(
+            GroupChatConstant.STATUS_WAITING_INPUT,
             GroupChatConstant.STATUS_PAUSED,
             GroupChatConstant.STATUS_WAITING_DICE,
             GroupChatConstant.STATUS_FAILED,
@@ -348,6 +349,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 throw new UserRequestException("跑团可恢复轮次存档不合法");
             }
             Set<Long> currentStepIds = new HashSet<>();
+            Set<Long> currentMessageIds = new HashSet<>();
             for (GroupChatReplyStep step : safe(turnSnapshot.getReplySteps())) {
                 if (step == null
                         || !validId(step.getId(), cursors.getMaxReplyStepId(), stepIds)
@@ -369,6 +371,26 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                         || message.getReplyStepId() != null
                         && !currentStepIds.contains(message.getReplyStepId())) {
                     throw new UserRequestException("跑团轮次消息存档不合法");
+                }
+                currentMessageIds.add(message.getId());
+            }
+            for (GroupChatReplyStep step
+                    : safe(turnSnapshot.getReplySteps())) {
+                if (step.getParentStepId() != null
+                        && (!currentStepIds.contains(step.getParentStepId())
+                        || !currentStepIds.contains(step.getRootStepId())
+                        || step.getInteractionSeq() == null
+                        || step.getInteractionSeq() <= 0
+                        || !StringUtils.hasText(
+                        step.getInteractionType()))) {
+                    throw new UserRequestException(
+                            "跑团交互步骤存档不合法");
+                }
+                if (step.getPromptMessageId() != null
+                        && !currentMessageIds.contains(
+                        step.getPromptMessageId())) {
+                    throw new UserRequestException(
+                            "跑团交互步骤引用了未知问题消息");
                 }
             }
             Set<Long> currentSummaryIds = new HashSet<>();

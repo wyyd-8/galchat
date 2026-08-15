@@ -62,7 +62,9 @@ public class GroupTurnCheckpointService {
                 step.getId())) {
             return;
         }
-        upsert(turn, step, STEP_START, 0L, 0L);
+        upsert(turn, step, STEP_START,
+                zero(messageMapper.selectMaxIdByReplyStepId(step.getId())),
+                zero(toolCallMapper.selectMaxIdByReplyStepId(step.getId())));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -214,7 +216,9 @@ public class GroupTurnCheckpointService {
         LocalDateTime now = LocalDateTime.now();
         if (steps != null) {
             for (GroupChatReplyStep current : steps) {
-                current.setStatus(GroupChatConstant.STATUS_PENDING)
+                current.setStatus(current.getParentStepId() == null
+                                ? GroupChatConstant.STATUS_PENDING
+                                : GroupChatConstant.STATUS_CANCELLED)
                         .setOutputMessageId(null)
                         .setErrorMessage(null)
                         .setUpdatedAt(now);

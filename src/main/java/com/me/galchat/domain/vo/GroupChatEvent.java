@@ -30,6 +30,9 @@ public class GroupChatEvent {
     private String delta;
     private String content;
     private String toolName;
+    private Long promptMessageId;
+    private String interactionType;
+    private Integer interactionSeq;
     private KpDiceToolResult diceRoll;
     private TrpgGameTimeVO gameTime;
     private Map<String, String> sceneOptions;

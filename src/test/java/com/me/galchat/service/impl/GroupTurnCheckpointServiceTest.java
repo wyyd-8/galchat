@@ -245,6 +245,37 @@ class GroupTurnCheckpointServiceTest {
     }
 
     @Test
+    void initializingResumedStepPreservesEarlierInteractionHistory() {
+        Fixture fixture = fixture(GroupTurnCheckpointService.COMPLETED);
+        when(fixture.checkpointMapper().selectById(7L)).thenReturn(
+                new GroupTurnCheckpoint()
+                        .setConversationId(7L)
+                        .setTurnId(101L)
+                        .setReplyStepId(301L)
+                        .setCheckpointType(
+                                GroupTurnCheckpointService.COMPLETED));
+        when(fixture.messageMapper().selectMaxIdByReplyStepId(103L))
+                .thenReturn(212L);
+        when(fixture.toolCallMapper().selectMaxIdByReplyStepId(103L))
+                .thenReturn(9L);
+
+        fixture.service().initializeStep(
+                fixture.turn(), fixture.step());
+
+        ArgumentCaptor<GroupTurnCheckpoint> saved =
+                ArgumentCaptor.forClass(GroupTurnCheckpoint.class);
+        verify(fixture.checkpointMapper()).upsert(saved.capture());
+        assertThat(saved.getValue())
+                .extracting(
+                        GroupTurnCheckpoint::getCheckpointType,
+                        GroupTurnCheckpoint::getMessageId,
+                        GroupTurnCheckpoint::getToolCallId)
+                .containsExactly(
+                        GroupTurnCheckpointService.STEP_START,
+                        212L, 9L);
+    }
+
+    @Test
     void committedToolRecordsBothDurableHighWaterMarks() {
         Fixture fixture = fixture(GroupTurnCheckpointService.STEP_START);
         when(fixture.stepMapper().selectById(103L))

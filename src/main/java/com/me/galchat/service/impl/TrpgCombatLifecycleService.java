@@ -438,7 +438,8 @@ public class TrpgCombatLifecycleService {
             Long conversationId,
             Long replyStepId,
             List<String> participantNames,
-            String requestedOrderMode) {
+            String requestedOrderMode,
+            List<String> declaredAttackerNames) {
         GroupConversation conversation =
                 conversationService.requireActive(conversationId);
         requireTrpg(conversation);
@@ -475,6 +476,8 @@ public class TrpgCombatLifecycleService {
         String orderMode = normalizeOrderMode(requestedOrderMode);
         List<String> names = normalizeNames(participantNames);
         List<CocCharacter> cards = requireCards(conversationId, names);
+        Set<Long> declaredAttackerIds = normalizeDeclaredAttackerIds(
+                orderMode, declaredAttackerNames, cards);
         LocalDateTime now = LocalDateTime.now();
         TrpgCombat combat = new TrpgCombat()
                 .setConversationId(conversationId)
@@ -482,7 +485,8 @@ public class TrpgCombatLifecycleService {
                 .setStatus(GroupChatConstant.COMBAT_STATUS_START_REQUESTED)
                 .setOrderMode(orderMode)
                 .setCurrentRound(1)
-                .setParticipants(participantSnapshot(cards))
+                .setParticipants(participantSnapshot(
+                        cards, declaredAttackerIds))
                 .setActiveTurnResults(objectMapper.createArrayNode())
                 .setStartRequestedStepId(replyStepId)
                 .setCreatedAt(now)
@@ -721,8 +725,15 @@ public class TrpgCombatLifecycleService {
                         .eq(CocCharacter::getRunId,
                                 combat.getConversationId()));
         Set<Long> ids = new HashSet<>();
-        combat.getParticipants().forEach(node ->
-                ids.add(node.get("characterId").asLong()));
+        Set<Long> declaredAttackerIds = new HashSet<>();
+        combat.getParticipants().forEach(node -> {
+            long characterId = node.get("characterId").asLong();
+            ids.add(characterId);
+            if (node.path("declaredFirstRoundAttack")
+                    .asBoolean(false)) {
+                declaredAttackerIds.add(characterId);
+            }
+        });
         Comparator<CocCharacter> dexOrder = Comparator
                 .comparing((CocCharacter card) ->
                                 card.getDex() == null
@@ -736,7 +747,8 @@ public class TrpgCombatLifecycleService {
                 combat.getOrderMode())) {
             order = Comparator
                     .comparing((CocCharacter card) ->
-                            "NPC".equals(card.getActorType()) ? 1 : 0)
+                            declaredAttackerIds.contains(card.getId())
+                                    ? 0 : 1)
                     .thenComparing(dexOrder);
         }
         return cards.stream()
@@ -783,7 +795,9 @@ public class TrpgCombatLifecycleService {
         };
     }
 
-    private ArrayNode participantSnapshot(List<CocCharacter> cards) {
+    private ArrayNode participantSnapshot(
+            List<CocCharacter> cards,
+            Set<Long> declaredAttackerIds) {
         ArrayNode result = objectMapper.createArrayNode();
         for (CocCharacter card : cards) {
             GroupReplyPlanService.CombatPlanItem controller =
@@ -792,6 +806,8 @@ public class TrpgCombatLifecycleService {
             node.put("characterId", card.getId());
             node.put("name", card.getName());
             node.put("cardType", card.getActorType());
+            node.put("declaredFirstRoundAttack",
+                    declaredAttackerIds.contains(card.getId()));
             node.put("controllerType", controller.actorType());
             if (controller.actorId() != null) {
                 node.put("controllerId", controller.actorId());
@@ -810,6 +826,46 @@ public class TrpgCombatLifecycleService {
             node.put("dead", Boolean.TRUE.equals(card.getDead()));
         }
         return result;
+    }
+
+    private Set<Long> normalizeDeclaredAttackerIds(
+            String orderMode,
+            List<String> rawNames,
+            List<CocCharacter> participants) {
+        if (rawNames == null || rawNames.isEmpty()) {
+            return Set.of();
+        }
+        if (!GroupChatConstant.COMBAT_ORDER_INVESTIGATORS_FIRST.equals(
+                orderMode)) {
+            throw new UserRequestException(
+                    "只有 INVESTIGATORS_FIRST 可以指定提前声明攻击者");
+        }
+        var byName = participants.stream().collect(Collectors.toMap(
+                CocCharacter::getName, Function.identity()));
+        Set<String> uniqueNames = new HashSet<>();
+        Set<Long> result = new HashSet<>();
+        for (String rawName : rawNames) {
+            if (!StringUtils.hasText(rawName)) {
+                throw new UserRequestException(
+                        "提前声明攻击者名称不能为空");
+            }
+            String name = rawName.trim();
+            if (!uniqueNames.add(name)) {
+                throw new UserRequestException(
+                        "提前声明攻击者不能重复：" + name);
+            }
+            CocCharacter card = byName.get(name);
+            if (card == null) {
+                throw new UserRequestException(
+                        "提前声明攻击者不在参战名单中：" + name);
+            }
+            if ("NPC".equals(card.getActorType())) {
+                throw new UserRequestException(
+                        "只有调查员可以提前声明攻击：" + name);
+            }
+            result.add(card.getId());
+        }
+        return Set.copyOf(result);
     }
 
     private void putNullable(

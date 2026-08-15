@@ -36,7 +36,7 @@ const planItems = computed(() => props.replyPlan.items)
 const items = computed(() => visibleReplyPlanItems(props.conversation.mode, planItems.value))
 const trpgExecution = computed(() => buildTrpgExecutionState(props.replyPlans, props.currentTurn))
 const loadedPlanSignature = ref('')
-const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && props.currentTurn.inputType === 'message'))
+const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && (props.currentTurn.inputType === 'message' || props.currentTurn.inputType === 'clarification')))
 const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
 const sceneProposalRole = computed(() => props.currentTurn?.waitingForUser && props.currentTurn.actionType === 'trpg_scene'
   ? (props.currentTurn.itemOrder === 1 ? 'lead' : 'contributor')
@@ -65,6 +65,7 @@ const composerPlaceholder = computed(() => {
   if (props.conversation.status !== 'active') return '这个会话已经关闭'
   if (waitingForMessage.value && sceneProposalRole.value === 'lead') return '提出一个具体、可执行的场景计划…'
   if (waitingForMessage.value && sceneProposalRole.value === 'contributor') return '回应已有计划，或提出补充与替代方案…'
+  if (props.currentTurn?.inputType === 'clarification') return '回答KP；可以补充、修改或放弃原行动…'
   if (waitingForMessage.value) return props.conversation.mode === 'trpg' ? '输入玩家调查员的行动…' : '输入群聊消息…'
   if (props.currentTurn?.inputType === 'selection') return '请从上方选择调查地点'
   if (props.currentTurn?.inputType === 'dice') return '请在跑团工具中完成待处理投骰'
@@ -175,10 +176,13 @@ function handleScroll(event: Event) {
         <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType === 'combat_defense'" class="scene-selection-panel">
           <strong>轮到你防守</strong><span>{{ currentTurn.sceneName || '请选择闪避、反击或 KP 给出的其他合法反应' }}</span>
         </div>
+        <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'clarification'" class="scene-selection-panel">
+          <strong>KP需要确认</strong><span>你的回答可以补足细节、改变行动、重新判断，或放弃原行动。</span>
+        </div>
         <div class="composer" :class="{ disabled: conversation.status !== 'active' }">
           <button v-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="emit('startTurn')"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
           <textarea v-else v-model="input" :disabled="conversation.status !== 'active' || sending || !waitingForMessage" rows="1" :placeholder="composerPlaceholder" @keydown="keydown" />
-          <button v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && replyPlan.source === 'SCENE'" class="button ghost" :disabled="sending" @click="emit('endExploration')"><Footprints :size="17" />结束探索</button>
+          <button v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType !== 'trpg_interaction_response' && replyPlan.source === 'SCENE'" class="button ghost" :disabled="sending" @click="emit('endExploration')"><Footprints :size="17" />结束探索</button>
           <TooltipProvider v-if="conversation.mode !== 'trpg' || waitingForMessage"><TooltipRoot><TooltipTrigger as-child><button class="send-button" :disabled="!input.trim() || sending || conversation.status !== 'active' || !waitingForMessage" @click="emit('send')"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">Enter 发送 · Shift+Enter 换行</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider>
         </div>
       </section>

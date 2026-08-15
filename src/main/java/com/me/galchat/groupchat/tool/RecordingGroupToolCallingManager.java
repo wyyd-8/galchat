@@ -67,6 +67,8 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
                 .count();
         boolean finishMarker = toolNames.contains(
                 "markCombatFinished");
+        boolean clarification = toolNames.contains(
+                "askForClarification");
         if (diceToolCount > 0 && toolNames.size() != 1) {
             throw new UserRequestException("一次响应只能调用一个掷骰工具，且不能与其他工具并行");
         }
@@ -74,8 +76,12 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
             throw new UserRequestException(
                     "结束战斗标记不能与掷骰工具并行调用");
         }
+        if (clarification && toolNames.size() != 1) {
+            throw new UserRequestException(
+                    "追问工具必须单独调用");
+        }
         Long replyStepId = replyStepId(prompt);
-        if (diceToolCount == 1) {
+        if (diceToolCount == 1 || clarification) {
             return transactionTemplate.execute(status ->
                     executeAndRecord(prompt, response, replyStepId));
         }

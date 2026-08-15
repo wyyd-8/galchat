@@ -1373,6 +1373,240 @@ class TrpgTurnExecutionServiceTest {
         verifyNoInteractions(saveService);
     }
 
+    @Test
+    void currentTurnPrioritizesHumanInteractionChild() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L).setConversationId(7L)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        GroupChatReplyStep parent = new GroupChatReplyStep()
+                .setId(201L).setTurnId(101L).setStepNo(4)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        GroupChatReplyStep child = new GroupChatReplyStep()
+                .setId(301L).setTurnId(101L).setStepNo(8)
+                .setParentStepId(201L).setRootStepId(201L)
+                .setInteractionType("TEAM_RISK_CONFIRMATION")
+                .setInteractionSeq(2).setPromptMessageId(401L)
+                .setActionType(
+                        GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
+                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setSpeakerId(31L).setSubjectCharacterId(31L)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        when(conversations.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(turns.selectList(any())).thenReturn(List.of(turn));
+        when(steps.selectList(any())).thenReturn(List.of(parent, child));
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversations, mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class), turns, steps,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                mock(GroupChatService.class),
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+
+        GroupCurrentTurnVO current = service.current(7L);
+
+        assertThat(current.stepId()).isEqualTo(301L);
+        assertThat(current.inputType()).isEqualTo("clarification");
+        assertThat(current.promptMessageId()).isEqualTo(401L);
+        assertThat(current.interactionType())
+                .isEqualTo("TEAM_RISK_CONFIRMATION");
+        assertThat(current.interactionSeq()).isEqualTo(2);
+        assertThat(current.waitingForUser()).isTrue();
+    }
+
+    @Test
+    void kpClarificationPausesAtHumanChildInsteadOfCompletingTurn() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupConversationLockService locks =
+                mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatService chats = mock(GroupChatService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L).setConversationId(7L)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        GroupChatReplyStep parent = new GroupChatReplyStep()
+                .setId(201L).setTurnId(101L).setStepNo(4)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        GroupChatReplyStep child = new GroupChatReplyStep()
+                .setId(301L).setTurnId(101L).setStepNo(8)
+                .setParentStepId(201L).setRootStepId(201L)
+                .setInteractionType("KP_CLARIFICATION")
+                .setInteractionSeq(1).setPromptMessageId(401L)
+                .setActionType(
+                        GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
+                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setSpeakerId(31L).setStatus(GroupChatConstant.STATUS_PENDING);
+        when(conversations.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversations.requireActive(7L))
+                .thenReturn(conversation);
+        when(locks.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turns.selectList(any())).thenReturn(List.of(turn));
+        when(turns.selectById(101L)).thenReturn(turn);
+        when(steps.selectCount(any())).thenReturn(0L);
+        when(steps.selectList(any()))
+                .thenReturn(List.of(parent), List.of(child));
+        when(steps.selectById(201L)).thenReturn(parent);
+        when(chats.streamPersistedStep(conversation, turn, parent))
+                .thenReturn(Flux.defer(() -> {
+                    parent.setStatus(
+                            GroupChatConstant.STATUS_WAITING_INTERACTION);
+                    return Flux.empty();
+                }));
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversations, locks, mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class), turns, steps,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class), chats,
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+
+        List<GroupChatEvent> events = service.continueTurn(
+                7L, new GroupTurnContinueDTO()).collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_TURN_ACCEPTED,
+                        GroupChatConstant.EVENT_TURN_WAITING_INPUT);
+        assertThat(events.getLast().getReplyStepId()).isEqualTo(301L);
+        assertThat(child.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
+        assertThat(turn.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
+    }
+
+    @Test
+    void humanClarificationAnswerResumesOriginalKpStep() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupConversationLockService locks =
+                mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messages =
+                mock(GroupChatMessageMapper.class);
+        GroupChatService chats = mock(GroupChatService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L).setConversationId(7L)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        GroupChatReplyStep parent = new GroupChatReplyStep()
+                .setId(201L).setTurnId(101L).setStepNo(4)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        GroupChatReplyStep child = new GroupChatReplyStep()
+                .setId(301L).setTurnId(101L).setStepNo(8)
+                .setParentStepId(201L).setRootStepId(201L)
+                .setActionType(
+                        GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
+                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setSpeakerId(31L)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        when(conversations.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversations.requireActive(7L))
+                .thenReturn(conversation);
+        when(conversations.nextSequence(7L)).thenReturn(9L);
+        when(locks.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turns.selectById(101L)).thenReturn(turn);
+        when(steps.selectById(301L)).thenReturn(child);
+        when(steps.selectById(201L)).thenReturn(parent);
+        when(steps.selectList(any()))
+                .thenReturn(List.of(parent));
+        when(messages.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0).setId(401L);
+                    return 1;
+                });
+        when(chats.streamPersistedStep(conversation, turn, parent))
+                .thenReturn(Flux.defer(() -> {
+                    parent.setStatus(GroupChatConstant.STATUS_COMPLETED);
+                    return Flux.empty();
+                }));
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversations, locks, mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class), turns, steps, messages,
+                mock(GroupTurnRecoveryService.class), chats,
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+        GroupChatRequestDTO request = new GroupChatRequestDTO();
+        request.setContent("改查上锁的抽屉；打不开就停手。");
+
+        List<GroupChatEvent> events = service.submitMessage(
+                7L, 101L, 301L, request).collectList().block();
+
+        verify(chats).streamPersistedStep(conversation, turn, parent);
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_TURN_ACCEPTED,
+                        GroupChatConstant.EVENT_TURN_COMPLETED);
+        assertThat(child.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_COMPLETED);
+    }
+
     private void assertDuplicateRejected(Runnable action) {
         assertThatThrownBy(action::run)
                 .isInstanceOf(

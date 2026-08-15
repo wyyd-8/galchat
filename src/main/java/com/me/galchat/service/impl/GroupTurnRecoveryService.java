@@ -203,6 +203,8 @@ public class GroupTurnRecoveryService {
                 step.getActionType())
                 || GroupChatConstant
                 .ACTION_COMBAT_ADJUDICATE.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
                 step.getActionType());
     }
 }

@@ -701,6 +701,203 @@ class GroupChatServiceTest {
     }
 
     @Test
+    void directClarificationPublishesQuestionAndSuspendsParentStep() {
+        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        ChatClient chatClient = ChatClient.builder(model).build();
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupContextPolicy contextPolicy = mock(GroupContextPolicy.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatMessageMapper messages =
+                mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupChatService service = new GroupChatService(
+                conversations,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class), runtimeRegistry,
+                messages, mock(GroupChatTurnMapper.class), steps,
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                immediateTransactionTemplate(), diceMessageCodec(),
+                JsonMapper.builder().build(), emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L).setWorldId(2L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        GroupChatReplyStep parent = new GroupChatReplyStep()
+                .setId(31L).setTurnId(30L).setStepNo(4)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setGroupKey("scene:1").setGroupName("书房")
+                .setGroupOrder(1).setItemOrder(4)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        GroupActionSpec action = new GroupActionSpec(
+                parent.getActionType(), parent.getSpeakerType(), null,
+                parent.getGroupKey(), parent.getGroupName(), 1, 4);
+        when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        when(runtime.contextPolicy()).thenReturn(contextPolicy);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(contextPolicy.load(conversation, action))
+                .thenReturn(new GroupContextMaterial(List.of()));
+        when(agentPolicy.prepare(any(), any(), any()))
+                .thenReturn(new GroupModelInvocation(
+                        chatClient,
+                        new Prompt(List.of(new UserMessage("裁定"))),
+                        List.of()));
+        when(agentPolicy.actorName(any(), any())).thenReturn("KP");
+        when(conversations.nextSequence(7L)).thenReturn(8L);
+        when(messages.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0)
+                            .setId(40L);
+                    return 1;
+                });
+        String directJson = """
+                {"childStepId":301,"rootStepId":31,
+                 "interactionType":"KP_CLARIFICATION",
+                 "interactionSeq":1,
+                 "targetActor":{"type":"character","id":9},
+                 "targetCharacterId":32,
+                 "question":"你要检查抽屉还是桌面？",
+                 "reasonType":"METHOD"}
+                """;
+        Generation direct = new Generation(
+                new org.springframework.ai.chat.messages.AssistantMessage(
+                        directJson),
+                ChatGenerationMetadata.builder()
+                        .finishReason(ToolExecutionResult.FINISH_REASON)
+                        .metadata(ToolExecutionResult.METADATA_TOOL_NAME,
+                                "askForClarification")
+                        .build());
+        when(model.stream(any(Prompt.class))).thenReturn(
+                reactor.core.publisher.Flux.just(
+                        new ChatResponse(List.of(direct))));
+
+        List<GroupChatEvent> events = service.streamPersistedStep(
+                conversation, turn, parent).collectList().block();
+
+        assertThat(events)
+                .filteredOn(event -> GroupChatConstant.EVENT_MESSAGE_DELTA
+                        .equals(event.getEventType()))
+                .extracting(GroupChatEvent::getDelta)
+                .containsExactly("你要检查抽屉还是桌面？");
+        verify(messages).updateById(
+                org.mockito.ArgumentMatchers.<GroupChatMessage>argThat(message ->
+                        "你要检查抽屉还是桌面？".equals(
+                                message.getContent())));
+        assertThat(parent.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        verify(steps, org.mockito.Mockito.times(2)).update(
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void combatRouteClarificationIsPublicAndSkipsRouteFinalization() {
+        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        ChatClient chatClient = ChatClient.builder(model).build();
+        GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupContextPolicy contexts = mock(GroupContextPolicy.class);
+        GroupAgentPolicy agents = mock(GroupAgentPolicy.class);
+        GroupChatMessageMapper messages =
+                mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        TrpgCombatLifecycleService combats =
+                mock(TrpgCombatLifecycleService.class);
+        GroupChatService service = new GroupChatService(
+                conversations, mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class), runtimes, messages,
+                mock(GroupChatTurnMapper.class), steps,
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                immediateTransactionTemplate(), diceMessageCodec(),
+                JsonMapper.builder().build(), emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class), combats,
+                mock(GroupTurnCheckpointService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L).setWorldId(2L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        GroupChatReplyStep route = new GroupChatReplyStep()
+                .setId(31L).setTurnId(30L).setStepNo(2)
+                .setActionType(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(runtimes.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        when(runtime.contextPolicy()).thenReturn(contexts);
+        when(runtime.agentPolicy()).thenReturn(agents);
+        when(contexts.load(any(), any()))
+                .thenReturn(new GroupContextMaterial(List.of()));
+        when(agents.prepare(any(), any(), any()))
+                .thenReturn(new GroupModelInvocation(
+                        chatClient,
+                        new Prompt(List.of(new UserMessage("路由"))),
+                        List.of()));
+        when(conversations.nextSequence(7L)).thenReturn(10L);
+        when(messages.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0).setId(40L);
+                    return 1;
+                });
+        String directJson = """
+                {"childStepId":301,"rootStepId":31,
+                 "interactionType":"KP_CLARIFICATION",
+                 "interactionSeq":1,
+                 "targetActor":{"type":"user","id":9},
+                 "targetCharacterId":32,
+                 "question":"你攻击的是门边还是窗边的食尸鬼？",
+                 "reasonType":"TARGET"}
+                """;
+        Generation direct = new Generation(
+                new org.springframework.ai.chat.messages.AssistantMessage(
+                        directJson),
+                ChatGenerationMetadata.builder()
+                        .finishReason(ToolExecutionResult.FINISH_REASON)
+                        .metadata(ToolExecutionResult.METADATA_TOOL_NAME,
+                                "askForClarification")
+                        .build());
+        when(model.stream(any(Prompt.class))).thenReturn(
+                reactor.core.publisher.Flux.just(
+                        new ChatResponse(List.of(direct))));
+
+        List<GroupChatEvent> events = service.streamPersistedStep(
+                conversation, turn, route).collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_REPLY_STARTED,
+                        GroupChatConstant.EVENT_MESSAGE_COMPLETED);
+        assertThat(events.getLast().getContent())
+                .isEqualTo("你攻击的是门边还是窗边的食尸鬼？");
+        assertThat(route.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        verify(combats, never()).completeReactionRoute(
+                any(), any(), any(), any());
+    }
+
+    @Test
     void directDiceToolResponseEmitsDiceEventWithoutPersistingJsonAsDialogue() {
         DeepSeekChatModel model = mock(DeepSeekChatModel.class);
         ChatClient chatClient = ChatClient.builder(model).build();

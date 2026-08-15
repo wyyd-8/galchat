@@ -207,3 +207,26 @@ test('advances current step state from streaming events without losing plan iden
     null,
   )
 })
+
+test('uses a dedicated clarification input state for interaction children', () => {
+  const activePlan: ReplyPlan = {
+    id: 20, source: 'SCENE', displayName: '密道', items: [],
+  }
+  const accepted = applyCurrentTurnEvent(
+    null,
+    { eventType: 'turn.accepted', turnId: 100 },
+    activePlan,
+  )
+
+  const turn = applyCurrentTurnEvent(accepted, {
+    eventType: 'turn.waiting_input',
+    turnId: 100,
+    replyStepId: 302,
+    actionType: 'trpg_interaction_response',
+    groupName: '密道',
+    speaker: { type: 'user', id: 22 },
+  }, activePlan)
+
+  assert.equal(turn?.inputType, 'clarification')
+  assert.equal(turn?.waitingForUser, true)
+})

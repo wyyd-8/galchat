@@ -335,7 +335,7 @@ public class GroupChatService {
             if (GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE.equals(
                     action.actionType())) {
                 return executeBufferedCombatRoute(
-                        requestSpec, conversation, turn, step);
+                        requestSpec, conversation, turn, step, speaker);
             }
             GroupChatMessage outputMessage = transactionTemplate.execute(status -> {
                 step.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
@@ -379,7 +379,8 @@ public class GroupChatService {
             ChatClient.ChatClientRequestSpec requestSpec,
             GroupConversation conversation,
             GroupChatTurn turn,
-            GroupChatReplyStep step) {
+            GroupChatReplyStep step,
+            GroupChatEvent.Speaker speaker) {
         transactionTemplate.executeWithoutResult(status -> {
             step.setStatus(GroupChatConstant.STATUS_RUNNING)
                     .setUpdatedAt(LocalDateTime.now());
@@ -388,6 +389,26 @@ public class GroupChatService {
         return requestSpec.stream().chatResponse()
                 .collectList()
                 .flatMapMany(responses -> {
+                    TrpgStepInteractionService.InteractionRequest
+                            interaction = directInteraction(responses);
+                    if (interaction != null) {
+                        GroupChatMessage message =
+                                persistBufferedInteraction(
+                                        conversation, turn, step,
+                                        interaction);
+                        return Flux.just(
+                                baseEvent(
+                                        GroupChatConstant.EVENT_REPLY_STARTED,
+                                        conversation, turn, step,
+                                        message, speaker).build(),
+                                baseEvent(
+                                        GroupChatConstant
+                                                .EVENT_MESSAGE_COMPLETED,
+                                        conversation, turn, step,
+                                        message, speaker)
+                                        .content(interaction.question())
+                                        .build());
+                    }
                     StringBuilder raw = new StringBuilder();
                     responses.forEach(response -> {
                         if (response != null
@@ -442,6 +463,60 @@ public class GroupChatService {
                     });
                     return Flux.empty();
                 });
+    }
+
+    private TrpgStepInteractionService.InteractionRequest
+            directInteraction(List<ChatResponse> responses) {
+        for (ChatResponse response : responses) {
+            if (response == null || response.getResults() == null) {
+                continue;
+            }
+            for (Generation generation : response.getResults()) {
+                if (isDirectTool(generation, "askForClarification")) {
+                    return readInteractionRequest(
+                            generation.getOutput().getText());
+                }
+            }
+        }
+        return null;
+    }
+
+    private GroupChatMessage persistBufferedInteraction(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step,
+            TrpgStepInteractionService.InteractionRequest interaction) {
+        return transactionTemplate.execute(status -> {
+            LocalDateTime now = LocalDateTime.now();
+            GroupChatMessage message = new GroupChatMessage()
+                    .setConversationId(conversation.getId())
+                    .setSceneId(sceneId(turn))
+                    .setTurnId(turn.getId())
+                    .setReplyStepId(step.getId())
+                    .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                    .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
+                    .setVisibility("public")
+                    .setContent(interaction.question())
+                    .setSequenceNo(conversationService.nextSequence(
+                            conversation.getId()))
+                    .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                    .setCreatedAt(now)
+                    .setUpdatedAt(now);
+            messageMapper.insert(message);
+            step.setOutputMessageId(message.getId())
+                    .setStatus(GroupChatConstant
+                            .STATUS_WAITING_INTERACTION)
+                    .setUpdatedAt(now);
+            stepMapper.updateById(step);
+            stepMapper.update(null,
+                    new LambdaUpdateWrapper<GroupChatReplyStep>()
+                            .eq(GroupChatReplyStep::getId,
+                                    interaction.childStepId())
+                            .set(GroupChatReplyStep::getPromptMessageId,
+                                    message.getId())
+                            .set(GroupChatReplyStep::getUpdatedAt, now));
+            return message;
+        });
     }
 
     private boolean isBufferedInvestigatorSelection(
@@ -686,6 +761,22 @@ public class GroupChatService {
                         .build());
                 continue;
             }
+            if (isDirectTool(generation, "askForClarification")) {
+                if (accumulator.interaction != null) {
+                    throw new IllegalStateException(
+                            "同一回复步骤不能发起多个追问");
+                }
+                accumulator.interaction = readInteractionRequest(
+                        output.getText());
+                accumulator.content.append(
+                        accumulator.interaction.question());
+                events.add(baseEvent(
+                        GroupChatConstant.EVENT_MESSAGE_DELTA,
+                        conversation, turn, step, message, speaker)
+                        .delta(accumulator.interaction.question())
+                        .build());
+                continue;
+            }
             if (output instanceof DeepSeekAssistantMessage deepSeek) {
                 String reasoning = deepSeek.getReasoningContent();
                 if (StringUtils.hasText(reasoning)) {
@@ -787,6 +878,8 @@ public class GroupChatService {
                 || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
                 action.actionType())
                 || GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
+                action.actionType())
+                || GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
                 action.actionType()));
     }
 
@@ -814,6 +907,29 @@ public class GroupChatService {
         } catch (JacksonException exception) {
             throw new IllegalStateException(
                     "选景工具返回结果无法解析", exception);
+        }
+    }
+
+    private TrpgStepInteractionService.InteractionRequest
+            readInteractionRequest(String content) {
+        if (!StringUtils.hasText(content)) {
+            throw new IllegalStateException(
+                    "追问工具未返回结构化结果");
+        }
+        try {
+            TrpgStepInteractionService.InteractionRequest result =
+                    objectMapper.readValue(content,
+                            TrpgStepInteractionService
+                                    .InteractionRequest.class);
+            if (result == null || result.childStepId() == null
+                    || !StringUtils.hasText(result.question())) {
+                throw new IllegalStateException(
+                        "追问工具结果缺少子步骤或问题");
+            }
+            return result;
+        } catch (JacksonException exception) {
+            throw new IllegalStateException(
+                    "追问工具结果无法解析", exception);
         }
     }
 
@@ -857,6 +973,41 @@ public class GroupChatService {
                 transactionTemplate.executeWithoutResult(status -> {
                     persistOutput(message, accumulator,
                             GroupChatConstant.STATUS_COMPLETED);
+                    if (accumulator.interaction != null) {
+                        LocalDateTime now = LocalDateTime.now();
+                        step.setStatus(GroupChatConstant
+                                        .STATUS_WAITING_INTERACTION)
+                                .setErrorMessage(null)
+                                .setUpdatedAt(now);
+                        stepMapper.update(null,
+                                new LambdaUpdateWrapper<
+                                        GroupChatReplyStep>()
+                                        .eq(GroupChatReplyStep::getId,
+                                                step.getId())
+                                        .set(GroupChatReplyStep::getStatus,
+                                                GroupChatConstant
+                                                        .STATUS_WAITING_INTERACTION)
+                                        .set(GroupChatReplyStep
+                                                        ::getOutputMessageId,
+                                                message.getId())
+                                        .set(GroupChatReplyStep
+                                                        ::getErrorMessage,
+                                                null)
+                                        .set(GroupChatReplyStep::getUpdatedAt,
+                                                now));
+                        stepMapper.update(null,
+                                new LambdaUpdateWrapper<
+                                        GroupChatReplyStep>()
+                                        .eq(GroupChatReplyStep::getId,
+                                                accumulator.interaction
+                                                        .childStepId())
+                                        .set(GroupChatReplyStep
+                                                        ::getPromptMessageId,
+                                                message.getId())
+                                        .set(GroupChatReplyStep::getUpdatedAt,
+                                                now));
+                        return;
+                    }
                     if (accumulator.diceRoll != null
                             && GroupChatConstant.MODE_TRPG.equals(
                             conversation.getMode())) {
@@ -1092,6 +1243,7 @@ public class GroupChatService {
         private final StringBuilder reasoning = new StringBuilder();
         private final DecisionActionStreamParser decisionActionParser;
         private KpDiceToolResult diceRoll;
+        private TrpgStepInteractionService.InteractionRequest interaction;
         private TrpgSceneSelectionService.SceneOptionsResult sceneOptions;
         private Long lastMaterialMessageId;
 

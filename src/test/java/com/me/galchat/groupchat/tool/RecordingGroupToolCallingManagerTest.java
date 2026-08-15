@@ -126,6 +126,36 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @Test
+    void clarificationExecutionAndRecordingUseOneTransaction() {
+        ToolCallingManager delegate = mock(ToolCallingManager.class);
+        GroupToolCallStore store = mock(GroupToolCallStore.class);
+        TransactionTemplate transactionTemplate =
+                mock(TransactionTemplate.class);
+        RecordingGroupToolCallingManager manager =
+                new RecordingGroupToolCallingManager(
+                        delegate, store, transactionTemplate);
+        Prompt prompt = prompt(Map.of(
+                ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L));
+        ChatResponse response = responseWithCalls(
+                "askForClarification");
+        ToolExecutionResult result = mock(ToolExecutionResult.class);
+        when(delegate.executeToolCalls(prompt, response))
+                .thenReturn(result);
+        when(transactionTemplate.execute(any())).thenAnswer(invocation ->
+                invocation.<org.springframework.transaction.support.TransactionCallback<ToolExecutionResult>>
+                        getArgument(0)
+                        .doInTransaction(mock(TransactionStatus.class)));
+
+        assertThat(manager.executeToolCalls(prompt, response))
+                .isSameAs(result);
+
+        var order = inOrder(delegate, store);
+        order.verify(delegate).executeToolCalls(prompt, response);
+        order.verify(store).saveExecution(41L, response, result);
+        verify(transactionTemplate).execute(any());
+    }
+
+    @Test
     void rejectsParallelCallsWhenOneIsStateChangingDiceTool() {
         ToolCallingManager delegate = mock(ToolCallingManager.class);
         GroupToolCallStore store = mock(GroupToolCallStore.class);
@@ -138,6 +168,22 @@ class RecordingGroupToolCallingManagerTest {
         assertThatThrownBy(() -> manager.executeToolCalls(
                 prompt, responseWithCalls("requestCheck", "searchInfo")))
                 .hasMessageContaining("只能调用一个掷骰工具");
+
+        verifyNoInteractions(delegate);
+    }
+
+    @Test
+    void rejectsParallelCallsWhenOneIsClarification() {
+        ToolCallingManager delegate = mock(ToolCallingManager.class);
+        RecordingGroupToolCallingManager manager =
+                new RecordingGroupToolCallingManager(
+                        delegate, mock(GroupToolCallStore.class),
+                        mock(TransactionTemplate.class));
+
+        assertThatThrownBy(() -> manager.executeToolCalls(
+                prompt(Map.of()), responseWithCalls(
+                        "askForClarification", "searchInfo")))
+                .hasMessageContaining("追问工具必须单独调用");
 
         verifyNoInteractions(delegate);
     }

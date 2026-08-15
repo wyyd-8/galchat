@@ -84,6 +84,7 @@ export interface GroupChatEvent {
   eventType: 'stream.caught_up' | 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
   actionType?: string; groupName?: string; itemOrder?: number; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string; toolName?: string
+  promptMessageId?: number; interactionType?: string; interactionSeq?: number
   diceRoll?: DiceRollAggregate
   gameTime?: TrpgGameTime
   sceneOptions?: Record<string, string>; autoSelected?: boolean
@@ -91,7 +92,8 @@ export interface GroupChatEvent {
 }
 export interface CurrentTurn {
   turnId: number; planId?: number; planSource?: string; planContextId?: number; status: string
-  stepId?: number; actionType?: string; itemOrder?: number; inputType?: 'message' | 'selection' | 'continue' | 'dice'; sceneName?: string
+  stepId?: number; actionType?: string; itemOrder?: number; inputType?: 'message' | 'selection' | 'clarification' | 'continue' | 'dice'; sceneName?: string
+  promptMessageId?: number; interactionType?: string; interactionSeq?: number
   waitingForUser: boolean; sceneOptions: Record<string, string>; steps: CurrentTurnStep[]
 }
 export interface CurrentTurnStep {

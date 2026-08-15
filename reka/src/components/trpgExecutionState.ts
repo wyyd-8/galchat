@@ -129,8 +129,15 @@ export function applyCurrentTurnEvent(
       stepId: event.replyStepId,
       actionType: event.actionType,
       itemOrder: event.itemOrder,
-      inputType: event.actionType === 'trpg_scene_selection' ? 'selection' : 'message',
+      inputType: event.actionType === 'trpg_scene_selection'
+        ? 'selection'
+        : event.actionType === 'trpg_interaction_response'
+          ? 'clarification'
+          : 'message',
       sceneName: event.groupName,
+      promptMessageId: event.promptMessageId,
+      interactionType: event.interactionType,
+      interactionSeq: event.interactionSeq,
       waitingForUser: true,
       sceneOptions: event.sceneOptions ?? {},
       steps: updateEventStep(current.steps, event, 'waiting_input'),

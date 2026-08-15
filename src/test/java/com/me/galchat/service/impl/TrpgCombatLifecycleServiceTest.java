@@ -155,7 +155,7 @@ class TrpgCombatLifecycleServiceTest {
     }
 
     @Test
-    void investigatorFirstOnlyChangesFirstRoundAndNpcUsesKpController() {
+    void onlyDeclaredAttackerIsPrioritizedAndOnlyInFirstRound() {
         GroupConversationService conversations =
                 mock(GroupConversationService.class);
         GroupReplyPlanService plans =
@@ -202,6 +202,8 @@ class TrpgCombatLifecycleServiceTest {
                 72L, "NPC", null, "食尸鬼", 90);
         CocCharacter bot = card(
                 73L, "BOT", 9L, "陈默", 60);
+        CocCharacter undeclaredInvestigator = card(
+                74L, "BOT", 10L, "赵雅", 70);
         when(conversations.requireActive(7L))
                 .thenReturn(conversation);
         when(planMapper.selectById(10L)).thenReturn(scene);
@@ -210,20 +212,27 @@ class TrpgCombatLifecycleServiceTest {
         when(combatMapper.selectCount(any())).thenReturn(0L);
         when(characterMapper.selectList(any()))
                 .thenReturn(List.of(
-                        slowPlayer, fastNpc, bot),
-                        List.of(slowPlayer, fastNpc, bot));
+                        slowPlayer, fastNpc, bot,
+                        undeclaredInvestigator),
+                        List.of(slowPlayer, fastNpc, bot,
+                                undeclaredInvestigator));
         doAnswer(invocation -> {
             invocation.<TrpgCombat>getArgument(0).setId(200L);
             return 1;
         }).when(combatMapper).insert(any(TrpgCombat.class));
         var requested = service.requestStart(
                 7L, 40L,
-                List.of("林恩", "食尸鬼", "陈默"),
-                GroupChatConstant
-                        .COMBAT_ORDER_INVESTIGATORS_FIRST);
+                List.of("林恩", "食尸鬼", "陈默", "赵雅"),
+                GroupChatConstant.COMBAT_ORDER_INVESTIGATORS_FIRST,
+                List.of("林恩", "陈默"));
         org.mockito.ArgumentCaptor<TrpgCombat> combatCaptor =
                 org.mockito.ArgumentCaptor.forClass(TrpgCombat.class);
         verify(combatMapper).insert(combatCaptor.capture());
+        assertThat(combatCaptor.getValue().getParticipants())
+                .filteredOn(node -> node.path(
+                        "declaredFirstRoundAttack").asBoolean(false))
+                .extracting(node -> node.get("name").asText())
+                .containsExactly("林恩", "陈默");
         when(combatMapper.selectList(any()))
                 .thenReturn(List.of(combatCaptor.getValue()));
 
@@ -242,12 +251,35 @@ class TrpgCombatLifecycleServiceTest {
                 .extracting(
                         GroupReplyPlanService.CombatPlanItem
                                 ::subjectCharacterId)
-                .containsExactly(73L, 71L, 72L);
-        assertThat(order.getValue().getLast())
+                .containsExactly(73L, 71L, 72L, 74L);
+        assertThat(order.getValue().get(2))
                 .extracting(
                         GroupReplyPlanService.CombatPlanItem::actorType,
                         GroupReplyPlanService.CombatPlanItem::actorId)
                 .containsExactly(GroupChatConstant.ACTOR_KP, null);
+
+        conversation.setActiveReplyPlanId(11L);
+        when(planMapper.selectById(11L)).thenReturn(
+                new GroupReplyPlan().setId(11L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                        .setContextId(200L));
+        when(combatMapper.selectById(200L))
+                .thenReturn(combatCaptor.getValue());
+
+        service.startNextRoundUnderLock(conversation);
+
+        org.mockito.ArgumentCaptor<
+                List<GroupReplyPlanService.CombatPlanItem>> secondRound =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(plans).replaceCombatRoundUnderLock(
+                org.mockito.ArgumentMatchers.eq(conversation),
+                org.mockito.ArgumentMatchers.eq(2),
+                secondRound.capture());
+        assertThat(secondRound.getValue())
+                .extracting(
+                        GroupReplyPlanService.CombatPlanItem
+                                ::subjectCharacterId)
+                .containsExactly(72L, 74L, 73L, 71L);
     }
 
     @Test

@@ -12,12 +12,16 @@ import type {
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { listDiceMessagesNewestFirst } from '@/dice/domain/dicePlayback'
-import { buildToolCharacterTargets, toolDialogContentClass, useToolConfirmations } from '@/components/trpgToolsState'
+import {
+  buildToolCharacterTargets, formatCheckRate, resolveWeaponCheckValue, toolDialogContentClass,
+  useToolConfirmations,
+} from '@/components/trpgToolsState'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{
   conversation: Conversation
   module: CocModule | null
+  username: string
   characters: Character[]
   participantIds: number[]
   messages: GroupMessage[]
@@ -36,22 +40,72 @@ const saveRemark = ref('')
 const cards = ref<InvestigatorCardSummary[]>([])
 const selectedKey = ref('player')
 const selectedToolTab = ref('status')
+const selectedSheetTab = ref('skills')
+const selectedProfileTab = ref('background')
 const { confirmLoad, confirmRollback } = useToolConfirmations(open, selectedToolTab)
 const card = ref<CharacterCard | null>(null)
 const cardText = ref('')
 
-const characterTargets = computed(() => buildToolCharacterTargets(props.characters, cards.value, props.participantIds))
+const characterTargets = computed(() => buildToolCharacterTargets(
+  props.characters,
+  cards.value,
+  props.participantIds,
+  props.username,
+))
 const selectedTarget = computed(() => characterTargets.value.find((target) => target.key === selectedKey.value)
   || characterTargets.value[0])
 const selectedParticipantId = computed(() => selectedTarget.value?.participantId)
 const contextPercent = computed(() => Math.max(0, Math.round((contextUsage.value?.ratio || 0) * 100)))
 const contextTone = computed(() => contextPercent.value >= 90 ? 'danger' : contextPercent.value >= 70 ? 'warning' : 'safe')
-const selectedActorName = computed(() => selectedTarget.value?.name || '玩家调查员')
+const selectedActorName = computed(() => selectedTarget.value?.name || props.username.trim() || '当前玩家')
 const completedCardCount = computed(() => characterTargets.value.filter((target) => target.cardId !== undefined).length)
 const dialogContentClass = computed(() => toolDialogContentClass(selectedToolTab.value))
 const diceMessages = computed(() => listDiceMessagesNewestFirst(props.messages))
+const characterAttributes = computed(() => card.value ? [
+  { code: 'STR', label: '力量', value: card.value.character.str },
+  { code: 'CON', label: '体质', value: card.value.character.con },
+  { code: 'SIZ', label: '体型', value: card.value.character.siz },
+  { code: 'DEX', label: '敏捷', value: card.value.character.dex },
+  { code: 'APP', label: '外貌', value: card.value.character.app },
+  { code: 'INT', label: '智力', value: card.value.character.intValue },
+  { code: 'POW', label: '意志', value: card.value.character.pow },
+  { code: 'EDU', label: '教育', value: card.value.character.edu },
+] : [])
+const dodgeValue = computed(() => {
+  const skill = card.value?.skills.find((item) => item.displayName.trim() === '闪避')
+  return skill?.value ?? (card.value ? Math.floor(card.value.character.dex / 2) : undefined)
+})
+const derivedStats = computed(() => card.value ? [
+  { label: '伤害加值', value: card.value.character.damageBonus },
+  { label: '体格', value: card.value.character.build },
+  { label: '移动力', value: card.value.character.mov },
+  { label: '闪避', value: dodgeValue.value == null ? undefined : `${dodgeValue.value}%` },
+  { label: '护甲', value: card.value.character.armor },
+] : [])
+const characterStatuses = computed(() => {
+  const character = card.value?.character
+  if (!character) return []
+  const statuses: Array<{ label: string, tone: 'safe' | 'warning' | 'danger' }> = []
+  if (character.dead) statuses.push({ label: '死亡', tone: 'danger' })
+  else {
+    if (character.dying) statuses.push({ label: '濒死', tone: 'danger' })
+    if (character.unconscious) statuses.push({ label: '昏迷', tone: 'danger' })
+    if (character.majorWound) statuses.push({ label: '重伤', tone: 'warning' })
+    if (character.temporaryInsanity) statuses.push({ label: '临时性疯狂', tone: 'warning' })
+  }
+  return statuses.length ? statuses : [{ label: '状态稳定', tone: 'safe' as const }]
+})
 
 function time(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '暂无记录' }
+function shown(value?: string | number | null) { return value == null || value === '' ? '—' : value }
+function resourceStyle(current?: number, max?: number) {
+  const ratio = current == null || !max ? 0 : Math.max(0, Math.min(100, Math.round(current / max * 100)))
+  return { '--resource-ratio': `${ratio}%` }
+}
+function ammo(remaining?: number, capacity?: number) {
+  if (remaining != null && capacity != null) return `${remaining} / ${capacity}`
+  return shown(remaining ?? capacity)
+}
 async function execute(action: () => Promise<void>) {
   if (busy.value) return
   busy.value = true
@@ -102,12 +156,16 @@ async function rollbackTurn() {
 async function selectTarget(key: string) {
   if (busy.value || selectedKey.value === key) return
   selectedKey.value = key
+  selectedSheetTab.value = 'skills'
+  selectedProfileTab.value = 'background'
   cardText.value = ''
   await execute(loadCard)
 }
 watch(open, (visible) => { if (visible) void execute(refreshOverview) })
 watch(() => props.conversation.id, () => {
   selectedKey.value = 'player'
+  selectedSheetTab.value = 'skills'
+  selectedProfileTab.value = 'background'
   cards.value = []
   card.value = null
   confirmLoad.value = false
@@ -178,7 +236,7 @@ watch(() => props.conversation.id, () => {
                   <UserRound v-if="target.actorType === 'PLAYER'" :size="17" />
                   <template v-else>{{ target.image ? '' : target.name.slice(0, 1) }}</template>
                 </span>
-                <span><strong>{{ target.name }}</strong><small>{{ target.actorType === 'PLAYER' ? '由当前登录用户控制' : 'AI 调查员' }}</small></span>
+                <span><strong>{{ target.name }}</strong><small>{{ target.actorType === 'PLAYER' ? '由当前登录用户控制' : 'AI 控制' }}</small></span>
                 <span class="binding-state" :class="{ complete: target.cardId !== undefined }">
                   <Check v-if="target.cardId !== undefined" :size="13" />{{ target.cardId !== undefined ? '已建立' : '待建立' }}
                 </span>
@@ -188,10 +246,135 @@ watch(() => props.conversation.id, () => {
 
           <aside class="trpg-binding-card-pane">
             <div v-if="busy && !card" class="binding-empty"><LoaderCircle class="spin" :size="24" /><strong>正在读取人物卡…</strong></div>
-            <section v-else-if="card" class="character-sheet binding-sheet">
-              <div class="sheet-heading"><span><small>{{ card.character.actorType === 'PLAYER' ? '玩家调查员' : card.character.actorType === 'BOT' ? 'AI 调查员' : '模组角色' }} · {{ card.character.occupation || '未填写职业' }}</small><h3>{{ card.character.name }}</h3><p>{{ card.character.sex || '—' }} · {{ card.character.age || '—' }} 岁 · {{ card.character.era || '时代未填' }}</p></span><div class="vitals"><b>HP {{ card.character.hpCurrent }}/{{ card.character.hpMax }}</b><b>SAN {{ card.character.sanCurrent }}/{{ card.character.sanMax }}</b><b>MP {{ card.character.mpCurrent }}/{{ card.character.mpMax }}</b></div></div>
-              <div class="attribute-grid"><span v-for="[name, value] in Object.entries({ STR: card.character.str, CON: card.character.con, SIZ: card.character.siz, DEX: card.character.dex, APP: card.character.app, INT: card.character.intValue, POW: card.character.pow, EDU: card.character.edu })" :key="name"><small>{{ name }}</small><strong>{{ value }}</strong></span></div>
-              <div class="sheet-columns"><div><strong>技能</strong><p>{{ card.skills.map((item) => `${item.displayName} ${item.value}%`).join(' · ') || '暂无技能' }}</p></div><div><strong>武器与装备</strong><p>{{ card.weapons.map((item) => `${item.name}${item.damage ? ` ${item.damage}` : ''}`).join(' · ') || '暂无武器' }}<br />{{ card.profile?.equipmentText || '无额外装备' }}</p></div></div>
+            <section v-else-if="card" class="character-sheet binding-sheet trpg-character-sheet">
+              <header class="sheet-overview">
+                <span
+                  class="sheet-portrait"
+                  :class="{ placeholder: !card.character.image }"
+                  :style="card.character.image ? { backgroundImage: `url(${card.character.image})` } : {}"
+                ><UserRound v-if="!card.character.image" :size="24" /></span>
+                <div class="sheet-identity">
+                  <small>{{ selectedActorName }} · {{ card.character.occupation || '未填写职业' }}</small>
+                  <h3>{{ card.character.name }}</h3>
+                  <p>{{ shown(card.character.sex) }} · {{ shown(card.character.age) }} 岁 · {{ card.character.era || '时代未填' }}</p>
+                  <p>{{ card.character.birthplace || '出身地未填' }} · {{ card.character.residence || '居住地未填' }}</p>
+                </div>
+                <div class="sheet-statuses" aria-label="调查员状态">
+                  <em v-for="status in characterStatuses" :key="status.label" :class="status.tone">{{ status.label }}</em>
+                </div>
+              </header>
+
+              <div class="sheet-resource-grid">
+                <span class="sheet-resource hp" :style="resourceStyle(card.character.hpCurrent, card.character.hpMax)">
+                  <small>生命 HP</small><strong>{{ shown(card.character.hpCurrent) }} / {{ shown(card.character.hpMax) }}</strong><i />
+                </span>
+                <span class="sheet-resource san" :style="resourceStyle(card.character.sanCurrent, card.character.sanMax)">
+                  <small>理智 SAN</small><strong>{{ shown(card.character.sanCurrent) }} / {{ shown(card.character.sanMax) }}</strong><i />
+                </span>
+                <span class="sheet-resource mp" :style="resourceStyle(card.character.mpCurrent, card.character.mpMax)">
+                  <small>魔法 MP</small><strong>{{ shown(card.character.mpCurrent) }} / {{ shown(card.character.mpMax) }}</strong><i />
+                </span>
+                <span class="sheet-resource luck" :style="resourceStyle(card.character.luckCurrent, 100)">
+                  <small>幸运 LUCK</small><strong>{{ shown(card.character.luckCurrent) }}</strong><i />
+                </span>
+              </div>
+
+              <div class="sheet-attribute-grid" aria-label="调查员属性">
+                <span v-for="attribute in characterAttributes" :key="attribute.code">
+                  <span class="sheet-attribute-label"><small>{{ attribute.label }}</small><b>{{ attribute.code }}</b></span>
+                  <strong>{{ attribute.value }}</strong>
+                </span>
+              </div>
+              <div class="sheet-derived-grid">
+                <span v-for="stat in derivedStats" :key="stat.label"><small>{{ stat.label }}</small><strong>{{ shown(stat.value) }}</strong></span>
+              </div>
+
+              <TabsRoot v-model="selectedSheetTab" class="sheet-detail-tabs">
+                <TabsList class="sheet-primary-tabs">
+                  <TabsTrigger value="skills">技能</TabsTrigger>
+                  <TabsTrigger value="combat">战斗与装备</TabsTrigger>
+                  <TabsTrigger value="profile">背景与资产</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="skills" class="sheet-tab-content">
+                  <div class="sheet-table-scroll">
+                    <table class="sheet-data-table skill-data-table">
+                      <thead><tr><th>技能名称</th><th>基础值</th><th>成功率</th></tr></thead>
+                      <tbody>
+                        <tr v-for="skill in card.skills" :key="skill.id">
+                          <td><strong>{{ skill.displayName }}</strong><small v-if="skill.category">{{ skill.category }}</small></td>
+                          <td>{{ shown(skill.baseValue) }}</td>
+                          <td class="check-rate">{{ formatCheckRate(skill.value) }}</td>
+                        </tr>
+                        <tr v-if="!card.skills.length"><td colspan="3" class="sheet-table-empty">暂无技能</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="combat" class="sheet-tab-content">
+                  <div class="sheet-table-scroll">
+                    <table class="sheet-data-table weapon-data-table">
+                      <thead><tr><th>武器</th><th>成功率</th><th>伤害</th><th>射程</th><th>次数</th><th>弹药</th><th>故障值</th></tr></thead>
+                      <tbody>
+                        <tr v-for="weapon in card.weapons" :key="weapon.id" :class="{ broken: weapon.isBroken }">
+                          <td><strong>{{ weapon.name }}</strong><small v-if="weapon.notes">{{ weapon.notes }}</small><em v-if="weapon.isBroken">已损坏</em></td>
+                          <td class="check-rate">{{ formatCheckRate(resolveWeaponCheckValue(weapon, card.skills)) }}</td>
+                          <td>{{ shown(weapon.damage) }}</td>
+                          <td>{{ shown(weapon.range) }}</td>
+                          <td>{{ shown(weapon.attacksPerRound) }}</td>
+                          <td>{{ ammo(weapon.remainingAmmo, weapon.ammoCapacity) }}</td>
+                          <td>{{ shown(weapon.malfunction) }}</td>
+                        </tr>
+                        <tr v-if="!card.weapons.length"><td colspan="7" class="sheet-table-empty">暂无武器</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <section class="sheet-equipment-summary">
+                    <strong>随身装备</strong><p>{{ card.profile?.equipmentText || '无额外装备' }}</p>
+                  </section>
+                </TabsContent>
+
+                <TabsContent value="profile" class="sheet-tab-content profile-tab-content">
+                  <TabsRoot v-model="selectedProfileTab" class="sheet-profile-tabs">
+                    <TabsList class="sheet-secondary-tabs">
+                      <TabsTrigger value="background">人物背景</TabsTrigger>
+                      <TabsTrigger value="connections">重要联系</TabsTrigger>
+                      <TabsTrigger value="trauma">创伤记录</TabsTrigger>
+                      <TabsTrigger value="assets">资产与笔记</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="background" class="sheet-profile-content">
+                      <div class="sheet-profile-grid">
+                        <section><strong>形象描述</strong><p>{{ card.profile?.appearance || '未记录' }}</p></section>
+                        <section><strong>思想与信念</strong><p>{{ card.profile?.ideology || '未记录' }}</p></section>
+                        <section><strong>特质</strong><p>{{ card.profile?.traits || '未记录' }}</p></section>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="connections" class="sheet-profile-content">
+                      <div class="sheet-profile-grid">
+                        <section><strong>重要之人</strong><p>{{ card.profile?.significantPeople || '未记录' }}</p></section>
+                        <section><strong>意义非凡之地</strong><p>{{ card.profile?.meaningfulLocations || '未记录' }}</p></section>
+                        <section><strong>宝贵之物</strong><p>{{ card.profile?.treasuredPossessions || '未记录' }}</p></section>
+                        <section><strong>关键连接</strong><small>{{ card.profile?.keyConnectionCategory || '未分类' }}</small><p>{{ card.profile?.keyConnectionText || '未记录' }}</p></section>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="trauma" class="sheet-profile-content">
+                      <div class="sheet-profile-grid">
+                        <section><strong>伤口和疤痕</strong><p>{{ card.profile?.injuriesAndScars || '未记录' }}</p></section>
+                        <section><strong>恐惧症和狂躁症</strong><p>{{ card.profile?.phobiasAndManias || '未记录' }}</p></section>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="assets" class="sheet-profile-content">
+                      <div class="sheet-profile-grid">
+                        <section><strong>装备和道具</strong><p>{{ card.profile?.equipmentText || '未记录' }}</p></section>
+                        <section class="sheet-wealth"><strong>财务状况</strong><dl><div><dt>消费水平</dt><dd>{{ card.profile?.spendingLevel || '—' }}</dd></div><div><dt>现金</dt><dd>{{ card.profile?.cash || '—' }}</dd></div></dl></section>
+                        <section><strong>资产</strong><p>{{ card.profile?.assetsText || '未记录' }}</p></section>
+                        <section><strong>调查员笔记</strong><p>{{ card.profile?.notes || '未记录' }}</p></section>
+                      </div>
+                    </TabsContent>
+                  </TabsRoot>
+                </TabsContent>
+              </TabsRoot>
             </section>
             <section v-else class="tool-card import-card binding-import-card"><BookUser :size="25" /><strong>{{ selectedActorName }}尚未建立人物卡</strong><p>首行必须是“姓名, 职业, 性别, 年龄岁”，并包含 STR、CON、SIZ、DEX、APP、INT、POW、EDU 八项属性；年龄范围为 15–90。</p><label class="field"><span>人物卡文本</span><textarea v-model="cardText" rows="10" placeholder="调查员, 记者, 女, 27岁\n时代: 1920s\nSTR 50 CON 55 SIZ 60 DEX 65 APP 60 INT 70 POW 55 EDU 70\n——技能——\n侦查 60%" /></label><button class="button primary" :disabled="!cardText.trim() || busy" @click="execute(createCard)">导入人物卡</button></section>
           </aside>

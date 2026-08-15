@@ -869,7 +869,7 @@ async function changePassword() {
     :participant-ids="workspace.participantIds.value"
     @complete="completeTrpgBinding"
   />
-  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" @restored="restoreTrpg" @open-dice="openDiceMessage" @debug-dice="openDiceDebug" @locate-dice="locateDiceMessage" />
+  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" @restored="restoreTrpg" @open-dice="openDiceMessage" @debug-dice="openDiceDebug" @locate-dice="locateDiceMessage" />
   <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" />
   <NoticeToast />
 </template>

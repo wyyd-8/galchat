@@ -568,6 +568,84 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .sheet-columns > div { padding: 11px; border-radius: 8px; background: #f2f0e9; }
 .sheet-columns strong { font-size: 10px; }
 .sheet-columns p { margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.65; }
+.trpg-tools-card-layout { height: min(600px, calc(86vh - 150px)); min-height: 540px; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; }
+.trpg-tools-card-layout .trpg-binding-card-pane { padding-left: 20px; }
+.trpg-character-sheet { min-height: 0; padding: 16px; display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr); gap: 11px; overflow: hidden; background: linear-gradient(145deg, #fffef9, #fbfaf3); box-shadow: 0 12px 32px rgba(62,58,45,.06); }
+.sheet-overview { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.sheet-portrait { width: 54px; height: 66px; border: 1px solid var(--line); border-radius: 9px; display: grid; place-items: center; color: var(--pine); background-color: var(--pine-soft); background-position: center; background-size: cover; box-shadow: inset 0 0 0 3px rgba(255,255,255,.55); }
+.sheet-portrait.placeholder { background: linear-gradient(145deg, var(--pine-soft), #d7e2dc); }
+.sheet-identity { min-width: 0; }
+.sheet-identity small { color: var(--pine); font-size: 9px; font-weight: 700; letter-spacing: .04em; }
+.sheet-identity h3 { margin: 2px 0 3px; overflow: hidden; font-family: var(--font-display); font-size: 23px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-identity p { margin: 2px 0 0; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-statuses { max-width: 145px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.sheet-statuses em { padding: 4px 7px; border-radius: 999px; font-size: 8px; font-style: normal; font-weight: 700; white-space: nowrap; }
+.sheet-statuses em.safe { color: var(--pine); background: var(--pine-soft); }
+.sheet-statuses em.warning { color: #88642f; background: #f4e8d4; }
+.sheet-statuses em.danger { color: var(--wine); background: #f3e3e5; }
+.sheet-resource-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.sheet-resource { min-width: 0; padding: 7px 8px 9px; position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.72); }
+.sheet-resource small, .sheet-resource strong { display: block; }
+.sheet-resource small { color: var(--muted); font-size: 7px; font-weight: 700; letter-spacing: .04em; }
+.sheet-resource strong { margin-top: 2px; font-size: 11px; }
+.sheet-resource i { height: 3px; position: absolute; right: 0; bottom: 0; left: 0; background: #ebe8df; }
+.sheet-resource i::after { width: var(--resource-ratio); height: 100%; display: block; content: ''; background: var(--pine); }
+.sheet-resource.hp i::after { background: var(--wine); }
+.sheet-resource.san i::after { background: #56718e; }
+.sheet-resource.mp i::after { background: #665d91; }
+.sheet-resource.luck i::after { background: var(--amber); }
+.sheet-attribute-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.sheet-attribute-grid > span { min-width: 0; min-height: 48px; padding: 6px 2px; border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; }
+.sheet-attribute-grid > span:last-child { border-right: 0; }
+.sheet-attribute-label { min-width: 0; display: flex; align-items: baseline; justify-content: center; gap: 4px; }
+.sheet-attribute-grid small { overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-attribute-grid b { color: #909188; font-size: 7px; font-weight: 600; letter-spacing: .04em; }
+.sheet-attribute-grid strong { font-size: 14px; line-height: 1; }
+.sheet-derived-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.sheet-derived-grid span { min-width: 0; padding: 6px 8px; border-radius: 7px; display: flex; align-items: center; justify-content: space-between; gap: 6px; background: #f0eee7; }
+.sheet-derived-grid small { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-derived-grid strong { font-size: 10px; white-space: nowrap; }
+.sheet-detail-tabs, .sheet-profile-tabs { min-height: 0; display: flex; flex-direction: column; }
+.sheet-primary-tabs, .sheet-secondary-tabs { flex: 0 0 auto; display: flex; align-items: center; gap: 3px; }
+.sheet-primary-tabs { margin: 0 0 8px; padding: 3px; border-radius: 9px; background: #eceae3; }
+.sheet-primary-tabs button, .sheet-secondary-tabs button { border: 0; cursor: pointer; }
+.sheet-primary-tabs button { min-height: 28px; padding: 0 10px; border-radius: 7px; flex: 1; color: var(--muted); background: transparent; font-size: 9px; }
+.sheet-primary-tabs button[data-state='active'] { color: var(--ink); background: #fffefa; box-shadow: 0 2px 7px rgba(47,45,39,.08); font-weight: 700; }
+.sheet-tab-content[data-state='active'] { min-height: 0; flex: 1; display: flex; flex-direction: column; outline: none; }
+.sheet-table-scroll { min-height: 0; flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.68); scrollbar-color: #c9c5ba transparent; scrollbar-width: thin; }
+.sheet-data-table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: 9px; }
+.sheet-data-table th { padding: 7px 9px; position: sticky; z-index: 1; top: 0; color: #68716c; background: #e5ebe7; font-size: 8px; font-weight: 700; text-align: left; white-space: nowrap; }
+.sheet-data-table td { padding: 7px 9px; border-top: 1px solid var(--line); vertical-align: middle; }
+.sheet-data-table tbody tr:nth-child(even) { background: rgba(235,233,225,.48); }
+.sheet-data-table tbody tr:hover { background: #eef2ee; }
+.sheet-data-table td strong, .sheet-data-table td small { display: block; }
+.sheet-data-table td strong { font-size: 9px; }
+.sheet-data-table td small { max-width: 190px; margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-data-table .check-rate { font-family: var(--font-mono); font-size: 8px; white-space: nowrap; }
+.skill-data-table th:nth-child(2), .skill-data-table td:nth-child(2) { width: 72px; text-align: center; }
+.skill-data-table th:last-child, .skill-data-table td:last-child { width: 142px; text-align: right; }
+.weapon-data-table { min-width: 680px; }
+.weapon-data-table td:not(:first-child), .weapon-data-table th:not(:first-child) { text-align: center; white-space: nowrap; }
+.weapon-data-table tr.broken { color: var(--wine); background: #faf0f1; }
+.weapon-data-table td em { margin-top: 3px; padding: 2px 5px; border-radius: 99px; display: inline-block; color: var(--wine); background: #f3e3e5; font-size: 7px; font-style: normal; }
+.sheet-table-empty { height: 86px; color: var(--muted); text-align: center !important; }
+.sheet-equipment-summary { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f0eee7; }
+.sheet-equipment-summary strong { font-size: 8px; }
+.sheet-equipment-summary p { max-height: 38px; margin: 3px 0 0; overflow: auto; color: var(--muted); font-size: 8px; line-height: 1.55; white-space: pre-wrap; }
+.profile-tab-content { overflow: hidden; }
+.sheet-secondary-tabs { margin-bottom: 8px; overflow-x: auto; border-bottom: 1px solid var(--line); }
+.sheet-secondary-tabs button { padding: 6px 8px; border-bottom: 2px solid transparent; flex: 0 0 auto; color: var(--muted); background: transparent; font-size: 8px; }
+.sheet-secondary-tabs button[data-state='active'] { color: var(--pine); border-color: var(--pine); font-weight: 700; }
+.sheet-profile-content[data-state='active'] { min-height: 0; flex: 1; overflow-y: auto; outline: none; scrollbar-color: #c9c5ba transparent; scrollbar-width: thin; }
+.sheet-profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.sheet-profile-grid section { min-width: 0; min-height: 72px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.7); }
+.sheet-profile-grid section > strong { font-size: 9px; }
+.sheet-profile-grid section > small { margin-left: 5px; color: var(--pine); font-size: 7px; }
+.sheet-profile-grid section > p { margin: 5px 0 0; color: var(--muted); font-size: 8px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sheet-wealth dl { margin: 7px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.sheet-wealth dl > div { padding: 6px; border-radius: 6px; background: #f0eee7; }
+.sheet-wealth dt { color: var(--muted); font-size: 7px; }
+.sheet-wealth dd { margin: 2px 0 0; font-size: 9px; font-weight: 700; }
 .dice-history-list { width: 100%; display: grid; gap: 9px; }
 .dice-history-item { min-width: 0; position: relative; }
 .dice-history-item .dice-message-card { padding-right: 58px; }
@@ -884,6 +962,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (min-width: 1120px) {
+  .trpg-binding-dialog.trpg-tools-character-dialog { width: min(calc(100vw - 48px), 1120px); }
   .settings-dialog-moving { left: calc(50% - 540px); transform: translateY(-50%); transition-duration: 180ms; }
   .settings-dialog-expanded { width: 1080px; left: calc(50% - 540px); transform: translateY(-50%); }
   .lore-tab, .lore-layout { height: 405px; min-height: 405px; }
@@ -954,6 +1033,20 @@ button.sidebar-recent-item:hover { background: #efede6; }
   .investigator-grid, .sheet-columns { grid-template-columns: 1fr; }
   .attribute-grid { grid-template-columns: repeat(4, 1fr); }
   .attribute-grid span:nth-child(4) { border-right: 0; }
+  .trpg-tools-card-layout { height: auto; min-height: 0; }
+  .trpg-tools-card-layout .trpg-binding-targets { max-height: 210px; }
+  .trpg-character-sheet { min-height: 650px; overflow: visible; }
+  .sheet-overview { grid-template-columns: auto minmax(0, 1fr); }
+  .sheet-statuses { max-width: none; grid-column: 1 / -1; justify-content: flex-start; }
+  .sheet-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sheet-attribute-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .sheet-attribute-grid > span:nth-child(4) { border-right: 0; }
+  .sheet-attribute-grid > span:nth-child(-n + 4) { border-bottom: 1px solid var(--line); }
+  .sheet-derived-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sheet-detail-tabs { min-height: 350px; }
+  .sheet-primary-tabs { overflow-x: auto; }
+  .sheet-primary-tabs button { min-width: 92px; }
+  .sheet-profile-grid { grid-template-columns: 1fr; }
   .favorability-row { grid-template-columns: 75px minmax(0, 1fr) auto; }
   .dialog-content { max-height: 92vh; }
   .data-world-summary, .data-action-card { grid-template-columns: auto minmax(0, 1fr); }

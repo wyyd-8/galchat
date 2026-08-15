@@ -53,6 +53,52 @@ test('keeps an established character card read-only in the TRPG tools dialog', a
   assert.equal(findElement(sheet as unknown as RootNode, (element) => element.tag === 'button'), undefined)
 })
 
+test('organizes the read-only character sheet into practical data panels', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const sheet = findElement(baseParse(template), (element) => hasClass(element, 'binding-sheet'))
+  assert.ok(sheet, 'the tools dialog should render the selected character card')
+
+  const root = sheet as unknown as RootNode
+  for (const panel of ['skills', 'combat', 'profile']) {
+    assert.ok(findElement(root, (element) => element.tag === 'TabsContent'
+      && hasAttribute(element, 'value', panel)), `the sheet should contain the ${panel} panel`)
+  }
+  for (const panel of ['background', 'connections', 'trauma', 'assets']) {
+    assert.ok(findElement(root, (element) => element.tag === 'TabsContent'
+      && hasAttribute(element, 'value', panel)), `the profile should contain the ${panel} panel`)
+  }
+
+  const sheetText = textContent(sheet)
+  assert.match(sheetText, /基础值/)
+  assert.match(sheetText, /成功率/)
+  assert.match(sheetText, /射程/)
+  assert.match(sheetText, /次数/)
+  assert.match(sheetText, /弹药/)
+  assert.match(sheetText, /故障值/)
+  assert.doesNotMatch(sheetText, /成长|贯穿/)
+})
+
+test('groups each attribute name and code above its value', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+
+  const attributeGrid = findElement(baseParse(template), (element) => hasClass(element, 'sheet-attribute-grid'))
+  assert.ok(attributeGrid, 'the character sheet should contain the attribute grid')
+
+  const attributeCell = attributeGrid.children.find((child): child is ElementNode => child.type === NodeTypes.ELEMENT)
+  assert.ok(attributeCell, 'the attribute grid should render an attribute cell')
+
+  const cellChildren = attributeCell.children.filter((child): child is ElementNode => child.type === NodeTypes.ELEMENT)
+  assert.deepEqual(cellChildren.map((child) => child.tag), ['span', 'strong'])
+  assert.equal(hasClass(cellChildren[0], 'sheet-attribute-label'), true)
+  assert.deepEqual(cellChildren[0].children
+    .filter((child): child is ElementNode => child.type === NodeTypes.ELEMENT)
+    .map((child) => child.tag), ['small', 'b'])
+})
+
 test('keeps manual saves separate while showing turn rollback in status', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]

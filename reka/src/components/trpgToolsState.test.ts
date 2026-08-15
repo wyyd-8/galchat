@@ -26,11 +26,11 @@ const cards: InvestigatorCardSummary[] = [
 ]
 
 test('builds the character-card selector with the player first and each matching card state', () => {
-  assert.deepEqual(buildToolCharacterTargets(characters, cards, [11, 22]), [
+  assert.deepEqual(buildToolCharacterTargets(characters, cards, [11, 22], '旅人甲'), [
     {
       key: 'player',
       actorType: 'PLAYER',
-      name: '玩家调查员',
+      name: '旅人甲',
       cardId: 101,
     },
     {
@@ -50,12 +50,19 @@ test('builds the character-card selector with the player first and each matching
   ])
 })
 
+test('uses the signed-in username and AI character names for tool targets', () => {
+  assert.deepEqual(
+    buildToolCharacterTargets(characters, cards, [11, 22], '旅人甲').map((target) => target.name),
+    ['旅人甲', '艾琳', '罗伯特'],
+  )
+})
+
 test('excludes AI investigators that do not belong to the current TRPG run', () => {
-  assert.deepEqual(buildToolCharacterTargets(characters, cards, [22]), [
+  assert.deepEqual(buildToolCharacterTargets(characters, cards, [22], '旅人甲'), [
     {
       key: 'player',
       actorType: 'PLAYER',
-      name: '玩家调查员',
+      name: '旅人甲',
       cardId: 101,
     },
     {
@@ -69,7 +76,7 @@ test('excludes AI investigators that do not belong to the current TRPG run', () 
 })
 
 test('uses the third-stage dialog width only while the character-card tab is selected', () => {
-  assert.equal(toolDialogContentClass('card'), 'trpg-binding-dialog')
+  assert.equal(toolDialogContentClass('card'), 'trpg-binding-dialog trpg-tools-character-dialog')
   assert.equal(toolDialogContentClass('status'), '')
   assert.equal(toolDialogContentClass('dice'), '')
 })
@@ -98,4 +105,33 @@ test('clears pending destructive confirmations when switching tools', async () =
 
   assert.equal(confirmations.confirmRollback.value, false)
   assert.equal(confirmations.confirmLoad.value, false)
+})
+
+test('formats a CoC check rate as full, half, and fifth values', () => {
+  const formatCheckRate = (trpgToolsState as typeof trpgToolsState & {
+    formatCheckRate?: (value?: number) => string
+  }).formatCheckRate
+
+  assert.ok(formatCheckRate, 'TRPG tools should expose check-rate formatting')
+  assert.equal(formatCheckRate(40), '40% / 20% / 8%')
+  assert.equal(formatCheckRate(1), '1% / 0% / 0%')
+  assert.equal(formatCheckRate(undefined), '—')
+})
+
+test('resolves a weapon success rate from its normalized skill name', () => {
+  const resolveWeaponCheckValue = (trpgToolsState as typeof trpgToolsState & {
+    resolveWeaponCheckValue?: (
+      weapon: { name: string, skillName?: string },
+      skills: Array<{ displayName: string, value: number }>,
+    ) => number | undefined
+  }).resolveWeaponCheckValue
+
+  assert.ok(resolveWeaponCheckValue, 'TRPG tools should resolve weapon check values')
+  const skills = [
+    { displayName: '射击:手枪', value: 55 },
+    { displayName: '格斗:斗殴', value: 65 },
+  ]
+  assert.equal(resolveWeaponCheckValue({ name: '左轮手枪', skillName: '射击：手枪' }, skills), 55)
+  assert.equal(resolveWeaponCheckValue({ name: '徒手格斗' }, skills), 65)
+  assert.equal(resolveWeaponCheckValue({ name: '未知武器' }, skills), undefined)
 })

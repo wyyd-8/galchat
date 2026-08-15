@@ -1,5 +1,5 @@
 import { ref, watch, type Ref } from 'vue'
-import type { Character, InvestigatorCardSummary } from '../api/types.ts'
+import type { Character, CocSkill, CocWeapon, InvestigatorCardSummary } from '../api/types.ts'
 
 export interface ToolCharacterTarget {
   key: string
@@ -10,8 +10,31 @@ export interface ToolCharacterTarget {
   cardId?: number
 }
 
+export function formatCheckRate(value?: number): string {
+  if (value == null) return '—'
+  return `${value}% / ${Math.floor(value / 2)}% / ${Math.floor(value / 5)}%`
+}
+
+function normalizedCheckName(value?: string): string {
+  return (value || '').trim().replaceAll('：', ':').replaceAll(/\s+/g, '')
+}
+
+export function resolveWeaponCheckValue(
+  weapon: Pick<CocWeapon, 'name' | 'skillName'>,
+  skills: Array<Pick<CocSkill, 'displayName' | 'value'>>,
+): number | undefined {
+  const requestedNames = new Set([
+    normalizedCheckName(weapon.skillName),
+    normalizedCheckName(weapon.name),
+  ].filter(Boolean))
+  if (['徒手格斗', '斗殴', '徒手战斗'].some((name) => requestedNames.has(name))) {
+    requestedNames.add('格斗:斗殴')
+  }
+  return skills.find((skill) => requestedNames.has(normalizedCheckName(skill.displayName)))?.value
+}
+
 export function toolDialogContentClass(tab: string): string {
-  return tab === 'card' ? 'trpg-binding-dialog' : ''
+  return tab === 'card' ? 'trpg-binding-dialog trpg-tools-character-dialog' : ''
 }
 
 export function useToolConfirmations(open: Ref<boolean>, selectedTab: Ref<string>) {
@@ -30,6 +53,7 @@ export function buildToolCharacterTargets(
   characters: Character[],
   cards: InvestigatorCardSummary[],
   participantIds: number[],
+  username = '',
 ): ToolCharacterTarget[] {
   const playerCard = cards.find((card) => card.actorType === 'PLAYER')
   const participantIdSet = new Set(participantIds)
@@ -38,7 +62,7 @@ export function buildToolCharacterTargets(
     {
       key: 'player',
       actorType: 'PLAYER',
-      name: '玩家调查员',
+      name: username.trim() || '当前玩家',
       ...(playerCard ? { cardId: playerCard.cardId } : {}),
     },
     ...characters.filter((character) => participantIdSet.has(character.characterId)).map((character) => {

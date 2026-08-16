@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TrpgCombatTurnPolicyTest {
 
     @Test
-    void expandsEveryAttackerIntoRouteOptionalDefenseAndAdjudication() {
+    void createsOnlyAttackAndAdjudicationRootsForEveryAttacker() {
         GroupReplyPlanItem npc = new GroupReplyPlanItem()
                 .setActorType(GroupChatConstant.ACTOR_KP)
                 .setActorId(null)
@@ -32,15 +32,11 @@ class TrpgCombatTurnPolicyTest {
                 .extracting(action -> action.actionType())
                 .containsExactly(
                         GroupChatConstant.ACTION_COMBAT_ATTACK,
-                        GroupChatConstant
-                                .ACTION_COMBAT_REACTION_ROUTE,
-                        GroupChatConstant.ACTION_COMBAT_DEFENSE,
                         GroupChatConstant.ACTION_COMBAT_ADJUDICATE);
         assertThat(actions.getFirst().subjectCharacterId())
                 .isEqualTo(71L);
         assertThat(actions.get(1).actorType())
                 .isEqualTo(GroupChatConstant.ACTOR_KP);
-        assertThat(actions.get(2).subjectCharacterId()).isNull();
         assertThat(actions.getLast().subjectCharacterId())
                 .isEqualTo(71L);
     }

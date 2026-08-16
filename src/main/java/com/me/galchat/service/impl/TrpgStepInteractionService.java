@@ -79,20 +79,20 @@ public class TrpgStepInteractionService {
                 || !conversation.getId().equals(turn.getConversationId())) {
             throw new UserRequestException("追问行动轮不存在");
         }
-        GroupChatReplyStep parent = stepMapper.selectById(replyStepId);
-        if (parent == null || !turnId.equals(parent.getTurnId())
-                || parent.getParentStepId() != null) {
+        GroupChatReplyStep source = stepMapper.selectById(replyStepId);
+        if (source == null || !turnId.equals(source.getTurnId())) {
             throw new UserRequestException("追问父步骤不存在");
         }
-        if (!GroupChatConstant.ACTOR_KP.equals(parent.getSpeakerType())
+        if (!GroupChatConstant.ACTOR_KP.equals(source.getSpeakerType())
                 || !(GroupChatConstant.ACTION_TRPG_SCENE.equals(
-                parent.getActionType())
+                source.getActionType())
                 || GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE.equals(
-                parent.getActionType()))) {
+                source.getActionType()))) {
             throw new UserRequestException(
                     "当前步骤不允许KP发起追问");
         }
-        List<GroupChatReplyStep> interactions = interactions(parent.getId());
+        GroupChatReplyStep root = interactionRoot(source, turnId);
+        List<GroupChatReplyStep> interactions = interactions(root.getId());
         if (interactions.size() >= MAX_INTERACTIONS_PER_ROOT) {
             throw new UserRequestException("一次裁定最多追问6次");
         }
@@ -106,17 +106,16 @@ public class TrpgStepInteractionService {
         LocalDateTime now = LocalDateTime.now();
         GroupChatReplyStep child = new GroupChatReplyStep()
                 .setTurnId(turnId)
-                .setParentStepId(parent.getId())
-                .setRootStepId(parent.getRootStepId() == null
-                        ? parent.getId() : parent.getRootStepId())
+                .setParentStepId(root.getId())
+                .setRootStepId(root.getId())
                 .setInteractionType("TEAM".equals(scope)
                         ? TEAM_RISK_CONFIRMATION : KP_CLARIFICATION)
                 .setInteractionSeq(interactionSeq)
-                .setPromptMessageId(parent.getOutputMessageId())
-                .setGroupKey(parent.getGroupKey())
-                .setGroupName(parent.getGroupName())
-                .setGroupOrder(parent.getGroupOrder())
-                .setItemOrder(parent.getItemOrder())
+                .setPromptMessageId(source.getOutputMessageId())
+                .setGroupKey(root.getGroupKey())
+                .setGroupName(root.getGroupName())
+                .setGroupOrder(root.getGroupOrder())
+                .setItemOrder(root.getItemOrder())
                 .setStepNo(nextStepNo(turnId))
                 .setActionType(
                         GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
@@ -128,14 +127,34 @@ public class TrpgStepInteractionService {
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         stepMapper.insert(child);
-        parent.setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION)
+        root.setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION)
                 .setErrorMessage(null)
                 .setUpdatedAt(now);
-        stepMapper.updateById(parent);
+        stepMapper.updateById(root);
         return new InteractionRequest(
                 child.getId(), child.getRootStepId(),
                 child.getInteractionType(), interactionSeq,
                 target.actor(), target.cardId(), question, reasonType);
+    }
+
+    private GroupChatReplyStep interactionRoot(
+            GroupChatReplyStep source, Long turnId) {
+        if (source.getParentStepId() == null) {
+            return source;
+        }
+        if (!GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE.equals(
+                source.getActionType())) {
+            throw new UserRequestException("追问只支持一层子步骤");
+        }
+        GroupChatReplyStep root = stepMapper.selectById(
+                source.getParentStepId());
+        if (root == null || !turnId.equals(root.getTurnId())
+                || root.getParentStepId() != null
+                || !GroupChatConstant.ACTION_COMBAT_ADJUDICATE.equals(
+                root.getActionType())) {
+            throw new UserRequestException("战斗裁定根步骤不存在");
+        }
+        return root;
     }
 
     private List<GroupChatReplyStep> interactions(Long rootStepId) {
@@ -143,6 +162,7 @@ public class TrpgStepInteractionService {
                 new LambdaQueryWrapper<GroupChatReplyStep>()
                         .eq(GroupChatReplyStep::getRootStepId, rootStepId)
                         .isNotNull(GroupChatReplyStep::getParentStepId)
+                        .isNotNull(GroupChatReplyStep::getInteractionType)
                         .orderByAsc(
                                 GroupChatReplyStep::getInteractionSeq));
         return result == null ? List.of() : result;

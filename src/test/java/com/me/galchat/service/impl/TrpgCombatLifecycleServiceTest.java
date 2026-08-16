@@ -15,6 +15,7 @@ import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
@@ -28,6 +29,289 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TrpgCombatLifecycleServiceTest {
+
+    @Test
+    void preparingAdjudicationCreatesFirstRouteAsDirectOrderedChild() {
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        TrpgCombatLifecycleService service = serviceWithSteps(stepMapper);
+        GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep adjudication = new GroupChatReplyStep()
+                .setId(42L).setTurnId(30L).setStepNo(2)
+                .setItemOrder(2).setGroupKey("combat:1")
+                .setGroupName("战斗第1轮").setGroupOrder(1)
+                .setSubjectCharacterId(71L)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(stepMapper.selectList(any()))
+                .thenReturn(List.of(), List.of(adjudication));
+        doAnswer(invocation -> {
+            invocation.<GroupChatReplyStep>getArgument(0).setId(43L);
+            return 1;
+        }).when(stepMapper).insert(any(GroupChatReplyStep.class));
+
+        GroupChatReplyStep route = service.prepareAdjudicationRoot(
+                turn, adjudication);
+
+        ArgumentCaptor<GroupChatReplyStep> inserted =
+                ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(stepMapper).insert(inserted.capture());
+        assertThat(route).isSameAs(inserted.getValue());
+        assertThat(route.getParentStepId()).isEqualTo(42L);
+        assertThat(route.getRootStepId()).isEqualTo(42L);
+        assertThat(route.getActionType()).isEqualTo(
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        assertThat(route.getSubjectCharacterId()).isEqualTo(71L);
+        assertThat(route.getStepNo()).isEqualTo(3);
+        assertThat(adjudication.getStatus()).isEqualTo(
+                GroupChatConstant.STATUS_WAITING_INTERACTION);
+    }
+
+    @Test
+    void completedClarificationAppendsRouteRetryBeforeRootCanResume() {
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        TrpgCombatLifecycleService service = serviceWithSteps(stepMapper);
+        GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep adjudication = new GroupChatReplyStep()
+                .setId(42L).setTurnId(30L).setStepNo(2)
+                .setItemOrder(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        GroupChatReplyStep oldRoute = new GroupChatReplyStep()
+                .setId(43L).setTurnId(30L).setStepNo(3)
+                .setParentStepId(42L).setRootStepId(42L)
+                .setActionType(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        GroupChatReplyStep clarification = new GroupChatReplyStep()
+                .setId(44L).setTurnId(30L).setStepNo(4)
+                .setParentStepId(42L).setRootStepId(42L)
+                .setActionType(
+                        GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        when(stepMapper.selectById(42L)).thenReturn(adjudication);
+        when(stepMapper.selectList(any())).thenReturn(
+                List.of(oldRoute, clarification),
+                List.of(clarification),
+                List.of(oldRoute, clarification));
+        doAnswer(invocation -> {
+            invocation.<GroupChatReplyStep>getArgument(0).setId(45L);
+            return 1;
+        }).when(stepMapper).insert(any(GroupChatReplyStep.class));
+
+        GroupChatReplyStep next = service.advanceAdjudicationChild(
+                turn, clarification);
+
+        ArgumentCaptor<GroupChatReplyStep> inserted =
+                ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(stepMapper).insert(inserted.capture());
+        assertThat(inserted.getValue().getActionType()).isEqualTo(
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        assertThat(inserted.getValue().getParentStepId()).isEqualTo(42L);
+        assertThat(next).isSameAs(inserted.getValue());
+        assertThat(adjudication.getStatus()).isEqualTo(
+                GroupChatConstant.STATUS_WAITING_INTERACTION);
+    }
+
+    @Test
+    void adjudicationPromptIncludesEveryOrderedChildUnderItsRoot() {
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        conversations,
+                        mock(GroupReplyPlanService.class),
+                        mock(GroupReplyPlanMapper.class),
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class),
+                        stepMapper, messageMapper,
+                        mock(CocCharacterMapper.class),
+                        mock(TrpgCombatMapper.class),
+                        JsonMapper.builder().build());
+        GroupChatReplyStep attack = new GroupChatReplyStep()
+                .setId(40L).setTurnId(30L).setStepNo(1)
+                .setOutputMessageId(100L)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ATTACK);
+        GroupChatReplyStep root = new GroupChatReplyStep()
+                .setId(42L).setTurnId(30L).setStepNo(2)
+                .setSubjectCharacterId(71L)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE);
+        GroupChatReplyStep route1 = childStep(
+                43L, 3, 42L,
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 101L);
+        GroupChatReplyStep clarification = childStep(
+                44L, 4, 42L,
+                GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE, 102L);
+        GroupChatReplyStep route2 = childStep(
+                45L, 5, 42L,
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 103L);
+        GroupChatReplyStep defense = childStep(
+                46L, 6, 42L,
+                GroupChatConstant.ACTION_COMBAT_DEFENSE, 104L);
+        when(stepMapper.selectList(any())).thenReturn(
+                List.of(root),
+                List.of(route1, clarification, route2, defense),
+                List.of(attack));
+        when(messageMapper.selectById(100L)).thenReturn(
+                message(100L, "向门边的食尸鬼射击"));
+        when(messageMapper.selectById(101L)).thenReturn(
+                message(101L, "目标不明确，需要追问"));
+        when(messageMapper.selectById(102L)).thenReturn(
+                message(102L, "门边那只"));
+        when(messageMapper.selectById(103L)).thenReturn(
+                message(103L, "目标为门边食尸鬼"));
+        when(messageMapper.selectById(104L)).thenReturn(
+                message(104L, "食尸鬼寻找掩护"));
+
+        String prompt = service.adjudicationPrompt(
+                7L,
+                new com.me.galchat.groupchat.runtime.GroupActionSpec(
+                        GroupChatConstant.ACTION_COMBAT_ADJUDICATE,
+                        GroupChatConstant.ACTOR_KP, null, 71L,
+                        "combat:1", "战斗", 1, 2));
+
+        assertThat(prompt).containsSubsequence(
+                "向门边的食尸鬼射击",
+                "目标不明确，需要追问",
+                "门边那只",
+                "目标为门边食尸鬼",
+                "食尸鬼寻找掩护");
+    }
+
+    @Test
+    void defensePromptUsesLatestPriorRouteFromTheSameRoot() {
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupReplyPlanService.class),
+                        mock(GroupReplyPlanMapper.class),
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class),
+                        stepMapper, messageMapper,
+                        mock(CocCharacterMapper.class),
+                        mock(TrpgCombatMapper.class),
+                        JsonMapper.builder().build());
+        GroupChatReplyStep route1 = childStep(
+                43L, 3, 42L,
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 101L);
+        GroupChatReplyStep clarification = childStep(
+                44L, 4, 42L,
+                GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE, 102L);
+        GroupChatReplyStep route2 = childStep(
+                45L, 5, 42L,
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 103L);
+        GroupChatReplyStep defense = childStep(
+                46L, 6, 42L,
+                GroupChatConstant.ACTION_COMBAT_DEFENSE, null)
+                .setSubjectCharacterId(72L);
+        when(stepMapper.selectList(any())).thenReturn(
+                List.of(defense),
+                List.of(route1, clarification, route2, defense));
+        when(messageMapper.selectById(101L)).thenReturn(
+                message(101L, "旧路由：目标不明确"));
+        when(messageMapper.selectById(103L)).thenReturn(
+                message(103L, "新路由：可闪避或寻找掩护"));
+
+        String prompt = service.defensePrompt(
+                new com.me.galchat.groupchat.runtime.GroupActionSpec(
+                        GroupChatConstant.ACTION_COMBAT_DEFENSE,
+                        GroupChatConstant.ACTOR_KP, null, 72L,
+                        "combat:1", "战斗", 1, 2));
+
+        assertThat(prompt)
+                .contains("新路由：可闪避或寻找掩护")
+                .doesNotContain("旧路由：目标不明确");
+    }
+
+    @Test
+    void completedAdjudicationPersistsOrderedChildrenAndDerivedActiveOrder() {
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatToolCallMapper toolCalls =
+                mock(GroupChatToolCallMapper.class);
+        GroupChatMessageMapper messages =
+                mock(GroupChatMessageMapper.class);
+        TrpgCombatMapper combats = mock(TrpgCombatMapper.class);
+        var objectMapper = JsonMapper.builder().build();
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupReplyPlanService.class),
+                        planMapper, mock(GroupChatTurnMapper.class),
+                        toolCalls, stepMapper, messages,
+                        mock(CocCharacterMapper.class), combats,
+                        objectMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setActiveReplyPlanId(10L);
+        GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep priorRoot = new GroupChatReplyStep()
+                .setId(32L).setTurnId(30L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE);
+        GroupChatReplyStep attack = new GroupChatReplyStep()
+                .setId(40L).setTurnId(30L).setStepNo(3)
+                .setOutputMessageId(100L)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ATTACK);
+        GroupChatReplyStep root = new GroupChatReplyStep()
+                .setId(42L).setTurnId(30L).setStepNo(4)
+                .setItemOrder(20).setSubjectCharacterId(71L)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE);
+        GroupChatReplyStep route = childStep(
+                43L, 5, 42L,
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 101L);
+        GroupChatReplyStep defense = childStep(
+                44L, 6, 42L,
+                GroupChatConstant.ACTION_COMBAT_DEFENSE, 102L);
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                        .setContextId(200L));
+        TrpgCombat combat = new TrpgCombat()
+                .setId(200L).setConversationId(7L)
+                .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
+                .setCurrentRound(1)
+                .setParticipants(objectMapper.createArrayNode())
+                .setActiveTurnResults(objectMapper.createArrayNode());
+        when(combats.selectById(200L)).thenReturn(combat);
+        when(stepMapper.selectList(any())).thenReturn(
+                List.of(route, defense),
+                List.of(attack),
+                List.of(priorRoot, root));
+        when(toolCalls.selectList(any())).thenReturn(List.of());
+        when(messages.selectById(100L)).thenReturn(
+                message(100L, "攻击"));
+        when(messages.selectById(101L)).thenReturn(
+                message(101L, "路由"));
+        when(messages.selectById(102L)).thenReturn(
+                message(102L, "防守"));
+        com.me.galchat.domain.po.GroupChatMessage adjudicationMessage =
+                message(200L, "裁定完成");
+
+        service.completeAdjudication(
+                conversation, turn, root, adjudicationMessage);
+
+        tools.jackson.databind.JsonNode result =
+                combat.getActiveTurnResults().get(0);
+        assertThat(result.get("activeOrder").asInt()).isEqualTo(2);
+        assertThat(result.get("childSteps")).hasSize(2);
+        assertThat(result.get("childSteps").get(0)
+                .get("actionType").asText()).isEqualTo(
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        assertThat(result.get("childSteps").get(1)
+                .get("actionType").asText()).isEqualTo(
+                GroupChatConstant.ACTION_COMBAT_DEFENSE);
+    }
 
     @Test
     void utilityActionRouteAllowsReloadWithoutAnotherParticipantTarget() {
@@ -51,11 +335,19 @@ class TrpgCombatLifecycleServiceTest {
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(10L);
         GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep adjudication = new GroupChatReplyStep()
+                .setId(41L).setTurnId(30L).setStepNo(2)
+                .setItemOrder(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
         GroupChatReplyStep route = new GroupChatReplyStep()
-                .setId(42L).setTurnId(30L).setStepNo(2)
+                .setId(42L).setTurnId(30L).setStepNo(3)
+                .setParentStepId(41L).setRootStepId(41L)
                 .setSubjectCharacterId(71L)
                 .setActionType(
                         GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        when(stepMapper.selectById(41L)).thenReturn(adjudication);
         when(planMapper.selectById(10L)).thenReturn(
                 new GroupReplyPlan().setId(10L)
                         .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
@@ -64,12 +356,12 @@ class TrpgCombatLifecycleServiceTest {
                 new TrpgCombat().setId(200L).setConversationId(7L)
                         .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
                         .setParticipants(objectMapper.createArrayNode()));
-        GroupChatReplyStep defense = new GroupChatReplyStep()
-                .setId(43L).setTurnId(30L).setStepNo(3)
-                .setItemOrder(3)
-                .setActionType(GroupChatConstant.ACTION_COMBAT_DEFENSE)
-                .setStatus(GroupChatConstant.STATUS_PENDING);
-        when(stepMapper.selectList(any())).thenReturn(List.of(defense));
+        when(stepMapper.selectList(any()))
+                .thenReturn(List.of(route));
+        doAnswer(invocation -> {
+            invocation.<GroupChatReplyStep>getArgument(0).setId(43L);
+            return 1;
+        }).when(stepMapper).insert(any(GroupChatReplyStep.class));
 
         var decision = service.completeReactionRoute(
                 conversation, turn, route,
@@ -79,9 +371,29 @@ class TrpgCombatLifecycleServiceTest {
         assertThat(decision.targetCharacterId()).isNull();
         assertThat(decision.targetName()).isNull();
         assertThat(decision.insertDefense()).isFalse();
+        ArgumentCaptor<GroupChatReplyStep> inserted =
+                ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(stepMapper).insert(inserted.capture());
+        GroupChatReplyStep defense = inserted.getValue();
+        assertThat(defense.getParentStepId()).isEqualTo(41L);
         assertThat(defense.getSubjectCharacterId()).isNull();
         assertThat(defense.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_CANCELLED);
+    }
+
+    private TrpgCombatLifecycleService serviceWithSteps(
+            GroupChatReplyStepMapper stepMapper) {
+        return new TrpgCombatLifecycleService(
+                mock(GroupConversationService.class),
+                mock(GroupReplyPlanService.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupChatTurnMapper.class),
+                mock(GroupChatToolCallMapper.class),
+                stepMapper,
+                mock(GroupChatMessageMapper.class),
+                mock(CocCharacterMapper.class),
+                mock(TrpgCombatMapper.class),
+                JsonMapper.builder().build());
     }
 
     @Test
@@ -308,12 +620,16 @@ class TrpgCombatLifecycleServiceTest {
                 combatStep(41L, 1,
                         GroupChatConstant.ACTION_COMBAT_ATTACK, 71L),
                 combatStep(42L, 2,
-                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 71L),
-                combatStep(43L, 3,
-                        GroupChatConstant.ACTION_COMBAT_DEFENSE, null),
-                combatStep(44L, 4,
                         GroupChatConstant.ACTION_COMBAT_ADJUDICATE, 71L),
-                combatStep(45L, 5,
+                combatStep(43L, 3,
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 71L)
+                        .setItemOrder(2).setParentStepId(42L)
+                        .setRootStepId(42L),
+                combatStep(44L, 4,
+                        GroupChatConstant.ACTION_COMBAT_DEFENSE, null)
+                        .setItemOrder(2).setParentStepId(42L)
+                        .setRootStepId(42L),
+                combatStep(45L, 3,
                         GroupChatConstant.ACTION_COMBAT_ATTACK, 72L));
         when(stepMapper.selectList(any())).thenReturn(steps);
 
@@ -351,5 +667,22 @@ class TrpgCombatLifecycleServiceTest {
                 .setActionType(actionType)
                 .setSubjectCharacterId(characterId)
                 .setStatus(GroupChatConstant.STATUS_PENDING);
+    }
+
+    private GroupChatReplyStep childStep(
+            Long id, int stepNo, Long rootId,
+            String actionType, Long outputMessageId) {
+        return new GroupChatReplyStep()
+                .setId(id).setTurnId(30L).setStepNo(stepNo)
+                .setParentStepId(rootId).setRootStepId(rootId)
+                .setActionType(actionType)
+                .setOutputMessageId(outputMessageId)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+    }
+
+    private com.me.galchat.domain.po.GroupChatMessage message(
+            Long id, String content) {
+        return new com.me.galchat.domain.po.GroupChatMessage()
+                .setId(id).setContent(content);
     }
 }

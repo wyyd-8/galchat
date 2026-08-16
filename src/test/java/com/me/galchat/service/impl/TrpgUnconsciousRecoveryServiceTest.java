@@ -93,6 +93,8 @@ class TrpgUnconsciousRecoveryServiceTest {
         assertThat(steps.subList(1, 4))
                 .extracting(GroupChatReplyStep::getStatus)
                 .containsOnly(GroupChatConstant.STATUS_CANCELLED);
+        assertThat(steps.get(4).getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_PENDING);
         verify(toolCalls).saveSystemDice(attack.getId(), roll);
         verify(checkpoints).recordBoundary(
                 turn, attack, GroupTurnCheckpointService.WAITING_DICE);
@@ -156,10 +158,17 @@ class TrpgUnconsciousRecoveryServiceTest {
         return List.of(
                 step(41L, 1, GroupChatConstant.ACTION_COMBAT_ATTACK, 71L),
                 step(42L, 2,
-                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 71L),
-                step(43L, 3, GroupChatConstant.ACTION_COMBAT_DEFENSE, null),
-                step(44L, 4,
-                        GroupChatConstant.ACTION_COMBAT_ADJUDICATE, 71L));
+                        GroupChatConstant.ACTION_COMBAT_ADJUDICATE, 71L),
+                step(43L, 3,
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 71L)
+                        .setItemOrder(2).setParentStepId(42L)
+                        .setRootStepId(42L),
+                step(44L, 4, GroupChatConstant.ACTION_COMBAT_DEFENSE, null)
+                        .setItemOrder(2).setParentStepId(42L)
+                        .setRootStepId(42L),
+                step(45L, 5,
+                        GroupChatConstant.ACTION_COMBAT_ATTACK, 72L)
+                        .setItemOrder(3));
     }
 
     private GroupChatReplyStep step(

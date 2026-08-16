@@ -29,6 +29,7 @@ import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -47,6 +48,107 @@ class TrpgTurnExecutionServiceTest {
     static void initMybatisPlusTableInfo() {
         com.me.galchat.support.MybatisPlusTestSupport.initialize(
                 GroupChatReplyStep.class);
+    }
+
+    @Test
+    void combatAdjudicationExecutesOrderedChildBeforeResumingRoot() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupConversationLockService locks =
+                mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatService chats = mock(GroupChatService.class);
+        TrpgCombatLifecycleService combats =
+                mock(TrpgCombatLifecycleService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        GroupChatReplyStep root = new GroupChatReplyStep()
+                .setId(201L).setTurnId(101L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        GroupChatReplyStep route = new GroupChatReplyStep()
+                .setId(301L).setTurnId(101L).setStepNo(3)
+                .setParentStepId(201L).setRootStepId(201L)
+                .setActionType(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(conversations.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversations.requireActive(7L))
+                .thenReturn(conversation);
+        when(locks.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turns.selectList(any())).thenReturn(List.of(turn));
+        when(turns.selectById(101L)).thenReturn(turn);
+        when(steps.selectCount(any())).thenReturn(0L);
+        when(steps.selectList(any()))
+                .thenReturn(List.of(root), List.of(root));
+        when(steps.selectById(201L)).thenReturn(root);
+        when(steps.selectById(301L)).thenReturn(route);
+        when(combats.prepareAdjudicationRoot(turn, root))
+                .thenAnswer(invocation -> {
+                    root.setStatus(
+                            GroupChatConstant.STATUS_WAITING_INTERACTION);
+                    return route;
+                })
+                .thenReturn(null);
+        when(combats.advanceAdjudicationChild(turn, route))
+                .thenAnswer(invocation -> {
+                    root.setStatus(GroupChatConstant.STATUS_PENDING);
+                    return null;
+                });
+        List<String> executionOrder = new ArrayList<>();
+        when(chats.streamPersistedStep(conversation, turn, route))
+                .thenReturn(Flux.defer(() -> {
+                    executionOrder.add("route");
+                    route.setStatus(GroupChatConstant.STATUS_COMPLETED);
+                    return Flux.empty();
+                }));
+        when(chats.streamPersistedStep(conversation, turn, root))
+                .thenReturn(Flux.defer(() -> {
+                    executionOrder.add("adjudication");
+                    root.setStatus(GroupChatConstant.STATUS_COMPLETED);
+                    return Flux.empty();
+                }));
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversations, locks, mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class), turns, steps,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class), chats,
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                combats,
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+
+        List<GroupChatEvent> events = service.continueTurn(
+                7L, new GroupTurnContinueDTO()).collectList().block();
+
+        assertThat(executionOrder)
+                .containsExactly("route", "adjudication");
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_TURN_ACCEPTED,
+                        GroupChatConstant.EVENT_TURN_COMPLETED);
     }
 
     @Test

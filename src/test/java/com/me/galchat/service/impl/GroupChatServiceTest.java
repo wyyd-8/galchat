@@ -805,7 +805,7 @@ class GroupChatServiceTest {
     }
 
     @Test
-    void combatRouteClarificationIsPublicAndSkipsRouteFinalization() {
+    void combatRouteClarificationIsPublicAndCompletesRouteChild() {
         DeepSeekChatModel model = mock(DeepSeekChatModel.class);
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
@@ -839,7 +839,8 @@ class GroupChatServiceTest {
                 .setId(30L).setConversationId(7L)
                 .setStatus(GroupChatConstant.STATUS_RUNNING);
         GroupChatReplyStep route = new GroupChatReplyStep()
-                .setId(31L).setTurnId(30L).setStepNo(2)
+                .setId(31L).setTurnId(30L).setStepNo(3)
+                .setParentStepId(29L).setRootStepId(29L)
                 .setActionType(
                         GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE)
                 .setSpeakerType(GroupChatConstant.ACTOR_KP)
@@ -862,7 +863,7 @@ class GroupChatServiceTest {
                     return 1;
                 });
         String directJson = """
-                {"childStepId":301,"rootStepId":31,
+                {"childStepId":301,"rootStepId":29,
                  "interactionType":"KP_CLARIFICATION",
                  "interactionSeq":1,
                  "targetActor":{"type":"user","id":9},
@@ -892,7 +893,7 @@ class GroupChatServiceTest {
         assertThat(events.getLast().getContent())
                 .isEqualTo("你攻击的是门边还是窗边的食尸鬼？");
         assertThat(route.getStatus())
-                .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
+                .isEqualTo(GroupChatConstant.STATUS_COMPLETED);
         verify(combats, never()).completeReactionRoute(
                 any(), any(), any(), any());
     }

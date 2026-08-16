@@ -10,6 +10,7 @@ import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -112,6 +113,56 @@ class TrpgStepInteractionServiceTest {
         assertThat(result.targetCharacterId()).isEqualTo(31L);
         assertThat(result.interactionType())
                 .isEqualTo("TEAM_RISK_CONFIRMATION");
+    }
+
+    @Test
+    void combatRouteClarificationIsAppendedBesideRouteUnderAdjudicationRoot() {
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        TrpgParticipantService participants =
+                mock(TrpgParticipantService.class);
+        TrpgStepInteractionService service = service(
+                steps, turns, participants);
+        GroupChatReplyStep adjudication = new GroupChatReplyStep()
+                .setId(201L).setTurnId(101L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        GroupChatReplyStep route = new GroupChatReplyStep()
+                .setId(202L).setTurnId(101L).setStepNo(3)
+                .setParentStepId(201L).setRootStepId(201L)
+                .setActionType(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        when(turns.selectById(101L)).thenReturn(runningTurn());
+        when(steps.selectById(202L)).thenReturn(route);
+        when(steps.selectById(201L)).thenReturn(adjudication);
+        when(steps.selectList(any()))
+                .thenReturn(List.of(), List.of(adjudication, route));
+        when(participants.listInvestigators(any()))
+                .thenReturn(List.of(participant(
+                        GroupChatConstant.ACTOR_USER,
+                        31L, 31L, "林恩")));
+        doAnswer(invocation -> {
+            invocation.<GroupChatReplyStep>getArgument(0).setId(303L);
+            return 1;
+        }).when(steps).insert(any(GroupChatReplyStep.class));
+
+        var result = service.askForClarification(
+                conversation(), 101L, 202L,
+                "INDIVIDUAL", "林恩",
+                "你要防守哪一次攻击？", "TARGET");
+
+        ArgumentCaptor<GroupChatReplyStep> inserted =
+                ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(steps).insert(inserted.capture());
+        assertThat(inserted.getValue().getParentStepId()).isEqualTo(201L);
+        assertThat(inserted.getValue().getRootStepId()).isEqualTo(201L);
+        assertThat(result.rootStepId()).isEqualTo(201L);
+        assertThat(adjudication.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
     }
 
     @Test

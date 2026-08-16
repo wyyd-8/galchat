@@ -188,12 +188,21 @@ public class TrpgUnconsciousRecoveryService {
         if (steps == null) {
             return;
         }
+        int nextSlot = steps.stream()
+                .filter(step -> step.getParentStepId() == null)
+                .filter(step -> GroupChatConstant.ACTION_COMBAT_ATTACK
+                        .equals(step.getActionType()))
+                .map(GroupChatReplyStep::getItemOrder)
+                .filter(Objects::nonNull)
+                .filter(order -> order > first)
+                .min(Integer::compareTo)
+                .orElse(Integer.MAX_VALUE);
         steps.stream()
                 .filter(step -> !Objects.equals(
                         step.getId(), recovery.getId()))
                 .filter(step -> step.getItemOrder() != null
                         && step.getItemOrder() > first
-                        && step.getItemOrder() < first + 4)
+                        && step.getItemOrder() < nextSlot)
                 .filter(step -> GroupChatConstant.STATUS_PENDING.equals(
                         step.getStatus()))
                 .forEach(step -> {

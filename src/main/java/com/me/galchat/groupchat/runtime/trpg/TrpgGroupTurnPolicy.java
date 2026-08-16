@@ -34,7 +34,7 @@ public class TrpgGroupTurnPolicy implements GroupTurnPolicy {
         }
         List<GroupActionSpec> actions = new ArrayList<>();
         for (var item : selection.items()) {
-            int base = (item.getItemOrder() - 1) * 4;
+            int base = (item.getItemOrder() - 1) * 2;
             actions.add(new GroupActionSpec(
                     GroupChatConstant.ACTION_COMBAT_ATTACK,
                     item.getActorType(), item.getActorId(),
@@ -42,22 +42,11 @@ public class TrpgGroupTurnPolicy implements GroupTurnPolicy {
                     selection.executionKey(), selection.displayName(),
                     1, base + 1));
             actions.add(new GroupActionSpec(
-                    GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE,
-                    GroupChatConstant.ACTOR_KP, null,
-                    item.getSubjectCharacterId(),
-                    selection.executionKey(), selection.displayName(),
-                    1, base + 2));
-            actions.add(new GroupActionSpec(
-                    GroupChatConstant.ACTION_COMBAT_DEFENSE,
-                    GroupChatConstant.ACTOR_KP, null, null,
-                    selection.executionKey(), selection.displayName(),
-                    1, base + 3));
-            actions.add(new GroupActionSpec(
                     GroupChatConstant.ACTION_COMBAT_ADJUDICATE,
                     GroupChatConstant.ACTOR_KP, null,
                     item.getSubjectCharacterId(),
                     selection.executionKey(), selection.displayName(),
-                    1, base + 4));
+                    1, base + 2));
         }
         return List.copyOf(actions);
     }

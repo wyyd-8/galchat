@@ -503,9 +503,12 @@ public class GroupChatService {
                     .setCreatedAt(now)
                     .setUpdatedAt(now);
             messageMapper.insert(message);
+            boolean orderedChild = step.getParentStepId() != null;
             step.setOutputMessageId(message.getId())
-                    .setStatus(GroupChatConstant
-                            .STATUS_WAITING_INTERACTION)
+                    .setStatus(orderedChild
+                            ? GroupChatConstant.STATUS_COMPLETED
+                            : GroupChatConstant
+                                    .STATUS_WAITING_INTERACTION)
                     .setUpdatedAt(now);
             stepMapper.updateById(step);
             stepMapper.update(null,
@@ -515,6 +518,11 @@ public class GroupChatService {
                             .set(GroupChatReplyStep::getPromptMessageId,
                                     message.getId())
                             .set(GroupChatReplyStep::getUpdatedAt, now));
+            if (orderedChild) {
+                checkpointService.recordBoundary(
+                        turn, step,
+                        GroupTurnCheckpointService.COMPLETED);
+            }
             return message;
         });
     }

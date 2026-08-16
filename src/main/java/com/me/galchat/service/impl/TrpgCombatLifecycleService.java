@@ -54,6 +54,166 @@ public class TrpgCombatLifecycleService {
     private final ObjectMapper objectMapper;
 
     @Transactional
+    public GroupChatReplyStep prepareAdjudicationRoot(
+            GroupChatTurn turn,
+            GroupChatReplyStep adjudication) {
+        requireAdjudicationRoot(turn, adjudication);
+        List<GroupChatReplyStep> children = childrenOf(
+                adjudication.getId());
+        GroupChatReplyStep next = children.stream()
+                .filter(this::isUnfinished)
+                .findFirst()
+                .orElse(null);
+        if (children.isEmpty()) {
+            next = appendChild(
+                    adjudication,
+                    GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE,
+                    GroupChatConstant.ACTOR_KP,
+                    null,
+                    adjudication.getSubjectCharacterId(),
+                    GroupChatConstant.STATUS_PENDING);
+        }
+        if (next != null) {
+            adjudication.setStatus(
+                            GroupChatConstant.STATUS_WAITING_INTERACTION)
+                    .setErrorMessage(null)
+                    .setUpdatedAt(LocalDateTime.now());
+            stepMapper.updateById(adjudication);
+        }
+        return next;
+    }
+
+    @Transactional
+    public GroupChatReplyStep advanceAdjudicationChild(
+            GroupChatTurn turn,
+            GroupChatReplyStep completedChild) {
+        if (completedChild == null
+                || completedChild.getParentStepId() == null
+                || !GroupChatConstant.STATUS_COMPLETED.equals(
+                completedChild.getStatus())) {
+            throw new UserRequestException("战斗子步骤尚未完成");
+        }
+        GroupChatReplyStep adjudication = stepMapper.selectById(
+                completedChild.getParentStepId());
+        requireAdjudicationRoot(turn, adjudication);
+        List<GroupChatReplyStep> children = childrenOf(
+                adjudication.getId());
+        if (GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
+                completedChild.getActionType())) {
+            GroupChatReplyStep retry = children.stream()
+                    .filter(step -> step.getStepNo()
+                            > completedChild.getStepNo())
+                    .filter(step -> GroupChatConstant
+                            .ACTION_COMBAT_REACTION_ROUTE.equals(
+                                    step.getActionType()))
+                    .findFirst()
+                    .orElse(null);
+            if (retry == null) {
+                retry = appendChild(
+                        adjudication,
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        adjudication.getSubjectCharacterId(),
+                        GroupChatConstant.STATUS_PENDING);
+            }
+            updateAdjudicationStatus(
+                    adjudication,
+                    GroupChatConstant.STATUS_WAITING_INTERACTION);
+            return retry;
+        }
+        GroupChatReplyStep next = children.stream()
+                .filter(this::isUnfinished)
+                .findFirst()
+                .orElse(null);
+        updateAdjudicationStatus(
+                adjudication,
+                next == null
+                        ? GroupChatConstant.STATUS_PENDING
+                        : GroupChatConstant.STATUS_WAITING_INTERACTION);
+        return next;
+    }
+
+    private void updateAdjudicationStatus(
+            GroupChatReplyStep adjudication,
+            String status) {
+        adjudication.setStatus(status)
+                .setErrorMessage(null)
+                .setUpdatedAt(LocalDateTime.now());
+        stepMapper.updateById(adjudication);
+    }
+
+    private void requireAdjudicationRoot(
+            GroupChatTurn turn,
+            GroupChatReplyStep adjudication) {
+        if (turn == null || turn.getId() == null
+                || adjudication == null
+                || !turn.getId().equals(adjudication.getTurnId())
+                || adjudication.getParentStepId() != null
+                || !GroupChatConstant.ACTION_COMBAT_ADJUDICATE.equals(
+                adjudication.getActionType())) {
+            throw new UserRequestException("战斗裁定根步骤不存在");
+        }
+    }
+
+    private GroupChatReplyStep appendChild(
+            GroupChatReplyStep root,
+            String actionType,
+            String speakerType,
+            Long speakerId,
+            Long subjectCharacterId,
+            String status) {
+        LocalDateTime now = LocalDateTime.now();
+        GroupChatReplyStep child = new GroupChatReplyStep()
+                .setTurnId(root.getTurnId())
+                .setParentStepId(root.getId())
+                .setRootStepId(root.getId())
+                .setGroupKey(root.getGroupKey())
+                .setGroupName(root.getGroupName())
+                .setGroupOrder(root.getGroupOrder())
+                .setItemOrder(root.getItemOrder())
+                .setStepNo(nextStepNo(root.getTurnId()))
+                .setActionType(actionType)
+                .setSpeakerType(speakerType)
+                .setSpeakerId(speakerId)
+                .setSubjectCharacterId(subjectCharacterId)
+                .setForceReply(false)
+                .setStatus(status)
+                .setCreatedAt(now)
+                .setUpdatedAt(now);
+        stepMapper.insert(child);
+        return child;
+    }
+
+    private List<GroupChatReplyStep> childrenOf(Long rootStepId) {
+        List<GroupChatReplyStep> children = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getParentStepId,
+                                rootStepId)
+                        .orderByAsc(GroupChatReplyStep::getStepNo));
+        return children == null ? List.of() : children.stream()
+                .filter(step -> rootStepId.equals(
+                        step.getParentStepId()))
+                .toList();
+    }
+
+    private boolean isUnfinished(GroupChatReplyStep step) {
+        return !GroupChatConstant.STATUS_COMPLETED.equals(step.getStatus())
+                && !GroupChatConstant.STATUS_CANCELLED.equals(
+                step.getStatus());
+    }
+
+    private int nextStepNo(Long turnId) {
+        List<GroupChatReplyStep> last = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turnId)
+                        .orderByDesc(GroupChatReplyStep::getStepNo)
+                        .last("limit 1"));
+        return last == null || last.isEmpty()
+                ? 1 : last.getFirst().getStepNo() + 1;
+    }
+
+    @Transactional
     public RouteDecision completeReactionRoute(
             GroupConversation conversation,
             GroupChatTurn turn,
@@ -77,13 +237,7 @@ public class TrpgCombatLifecycleService {
         TrpgCombat combat = requireActiveCombat(conversation);
         String actionKind = root.get("actionKind") == null
                 ? "TARGETED" : root.get("actionKind").asText();
-        GroupChatReplyStep defense = nextStep(
-                turn.getId(), routeStep.getStepNo());
-        if (defense == null
-                || !GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
-                defense.getActionType())) {
-            throw new IllegalStateException("战斗防守占位步骤不存在");
-        }
+        GroupChatReplyStep defense = defenseForRoute(turn, routeStep);
         if ("SELF_OR_UTILITY".equals(actionKind)) {
             defense.setSubjectCharacterId(null)
                     .setStatus(GroupChatConstant.STATUS_CANCELLED)
@@ -155,6 +309,31 @@ public class TrpgCombatLifecycleService {
                         ? null : root.get("reason").asText());
     }
 
+    private GroupChatReplyStep defenseForRoute(
+            GroupChatTurn turn,
+            GroupChatReplyStep routeStep) {
+        if (routeStep.getParentStepId() != null) {
+            GroupChatReplyStep adjudication = stepMapper.selectById(
+                    routeStep.getParentStepId());
+            requireAdjudicationRoot(turn, adjudication);
+            return appendChild(
+                    adjudication,
+                    GroupChatConstant.ACTION_COMBAT_DEFENSE,
+                    GroupChatConstant.ACTOR_KP,
+                    null,
+                    null,
+                    GroupChatConstant.STATUS_CANCELLED);
+        }
+        GroupChatReplyStep defense = nextStep(
+                turn.getId(), routeStep.getStepNo());
+        if (defense == null
+                || !GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
+                defense.getActionType())) {
+            throw new IllegalStateException("战斗防守占位步骤不存在");
+        }
+        return defense;
+    }
+
     public String defensePrompt(
             com.me.galchat.groupchat.runtime.GroupActionSpec action) {
         List<GroupChatReplyStep> defenses = stepMapper.selectList(
@@ -168,9 +347,22 @@ public class TrpgCombatLifecycleService {
         if (defenses == null || defenses.isEmpty()) {
             return "只描述对当前攻击的即时合法防守。";
         }
-        GroupChatReplyStep route = previousStep(
-                defenses.getFirst().getTurnId(),
-                defenses.getFirst().getStepNo());
+        GroupChatReplyStep defense = defenses.getFirst();
+        GroupChatReplyStep route;
+        if (defense.getParentStepId() != null) {
+            route = childrenOf(defense.getParentStepId()).stream()
+                    .filter(step -> GroupChatConstant
+                            .ACTION_COMBAT_REACTION_ROUTE.equals(
+                                    step.getActionType()))
+                    .filter(step -> step.getStepNo()
+                            < defense.getStepNo())
+                    .max(Comparator.comparing(
+                            GroupChatReplyStep::getStepNo))
+                    .orElse(null);
+        } else {
+            route = previousStep(
+                    defense.getTurnId(), defense.getStepNo());
+        }
         return "内部路由给出的防守范围：" + messageContent(route)
                 + "。只选择并描述其中一个合法反应，不得改选攻击目标。";
     }
@@ -178,29 +370,25 @@ public class TrpgCombatLifecycleService {
     public String adjudicationPrompt(
             Long conversationId,
             com.me.galchat.groupchat.runtime.GroupActionSpec action) {
-        List<GroupChatReplyStep> routes = stepMapper.selectList(
+        List<GroupChatReplyStep> roots = stepMapper.selectList(
                 new LambdaQueryWrapper<GroupChatReplyStep>()
                         .eq(GroupChatReplyStep::getActionType,
                                 GroupChatConstant
-                                        .ACTION_COMBAT_REACTION_ROUTE)
+                                        .ACTION_COMBAT_ADJUDICATE)
                         .eq(GroupChatReplyStep::getSubjectCharacterId,
                                 action.subjectCharacterId())
                         .orderByDesc(GroupChatReplyStep::getId)
                         .last("limit 1"));
-        if (routes == null || routes.isEmpty()) {
-            return "读取本主动位的攻击、路由和可选防守后进行裁定。";
+        if (roots == null || roots.isEmpty()) {
+            return "读取本主动位的攻击和全部有序子步骤后进行裁定。";
         }
-        GroupChatReplyStep route = routes.getFirst();
-        GroupChatReplyStep attack = previousStep(
-                route.getTurnId(), route.getStepNo());
-        GroupChatReplyStep defense = nextStep(
-                route.getTurnId(), route.getStepNo());
+        GroupChatReplyStep adjudication = roots.getFirst();
+        List<GroupChatReplyStep> children = childrenOf(
+                adjudication.getId());
+        GroupChatReplyStep attack = previousRootStep(
+                adjudication.getTurnId(), adjudication.getStepNo());
         String attackText = messageContent(attack);
-        String routeText = messageContent(route);
-        String defenseText = defense == null
-                || GroupChatConstant.STATUS_CANCELLED.equals(
-                defense.getStatus())
-                ? "无需插入防守行动" : messageContent(defense);
+        String childText = orderedChildrenText(children);
         String npcDeathInstruction = "";
         try {
             TrpgCombat combat = requireActiveCombat(
@@ -225,13 +413,35 @@ public class TrpgCombatLifecycleService {
         return """
                 本主动位材料：
                 攻击：%s
-                内部路由：%s
-                防守：%s
+                裁定前有序子步骤：
+                %s
                 请只根据这些公开行动、当前人物卡状态和骰点裁定。
                 %s
                 """.formatted(
-                attackText, routeText, defenseText,
+                attackText, childText,
                 npcDeathInstruction);
+    }
+
+    private String orderedChildrenText(
+            List<GroupChatReplyStep> children) {
+        if (children == null || children.isEmpty()) {
+            return "无";
+        }
+        StringBuilder result = new StringBuilder();
+        for (int index = 0; index < children.size(); index++) {
+            GroupChatReplyStep child = children.get(index);
+            if (index > 0) {
+                result.append('\n');
+            }
+            result.append(index + 1)
+                    .append(". [")
+                    .append(child.getActionType())
+                    .append(" / ")
+                    .append(child.getStatus())
+                    .append("] ")
+                    .append(messageContent(child));
+        }
+        return result.toString();
     }
 
     @Transactional
@@ -256,22 +466,39 @@ public class TrpgCombatLifecycleService {
                         adjudication.getId());
             }
         }
-        GroupChatReplyStep defense = previousStep(
-                turn.getId(), adjudication.getStepNo());
-        GroupChatReplyStep route = defense == null ? null
-                : previousStep(turn.getId(), defense.getStepNo());
-        GroupChatReplyStep attack = route == null ? null
-                : previousStep(turn.getId(), route.getStepNo());
+        List<GroupChatReplyStep> children = childrenOf(
+                adjudication.getId());
+        GroupChatReplyStep attack;
+        GroupChatReplyStep route;
+        GroupChatReplyStep defense;
+        if (children.isEmpty()) {
+            defense = previousStep(
+                    turn.getId(), adjudication.getStepNo());
+            route = defense == null ? null
+                    : previousStep(turn.getId(), defense.getStepNo());
+            attack = route == null ? null
+                    : previousStep(turn.getId(), route.getStepNo());
+        } else {
+            attack = previousRootStep(
+                    turn.getId(), adjudication.getStepNo());
+            route = lastChildOfType(children,
+                    GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+            defense = lastChildOfType(children,
+                    GroupChatConstant.ACTION_COMBAT_DEFENSE);
+        }
         ObjectNode result = results.addObject();
         result.put("combatRound", combat.getCurrentRound());
         result.put("activeOrder",
-                (adjudication.getItemOrder() + 1) / 4);
+                activeOrder(turn.getId(), adjudication));
         result.put("attackerCharacterId",
                 adjudication.getSubjectCharacterId());
         result.put("turnId", turn.getId());
         putStepAndMessage(result, "attack", attack);
         putStepAndMessage(result, "route", route);
         putStepAndMessage(result, "defense", defense);
+        ArrayNode childSteps = result.putArray("childSteps");
+        children.forEach(child ->
+                putChildStep(childSteps.addObject(), child));
         result.put("adjudicationStepId", adjudication.getId());
         result.put("adjudicationMessageId",
                 adjudicationMessage.getId());
@@ -311,6 +538,57 @@ public class TrpgCombatLifecycleService {
         }
         finishCombat(conversation, combat, results);
         return true;
+    }
+
+    private GroupChatReplyStep lastChildOfType(
+            List<GroupChatReplyStep> children,
+            String actionType) {
+        return children.stream()
+                .filter(step -> actionType.equals(step.getActionType()))
+                .max(Comparator.comparing(
+                        GroupChatReplyStep::getStepNo))
+                .orElse(null);
+    }
+
+    private int activeOrder(
+            Long turnId,
+            GroupChatReplyStep adjudication) {
+        List<GroupChatReplyStep> roots = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turnId)
+                        .isNull(GroupChatReplyStep::getParentStepId)
+                        .eq(GroupChatReplyStep::getActionType,
+                                GroupChatConstant
+                                        .ACTION_COMBAT_ADJUDICATE)
+                        .orderByAsc(GroupChatReplyStep::getStepNo));
+        if (roots == null) {
+            return 1;
+        }
+        for (int index = 0; index < roots.size(); index++) {
+            if (Objects.equals(
+                    roots.get(index).getId(), adjudication.getId())) {
+                return index + 1;
+            }
+        }
+        return 1;
+    }
+
+    private void putChildStep(
+            ObjectNode result,
+            GroupChatReplyStep step) {
+        result.put("stepId", step.getId());
+        result.put("stepNo", step.getStepNo());
+        result.put("actionType", step.getActionType());
+        result.put("status", step.getStatus());
+        if (step.getSubjectCharacterId() != null) {
+            result.put("subjectCharacterId",
+                    step.getSubjectCharacterId());
+        }
+        GroupChatMessage message = outputMessage(step);
+        if (message != null) {
+            result.put("messageId", message.getId());
+            result.put("content", message.getContent());
+        }
     }
 
     private void finishCombat(
@@ -401,6 +679,19 @@ public class TrpgCombatLifecycleService {
         List<GroupChatReplyStep> steps = stepMapper.selectList(
                 new LambdaQueryWrapper<GroupChatReplyStep>()
                         .eq(GroupChatReplyStep::getTurnId, turnId)
+                        .lt(GroupChatReplyStep::getStepNo, stepNo)
+                        .orderByDesc(GroupChatReplyStep::getStepNo)
+                        .last("limit 1"));
+        return steps == null || steps.isEmpty()
+                ? null : steps.getFirst();
+    }
+
+    private GroupChatReplyStep previousRootStep(
+            Long turnId, Integer stepNo) {
+        List<GroupChatReplyStep> steps = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turnId)
+                        .isNull(GroupChatReplyStep::getParentStepId)
                         .lt(GroupChatReplyStep::getStepNo, stepNo)
                         .orderByDesc(GroupChatReplyStep::getStepNo)
                         .last("limit 1"));
@@ -600,11 +891,20 @@ public class TrpgCombatLifecycleService {
             return;
         }
         int first = attack.getItemOrder();
+        int nextSlot = steps.stream()
+                .filter(step -> step.getParentStepId() == null)
+                .filter(step -> GroupChatConstant.ACTION_COMBAT_ATTACK
+                        .equals(step.getActionType()))
+                .map(GroupChatReplyStep::getItemOrder)
+                .filter(Objects::nonNull)
+                .filter(order -> order > first)
+                .min(Integer::compareTo)
+                .orElse(Integer.MAX_VALUE);
         LocalDateTime now = LocalDateTime.now();
         steps.stream()
                 .filter(step -> step.getItemOrder() != null
                         && step.getItemOrder() >= first
-                        && step.getItemOrder() < first + 4)
+                        && step.getItemOrder() < nextSlot)
                 .filter(step -> GroupChatConstant.STATUS_PENDING.equals(
                         step.getStatus()))
                 .forEach(step -> {

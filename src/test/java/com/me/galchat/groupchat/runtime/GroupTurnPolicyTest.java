@@ -41,9 +41,6 @@ class GroupTurnPolicyTest {
                 .extracting(GroupActionSpec::actionType)
                 .containsExactly(
                         GroupChatConstant.ACTION_COMBAT_ATTACK,
-                        GroupChatConstant
-                                .ACTION_COMBAT_REACTION_ROUTE,
-                        GroupChatConstant.ACTION_COMBAT_DEFENSE,
                         GroupChatConstant.ACTION_COMBAT_ADJUDICATE);
     }
 

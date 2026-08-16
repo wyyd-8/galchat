@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, BookUser, Check, Dices, FlaskConical, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, UserRound } from '@lucide/vue'
-import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
+import { Activity, BookUser, Check, Dices, FlaskConical, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, TriangleAlert, UserRound } from '@lucide/vue'
+import {
+  TabsContent, TabsList, TabsRoot, TabsTrigger,
+  TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
+} from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import DiceDebugPanel from '@/dice/components/DiceDebugPanel.vue'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
@@ -13,7 +16,7 @@ import type {
 import { errorMessage, notify } from '@/composables/useNotice'
 import { listDiceMessagesNewestFirst } from '@/dice/domain/dicePlayback'
 import {
-  buildToolCharacterTargets, formatCheckRate, resolveWeaponCheckValue, toolDialogContentClass,
+  buildSkillDisplayItems, buildToolCharacterTargets, formatCheckRate, nextSkillGroup, resolveWeaponCheckValue, toolDialogContentClass,
   useToolConfirmations,
 } from '@/components/trpgToolsState'
 
@@ -42,6 +45,7 @@ const selectedKey = ref('player')
 const selectedToolTab = ref('status')
 const selectedSheetTab = ref('skills')
 const selectedProfileTab = ref('background')
+const selectedSkillGroup = ref<string | null>(null)
 const { confirmLoad, confirmRollback } = useToolConfirmations(open, selectedToolTab)
 const card = ref<CharacterCard | null>(null)
 const cardText = ref('')
@@ -71,6 +75,7 @@ const characterAttributes = computed(() => card.value ? [
   { code: 'POW', label: '意志', value: card.value.character.pow },
   { code: 'EDU', label: '教育', value: card.value.character.edu },
 ] : [])
+const displaySkills = computed(() => buildSkillDisplayItems(card.value?.skills || [], selectedSkillGroup.value))
 const dodgeValue = computed(() => {
   const skill = card.value?.skills.find((item) => item.displayName.trim() === '闪避')
   return skill?.value ?? (card.value ? Math.floor(card.value.character.dex / 2) : undefined)
@@ -158,14 +163,19 @@ async function selectTarget(key: string) {
   selectedKey.value = key
   selectedSheetTab.value = 'skills'
   selectedProfileTab.value = 'background'
+  selectedSkillGroup.value = null
   cardText.value = ''
   await execute(loadCard)
+}
+function toggleSkillGroup(group: string) {
+  selectedSkillGroup.value = nextSkillGroup(selectedSkillGroup.value, group)
 }
 watch(open, (visible) => { if (visible) void execute(refreshOverview) })
 watch(() => props.conversation.id, () => {
   selectedKey.value = 'player'
   selectedSheetTab.value = 'skills'
   selectedProfileTab.value = 'background'
+  selectedSkillGroup.value = null
   cards.value = []
   card.value = null
   confirmLoad.value = false
@@ -297,39 +307,74 @@ watch(() => props.conversation.id, () => {
                 </TabsList>
 
                 <TabsContent value="skills" class="sheet-tab-content">
-                  <div class="sheet-table-scroll">
-                    <table class="sheet-data-table skill-data-table">
-                      <thead><tr><th>技能名称</th><th>基础值</th><th>成功率</th></tr></thead>
-                      <tbody>
-                        <tr v-for="skill in card.skills" :key="skill.id">
-                          <td><strong>{{ skill.displayName }}</strong><small v-if="skill.category">{{ skill.category }}</small></td>
-                          <td>{{ shown(skill.baseValue) }}</td>
-                          <td class="check-rate">{{ formatCheckRate(skill.value) }}</td>
-                        </tr>
-                        <tr v-if="!card.skills.length"><td colspan="3" class="sheet-table-empty">暂无技能</td></tr>
-                      </tbody>
-                    </table>
+                  <div class="sheet-skill-panel">
+                    <header class="sheet-skill-heading">
+                      <strong>技能</strong>
+                      <span>成功率 <small>常规 / 困难 / 极难</small></span>
+                    </header>
+                    <div class="sheet-skill-scroll">
+                      <div v-if="displaySkills.length" class="sheet-skill-grid" role="list">
+                        <div v-for="item in displaySkills" :key="item.key" class="sheet-skill-item" :class="{ category: item.kind === 'category' }" role="listitem">
+                          <button
+                            v-if="item.kind === 'category'"
+                            type="button"
+                            class="sheet-skill-category-button"
+                            :aria-pressed="selectedSkillGroup === item.displayName"
+                            @click="toggleSkillGroup(item.displayName)"
+                          >
+                            <span><strong>类别：{{ item.displayName }}</strong><small>{{ selectedSkillGroup === item.displayName ? '返回全部技能' : '查看大类技能' }}</small></span>
+                          </button>
+                          <span v-else>
+                            <strong>{{ item.displayName }}</strong>
+                            <small v-if="item.category">{{ item.category }}</small>
+                          </span>
+                          <code v-if="item.kind === 'skill'" class="check-rate">{{ formatCheckRate(item.value) }}</code>
+                        </div>
+                      </div>
+                      <div v-else class="sheet-table-empty">暂无技能</div>
+                    </div>
                   </div>
                 </TabsContent>
 
                 <TabsContent value="combat" class="sheet-tab-content">
-                  <div class="sheet-table-scroll">
-                    <table class="sheet-data-table weapon-data-table">
-                      <thead><tr><th>武器</th><th>成功率</th><th>伤害</th><th>射程</th><th>次数</th><th>弹药</th><th>故障值</th></tr></thead>
-                      <tbody>
-                        <tr v-for="weapon in card.weapons" :key="weapon.id" :class="{ broken: weapon.isBroken }">
-                          <td><strong>{{ weapon.name }}</strong><small v-if="weapon.notes">{{ weapon.notes }}</small><em v-if="weapon.abnormal" class="weapon-abnormal-note">此武器有可能妨碍探索</em><em v-if="weapon.isBroken">已损坏</em></td>
-                          <td class="check-rate">{{ formatCheckRate(resolveWeaponCheckValue(weapon, card.skills)) }}</td>
-                          <td>{{ shown(weapon.damage) }}</td>
-                          <td>{{ shown(weapon.range) }}</td>
-                          <td>{{ shown(weapon.attacksPerRound) }}</td>
-                          <td>{{ ammo(weapon.remainingAmmo, weapon.ammoCapacity) }}</td>
-                          <td>{{ shown(weapon.malfunction) }}</td>
-                        </tr>
-                        <tr v-if="!card.weapons.length"><td colspan="7" class="sheet-table-empty">暂无武器</td></tr>
-                      </tbody>
-                    </table>
-                  </div>
+                  <TooltipProvider :delay-duration="250">
+                    <div class="sheet-table-scroll">
+                      <table class="sheet-data-table weapon-data-table">
+                        <thead><tr><th>武器</th><th>成功率</th><th>伤害</th><th>射程</th><th>次数</th><th>弹药</th><th>故障值</th></tr></thead>
+                        <tbody>
+                          <tr v-for="weapon in card.weapons" :key="weapon.id" :class="{ broken: weapon.isBroken }">
+                            <td>
+                              <span class="weapon-name-line">
+                                <strong>{{ weapon.name }}</strong>
+                                <TooltipRoot v-if="weapon.abnormal">
+                                  <TooltipTrigger as-child><span class="weapon-risk-badge" tabindex="0"><TriangleAlert :size="9" />携带风险</span></TooltipTrigger>
+                                  <TooltipPortal>
+                                    <TooltipContent class="tooltip weapon-risk-tooltip" :side-offset="8">
+                                      <header><TriangleAlert :size="15" /><span><strong>可能妨碍调查</strong><small>实际影响取决于场景、携带方式和当前行动。</small></span></header>
+                                      <ul>
+                                        <li><strong>引人注意</strong><span>在街道、公共场所或受管制区域公开携带时，可能招来旁观、盘问、阻拦或报警，并让相关人物提高警惕。</span></li>
+                                        <li><strong>通行与隐蔽</strong><span>武器的尺寸、重量、外形或动静可能妨碍伪装、潜行、攀爬与狭窄区域通行，也可能需要先隐藏或寄存。</span></li>
+                                        <li><strong>现场与线索</strong><span>不恰当的携带或使用可能惊动目标、留下明显痕迹，或破坏需要保护和检查的调查现场。</span></li>
+                                        <li><strong>时间与资源</strong><span>为避免上述影响，调查员可能需要额外准备遮掩、运输、保管或替代装备，因此付出时间、金钱或行动机会。</span></li>
+                                      </ul>
+                                    </TooltipContent>
+                                  </TooltipPortal>
+                                </TooltipRoot>
+                              </span>
+                              <small v-if="weapon.notes">{{ weapon.notes }}</small><em v-if="weapon.isBroken">已损坏</em>
+                            </td>
+                            <td class="check-rate">{{ formatCheckRate(resolveWeaponCheckValue(weapon, card.skills)) }}</td>
+                            <td>{{ shown(weapon.damage) }}</td>
+                            <td>{{ shown(weapon.range) }}</td>
+                            <td>{{ shown(weapon.attacksPerRound) }}</td>
+                            <td>{{ ammo(weapon.remainingAmmo, weapon.ammoCapacity) }}</td>
+                            <td>{{ shown(weapon.malfunction) }}</td>
+                          </tr>
+                          <tr v-if="!card.weapons.length"><td colspan="7" class="sheet-table-empty">暂无武器</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </TooltipProvider>
                   <section class="sheet-equipment-summary">
                     <strong>随身装备</strong><p>{{ card.profile?.equipmentText || '无额外装备' }}</p>
                   </section>

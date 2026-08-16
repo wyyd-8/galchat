@@ -39,6 +39,13 @@ function hasIfExpression(element: ElementNode, expression: string): boolean {
     && prop.exp.content === expression)
 }
 
+function hasDirectiveExpression(element: ElementNode, name: string, expression: string): boolean {
+  return element.props.some((prop) => prop.type === NodeTypes.DIRECTIVE
+    && prop.name === name
+    && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+    && prop.exp.content === expression)
+}
+
 function textContent(node: unknown): string {
   if (!node || typeof node !== 'object') return ''
   const candidate = node as { type?: number, content?: unknown, children?: unknown[] }
@@ -57,7 +64,8 @@ test('keeps an established character card read-only in the TRPG tools dialog', a
   const sheet = findElement(baseParse(template), (element) => hasClass(element, 'binding-sheet'))
 
   assert.ok(sheet, 'the tools dialog should render the selected character card')
-  assert.equal(findElement(sheet as unknown as RootNode, (element) => element.tag === 'button'), undefined)
+  assert.equal(findElement(sheet as unknown as RootNode, (element) => ['input', 'textarea', 'select'].includes(element.tag)
+    || (element.tag === 'button' && !hasClass(element, 'sheet-skill-category-button'))), undefined)
 })
 
 test('organizes the read-only character sheet into practical data panels', async () => {
@@ -78,7 +86,6 @@ test('organizes the read-only character sheet into practical data panels', async
   }
 
   const sheetText = textContent(sheet)
-  assert.match(sheetText, /基础值/)
   assert.match(sheetText, /成功率/)
   assert.match(sheetText, /射程/)
   assert.match(sheetText, /次数/)
@@ -87,7 +94,43 @@ test('organizes the read-only character sheet into practical data panels', async
   assert.doesNotMatch(sheetText, /成长|贯穿/)
 })
 
-test('warns about abnormal weapons without exposing their internal risk tags', async () => {
+test('shows skills in a dense list using only their final three-level check rates', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const skillsPanel = findElement(baseParse(template), (element) => element.tag === 'TabsContent'
+    && hasAttribute(element, 'value', 'skills'))
+  assert.ok(skillsPanel, 'the character sheet should contain the skills panel')
+
+  const skillGrid = findElement(skillsPanel as unknown as RootNode, (element) => hasClass(element, 'sheet-skill-grid'))
+  assert.ok(skillGrid, 'all skills should be arranged in a compact multi-column list')
+  assert.match(textContent(skillGrid), /item\.displayName/)
+  assert.match(textContent(skillGrid), /formatCheckRate\(item\.value\)/)
+  const checkRate = findElement(skillGrid as unknown as RootNode, (element) => element.tag === 'code'
+    && hasClass(element, 'check-rate'))
+  assert.ok(checkRate, 'skill rows should show their three-level check rate')
+  assert.equal(hasIfExpression(checkRate, "item.kind === 'skill'"), true,
+    'category rows should not render a check rate')
+  assert.doesNotMatch(textContent(skillsPanel), /基础值|baseValue/)
+})
+
+test('uses a category card to enter and leave a focused skill group', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const skillsPanel = findElement(baseParse(template), (element) => element.tag === 'TabsContent'
+    && hasAttribute(element, 'value', 'skills'))
+  assert.ok(skillsPanel, 'the character sheet should contain the skills panel')
+
+  const categoryButton = findElement(skillsPanel as unknown as RootNode, (element) => element.tag === 'button'
+    && hasClass(element, 'sheet-skill-category-button'))
+  assert.ok(categoryButton, 'collapsed categories should be navigable cards')
+  assert.equal(hasIfExpression(categoryButton, "item.kind === 'category'"), true)
+  assert.equal(hasDirectiveExpression(categoryButton, 'on', 'toggleSkillGroup(item.displayName)'), true)
+  assert.match(textContent(categoryButton), /selectedSkillGroup.*返回全部技能.*查看大类技能/)
+})
+
+test('shows abnormal weapons as a subdued carry-risk badge with detailed guidance', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
@@ -95,11 +138,24 @@ test('warns about abnormal weapons without exposing their internal risk tags', a
     && hasAttribute(element, 'value', 'combat'))
   assert.ok(combatPanel, 'the character sheet should contain the combat panel')
 
-  const warning = findElement(combatPanel as unknown as RootNode, (element) => hasClass(element, 'weapon-abnormal-note'))
+  const tooltipRoot = findElement(combatPanel as unknown as RootNode, (element) => element.tag === 'TooltipRoot'
+    && hasIfExpression(element, 'weapon.abnormal'))
+  assert.ok(tooltipRoot, 'only abnormal weapons should receive an exploration risk tooltip')
+  const badge = findElement(tooltipRoot as unknown as RootNode, (element) => hasClass(element, 'weapon-risk-badge'))
+  const tooltip = findElement(tooltipRoot as unknown as RootNode, (element) => element.tag === 'TooltipContent')
 
-  assert.ok(warning, 'abnormal weapons should show an exploration warning')
-  assert.equal(hasIfExpression(warning, 'weapon.abnormal'), true)
-  assert.match(textContent(warning), /此武器有可能妨碍探索/)
+  assert.ok(badge, 'abnormal weapons should show a compact badge')
+  assert.equal(textContent(badge).trim(), '携带风险')
+  assert.ok(findElement(badge as unknown as RootNode, (element) => element.tag === 'TriangleAlert'),
+    'the badge should use the interface warning icon')
+  assert.ok(tooltip, 'the badge should explain the possible exploration impact on hover')
+  const tooltipText = textContent(tooltip)
+  assert.match(tooltipText, /可能妨碍调查/)
+  assert.match(tooltipText, /引人注意/)
+  assert.match(tooltipText, /通行与隐蔽/)
+  assert.match(tooltipText, /现场与线索/)
+  assert.match(tooltipText, /时间与资源/)
+  assert.doesNotMatch(tooltipText, /这些是需要留意的可能性/)
   assert.doesNotMatch(textContent(combatPanel), /riskTags|显眼|高噪声/)
 })
 

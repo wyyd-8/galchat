@@ -159,6 +159,22 @@ class AutoCharacterCardAssemblerTest {
     }
 
     @Test
+    void backgroundRejectsControlledWeaponCodeOutsideAutomaticCandidates() {
+        AutoCharacterCardAssembler assembler = assembler();
+        CharacterCardGenerationModels.DraftState built = assembler.build(
+                template(), module("现代"), basePlan(), skillDefinitions(),
+                new CharacterCardGenerationModels.BuildRolls(60, List.of(40), List.of()));
+        var background = new CharacterCardGenerationModels.BackgroundPlan(
+                "形象", "信念", "重要之人", "地点", "物品", "特质",
+                "TRAITS", "特质", "AK_47", List.of());
+
+        assertThatThrownBy(() -> assembler.applyBackground(
+                built, background, backgroundRolls(), effectiveSkills(built)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("受管制武器不能自动成为初始武器");
+    }
+
+    @Test
     void backgroundMarksCataloguedAbnormalWeaponForLaterKpRules() {
         AutoCharacterCardAssembler assembler = assembler();
         CharacterCardGenerationModels.DraftState built = assembler.build(

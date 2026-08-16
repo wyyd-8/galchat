@@ -343,6 +343,10 @@ public class CharacterCardContextFormatter {
                 value.append(" 伤害").append(escape(
                         weapon.getDamage().trim()));
             }
+            if (StringUtils.hasText(weapon.getRange())) {
+                value.append(" 射程").append(escape(
+                        weapon.getRange().trim()));
+            }
             if (weapon.getRemainingAmmo() != null
                     || weapon.getAmmoCapacity() != null) {
                 value.append(" 弹药")

@@ -121,6 +121,7 @@ class CharacterCardContextFormatterTest {
                         .setName("左轮手枪")
                         .setSkillName("射击:手枪")
                         .setDamage("1D10")
+                        .setRange("15m")
                         .setAmmoCapacity(6)
                         .setRemainingAmmo(2)
                         .setIsBroken(true)), null);
@@ -133,6 +134,7 @@ class CharacterCardContextFormatterTest {
                 .contains("林恩")
                 .contains("左轮手枪/射击:手枪")
                 .contains("伤害1D10")
+                .contains("射程15m")
                 .contains("弹药2/6")
                 .contains("状态损坏");
     }

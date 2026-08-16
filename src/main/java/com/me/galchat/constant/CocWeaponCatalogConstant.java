@@ -7,13 +7,34 @@ import java.util.Set;
 
 import static java.util.Map.entry;
 
-/** Global auto-generation allowlist sourced from the CoC appendix. */
+/** Global weapon catalog sourced from the CoC appendix. */
 public final class CocWeaponCatalogConstant {
 
     public enum WeaponEra {
         TWENTIES,
         MODERN,
         BOTH
+    }
+
+    public enum WeaponKind {
+        MELEE,
+        FIREARM,
+        OTHER_RANGED
+    }
+
+    public enum AcquisitionLevel {
+        COMMON("普通"),
+        CONTROLLED("受管制");
+
+        private final String label;
+
+        AcquisitionLevel(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
     }
 
     public record WeaponDefinition(
@@ -26,6 +47,9 @@ public final class CocWeaponCatalogConstant {
             Integer ammoCapacity,
             String malfunction,
             WeaponEra era,
+            WeaponKind kind,
+            AcquisitionLevel acquisitionLevel,
+            boolean autoSelectable,
             boolean abnormal,
             List<String> riskTags,
             String notes) {
@@ -56,7 +80,86 @@ public final class CocWeaponCatalogConstant {
             entry("LIGHT_SWORD", weapon("LIGHT_SWORD", "轻型刀剑（花剑、剑杖）", "格斗:刀剑", "1D6+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("STUN_GUN", weapon("STUN_GUN", "电击器", "斗殴", "1D3+眩晕", "接触", "1", null, "97", WeaponEra.MODERN)),
             entry("TASER", weapon("TASER", "泰瑟枪", "射击:手枪", "1D3+眩晕", "5m", "1", 3, "95", WeaponEra.MODERN)),
-            entry("WOOD_AXE", weapon("WOOD_AXE", "伐木斧", "格斗:斧", "1D8+2+DB", "接触", "1", null, null, WeaponEra.BOTH))
+            entry("WOOD_AXE", weapon("WOOD_AXE", "伐木斧", "格斗:斧", "1D8+2+DB", "接触", "1", null, null, WeaponEra.BOTH)),
+            entry("PISTOL_22_AUTO", firearm(
+                    "PISTOL_22_AUTO", ".22自动手枪", "射击:手枪", "1D6",
+                    "10m", "1（3）", 6, "100", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("REVOLVER_32", firearm(
+                    "REVOLVER_32", ".32/7.65mm左轮手枪", "射击:手枪", "1D8",
+                    "15m", "1（3）", 6, "100", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("REVOLVER_38_9MM", firearm(
+                    "REVOLVER_38_9MM", ".38/9mm左轮手枪", "射击:手枪", "1D10",
+                    "15m", "1（3）", 6, "100", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("PISTOL_38_9MM", firearm(
+                    "PISTOL_38_9MM", ".38/9mm自动手枪", "射击:手枪", "1D10",
+                    "15m", "1（3）", 8, "99", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("LUGER_P08", firearm(
+                    "LUGER_P08", "9mm 鲁格 P08", "射击:手枪", "1D10",
+                    "15m", "1（3）", 8, "99", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("PISTOL_45_AUTO", firearm(
+                    "PISTOL_45_AUTO", ".45自动手枪", "射击:手枪", "1D10+2",
+                    "15m", "1（3）", 7, "100", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("RIFLE_22_BOLT", firearm(
+                    "RIFLE_22_BOLT", ".22栓动步枪", "射击:步枪/霰弹枪", "1D6+1",
+                    "30m", "1", 6, "99", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("RIFLE_30_LEVER", firearm(
+                    "RIFLE_30_LEVER", ".30杠杆步枪", "射击:步枪/霰弹枪", "2D6",
+                    "50m", "1", 6, "98", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("RIFLE_30_06_BOLT", firearm(
+                    "RIFLE_30_06_BOLT", ".30-06（7.62mm）栓动步枪",
+                    "射击:步枪/霰弹枪", "2D6+4", "110m", "1", 5, "100",
+                    WeaponEra.BOTH, AcquisitionLevel.COMMON, true)),
+            entry("SHOTGUN_12_DOUBLE", firearm(
+                    "SHOTGUN_12_DOUBLE", "12号双管霰弹枪", "射击:步枪/霰弹枪",
+                    "近4D6；中2D6；远1D6", "近≤10m；中≤20m；远≤50m",
+                    "1或2", 2, "100", WeaponEra.BOTH,
+                    AcquisitionLevel.COMMON, true)),
+            entry("DERRINGER_25", firearm(
+                    "DERRINGER_25", ".25德林杰手枪（单管）", "射击:手枪", "1D6",
+                    "3m", "1", 1, "100", WeaponEra.TWENTIES,
+                    AcquisitionLevel.COMMON, true)),
+            entry("SHOTGUN_12_SAWED_OFF", firearm(
+                    "SHOTGUN_12_SAWED_OFF", "12号锯短双管霰弹枪",
+                    "射击:步枪/霰弹枪", "近4D6；中1D6；远无效",
+                    "近≤5m；中≤10m；远无效", "1或2", 2, "100",
+                    WeaponEra.TWENTIES, AcquisitionLevel.CONTROLLED, false)),
+            entry("THOMPSON_SMG", firearm(
+                    "THOMPSON_SMG", "汤普森冲锋枪", "射击:冲锋枪", "1D10+2",
+                    "20m", "1或全自动", 20, "96", WeaponEra.TWENTIES,
+                    AcquisitionLevel.CONTROLLED, false)),
+            entry("REVOLVER_357", firearm(
+                    "REVOLVER_357", ".357马格南左轮手枪", "射击:手枪",
+                    "1D8+1D4", "15m", "1（3）", 6, "100", WeaponEra.MODERN,
+                    AcquisitionLevel.COMMON, true)),
+            entry("GLOCK_17", firearm(
+                    "GLOCK_17", "9mm 格洛克17", "射击:手枪", "1D10",
+                    "15m", "1（3）", 17, "98", WeaponEra.MODERN,
+                    AcquisitionLevel.COMMON, true)),
+            entry("SHOTGUN_12_PUMP", firearm(
+                    "SHOTGUN_12_PUMP", "12号泵动式霰弹枪", "射击:步枪/霰弹枪",
+                    "近4D6；中2D6；远1D6", "近≤10m；中≤20m；远≤50m",
+                    "1", 5, "100", WeaponEra.MODERN,
+                    AcquisitionLevel.COMMON, true)),
+            entry("AK_47", firearm(
+                    "AK_47", "AK-47/AKM", "射击:步枪/霰弹枪", "2D6+1",
+                    "100m", "1（2）或全自动", 30, "100", WeaponEra.MODERN,
+                    AcquisitionLevel.CONTROLLED, false)),
+            entry("M4", firearm(
+                    "M4", "M4", "射击:步枪/霰弹枪", "2D6",
+                    "90m", "1或3发点射", 30, "97", WeaponEra.MODERN,
+                    AcquisitionLevel.CONTROLLED, false)),
+            entry("MP5", firearm(
+                    "MP5", "H&K MP5", "射击:冲锋枪", "1D10",
+                    "20m", "1（2）或全自动", 30, "97", WeaponEra.MODERN,
+                    AcquisitionLevel.CONTROLLED, false))
     );
 
     private CocWeaponCatalogConstant() {
@@ -75,10 +178,23 @@ public final class CocWeaponCatalogConstant {
                 .toList();
     }
 
+    public static List<WeaponDefinition> autoSelectableForEra(String era) {
+        return availableForEra(era).stream()
+                .filter(WeaponDefinition::autoSelectable)
+                .toList();
+    }
+
+    public static List<WeaponDefinition> weaponsByKind(WeaponKind kind) {
+        return WEAPONS.values().stream()
+                .filter(weapon -> weapon.kind() == kind)
+                .sorted(java.util.Comparator.comparing(WeaponDefinition::code))
+                .toList();
+    }
+
     public static WeaponDefinition require(String code) {
         WeaponDefinition definition = code == null ? null : WEAPONS.get(code);
         if (definition == null) {
-            throw new IllegalArgumentException("未知常规武器：" + code);
+            throw new IllegalArgumentException("未知武器：" + code);
         }
         return definition;
     }
@@ -105,7 +221,8 @@ public final class CocWeaponCatalogConstant {
             Integer ammoCapacity, String malfunction, WeaponEra era) {
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
-                false, List.of(), null);
+                inferKind(code, requiredSkillName), AcquisitionLevel.COMMON,
+                true, false, List.of(), null);
     }
 
     private static WeaponDefinition abnormalWeapon(
@@ -115,6 +232,30 @@ public final class CocWeaponCatalogConstant {
             List<String> riskTags) {
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
-                true, List.copyOf(riskTags), null);
+                inferKind(code, requiredSkillName), AcquisitionLevel.COMMON,
+                true, true, List.copyOf(riskTags), null);
+    }
+
+    private static WeaponDefinition firearm(
+            String code, String name, String requiredSkillName,
+            String damage, String range, String attacksPerRound,
+            Integer ammoCapacity, String malfunction, WeaponEra era,
+            AcquisitionLevel acquisitionLevel, boolean autoSelectable) {
+        return new WeaponDefinition(code, name, requiredSkillName, damage,
+                range, attacksPerRound, ammoCapacity, malfunction, era,
+                WeaponKind.FIREARM, acquisitionLevel, autoSelectable,
+                false, List.of(), null);
+    }
+
+    private static WeaponKind inferKind(
+            String code, String requiredSkillName) {
+        if (Set.of("BOW", "CROSSBOW", "TASER").contains(code)) {
+            return WeaponKind.OTHER_RANGED;
+        }
+        if (requiredSkillName != null
+                && requiredSkillName.startsWith("射击:")) {
+            return WeaponKind.FIREARM;
+        }
+        return WeaponKind.MELEE;
     }
 }

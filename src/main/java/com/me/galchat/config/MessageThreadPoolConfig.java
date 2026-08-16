@@ -90,4 +90,20 @@ public class MessageThreadPoolConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean("weaponAuditTaskExecutor")
+    public ThreadPoolTaskExecutor weaponAuditTaskExecutor() {
+        log.info("初始化主动导入武器审核线程池...");
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(50);
+        executor.setThreadNamePrefix("weapon-audit-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.setAwaitTerminationSeconds(5);
+        executor.setRejectedExecutionHandler(
+                new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { nextTick, ref } from 'vue'
-import type { Character, InvestigatorCardSummary } from '../api/types.ts'
+import type { Character, CocSkill, InvestigatorCardSummary } from '../api/types.ts'
 import * as trpgToolsState from './trpgToolsState.ts'
 
 const { buildToolCharacterTargets, toolDialogContentClass } = trpgToolsState
@@ -116,6 +116,61 @@ test('formats a CoC check rate as full, half, and fifth values', () => {
   assert.equal(formatCheckRate(40), '40% / 20% / 8%')
   assert.equal(formatCheckRate(1), '1% / 0% / 0%')
   assert.equal(formatCheckRate(undefined), '—')
+})
+
+test('collapses unallocated specializations including combat groups into category rows', () => {
+  const buildSkillDisplayItems = (trpgToolsState as typeof trpgToolsState & {
+    buildSkillDisplayItems?: (skills: CocSkill[], activeGroup?: string | null) => Array<{
+      kind: 'category' | 'skill', displayName: string, value?: number
+    }>
+  }).buildSkillDisplayItems
+  assert.ok(buildSkillDisplayItems, 'TRPG tools should build skill display rows')
+
+  const items = buildSkillDisplayItems([
+    { id: 1, characterId: 9, displayName: '会计', category: '知识', baseValue: 5, value: 5 },
+    { id: 2, characterId: 9, displayName: '科学', category: '科学', baseValue: 1, value: 1 },
+    { id: 3, characterId: 9, displayName: '科学:天文学', category: '科学', specialization: '天文学', baseValue: 1, value: 1 },
+    { id: 4, characterId: 9, displayName: '科学:地质学', category: '科学', specialization: '地质学', baseValue: 1, value: 40 },
+    { id: 5, characterId: 9, displayName: '格斗:斧', category: '格斗', specialization: '斧', baseValue: 15, value: 15 },
+    { id: 6, characterId: 9, displayName: '母语', category: '语言', baseValue: 60, value: 60 },
+    { id: 7, characterId: 9, displayName: '斗殴', category: '格斗', baseValue: 25, value: 25 },
+  ])
+
+  assert.deepEqual(items.map(({ kind, displayName, value }) => ({ kind, displayName, value })), [
+    { kind: 'skill', displayName: '会计', value: 5 },
+    { kind: 'category', displayName: '科学', value: undefined },
+    { kind: 'skill', displayName: '科学:地质学', value: 40 },
+    { kind: 'category', displayName: '格斗', value: undefined },
+    { kind: 'skill', displayName: '母语', value: 60 },
+  ])
+})
+
+test('moves an opened category first and shows only every skill in that category', () => {
+  const skills: CocSkill[] = [
+    { id: 1, characterId: 9, displayName: '会计', category: '知识', baseValue: 5, value: 5 },
+    { id: 2, characterId: 9, displayName: '科学', category: '科学', baseValue: 1, value: 1 },
+    { id: 3, characterId: 9, displayName: '科学:天文学', category: '科学', specialization: '天文学', baseValue: 1, value: 1 },
+    { id: 4, characterId: 9, displayName: '科学:地质学', category: '科学', specialization: '地质学', baseValue: 1, value: 40 },
+    { id: 5, characterId: 9, displayName: '格斗:斧', category: '格斗', specialization: '斧', baseValue: 15, value: 15 },
+  ]
+
+  assert.deepEqual(trpgToolsState.buildSkillDisplayItems(skills, '科学')
+    .map(({ kind, displayName, value }) => ({ kind, displayName, value })), [
+    { kind: 'category', displayName: '科学', value: undefined },
+    { kind: 'skill', displayName: '科学:天文学', value: 1 },
+    { kind: 'skill', displayName: '科学:地质学', value: 40 },
+  ])
+})
+
+test('clicking the opened skill category returns to the overview', () => {
+  const nextSkillGroup = (trpgToolsState as typeof trpgToolsState & {
+    nextSkillGroup?: (current: string | null, requested: string) => string | null
+  }).nextSkillGroup
+  assert.ok(nextSkillGroup, 'TRPG tools should expose skill-category navigation')
+
+  assert.equal(nextSkillGroup(null, '科学'), '科学')
+  assert.equal(nextSkillGroup('科学', '科学'), null)
+  assert.equal(nextSkillGroup('科学', '格斗'), '格斗')
 })
 
 test('resolves a weapon success rate from its normalized skill name', () => {

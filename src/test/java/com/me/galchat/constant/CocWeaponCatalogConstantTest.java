@@ -17,7 +17,7 @@ class CocWeaponCatalogConstantTest {
                 .collect(Collectors.toSet());
 
         assertThat(codes)
-                .hasSize(17)
+                .hasSize(27)
                 .contains("BOW", "SMALL_KNIFE", "WOOD_AXE")
                 .doesNotContain("WHIP", "CHAINSAW", "TEAR_GAS_SPRAY");
     }
@@ -25,7 +25,7 @@ class CocWeaponCatalogConstantTest {
     @Test
     void catalogExcludesTorchWireAndEveryThrowingWeapon() {
         assertThat(CocWeaponCatalogConstant.weapons().values())
-                .hasSize(22)
+                .hasSize(41)
                 .noneMatch(weapon -> "投掷".equals(weapon.requiredSkillName()))
                 .noneMatch(weapon -> Set.of("燃烧的火把", "220V通电导线")
                         .contains(weapon.name()));
@@ -39,7 +39,7 @@ class CocWeaponCatalogConstantTest {
                 .collect(Collectors.toSet());
 
         assertThat(codes)
-                .hasSize(21)
+                .hasSize(37)
                 .contains("CHAINSAW", "STUN_GUN", "TASER", "SMALL_KNIFE")
                 .doesNotContain("WHIP");
     }
@@ -52,5 +52,34 @@ class CocWeaponCatalogConstantTest {
                 .collect(Collectors.toSet());
 
         assertThat(codes).doesNotContain("WHIP", "CHAINSAW", "TASER");
+    }
+
+    @Test
+    void catalogSeparatesQueryableFirearmsFromAutomaticStartingWeapons() {
+        Set<String> queryable = CocWeaponCatalogConstant.availableForEra("现代")
+                .stream()
+                .map(CocWeaponCatalogConstant.WeaponDefinition::code)
+                .collect(Collectors.toSet());
+        Set<String> automatic = CocWeaponCatalogConstant
+                .autoSelectableForEra("现代").stream()
+                .map(CocWeaponCatalogConstant.WeaponDefinition::code)
+                .collect(Collectors.toSet());
+
+        assertThat(queryable)
+                .contains("GLOCK_17", "SHOTGUN_12_PUMP", "AK_47", "M4", "MP5");
+        assertThat(automatic)
+                .contains("GLOCK_17", "SHOTGUN_12_PUMP")
+                .doesNotContain("AK_47", "M4", "MP5");
+        assertThat(CocWeaponCatalogConstant.require("SHOTGUN_12_DOUBLE"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.kind()).isEqualTo(
+                            CocWeaponCatalogConstant.WeaponKind.FIREARM);
+                    assertThat(weapon.damage())
+                            .isEqualTo("近4D6；中2D6；远1D6");
+                    assertThat(weapon.range())
+                            .isEqualTo("近≤10m；中≤20m；远≤50m");
+                    assertThat(weapon.acquisitionLevel()).isEqualTo(
+                            CocWeaponCatalogConstant.AcquisitionLevel.COMMON);
+                });
     }
 }

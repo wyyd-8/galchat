@@ -119,6 +119,21 @@ class CharacterCardCreationServiceTest {
     }
 
     @Test
+    void automaticCharacterCreationDoesNotOfferControlledWeapons() {
+        MutableGenerationModel model = new MutableGenerationModel();
+        CharacterCardCreationService service = service(model,
+                new SequenceRandom(4, 4, 4, 50, 3, 6, 2, 4, 4, 5));
+
+        service.createAuto(new CharacterCardGenerationModels.CreateRequest(
+                101L, 12L, "create-controlled-filter"));
+
+        assertThat(model.availableWeapons)
+                .extracting(CharacterCardGenerationModels.AvailableWeapon::code)
+                .contains("GLOCK_17", "SHOTGUN_12_PUMP")
+                .doesNotContain("AK_47", "M4", "MP5");
+    }
+
+    @Test
     void repeatedBackgroundRewriteRequestReturnsTheSameDraftVersion() {
         MutableGenerationModel model = new MutableGenerationModel();
         CharacterCardCreationService service = service(model,
@@ -298,6 +313,8 @@ class CharacterCardCreationServiceTest {
         bases.put("聆听", 20);
         bases.put("锁匠", 1);
         bases.put("射击:手枪", 20);
+        bases.put("射击:步枪/霰弹枪", 25);
+        bases.put("射击:冲锋枪", 15);
         List<CocSkillDef> result = new ArrayList<>();
         long id = 1;
         for (Map.Entry<String, Integer> entry : bases.entrySet()) {

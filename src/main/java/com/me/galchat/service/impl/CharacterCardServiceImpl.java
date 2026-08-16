@@ -56,6 +56,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     private final CharacterTemplateMapper characterTemplateMapper;
     private final UserInfoMapper userInfoMapper;
     private final GroupConversationMapper conversationMapper;
+    private final ImportedWeaponAuditQueue weaponAuditQueue;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -91,6 +92,9 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         }
         parsed.profile().setCharacterId(characterId);
         profileMapper.insert(parsed.profile());
+        if (!parsed.weapons().isEmpty()) {
+            weaponAuditQueue.submitAfterCommit(characterId);
+        }
         return requireById(characterId);
     }
 
@@ -483,7 +487,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
 
     private CharacterCardVO build(CocCharacter character) {
         Long id = character.getId();
-        List<CocCharacterSkill> skills = skillResolver.normalizeOverrides(
+        List<CocCharacterSkill> skills = skillResolver.resolveEffectiveSkills(
                 character,
                 skillMapper.selectList(new LambdaQueryWrapper<CocCharacterSkill>()
                         .eq(CocCharacterSkill::getCharacterId, id)

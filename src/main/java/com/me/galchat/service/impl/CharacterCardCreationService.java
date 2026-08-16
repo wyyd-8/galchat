@@ -309,7 +309,8 @@ public class CharacterCardCreationService {
 
     private List<CharacterCardGenerationModels.AvailableWeapon> availableWeapons(
             CharacterCardVO card) {
-        return CocWeaponCatalogConstant.availableForEra(card.getCharacter().getEra())
+        return CocWeaponCatalogConstant.autoSelectableForEra(
+                        card.getCharacter().getEra())
                 .stream().flatMap(definition -> card.getSkills().stream()
                         .filter(skill -> definition.requiredSkillName()
                                 .equals(skill.getDisplayName()))

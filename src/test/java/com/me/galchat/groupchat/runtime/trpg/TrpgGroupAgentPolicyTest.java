@@ -91,6 +91,7 @@ class TrpgGroupAgentPolicyTest {
                         .setName("左轮手枪")
                         .setSkillName("射击:手枪")
                         .setDamage("1D10")
+                        .setRange("15m")
                         .setAmmoCapacity(6)
                         .setRemainingAmmo(4)
                         .setIsBroken(false)
@@ -241,6 +242,7 @@ class TrpgGroupAgentPolicyTest {
                 .doesNotContain("<kp-abnormal-weapon-rules>")
                 .contains("<investigator-weapon-states>")
                 .contains("左轮手枪/射击:手枪")
+                .contains("射程15m")
                 .contains("弹药4/6")
                 .contains("每次实际射击后")
                 .contains("updateWeaponState")
@@ -248,6 +250,9 @@ class TrpgGroupAgentPolicyTest {
                 .contains("装填")
                 .contains("大失败")
                 .contains("武器损坏", "误伤", "走火")
+                .contains("不计算射程修正", "近、中、远")
+                .contains("单发或武器明确支持的半自动")
+                .contains("点射和全自动不能")
                 .doesNotContain("弹药与故障、射程档位")
                 .doesNotContain("不使用射程、抵近、移动修正、装填、连射、自动武器、弹药、故障");
 

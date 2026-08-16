@@ -55,6 +55,8 @@ class CharacterCardServiceImplTest {
     private CharacterTemplateMapper characterTemplateMapper;
     private UserInfoMapper userInfoMapper;
     private GroupConversationMapper conversationMapper;
+    private CocCharacterProfileMapper profileMapper;
+    private ImportedWeaponAuditQueue weaponAuditQueue;
     private CharacterCardServiceImpl service;
 
     @BeforeEach
@@ -67,11 +69,13 @@ class CharacterCardServiceImplTest {
         characterTemplateMapper = mock(CharacterTemplateMapper.class);
         userInfoMapper = mock(UserInfoMapper.class);
         conversationMapper = mock(GroupConversationMapper.class);
+        profileMapper = mock(CocCharacterProfileMapper.class);
+        weaponAuditQueue = mock(ImportedWeaponAuditQueue.class);
         service = new CharacterCardServiceImpl(characterMapper, skillMapper,
-                weaponMapper, mock(CocCharacterProfileMapper.class), skillDefMapper,
+                weaponMapper, profileMapper, skillDefMapper,
                 new CharacterSkillResolver(),
                 characterTemplateMapper, userInfoMapper,
-                conversationMapper);
+                conversationMapper, weaponAuditQueue);
     }
 
     @AfterEach
@@ -262,6 +266,51 @@ class CharacterCardServiceImplTest {
     }
 
     @Test
+    void importedCardQueuesWeaponAuditAfterItsWeaponsArePersisted() {
+        CharacterCardCreateDTO request = new CharacterCardCreateDTO();
+        request.setRunId(5L);
+        request.setParticipantId(9L);
+        request.setCharacterText("""
+                林恩，记者，女，30岁
+                出身波士顿，现居阿卡姆
+                时代: 现代
+                STR 50 CON 50 SIZ 50 DEX 50
+                APP 50 INT 50 POW 50 EDU 50
+                ————战斗————
+                袖珍手枪 60%，伤害 4D10
+                """);
+        when(conversationMapper.selectById(5L)).thenReturn(
+                new GroupConversation().setId(5L)
+                        .setMode(GroupChatConstant.MODE_TRPG));
+        when(characterMapper.selectList(any())).thenReturn(List.of());
+        when(skillDefMapper.selectList(null)).thenReturn(List.of());
+        when(characterTemplateMapper.selectById(9L)).thenReturn(
+                new CharacterTemplate().setName("原角色"));
+        AtomicReference<CocCharacter> insertedCharacter = new AtomicReference<>();
+        AtomicReference<CocCharacterWeapon> insertedWeapon = new AtomicReference<>();
+        doAnswer(invocation -> {
+            CocCharacter character = invocation.getArgument(0);
+            character.setId(71L);
+            insertedCharacter.set(character);
+            return 1;
+        }).when(characterMapper).insert(any(CocCharacter.class));
+        doAnswer(invocation -> {
+            CocCharacterWeapon weapon = invocation.getArgument(0);
+            weapon.setId(81L);
+            insertedWeapon.set(weapon);
+            return 1;
+        }).when(weaponMapper).insert(any(CocCharacterWeapon.class));
+        when(characterMapper.selectById(71L)).thenAnswer(
+                invocation -> insertedCharacter.get());
+        when(weaponMapper.selectList(any())).thenAnswer(
+                invocation -> List.of(insertedWeapon.get()));
+
+        service.create(request);
+
+        verify(weaponAuditQueue).submitAfterCommit(71L);
+    }
+
+    @Test
     void resolvesAttributeAndSkillChecksByRunAndUniqueCardName() {
         CocCharacter card = new CocCharacter()
                 .setId(71L).setRunId(5L).setParticipantId(null)
@@ -306,24 +355,29 @@ class CharacterCardServiceImplTest {
     }
 
     @Test
-    void cardReadHidesLegacyRowsThatOnlyRepeatSkillDefinitionDefaults() {
+    void cardReadReturnsEveryDefinedSkillWithItsEffectiveValue() {
         CocCharacter card = characterWithAllAttributes(50)
-                .setId(71L).setRunId(5L).setName("林恩");
+                .setId(71L).setRunId(5L).setName("林恩").setDex(41);
         when(characterMapper.selectById(71L)).thenReturn(card);
         when(skillDefMapper.selectList(null)).thenReturn(List.of(
                 skillDefinition(1L, "聆听", 20, null),
-                skillDefinition(2L, "图书馆使用", 20, null)));
+                skillDefinition(2L, "图书馆使用", 20, null),
+                skillDefinition(3L, "闪避", null, "DEX/2")));
         when(skillMapper.selectList(any())).thenReturn(List.of(
                 new CocCharacterSkill().setCharacterId(71L)
-                        .setDisplayName("聆听").setBaseValue(20).setValue(20),
+                        .setDisplayName("图书馆使用").setBaseValue(20).setValue(50),
                 new CocCharacterSkill().setCharacterId(71L)
-                        .setDisplayName("图书馆使用").setBaseValue(20).setValue(50)));
+                        .setDisplayName("自定义技能").setBaseValue(1).setValue(45)));
 
         CharacterCardVO resolved = service.getById(71L);
 
         assertThat(resolved.getSkills())
-                .extracting(CocCharacterSkill::getDisplayName)
-                .containsExactly("图书馆使用");
+                .extracting(CocCharacterSkill::getDisplayName, CocCharacterSkill::getValue)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("聆听", 20),
+                        org.assertj.core.groups.Tuple.tuple("图书馆使用", 50),
+                        org.assertj.core.groups.Tuple.tuple("闪避", 20),
+                        org.assertj.core.groups.Tuple.tuple("自定义技能", 45));
     }
 
     @Test

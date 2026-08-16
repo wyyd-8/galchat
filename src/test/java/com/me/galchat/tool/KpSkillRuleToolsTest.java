@@ -41,6 +41,30 @@ class KpSkillRuleToolsTest {
     }
 
     @Test
+    void combatSkillRulesExposeEraGroupedAcquisitionCatalogs() {
+        KpSkillRuleTools tools = new KpSkillRuleTools();
+
+        Map<String, String> result = tools.readSkillRules(
+                List.of("格斗:斧", "射击:手枪"),
+                context(GroupChatConstant.ACTOR_KP));
+
+        assertThat(result.get("格斗:斧"))
+                .contains("### 可用冷兵器列表")
+                .contains("#### 通用", "黄铜指虎")
+                .contains("#### 1920s", "长鞭")
+                .contains("#### 现代", "链锯");
+        assertThat(result.get("射击:手枪"))
+                .contains("### 可用热武器列表")
+                .contains("| 名称 | 伤害 | 射程 | 弹容量 | 获取级别 |")
+                .contains("| .38/9mm左轮手枪 | 1D10 | 15m | 6 | 普通 |")
+                .contains("| 12号双管霰弹枪 | 近4D6；中2D6；远1D6 | 近≤10m；中≤20m；远≤50m | 2 | 普通 |")
+                .contains("#### 1920s", "汤普森冲锋枪", "受管制")
+                .contains("#### 现代", "AK-47/AKM", "H&K MP5")
+                .contains("只能使用单发或武器明确支持的半自动模式")
+                .doesNotContain("| 所需技能 |", "| 价格 |", "| 故障值 |");
+    }
+
+    @Test
     void unknownAndBlankSkillNamesAreRejected() {
         KpSkillRuleTools tools = new KpSkillRuleTools();
 

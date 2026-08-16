@@ -344,6 +344,10 @@ public class AutoCharacterCardAssembler {
         }
         CocWeaponCatalogConstant.WeaponDefinition definition =
                 CocWeaponCatalogConstant.require(code);
+        if (!definition.autoSelectable()) {
+            throw new IllegalArgumentException(
+                    "受管制武器不能自动成为初始武器");
+        }
         boolean available = CocWeaponCatalogConstant.availableForEra(
                         card.getCharacter().getEra()).stream()
                 .anyMatch(candidate -> candidate.code().equals(code));

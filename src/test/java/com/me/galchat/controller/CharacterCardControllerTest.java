@@ -43,7 +43,8 @@ class CharacterCardControllerTest {
                 new com.me.galchat.service.impl.CharacterSkillResolver(),
                 mock(CharacterTemplateMapper.class),
                 mock(UserInfoMapper.class),
-                mock(GroupConversationMapper.class));
+                mock(GroupConversationMapper.class),
+                mock(com.me.galchat.service.impl.ImportedWeaponAuditQueue.class));
         mockMvc = MockMvcBuilders.standaloneSetup(
                 new CharacterCardController(service)).build();
     }

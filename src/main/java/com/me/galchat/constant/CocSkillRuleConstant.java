@@ -171,16 +171,20 @@ public final class CocSkillRuleConstant {
 - **斧：** 大型斧类；小型手斧可由 KP 判断使用斗殴，投斧使用投掷。
 - **绞索：** 以绳索或类似材料发动近战；当前系统不持久化擒抱或窒息状态，只裁定本次已经声明的即时目标。
 - **链锯：** 使用对应专攻发动近战；只有大失败时才可能由KP裁定武器损坏或其他与使用直接相关的一种后果，不使用独立故障阈值或持续伤害规则。
-                    """),
+                    """ + acquisitionCatalog(
+                    "可用冷兵器列表",
+                    CocWeaponCatalogConstant.WeaponKind.MELEE, false)),
             Map.entry("射击", """
 ## 技能：射击（专攻）
 
 - **范围：** 使用手枪、步枪/霰弹枪、冲锋枪、机枪、弓、火焰喷射器、重武器等具体远程武器。
 - **共通规则：** 射击是战斗技能，不能孤注一掷，通常作为攻击者的单人检定。只有当前场景明确给出显著有利或不利条件时应用奖惩骰。
-- **边界：** 不同武器专攻分别记录；投掷手雷、飞刀等使用投掷。当前 KP 规则上下文不处理射程档位、贯穿和伤害加值；一次射击仍只裁定一个目标，但可消耗多发弹药。射击后和装填时由KP使用武器状态工具更新弹药；只有大失败时才可能裁定武器损坏、误伤或走火等一种后果，不比较独立故障阈值。
+- **边界：** 不同武器专攻分别记录；投掷手雷、飞刀等使用投掷。当前 KP 规则上下文不计算射程命中修正、贯穿和伤害加值；有近、中、远多档伤害时由KP按实际距离选择一个公式。一次射击仍只裁定一个目标。当前只能使用单发或武器明确支持的半自动模式，点射和全自动不能声明或结算。射击后和装填时由KP使用武器状态工具更新弹药；只有大失败时才可能裁定武器损坏、误伤或走火等一种后果，不比较独立故障阈值。
 - **步枪/霰弹枪：** 可以共享人物卡上实际登记的专攻名，但命中后的伤害只能使用当前上下文明确提供的公式。
 - **弓：** 按人物卡上实际登记的射击专攻检定；不自动追加肉体伤害加值。
-                    """),
+                    """ + acquisitionCatalog(
+                    "可用热武器列表",
+                    CocWeaponCatalogConstant.WeaponKind.FIREARM, true)),
             Map.entry("急救", """
 ## 技能：急救
 
@@ -567,6 +571,55 @@ public final class CocSkillRuleConstant {
     public static final String KP_SKILL_INDEX = buildSkillIndex();
 
     private CocSkillRuleConstant() {
+    }
+
+    private static String acquisitionCatalog(
+            String title,
+            CocWeaponCatalogConstant.WeaponKind kind,
+            boolean firearm) {
+        StringBuilder result = new StringBuilder()
+                .append("\n### ").append(title).append("\n\n")
+                .append("下列武器表示系统支持的模组内获取候选，不代表当前人物已经持有，")
+                .append("也不保证任何地点都能直接取得；KP仍需结合时代、地点、合法渠道和剧情说明获取条件。\n\n");
+        if (firearm) {
+            result.append("带有点射或全自动能力的武器，当前只能使用单发或武器明确支持的半自动模式；")
+                    .append("点射和全自动不能声明或结算。霰弹枪由KP按实际距离选择近、中、远中的一个伤害公式。\n\n");
+        }
+        appendEraWeapons(result, kind,
+                CocWeaponCatalogConstant.WeaponEra.BOTH, "通用");
+        appendEraWeapons(result, kind,
+                CocWeaponCatalogConstant.WeaponEra.TWENTIES, "1920s");
+        appendEraWeapons(result, kind,
+                CocWeaponCatalogConstant.WeaponEra.MODERN, "现代");
+        return result.toString();
+    }
+
+    private static void appendEraWeapons(
+            StringBuilder result,
+            CocWeaponCatalogConstant.WeaponKind kind,
+            CocWeaponCatalogConstant.WeaponEra era,
+            String eraLabel) {
+        List<CocWeaponCatalogConstant.WeaponDefinition> weapons =
+                CocWeaponCatalogConstant.weaponsByKind(kind).stream()
+                        .filter(weapon -> weapon.era() == era)
+                        .toList();
+        if (weapons.isEmpty()) {
+            return;
+        }
+        result.append("#### ").append(eraLabel).append("\n\n")
+                .append("| 名称 | 伤害 | 射程 | 弹容量 | 获取级别 |\n")
+                .append("|---|---|---|---:|---|\n");
+        for (CocWeaponCatalogConstant.WeaponDefinition weapon : weapons) {
+            result.append("| ").append(weapon.name())
+                    .append(" | ").append(weapon.damage())
+                    .append(" | ").append(weapon.range())
+                    .append(" | ").append(weapon.ammoCapacity() == null
+                            ? "—" : weapon.ammoCapacity())
+                    .append(" | ").append(
+                            weapon.acquisitionLevel().label())
+                    .append(" |\n");
+        }
+        result.append('\n');
     }
 
     private static SkillRule rule(

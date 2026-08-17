@@ -34,6 +34,16 @@ class KpDiceRequestDTOsTest {
     }
 
     @Test
+    void damageRequestOnlyExposesStandaloneDamageFields() {
+        assertThat(KpDiceRequestDTOs.Damage.class.getRecordComponents())
+                .extracting(component -> component.getName())
+                .containsExactly("reason", "targets");
+        assertThat(KpDiceRequestDTOs.DamageTarget.class.getRecordComponents())
+                .extracting(component -> component.getName())
+                .containsExactly("targetCharacterName", "formula");
+    }
+
+    @Test
     void checkTargetAcceptsMultipleCandidateCheckNames() {
         assertThat(KpDiceRequestDTOs.CheckTarget.class.getRecordComponents())
                 .extracting(component -> component.getName())

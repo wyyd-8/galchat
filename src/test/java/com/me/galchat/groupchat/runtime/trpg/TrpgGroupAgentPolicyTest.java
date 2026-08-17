@@ -125,6 +125,8 @@ class TrpgGroupAgentPolicyTest {
         policy.setKpClarificationTools(clarificationTools);
         var firearmTools = mock(com.me.galchat.tool.KpFirearmTools.class);
         policy.setKpFirearmTools(firearmTools);
+        var meleeTools = mock(com.me.galchat.tool.KpMeleeTools.class);
+        policy.setKpMeleeTools(meleeTools);
         var invocation = policy.prepare(
                 conversation,
                 new GroupActionSpec(
@@ -217,7 +219,7 @@ class TrpgGroupAgentPolicyTest {
                 new GroupContextMaterial(List.of()));
         assertThat(exposedToolNames(combatInvocation.tools()))
                 .contains("readSkillRules", "updateWeaponState",
-                        "requestFirearmAttack")
+                        "requestFirearmAttack", "requestMeleeAttack")
                 .doesNotContain("askForClarification")
                 .doesNotContain("requestPushedCheck");
 
@@ -251,6 +253,7 @@ class TrpgGroupAgentPolicyTest {
                 .contains("之后所有已掷攻击组失效")
                 .contains("updateWeaponState")
                 .contains("requestFirearmAttack")
+                .contains("requestMeleeAttack")
                 .contains("装填")
                 .contains("大失败")
                 .contains("武器损坏", "误伤", "走火")

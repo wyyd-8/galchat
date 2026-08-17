@@ -1,5 +1,6 @@
 package com.me.galchat.service.impl;
 
+import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
@@ -115,8 +116,13 @@ final class CharacterCardImportParser {
         String name = matcher.group(1).trim();
         int value = Integer.parseInt(matcher.group(2));
         if (StringUtils.hasText(matcher.group(3))) {
+            boolean canImpale = CocWeaponCatalogConstant
+                    .findByExactName(name)
+                    .map(CocWeaponCatalogConstant.WeaponDefinition::canImpale)
+                    .orElse(false);
             weapons.add(new CocCharacterWeapon().setName(name).setSkillName(name)
-                    .setDamage(matcher.group(3).trim()).setIsBroken(false));
+                    .setDamage(matcher.group(3).trim())
+                    .setCanImpale(canImpale).setIsBroken(false));
         } else {
             skills.putIfAbsent(name, skill(name, value));
         }

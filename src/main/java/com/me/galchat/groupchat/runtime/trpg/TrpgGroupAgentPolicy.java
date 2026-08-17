@@ -19,6 +19,7 @@ import com.me.galchat.tool.KpChildSceneTools;
 import com.me.galchat.tool.KpClarificationTools;
 import com.me.galchat.tool.KpDiceTools;
 import com.me.galchat.tool.KpFirearmTools;
+import com.me.galchat.tool.KpMeleeTools;
 import com.me.galchat.tool.KpPushedCheckTools;
 import com.me.galchat.tool.InvestigatorSceneTools;
 import com.me.galchat.tool.KpSceneTools;
@@ -66,6 +67,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final TrpgChildSceneCommandService childSceneCommandService;
     private KpClarificationTools kpClarificationTools;
     private KpFirearmTools kpFirearmTools;
+    private KpMeleeTools kpMeleeTools;
 
     @Autowired
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
@@ -129,6 +131,11 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     @Autowired
     void setKpFirearmTools(KpFirearmTools kpFirearmTools) {
         this.kpFirearmTools = kpFirearmTools;
+    }
+
+    @Autowired
+    void setKpMeleeTools(KpMeleeTools kpMeleeTools) {
+        this.kpMeleeTools = kpMeleeTools;
     }
 
     @Override
@@ -434,7 +441,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     : scenePhase
                     ? sceneTools
                     : combatAdjudicate
-                    ? tools(kpDiceTools, kpFirearmTools,
+                    ? tools(kpDiceTools, kpFirearmTools, kpMeleeTools,
                             kpModuleTools, kpSkillRuleTools,
                             kpRunTools, kpCombatTools)
                     : combatRoute

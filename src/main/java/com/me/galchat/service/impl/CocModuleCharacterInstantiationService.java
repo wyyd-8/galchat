@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
@@ -127,7 +128,12 @@ public class CocModuleCharacterInstantiationService {
         for (CocCharacterWeapon source : safe(card.getWeapons())) {
             CocCharacterWeapon weapon = new CocCharacterWeapon();
             BeanUtils.copyProperties(source, weapon);
-            weapon.setId(null).setCharacterId(characterId);
+            boolean canImpale = CocWeaponCatalogConstant
+                    .findByExactName(source.getName())
+                    .map(CocWeaponCatalogConstant.WeaponDefinition::canImpale)
+                    .orElse(Boolean.TRUE.equals(source.getCanImpale()));
+            weapon.setId(null).setCharacterId(characterId)
+                    .setCanImpale(canImpale);
             weaponMapper.insert(weapon);
         }
         if (card.getProfile() != null) {

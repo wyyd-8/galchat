@@ -3,14 +3,16 @@ package com.me.galchat.service.impl;
 import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocCheckOutcome;
 import com.me.galchat.constant.CocPercentileModifier;
-import com.me.galchat.constant.DamageSourceMode;
+import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
+import com.me.galchat.constant.MeleeDefenseMode;
 import com.me.galchat.constant.GroupCheckRule;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.domain.dto.KpFirearmRequestDTOs;
+import com.me.galchat.domain.dto.KpMeleeRequestDTOs;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.DiceRollResult;
@@ -199,6 +201,190 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         characterCardService.updateWeapon(weapon);
         return createFirearmAndSettle(
                 conversationId, request.reason(), drafts);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KpDiceToolResult requestMeleeAttack(
+            Long conversationId,
+            Long runId,
+            KpMeleeRequestDTOs.Attack request) {
+        requireContext(conversationId, runId);
+        requireRequest(request, request == null ? null : request.reason());
+        if (request.attacker() == null || request.defender() == null
+                || !StringUtils.hasText(request.attacker().characterName())
+                || !StringUtils.hasText(request.defender().characterName())
+                || request.defender().defenseMode() == null) {
+            throw new UserRequestException("近战攻击者、防守者和防守方式不能为空");
+        }
+        String attackerName = request.attacker().characterName().trim();
+        String defenderName = request.defender().characterName().trim();
+        if (attackerName.equals(defenderName)) {
+            throw new UserRequestException("近战攻击者和防守者不能是同一角色");
+        }
+        MeleeDefenseMode defenseMode = request.defender().defenseMode();
+        if (defenseMode != MeleeDefenseMode.COUNTERATTACK
+                && StringUtils.hasText(
+                request.defender().counterWeaponName())) {
+            throw new UserRequestException("只有反击可以指定反击武器");
+        }
+
+        CocDiceCharacterVO attacker = characterCardService
+                .requireDiceCharacter(runId, attackerName);
+        CocDiceCharacterVO defender = characterCardService
+                .requireDiceCharacter(runId, defenderName);
+        CocCharacter attackerEntity = requireMeleeCharacter(
+                runId, attacker.cardId());
+        CocCharacter defenderEntity = requireMeleeCharacter(
+                runId, defender.cardId());
+        EffectiveMeleeWeapon attackWeapon = effectiveMeleeWeapon(
+                runId, attacker.name(), request.attacker().weaponName());
+        int attackValue = requireCheckValue(
+                attacker, attackWeapon.skillName());
+
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>();
+        drafts.add(meleeCheckDraft(
+                runId,
+                attacker,
+                defender,
+                "ATTACKER",
+                attackWeapon,
+                attackerEntity.getDamageBonus(),
+                attackValue,
+                normalizeModifier(request.attacker().modifier()),
+                defenseMode,
+                request.reason(),
+                1));
+
+        if (defenseMode != MeleeDefenseMode.NONE) {
+            EffectiveMeleeWeapon defenseWeapon;
+            String checkName;
+            if (defenseMode == MeleeDefenseMode.DODGE) {
+                defenseWeapon = null;
+                checkName = "闪避";
+            } else {
+                defenseWeapon = effectiveMeleeWeapon(
+                        runId, defender.name(),
+                        request.defender().counterWeaponName());
+                checkName = defenseWeapon.skillName();
+            }
+            int defenseValue = requireCheckValue(defender, checkName);
+            drafts.add(meleeCheckDraft(
+                    runId,
+                    defender,
+                    attacker,
+                    "DEFENDER",
+                    defenseWeapon,
+                    defenderEntity.getDamageBonus(),
+                    defenseValue,
+                    normalizeModifier(request.defender().modifier()),
+                    defenseMode,
+                    request.reason(),
+                    2));
+        }
+        return createMeleeAndSettle(
+                conversationId, request.reason(), drafts);
+    }
+
+    private CocCharacter requireMeleeCharacter(Long runId, Long cardId) {
+        CocCharacter character = characterCardService.lockDiceCharacter(
+                runId, cardId);
+        if (character == null || !StringUtils.hasText(
+                character.getDamageBonus())) {
+            throw new UserRequestException("近战角色缺少伤害加值");
+        }
+        return character;
+    }
+
+    private EffectiveMeleeWeapon effectiveMeleeWeapon(
+            Long runId, String characterName, String requestedWeaponName) {
+        if (!StringUtils.hasText(requestedWeaponName)) {
+            return new EffectiveMeleeWeapon(
+                    "徒手", "斗殴", "1D3+DB", false);
+        }
+        CocCharacterWeapon weapon = characterCardService
+                .requireWeaponForUpdate(
+                        runId, characterName, requestedWeaponName.trim());
+        if (Boolean.TRUE.equals(weapon.getIsBroken())) {
+            throw new UserRequestException("损坏的武器不能用于近战攻击");
+        }
+        if (!StringUtils.hasText(weapon.getSkillName())) {
+            throw new UserRequestException("近战武器缺少对应技能");
+        }
+        if (isRangedWeapon(weapon)) {
+            boolean handgun = "射击:手枪".equals(
+                    weapon.getSkillName().trim());
+            return handgun
+                    ? new EffectiveMeleeWeapon(
+                    "小型棍棒（枪托替代）", "斗殴",
+                    "1D6+DB", false)
+                    : new EffectiveMeleeWeapon(
+                    "大型棍棒（枪托替代）", "斗殴",
+                    "1D8+DB", false);
+        }
+        if (!StringUtils.hasText(weapon.getDamage())) {
+            throw new UserRequestException("近战武器缺少伤害公式");
+        }
+        CocMeleeRules.damagePlan(
+                weapon.getDamage(), "0", false,
+                Boolean.TRUE.equals(weapon.getCanImpale()));
+        return new EffectiveMeleeWeapon(
+                weapon.getName(), weapon.getSkillName().trim(),
+                weapon.getDamage().trim(),
+                Boolean.TRUE.equals(weapon.getCanImpale()));
+    }
+
+    private boolean isRangedWeapon(CocCharacterWeapon weapon) {
+        String skillName = weapon.getSkillName().trim();
+        if (skillName.startsWith("射击:")
+                || "投掷".equals(skillName)) {
+            return true;
+        }
+        return CocWeaponCatalogConstant.findByExactName(weapon.getName())
+                .map(definition -> definition.kind()
+                        != CocWeaponCatalogConstant.WeaponKind.MELEE)
+                .orElse(false);
+    }
+
+    private DiceRollResultCreateDTO meleeCheckDraft(
+            Long runId,
+            CocDiceCharacterVO actor,
+            CocDiceCharacterVO opponent,
+            String role,
+            EffectiveMeleeWeapon weapon,
+            String damageBonus,
+            int targetValue,
+            CocPercentileModifier modifier,
+            MeleeDefenseMode defenseMode,
+            String reason,
+            int displayOrder) {
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("runId", runId);
+        rule.put("cardId", actor.cardId());
+        rule.put("characterName", actor.name());
+        rule.put("role", role);
+        rule.put("checkName", weapon == null ? "闪避" : weapon.skillName());
+        rule.put("targetValue", targetValue);
+        rule.put("modifier", modifier.name());
+        rule.put("defenseMode", defenseMode.name());
+        rule.put("opponentCardId", opponent.cardId());
+        rule.put("opponentCharacterName", opponent.name());
+        rule.put("opponentConValue", opponent.con());
+        if (weapon != null) {
+            rule.put("weaponName", weapon.name());
+            rule.put("damageFormula", weapon.damage());
+            rule.put("damageBonus", damageBonus);
+            rule.put("canImpale", weapon.canImpale());
+        }
+        DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+        draft.setCharacterId(automaticRoller(actor));
+        draft.setDisplayOrder(displayOrder);
+        draft.setDisplayType(DiceRollConstant.TYPE_MELEE_ATTACK);
+        draft.setReason(reason.trim());
+        draft.setFormula(modifier.formula());
+        draft.setResolutionData(DiceResolutionDataVO.pending(
+                DiceRollConstant.TYPE_MELEE_ATTACK, null, rule));
+        return draft;
     }
 
     private KpDiceToolResult createChecks(
@@ -444,32 +630,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             Long conversationId, Long runId, KpDiceRequestDTOs.Damage request) {
         requireContext(conversationId, runId);
         requireRequest(request, request == null ? null : request.reason());
-        DamageSourceMode sourceMode = Objects.requireNonNull(
-                request.sourceMode(), "伤害来源模式不能为空");
         List<KpDiceRequestDTOs.DamageTarget> targets =
-                requireDamageTargets(request.targets(), sourceMode);
-
-        DiceRollSummary summary;
-        List<DiceRollResult> existing;
-        if (sourceMode == DamageSourceMode.FOLLOW_UP) {
-            Long summaryId = followUpLocator.requireLatestSummaryId(
-                    conversationId,
-                    Set.of(
-                            DiceRollConstant.TOOL_REQUEST_CHECK,
-                            DiceRollConstant.TOOL_REQUEST_GROUP_CHECK,
-                            DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK,
-                            DiceRollConstant.TOOL_REQUEST_OPPOSED_CHECK));
-            summary = internalService.requireSummaryForUpdate(summaryId);
-            requireConversation(summary, conversationId);
-            if (!DiceRollConstant.STATUS_COMPLETED.equals(summary.getStatus())) {
-                throw new UserRequestException("前置检定尚未完成");
-            }
-            existing = safeResults(internalService.listResultEntities(summaryId));
-            validateDamageSources(existing, targets);
-        } else {
-            summary = null;
-            existing = List.of();
-        }
+                requireDamageTargets(request.targets());
 
         List<DiceRollResultCreateDTO> drafts = new ArrayList<>(targets.size());
         for (int index = 0; index < targets.size(); index++) {
@@ -486,8 +648,6 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             rule.put("runId", runId);
             rule.put("cardId", card.cardId());
             rule.put("characterName", card.name());
-            rule.put("sourceCharacterName", trimToNull(
-                    target.sourceCharacterName()));
             rule.put("conValue", card.con());
 
             DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
@@ -501,23 +661,14 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             drafts.add(draft);
         }
 
-        List<DiceRollResult> damageResults;
-        if (sourceMode == DamageSourceMode.STANDALONE) {
-            DiceRollAggregate aggregate = internalService.createDiceRoll(
-                    conversationId, request.reason().trim(), drafts);
-            summary = aggregate.summary();
-            damageResults = aggregate.results();
-        } else {
-            int fallbackRound = summary.getRoundCount() + 1;
-            damageResults = internalService.appendDiceRollRound(
-                    conversationId, summary.getId(), drafts);
-            updateRoundCountFromCreated(summary, damageResults, fallbackRound);
-        }
+        DiceRollAggregate aggregate = internalService.createDiceRoll(
+                conversationId, request.reason().trim(), drafts);
+        DiceRollSummary summary = aggregate.summary();
+        List<DiceRollResult> damageResults = aggregate.results();
         settleAlreadyRolled(damageResults);
-        List<DiceRollResult> allResults = mergeResults(existing, damageResults);
-        refreshSummary(summary, allResults);
+        refreshSummary(summary, damageResults);
         List<DiceRollResult> conResults =
-                appendMajorWoundConRoundIfNeeded(summary, allResults);
+                appendMajorWoundConRoundIfNeeded(summary, damageResults);
         List<DiceRollResult> returned = new ArrayList<>(damageResults);
         returned.addAll(conResults);
         return toolResult(summary, returned);
@@ -693,8 +844,13 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 appendFirearmDamageRoundIfReady(summary, allResults));
         List<DiceRollResult> afterFirearm = created.isEmpty()
                 ? allResults : mergeResults(allResults, created);
-        List<DiceRollResult> insanity = appendTemporaryInsanityRoundIfNeeded(
+        List<DiceRollResult> melee = appendMeleeDamageRoundIfReady(
                 summary, afterFirearm);
+        created.addAll(melee);
+        List<DiceRollResult> afterMelee = melee.isEmpty()
+                ? afterFirearm : mergeResults(afterFirearm, melee);
+        List<DiceRollResult> insanity = appendTemporaryInsanityRoundIfNeeded(
+                summary, afterMelee);
         created.addAll(insanity);
         List<DiceRollResult> currentResults = created.isEmpty()
                 ? allResults
@@ -741,6 +897,29 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 aggregate.results());
         refreshSummary(aggregate.summary(), allResults);
         List<DiceRollResult> damage = appendFirearmDamageRoundIfReady(
+                aggregate.summary(), allResults);
+        List<DiceRollResult> combined = damage.isEmpty()
+                ? allResults : mergeResults(allResults, damage);
+        List<DiceRollResult> con = appendMajorWoundConRoundIfNeeded(
+                aggregate.summary(), combined);
+        List<DiceRollResult> returned = new ArrayList<>(aggregate.results());
+        returned.addAll(damage);
+        returned.addAll(con);
+        return toolResult(aggregate.summary(), returned);
+    }
+
+    private KpDiceToolResult createMeleeAndSettle(
+            Long conversationId,
+            String reason,
+            List<DiceRollResultCreateDTO> drafts) {
+        DiceRollAggregate aggregate = internalService.createDiceRoll(
+                conversationId, reason.trim(), drafts);
+        settleAlreadyRolled(aggregate.results());
+        List<DiceRollResult> allResults = mergeResults(
+                internalService.listResultEntities(aggregate.summary().getId()),
+                aggregate.results());
+        refreshSummary(aggregate.summary(), allResults);
+        List<DiceRollResult> damage = appendMeleeDamageRoundIfReady(
                 aggregate.summary(), allResults);
         List<DiceRollResult> combined = damage.isEmpty()
                 ? allResults : mergeResults(allResults, damage);
@@ -803,6 +982,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             settleUnconsciousRecoveryResult(result, resolution);
         } else if (DiceRollConstant.TYPE_FIREARM_ATTACK.equals(type)) {
             settleFirearmAttackResult(result, resolution);
+        } else if (DiceRollConstant.TYPE_MELEE_ATTACK.equals(type)) {
+            settleMeleeAttackResult(result, resolution);
         } else {
             throw new UserRequestException("暂不支持该掷骰结算类型：" + type);
         }
@@ -851,6 +1032,21 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         outcome.put("category", category.name());
         outcome.put("rank", check.rank().name());
         outcome.put("valid", true);
+        resolution.setOutcome(outcome);
+    }
+
+    private void settleMeleeAttackResult(
+            DiceRollResult result, DiceResolutionDataVO resolution) {
+        Map<String, Object> rule = resolution.getRule();
+        CocDiceRules.CheckResolution check = CocDiceRules.resolveCheck(
+                requireRoll(result),
+                intValue(rule, "targetValue"),
+                CocCheckDifficulty.REGULAR);
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("characterName", stringValue(rule, "characterName"));
+        outcome.put("role", stringValue(rule, "role"));
+        outcome.put("category", check.outcome().name());
+        outcome.put("rank", check.rank().name());
         resolution.setOutcome(outcome);
     }
 
@@ -907,6 +1103,9 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
     private void settleDamageResult(
             DiceRollResult result, DiceResolutionDataVO resolution) {
         int rawDamage = requireRoll(result);
+        if (Boolean.TRUE.equals(resolution.getRule().get("melee"))) {
+            rawDamage = Math.max(0, rawDamage);
+        }
         if (rawDamage < 0) {
             throw new UserRequestException("伤害不能为负数");
         }
@@ -1327,6 +1526,118 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 .orElse(null);
     }
 
+    private List<DiceRollResult> appendMeleeDamageRoundIfReady(
+            DiceRollSummary summary,
+            List<DiceRollResult> allResults) {
+        int attackRound = summary.getRoundCount();
+        List<DiceRollResult> attacks = safeResults(allResults).stream()
+                .filter(result -> Objects.equals(
+                        attackRound, result.getRoundNo()))
+                .filter(result -> DiceRollConstant.TYPE_MELEE_ATTACK.equals(
+                        resolution(result).getType()))
+                .sorted(Comparator.comparing(
+                        DiceRollResult::getDisplayOrder,
+                        Comparator.nullsLast(Integer::compareTo)))
+                .toList();
+        if (attacks.isEmpty()
+                || attacks.stream().anyMatch(
+                result -> result.getResolvedAt() == null)
+                || attacks.stream().anyMatch(result -> Boolean.TRUE.equals(
+                resolution(result).getOutcome().get("finalized")))) {
+            return List.of();
+        }
+        DiceRollResult attacker = attacks.stream()
+                .filter(result -> "ATTACKER".equals(
+                        ruleString(result, "role")))
+                .findFirst()
+                .orElseThrow(() -> new UserRequestException(
+                        "近战攻击检定数据不完整"));
+        MeleeDefenseMode defenseMode = MeleeDefenseMode.valueOf(
+                ruleString(attacker, "defenseMode"));
+        DiceRollResult defender = attacks.stream()
+                .filter(result -> "DEFENDER".equals(
+                        ruleString(result, "role")))
+                .findFirst().orElse(null);
+        if (defenseMode != MeleeDefenseMode.NONE && defender == null) {
+            throw new UserRequestException("近战防守检定数据不完整");
+        }
+        CocDiceRules.CheckRank attackerRank = CocDiceRules.CheckRank.valueOf(
+                outcomeString(attacker, "rank"));
+        CocDiceRules.CheckRank defenderRank = defender == null
+                ? null : CocDiceRules.CheckRank.valueOf(
+                outcomeString(defender, "rank"));
+        CocMeleeRules.Winner winner = CocMeleeRules.winner(
+                attackerRank, defenderRank, defenseMode);
+        DiceRollResult winningCheck = winner == CocMeleeRules.Winner.ATTACKER
+                ? attacker
+                : winner == CocMeleeRules.Winner.DEFENDER ? defender : null;
+        DiceRollResult source = winningCheck == defender
+                && defenseMode == MeleeDefenseMode.DODGE
+                ? null : winningCheck;
+        String winnerName = winningCheck == null
+                ? null : ruleString(winningCheck, "characterName");
+        for (DiceRollResult attack : attacks) {
+            DiceResolutionDataVO attackResolution = resolution(attack);
+            Map<String, Object> outcome = new LinkedHashMap<>(
+                    attackResolution.getOutcome());
+            outcome.put("finalized", true);
+            outcome.put("winner", attack == winningCheck);
+            if (winnerName != null) {
+                outcome.put("winnerCharacterName", winnerName);
+            }
+            attackResolution.setOutcome(outcome);
+            internalService.saveResult(attack);
+        }
+        refreshSummary(summary, allResults);
+        if (source == null) {
+            return List.of();
+        }
+
+        Map<String, Object> sourceRule = resolution(source).getRule();
+        boolean activeAttack = source == attacker;
+        CocDiceRules.CheckRank sourceRank = CocDiceRules.CheckRank.valueOf(
+                outcomeString(source, "rank"));
+        boolean extreme = activeAttack
+                && (sourceRank == CocDiceRules.CheckRank.EXTREME
+                || sourceRank == CocDiceRules.CheckRank.CRITICAL);
+        CocMeleeRules.DamagePlan plan = CocMeleeRules.damagePlan(
+                stringValue(sourceRule, "damageFormula"),
+                stringValue(sourceRule, "damageBonus"),
+                extreme,
+                booleanValue(sourceRule, "canImpale"));
+
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("conversationId", summary.getConversationId());
+        rule.put("runId", longValue(sourceRule, "runId"));
+        rule.put("cardId", longValue(sourceRule, "opponentCardId"));
+        rule.put("characterName",
+                stringValue(sourceRule, "opponentCharacterName"));
+        rule.put("sourceCharacterName",
+                stringValue(sourceRule, "characterName"));
+        rule.put("conValue", intValue(sourceRule, "opponentConValue"));
+        rule.put("melee", true);
+        rule.put("weaponName", stringValue(sourceRule, "weaponName"));
+        rule.put("maximumDamage", plan.maximumDamage());
+        rule.put("impaling", plan.impaling());
+
+        DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+        draft.setCharacterId(source.getCharacterId());
+        draft.setDisplayOrder(1);
+        draft.setDisplayType(DiceRollConstant.TYPE_DAMAGE);
+        draft.setReason(stringValue(sourceRule, "weaponName")
+                + "命中" + stringValue(
+                sourceRule, "opponentCharacterName"));
+        draft.setFormula(plan.formula());
+        draft.setResolutionData(DiceResolutionDataVO.pending(
+                DiceRollConstant.TYPE_DAMAGE, source.getId(), rule));
+        List<DiceRollResult> created = internalService.appendDiceRollRound(
+                summary.getConversationId(), summary.getId(), List.of(draft));
+        updateRoundCountFromCreated(summary, created, attackRound + 1);
+        settleAlreadyRolled(created);
+        refreshSummary(summary, mergeResults(allResults, created));
+        return created;
+    }
+
     private List<DiceRollResult> appendFirearmDamageRoundIfReady(
             DiceRollSummary summary,
             List<DiceRollResult> allResults) {
@@ -1630,8 +1941,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
     }
 
     private List<KpDiceRequestDTOs.DamageTarget> requireDamageTargets(
-            List<KpDiceRequestDTOs.DamageTarget> targets,
-            DamageSourceMode sourceMode) {
+            List<KpDiceRequestDTOs.DamageTarget> targets) {
         if (targets == null || targets.isEmpty()) {
             throw new UserRequestException("伤害目标不能为空");
         }
@@ -1644,13 +1954,6 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             }
             if (!targetNames.add(target.targetCharacterName().trim())) {
                 throw new UserRequestException("同一轮不能重复选择伤害目标");
-            }
-            boolean hasSource = StringUtils.hasText(target.sourceCharacterName());
-            if (sourceMode == DamageSourceMode.STANDALONE && hasSource) {
-                throw new UserRequestException("独立伤害不能指定前置来源角色");
-            }
-            if (sourceMode == DamageSourceMode.FOLLOW_UP && !hasSource) {
-                throw new UserRequestException("后续伤害必须指定前置来源角色");
             }
         }
         return List.copyOf(targets);
@@ -1701,69 +2004,6 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             throw new UserRequestException("前置检定未成功，不能结算回血");
         }
         return source;
-    }
-
-    private void validateDamageSources(
-            List<DiceRollResult> existing,
-            List<KpDiceRequestDTOs.DamageTarget> targets) {
-        for (KpDiceRequestDTOs.DamageTarget target : targets) {
-            String sourceName = target.sourceCharacterName().trim();
-            DiceRollResult source = safeResults(existing).stream()
-                    .filter(result -> {
-                        String type = resolution(result).getType();
-                        return DiceRollConstant.TYPE_CHECK.equals(type)
-                                || DiceRollConstant.TYPE_OPPOSED_CHECK.equals(type);
-                    })
-                    .filter(result -> sourceName.equals(
-                            ruleString(result, "characterName")))
-                    .max(Comparator.comparing(
-                            DiceRollResult::getRoundNo,
-                            Comparator.nullsFirst(Integer::compareTo)))
-                    .orElseThrow(() -> new UserRequestException(
-                            "找不到来源角色“" + sourceName + "”的前置检定"));
-            String checkName = ruleString(source, "checkName");
-            if ("闪避".equals(checkName.trim())
-                    || "DODGE".equalsIgnoreCase(checkName.trim())) {
-                throw new UserRequestException("闪避检定不能作为伤害来源");
-            }
-            if (DiceRollConstant.TYPE_CHECK.equals(
-                    resolution(source).getType())) {
-                String category = outcomeString(source, "category");
-                if (!CocCheckOutcome.CRITICAL_SUCCESS.name().equals(category)
-                        && !CocCheckOutcome.SUCCESS.name().equals(category)) {
-                    throw new UserRequestException("前置检定未成功，不能结算伤害");
-                }
-                continue;
-            }
-            List<DiceRollResult> opposedRound = safeResults(existing).stream()
-                    .filter(result -> Objects.equals(
-                            source.getRoundNo(), result.getRoundNo()))
-                    .filter(result -> DiceRollConstant.TYPE_OPPOSED_CHECK.equals(
-                            resolution(result).getType()))
-                    .toList();
-            if (!sourceName.equals(resolveOpposedWinner(opposedRound))) {
-                throw new UserRequestException("前置检定未成功，不能结算伤害");
-            }
-        }
-    }
-
-    private String resolveOpposedWinner(List<DiceRollResult> opposedRound) {
-        if (opposedRound.size() < 2) {
-            throw new UserRequestException("前置对抗检定数据不完整");
-        }
-        List<CocDiceRules.OpposedCandidate> candidates = opposedRound.stream()
-                .map(result -> new CocDiceRules.OpposedCandidate(
-                        ruleString(result, "characterName"),
-                        intValue(resolution(result).getRule(), "targetValue"),
-                        requireRoll(result)))
-                .toList();
-        String tieWinner = trimToNull(Objects.toString(
-                resolution(opposedRound.getFirst()).getRule()
-                        .get("tieWinnerCharacterName"),
-                null));
-        CocDiceRules.OpposedResolution resolution =
-                CocDiceRules.resolveOpposed(candidates, tieWinner);
-        return resolution.draw() ? null : resolution.winner();
     }
 
     private List<String> requireCharacterNames(List<String> characterNames) {
@@ -2001,5 +2241,12 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             hitCount += hits;
             impalingHitCount += impalingHits;
         }
+    }
+
+    private record EffectiveMeleeWeapon(
+            String name,
+            String skillName,
+            String damage,
+            boolean canImpale) {
     }
 }

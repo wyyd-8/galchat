@@ -63,8 +63,8 @@ class CocModuleCharacterInstantiationServiceTest {
                         List.of(new CocCharacterWeapon()
                                 .setId(102L)
                                 .setCharacterId(201L)
-                                .setName("浮空匕首")
-                                .setDamage("1D4+2")),
+                                .setName("小型刀具（折叠刀等）")
+                                .setDamage("1D4+DB")),
                         new CocCharacterProfile()
                                 .setId(103L)
                                 .setCharacterId(201L)
@@ -106,7 +106,9 @@ class CocModuleCharacterInstantiationServiceTest {
         verify(fixture.weaponMapper()).insert(weaponCaptor.capture());
         assertThat(weaponCaptor.getValue().getId()).isNull();
         assertThat(weaponCaptor.getValue().getCharacterId()).isEqualTo(901L);
-        assertThat(weaponCaptor.getValue().getName()).isEqualTo("浮空匕首");
+        assertThat(weaponCaptor.getValue().getName())
+                .isEqualTo("小型刀具（折叠刀等）");
+        assertThat(weaponCaptor.getValue().getCanImpale()).isTrue();
 
         var profileCaptor =
                 org.mockito.ArgumentCaptor.forClass(CocCharacterProfile.class);

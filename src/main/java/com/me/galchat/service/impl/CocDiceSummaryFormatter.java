@@ -74,6 +74,11 @@ public class CocDiceSummaryFormatter {
                 requireResolution(result).getType()))) {
             return formatOpposed(ordered);
         }
+        if (ordered.stream().allMatch(result ->
+                DiceRollConstant.TYPE_MELEE_ATTACK.equals(
+                        requireResolution(result).getType()))) {
+            return formatMelee(ordered);
+        }
         if (ordered.stream().allMatch(this::isInsanityResult)) {
             return formatInsanityRound(ordered);
         }
@@ -123,6 +128,29 @@ public class CocDiceSummaryFormatter {
         CocCheckOutcome category = CocCheckOutcome.valueOf(
                 stringValue(outcome, "category"));
         return name + (category == CocCheckOutcome.FUMBLE ? "大失败" : "失败");
+    }
+
+    private String formatMelee(List<DiceRollResult> results) {
+        DiceRollResult winner = results.stream()
+                .filter(result -> Boolean.TRUE.equals(
+                        requireResolution(result).getOutcome().get("winner")))
+                .findFirst().orElse(null);
+        if (winner == null) {
+            return "近战未命中，双方均未获胜";
+        }
+        DiceResolutionDataVO resolution = requireResolution(winner);
+        String name = stringValue(
+                resolution.getOutcome(), "characterName");
+        String role = stringValue(resolution.getRule(), "role");
+        String defenseMode = stringValue(
+                resolution.getRule(), "defenseMode");
+        if ("DEFENDER".equals(role) && "DODGE".equals(defenseMode)) {
+            return name + "闪避成功";
+        }
+        if ("DEFENDER".equals(role)) {
+            return name + "反击获胜";
+        }
+        return name + "近战攻击获胜";
     }
 
     private String formatOpposedExceptionalOutcome(DiceRollResult result) {
@@ -188,6 +216,18 @@ public class CocDiceSummaryFormatter {
                 text.append("，故障后失效");
             }
             return text.toString();
+        }
+        if (DiceRollConstant.TYPE_MELEE_ATTACK.equals(
+                resolution.getType())) {
+            Map<String, Object> outcome = resolution.getOutcome();
+            if (outcome == null) {
+                return "";
+            }
+            return stringValue(outcome, "characterName") + "进行“"
+                    + stringValue(resolution.getRule(), "checkName")
+                    + "”检定：" + checkOutcomeLabel(
+                    CocCheckOutcome.valueOf(stringValue(
+                            outcome, "category")), outcome);
         }
         if (DiceRollConstant.TYPE_SAN_LOSS.equals(resolution.getType())) {
             Map<String, Object> effect = resolution.getEffect();

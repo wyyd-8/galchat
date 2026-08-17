@@ -85,4 +85,20 @@ class CocWeaponCatalogConstantTest {
         assertThat(CocWeaponCatalogConstant.require("TASER").canImpale())
                 .isFalse();
     }
+
+    @Test
+    void edgedAndPointedMeleeWeaponsCarryAuthoritativeImpaleFlag() {
+        assertThat(CocWeaponCatalogConstant.require("SMALL_KNIFE").canImpale())
+                .isTrue();
+        assertThat(CocWeaponCatalogConstant.require("LARGE_SWORD").canImpale())
+                .isTrue();
+        assertThat(CocWeaponCatalogConstant.require("WOOD_AXE").canImpale())
+                .isTrue();
+        assertThat(CocWeaponCatalogConstant.require("LANCE").canImpale())
+                .isTrue();
+        assertThat(CocWeaponCatalogConstant.require("LARGE_CLUB").canImpale())
+                .isFalse();
+        assertThat(CocWeaponCatalogConstant.require("WHIP").canImpale())
+                .isFalse();
+    }
 }

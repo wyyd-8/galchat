@@ -96,11 +96,11 @@ public class KpDiceTools {
 
     @Tool(
             name = "rollDamage",
-            description = "结算独立伤害，或为最近一次成功的攻击/对抗检定追加伤害轮。"
+            description = "在独立掷骰流程中结算已经成立的伤害。"
                     + "KP手动从伤害公式中扣除目标护甲；后端不会自动扣除护甲。",
             returnDirect = true)
     public KpDiceToolResult rollDamage(
-            @ToolParam(description = "伤害原因、来源模式、来源角色、目标角色与表达式")
+            @ToolParam(description = "伤害原因、目标角色与表达式")
             KpDiceRequestDTOs.Damage request,
             ToolContext context) {
         KpExecutionContext kp = requireKpContext(context);

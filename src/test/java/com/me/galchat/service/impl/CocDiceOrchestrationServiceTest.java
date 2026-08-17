@@ -2,13 +2,13 @@ package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocPercentileModifier;
-import com.me.galchat.constant.DamageSourceMode;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.domain.dto.KpFirearmRequestDTOs;
+import com.me.galchat.domain.dto.KpMeleeRequestDTOs;
 import com.me.galchat.domain.po.DiceRollResult;
 import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.po.CocCharacter;
@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.me.galchat.constant.FirearmFiringMode;
+import com.me.galchat.constant.MeleeDefenseMode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -281,6 +282,213 @@ class CocDiceOrchestrationServiceTest {
                     .containsEntry("hitCount", 2)
                     .containsEntry("impalingHitCount", 0);
         });
+    }
+
+    @Test
+    void meleeExtremeKnifeAttackAutomaticallyAppendsImpalingDamage() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "林恩", Map.of("斗殴", 60));
+        CocDiceCharacterVO defender = card(
+                21L, 91L, "邪教徒", Map.of("闪避", 40));
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(defender);
+        CocCharacter attackerEntity = damageCard(11L, "林恩")
+                .setDamageBonus("+1D4");
+        CocCharacter defenderEntity = damageCard(21L, "邪教徒")
+                .setDamageBonus("0");
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(attackerEntity);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(defenderEntity);
+        when(cards.requireWeaponForUpdate(5L, "林恩", "折刀"))
+                .thenReturn(new CocCharacterWeapon()
+                        .setId(81L).setName("折刀").setSkillName("斗殴")
+                        .setDamage("1D4+2+DB").setCanImpale(true)
+                        .setIsBroken(false));
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 1, invocation.getArgument(2));
+                    rows.get(0).setResultData(new DiceRollResultVO(
+                            "1D100", List.of(), 5));
+                    rows.get(1).setResultData(new DiceRollResultVO(
+                            "1D100", List.of(), 80));
+                    return new DiceRollAggregate(
+                            new DiceRollSummary().setId(101L)
+                                    .setConversationId(7L).setReason("刺击")
+                                    .setRoundCount(1)
+                                    .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                            rows);
+                });
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> materialize(
+                        101L, 2, invocation.getArgument(2)));
+
+        KpDiceToolResult result = service.requestMeleeAttack(
+                7L, 5L, new KpMeleeRequestDTOs.Attack(
+                        "刺击",
+                        new KpMeleeRequestDTOs.Attacker(
+                                "林恩", "折刀",
+                                CocPercentileModifier.NORMAL),
+                        new KpMeleeRequestDTOs.Defender(
+                                "邪教徒", MeleeDefenseMode.DODGE,
+                                null, CocPercentileModifier.NORMAL)));
+
+        assertThat(result.results()).hasSize(3);
+        @SuppressWarnings("unchecked")
+        List<DiceRollResultCreateDTO> damageDrafts =
+                (List<DiceRollResultCreateDTO>) org.mockito.Mockito
+                        .mockingDetails(internal).getInvocations().stream()
+                        .filter(invocation -> invocation.getMethod().getName()
+                                .equals("appendDiceRollRound"))
+                        .findFirst().orElseThrow().getArgument(2);
+        assertThat(damageDrafts).singleElement().satisfies(draft -> {
+            assertThat(draft.getFormula()).isEqualTo("10+(1D4)");
+            assertThat(draft.getResolutionData().getRule())
+                    .containsEntry("characterName", "邪教徒")
+                    .containsEntry("sourceCharacterName", "林恩")
+                    .containsEntry("impaling", true);
+        });
+    }
+
+    @Test
+    void meleeCounterattackWinnerUsesOrdinaryDamageEvenOnExtremeSuccess() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "林恩", Map.of("斗殴", 40));
+        CocDiceCharacterVO defender = card(
+                21L, 91L, "邪教徒", Map.of("斗殴", 60));
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(defender);
+        CocCharacter attackerEntity = damageCard(11L, "林恩")
+                .setDamageBonus("0");
+        CocCharacter defenderEntity = damageCard(21L, "邪教徒")
+                .setDamageBonus("+1D4");
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(attackerEntity);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(defenderEntity);
+        when(cards.requireWeaponForUpdate(5L, "邪教徒", "大棒"))
+                .thenReturn(new CocCharacterWeapon()
+                        .setId(82L).setName("大棒").setSkillName("斗殴")
+                        .setDamage("1D8+DB").setCanImpale(false)
+                        .setIsBroken(false));
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 1, invocation.getArgument(2));
+                    rows.get(0).setResultData(new DiceRollResultVO(
+                            "1D100", List.of(), 80));
+                    rows.get(1).setResultData(new DiceRollResultVO(
+                            "1D100", List.of(), 5));
+                    return new DiceRollAggregate(
+                            new DiceRollSummary().setId(101L)
+                                    .setConversationId(7L).setReason("反击")
+                                    .setRoundCount(1)
+                                    .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                            rows);
+                });
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> materialize(
+                        101L, 2, invocation.getArgument(2)));
+
+        service.requestMeleeAttack(
+                7L, 5L, new KpMeleeRequestDTOs.Attack(
+                        "徒手攻击遭到反击",
+                        new KpMeleeRequestDTOs.Attacker(
+                                "林恩", null,
+                                CocPercentileModifier.NORMAL),
+                        new KpMeleeRequestDTOs.Defender(
+                                "邪教徒", MeleeDefenseMode.COUNTERATTACK,
+                                "大棒", CocPercentileModifier.NORMAL)));
+
+        @SuppressWarnings("unchecked")
+        List<DiceRollResultCreateDTO> damageDrafts =
+                (List<DiceRollResultCreateDTO>) org.mockito.Mockito
+                        .mockingDetails(internal).getInvocations().stream()
+                        .filter(invocation -> invocation.getMethod().getName()
+                                .equals("appendDiceRollRound"))
+                        .findFirst().orElseThrow().getArgument(2);
+        assertThat(damageDrafts).singleElement().satisfies(draft -> {
+            assertThat(draft.getFormula()).isEqualTo("1D8+(1D4)");
+            assertThat(draft.getResolutionData().getRule())
+                    .containsEntry("characterName", "林恩")
+                    .containsEntry("sourceCharacterName", "邪教徒")
+                    .containsEntry("maximumDamage", false);
+        });
+    }
+
+    @Test
+    void handgunUsedInMeleeBecomesSmallClubWithoutChangingTheWeapon() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "林恩", Map.of("斗殴", 55, "射击:手枪", 70));
+        CocDiceCharacterVO defender = card(
+                21L, 91L, "邪教徒", Map.of());
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(defender);
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(
+                damageCard(11L, "林恩").setDamageBonus("0"));
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(
+                damageCard(21L, "邪教徒").setDamageBonus("0"));
+        CocCharacterWeapon handgun = new CocCharacterWeapon()
+                .setId(81L).setName("左轮手枪")
+                .setSkillName("射击:手枪").setDamage("1D10")
+                .setRemainingAmmo(4).setCanImpale(true).setIsBroken(false);
+        when(cards.requireWeaponForUpdate(5L, "林恩", "左轮手枪"))
+                .thenReturn(handgun);
+        stubCreate(7L);
+
+        service.requestMeleeAttack(
+                7L, 5L, new KpMeleeRequestDTOs.Attack(
+                        "用枪托砸击",
+                        new KpMeleeRequestDTOs.Attacker(
+                                "林恩", "左轮手枪",
+                                CocPercentileModifier.NORMAL),
+                        new KpMeleeRequestDTOs.Defender(
+                                "邪教徒", MeleeDefenseMode.NONE,
+                                null, CocPercentileModifier.NORMAL)));
+
+        assertThat(createdDrafts()).singleElement().satisfies(draft -> {
+            assertThat(draft.getResolutionData().getRule())
+                    .containsEntry("checkName", "斗殴")
+                    .containsEntry("weaponName", "小型棍棒（枪托替代）")
+                    .containsEntry("damageFormula", "1D6+DB")
+                    .containsEntry("canImpale", false);
+        });
+        assertThat(handgun.getRemainingAmmo()).isEqualTo(4);
+        verify(cards, never()).updateWeapon(handgun);
+    }
+
+    @Test
+    void throwingWeaponUsedInMeleeBecomesLargeClub() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "林恩", Map.of("斗殴", 55, "投掷", 70));
+        CocDiceCharacterVO defender = card(
+                21L, 91L, "邪教徒", Map.of());
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(defender);
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(
+                damageCard(11L, "林恩").setDamageBonus("0"));
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(
+                damageCard(21L, "邪教徒").setDamageBonus("0"));
+        when(cards.requireWeaponForUpdate(5L, "林恩", "飞刀"))
+                .thenReturn(new CocCharacterWeapon()
+                        .setId(83L).setName("飞刀")
+                        .setSkillName("投掷").setDamage("1D4+半DB")
+                        .setCanImpale(true).setIsBroken(false));
+        stubCreate(7L);
+
+        service.requestMeleeAttack(
+                7L, 5L, new KpMeleeRequestDTOs.Attack(
+                        "握住飞刀砸击",
+                        new KpMeleeRequestDTOs.Attacker(
+                                "林恩", "飞刀",
+                                CocPercentileModifier.NORMAL),
+                        new KpMeleeRequestDTOs.Defender(
+                                "邪教徒", MeleeDefenseMode.NONE,
+                                null, CocPercentileModifier.NORMAL)));
+
+        assertThat(createdDrafts()).singleElement().satisfies(draft ->
+                assertThat(draft.getResolutionData().getRule())
+                        .containsEntry("checkName", "斗殴")
+                        .containsEntry("weaponName", "大型棍棒（枪托替代）")
+                        .containsEntry("damageFormula", "1D8+DB")
+                        .containsEntry("canImpale", false));
     }
 
     @Test
@@ -868,9 +1076,8 @@ class CocDiceOrchestrationServiceTest {
                 5L,
                 new KpDiceRequestDTOs.Damage(
                         "坠入坑中",
-                        DamageSourceMode.STANDALONE,
                         List.of(new KpDiceRequestDTOs.DamageTarget(
-                                "陈默", null, "3"))));
+                                "陈默", "3"))));
 
         assertThat(result.summary().getRoundCount()).isEqualTo(1);
         assertThat(locked.getHpCurrent()).isEqualTo(7);
@@ -911,9 +1118,8 @@ class CocDiceOrchestrationServiceTest {
                 5L,
                 new KpDiceRequestDTOs.Damage(
                         "持续失血",
-                        DamageSourceMode.STANDALONE,
                         List.of(new KpDiceRequestDTOs.DamageTarget(
-                                "陈默", null, "4"))));
+                                "陈默", "4"))));
 
         assertThat(locked.getHpCurrent()).isZero();
         assertThat(locked.getUnconscious()).isTrue();
@@ -1155,57 +1361,6 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
-    void followUpDamageRequiresAWinningOrSuccessfulSource() {
-        when(followUps.requireLatestSummaryId(
-                eq(7L), any())).thenReturn(101L);
-        DiceRollSummary summary = new DiceRollSummary()
-                .setId(101L)
-                .setConversationId(7L)
-                .setRoundCount(1)
-                .setStatus(DiceRollConstant.STATUS_COMPLETED);
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(
-                resolvedCheck(201L, 101L, 1, "林恩", 11L, 70, "FAILURE")));
-
-        assertThatThrownBy(() -> service.rollDamage(
-                7L,
-                5L,
-                new KpDiceRequestDTOs.Damage(
-                        "攻击邪教徒",
-                        DamageSourceMode.FOLLOW_UP,
-                        List.of(new KpDiceRequestDTOs.DamageTarget(
-                                "邪教徒", "林恩", "1D6")))))
-                .hasMessageContaining("前置检定未成功");
-    }
-
-    @Test
-    void followUpLookupCannotCrossConversation() {
-        when(followUps.requireLatestSummaryId(eq(7L), any()))
-                .thenReturn(101L);
-        when(internal.requireSummaryForUpdate(101L))
-                .thenReturn(new DiceRollSummary()
-                        .setId(101L)
-                        .setConversationId(8L)
-                        .setRoundCount(1)
-                        .setStatus(DiceRollConstant.STATUS_COMPLETED));
-
-        assertThatThrownBy(() -> service.rollDamage(
-                7L,
-                5L,
-                new KpDiceRequestDTOs.Damage(
-                        "攻击邪教徒",
-                        DamageSourceMode.FOLLOW_UP,
-                        List.of(new KpDiceRequestDTOs.DamageTarget(
-                                "邪教徒", "林恩", "1D6")))))
-                .hasMessageContaining("不属于当前群聊");
-
-        verify(internal, never()).listResultEntities(any());
-        verify(internal, never()).appendDiceRollRound(any(), any(), any());
-        verify(cards, never()).requireDiceCharacter(any(), any());
-        verify(cards, never()).updateDiceCharacter(any());
-    }
-
-    @Test
     void majorWoundConRoundIsCreatedOnceUnderSummaryLock() {
         CocDiceCharacterVO playerTarget = card(11L, null, "林恩", 70);
         CocDiceCharacterVO agentTarget = card(12L, 88L, "陈默", 45);
@@ -1238,12 +1393,11 @@ class CocDiceOrchestrationServiceTest {
                 5L,
                 new KpDiceRequestDTOs.Damage(
                         "爆炸冲击",
-                        DamageSourceMode.STANDALONE,
                         List.of(
                                 new KpDiceRequestDTOs.DamageTarget(
-                                        "林恩", null, "1D1*6"),
+                                        "林恩", "1D1*6"),
                                 new KpDiceRequestDTOs.DamageTarget(
-                                        "陈默", null, "6"))));
+                                        "陈默", "6"))));
 
         assertThat(created.summary().getStatus())
                 .isEqualTo(DiceRollConstant.STATUS_PENDING);

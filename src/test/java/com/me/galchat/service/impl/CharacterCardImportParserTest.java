@@ -64,6 +64,8 @@ class CharacterCardImportParserTest {
                 .doesNotContain("斗殴", "弓箭");
         assertThat(parsed.weapons()).hasSize(2);
         assertThat(parsed.weapons().getFirst().getDamage()).isEqualTo("1D3+DB");
+        assertThat(parsed.weapons().getFirst().getCanImpale()).isFalse();
+        assertThat(parsed.weapons().get(1).getCanImpale()).isTrue();
         assertThat(parsed.profile().getAppearance()).isEqualTo("形象");
         assertThat(parsed.profile().getEquipmentText()).isEqualTo("弓\n急救包\n水");
         assertThat(parsed.profile().getSpendingLevel()).isEqualTo("小康");

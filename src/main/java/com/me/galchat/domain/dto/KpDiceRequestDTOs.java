@@ -2,7 +2,6 @@ package com.me.galchat.domain.dto;
 
 import com.me.galchat.constant.CocCheckDifficulty;
 import com.me.galchat.constant.CocPercentileModifier;
-import com.me.galchat.constant.DamageSourceMode;
 import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
 import com.me.galchat.constant.GroupCheckRule;
@@ -98,21 +97,15 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Damage(
-            @ToolParam(description = "用简短短语概括伤害原因；不要复述行动过程、规则或结果。会作为掷骰概要或新增掷骰轮的展示文本")
+            @ToolParam(description = "用简短短语概括伤害原因；不要复述行动过程、规则或结果。会作为掷骰概要和前端展示文本")
             String reason,
-            @ToolParam(description = "伤害来源模式：STANDALONE独立伤害，FOLLOW_UP前置检定成功后的伤害")
-            DamageSourceMode sourceMode,
-            @ToolParam(description = "本轮各受伤角色、可选前置来源角色及对应伤害表达式")
+            @ToolParam(description = "本轮各受伤角色及对应伤害表达式")
             List<DamageTarget> targets) {
     }
 
     public record DamageTarget(
             @ToolParam(description = "承受伤害的角色名，必须与当前跑团中的角色卡名称一致")
             String targetCharacterName,
-            @ToolParam(
-                    description = "FOLLOW_UP时必填，填写完成前置攻击或检定的角色名；STANDALONE时必须省略",
-                    required = false)
-            String sourceCharacterName,
             @ToolParam(description = "对该目标执行的伤害表达式，例如1D6或1D8+2")
             String formula) {
     }

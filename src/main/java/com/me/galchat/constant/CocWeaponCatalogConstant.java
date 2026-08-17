@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.Optional;
 
 import static java.util.Map.entry;
 
@@ -200,6 +201,16 @@ public final class CocWeaponCatalogConstant {
         return definition;
     }
 
+    public static Optional<WeaponDefinition> findByExactName(String name) {
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        String normalized = name.trim();
+        return WEAPONS.values().stream()
+                .filter(weapon -> weapon.name().equals(normalized))
+                .findFirst();
+    }
+
     private static WeaponEra normalizeEra(String era) {
         if (era == null || era.isBlank()) {
             return WeaponEra.BOTH;
@@ -223,7 +234,11 @@ public final class CocWeaponCatalogConstant {
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
                 inferKind(code, requiredSkillName), AcquisitionLevel.COMMON,
-                true, Set.of("BOW", "CROSSBOW").contains(code),
+                true, Set.of(
+                        "BOW", "CROSSBOW", "HAND_AXE",
+                        "LARGE_KNIFE", "MEDIUM_KNIFE", "SMALL_KNIFE",
+                        "LANCE", "LARGE_SWORD", "MEDIUM_SWORD",
+                        "LIGHT_SWORD", "WOOD_AXE").contains(code),
                 false, List.of(), null);
     }
 

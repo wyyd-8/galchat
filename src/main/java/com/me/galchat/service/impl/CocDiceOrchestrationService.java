@@ -10,7 +10,9 @@ import com.me.galchat.constant.HealingMode;
 import com.me.galchat.constant.GroupCheckRule;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
+import com.me.galchat.domain.dto.KpFirearmRequestDTOs;
 import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.DiceRollResult;
 import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
@@ -89,6 +91,114 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 requireTargets(request.targets(), false);
         return createChecks(
                 conversationId, runId, request.reason(), difficulty, targets, groupRule);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public KpDiceToolResult requestFirearmAttack(
+            Long conversationId,
+            Long runId,
+            KpFirearmRequestDTOs.Attack request) {
+        requireContext(conversationId, runId);
+        requireRequest(request, request == null ? null : request.reason());
+        if (!StringUtils.hasText(request.characterName())
+                || !StringUtils.hasText(request.weaponName())
+                || request.firingMode() == null) {
+            throw new UserRequestException("开火角色、武器和射击方式不能为空");
+        }
+        if (request.targets() == null || request.targets().isEmpty()) {
+            throw new UserRequestException("枪械攻击目标不能为空");
+        }
+        CocDiceCharacterVO attacker = characterCardService
+                .requireDiceCharacter(runId, request.characterName().trim());
+        CocCharacterWeapon weapon = characterCardService
+                .requireWeaponForUpdate(
+                        runId, attacker.name(), request.weaponName().trim());
+        if (Boolean.TRUE.equals(weapon.getIsBroken())) {
+            throw new UserRequestException("损坏的武器不能射击");
+        }
+        if (weapon.getRemainingAmmo() == null
+                || weapon.getRemainingAmmo() < 1) {
+            throw new UserRequestException("武器没有可供发射的弹药");
+        }
+        Integer skillValue = attacker.checkValues() == null
+                ? null : attacker.checkValues().get(weapon.getSkillName());
+        if (skillValue == null || skillValue < 1 || skillValue > 100) {
+            throw new UserRequestException("人物卡缺少武器对应的射击技能");
+        }
+        int malfunctionThreshold = parseMalfunction(weapon.getMalfunction());
+        CocFirearmRules.maximumDamage(weapon.getDamage());
+
+        int remaining = weapon.getRemainingAmmo();
+        int globalGroupIndex = 0;
+        int displayOrder = 1;
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>();
+        Set<String> targetNames = new HashSet<>();
+        for (KpFirearmRequestDTOs.Target target : request.targets()) {
+            if (target == null || !StringUtils.hasText(
+                    target.targetCharacterName())
+                    || target.bulletCount() < 1) {
+                throw new UserRequestException("射击目标和子弹数无效");
+            }
+            String targetName = target.targetCharacterName().trim();
+            if (!targetNames.add(targetName)) {
+                throw new UserRequestException("同一目标只能声明一次子弹分配");
+            }
+            CocDiceCharacterVO targetCard = characterCardService
+                    .requireDiceCharacter(runId, targetName);
+            int allocated = Math.min(remaining, target.bulletCount());
+            remaining -= allocated;
+            for (int groupSize : CocFirearmRules.groupSizes(
+                    request.firingMode(), skillValue, allocated)) {
+                CocFirearmRules.AttackAdjustment adjustment =
+                        CocFirearmRules.adjustment(
+                                request.firingMode(), globalGroupIndex++,
+                                target.baseModifier());
+                if (adjustment.impossible()) {
+                    continue;
+                }
+                Map<String, Object> rule = new LinkedHashMap<>();
+                rule.put("runId", runId);
+                rule.put("weaponId", weapon.getId());
+                rule.put("attackerCardId", attacker.cardId());
+                rule.put("characterName", attacker.name());
+                rule.put("weaponName", weapon.getName());
+                rule.put("skillName", weapon.getSkillName());
+                rule.put("targetValue", skillValue);
+                rule.put("targetCardId", targetCard.cardId());
+                rule.put("targetCharacterName", targetCard.name());
+                rule.put("targetConValue", targetCard.con());
+                rule.put("firingMode", request.firingMode().name());
+                rule.put("bulletsInGroup", groupSize);
+                rule.put("modifier", adjustment.modifier().name());
+                rule.put("difficultyIncrease", adjustment.difficultyIncrease());
+                rule.put("malfunctionThreshold", malfunctionThreshold);
+                rule.put("fumbleBreaksWeapon", request.fumbleBreaksWeapon());
+                rule.put("canImpale", Boolean.TRUE.equals(
+                        weapon.getCanImpale()));
+                rule.put("damageFormula", weapon.getDamage().trim());
+
+                DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+                draft.setCharacterId(automaticRoller(attacker));
+                draft.setDisplayOrder(displayOrder++);
+                draft.setDisplayType(DiceRollConstant.TYPE_FIREARM_ATTACK);
+                draft.setReason(request.reason().trim());
+                draft.setFormula(adjustment.modifier().formula());
+                draft.setResolutionData(DiceResolutionDataVO.pending(
+                        DiceRollConstant.TYPE_FIREARM_ATTACK, null, rule));
+                drafts.add(draft);
+            }
+            if (remaining == 0) {
+                break;
+            }
+        }
+        if (drafts.isEmpty()) {
+            throw new UserRequestException("没有能够进行的枪械攻击检定组");
+        }
+        weapon.setRemainingAmmo(remaining);
+        characterCardService.updateWeapon(weapon);
+        return createFirearmAndSettle(
+                conversationId, request.reason(), drafts);
     }
 
     private KpDiceToolResult createChecks(
@@ -580,7 +690,12 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         settleCompletedInsanityPairs(allResults);
         refreshSummary(summary, allResults);
         List<DiceRollResult> created = new ArrayList<>(
-                appendTemporaryInsanityRoundIfNeeded(summary, allResults));
+                appendFirearmDamageRoundIfReady(summary, allResults));
+        List<DiceRollResult> afterFirearm = created.isEmpty()
+                ? allResults : mergeResults(allResults, created);
+        List<DiceRollResult> insanity = appendTemporaryInsanityRoundIfNeeded(
+                summary, afterFirearm);
+        created.addAll(insanity);
         List<DiceRollResult> currentResults = created.isEmpty()
                 ? allResults
                 : mergeResults(allResults, created);
@@ -612,6 +727,29 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 aggregate.results());
         refreshSummary(aggregate.summary(), allResults);
         return toolResult(aggregate.summary(), aggregate.results());
+    }
+
+    private KpDiceToolResult createFirearmAndSettle(
+            Long conversationId,
+            String reason,
+            List<DiceRollResultCreateDTO> drafts) {
+        DiceRollAggregate aggregate = internalService.createDiceRoll(
+                conversationId, reason.trim(), drafts);
+        settleAlreadyRolled(aggregate.results());
+        List<DiceRollResult> allResults = mergeResults(
+                internalService.listResultEntities(aggregate.summary().getId()),
+                aggregate.results());
+        refreshSummary(aggregate.summary(), allResults);
+        List<DiceRollResult> damage = appendFirearmDamageRoundIfReady(
+                aggregate.summary(), allResults);
+        List<DiceRollResult> combined = damage.isEmpty()
+                ? allResults : mergeResults(allResults, damage);
+        List<DiceRollResult> con = appendMajorWoundConRoundIfNeeded(
+                aggregate.summary(), combined);
+        List<DiceRollResult> returned = new ArrayList<>(aggregate.results());
+        returned.addAll(damage);
+        returned.addAll(con);
+        return toolResult(aggregate.summary(), returned);
     }
 
     private void settleAlreadyRolled(List<DiceRollResult> results) {
@@ -663,6 +801,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         } else if (DiceRollConstant.TYPE_UNCONSCIOUS_RECOVERY_CON.equals(
                 type)) {
             settleUnconsciousRecoveryResult(result, resolution);
+        } else if (DiceRollConstant.TYPE_FIREARM_ATTACK.equals(type)) {
+            settleFirearmAttackResult(result, resolution);
         } else {
             throw new UserRequestException("暂不支持该掷骰结算类型：" + type);
         }
@@ -683,6 +823,34 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         outcome.put("checkName", stringValue(rule, "checkName"));
         outcome.put("category", check.outcome().name());
         outcome.put("rank", check.rank().name());
+        resolution.setOutcome(outcome);
+    }
+
+    private void settleFirearmAttackResult(
+            DiceRollResult result, DiceResolutionDataVO resolution) {
+        Map<String, Object> rule = resolution.getRule();
+        int difficultyIncrease = intValue(rule, "difficultyIncrease");
+        CocDiceRules.CheckResolution check = CocDiceRules.resolveCheck(
+                requireRoll(result),
+                intValue(rule, "targetValue"),
+                difficultyIncrease == 0
+                        ? CocCheckDifficulty.REGULAR
+                        : difficultyIncrease == 1
+                        ? CocCheckDifficulty.HARD
+                        : CocCheckDifficulty.EXTREME);
+        CocCheckOutcome category = check.outcome();
+        if (difficultyIncrease >= 3 && requireRoll(result) != 1) {
+            category = requireRoll(result) >= 96
+                    ? CocCheckOutcome.FUMBLE
+                    : CocCheckOutcome.FAILURE;
+        }
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("characterName", stringValue(rule, "characterName"));
+        outcome.put("targetCharacterName",
+                stringValue(rule, "targetCharacterName"));
+        outcome.put("category", category.name());
+        outcome.put("rank", check.rank().name());
+        outcome.put("valid", true);
         resolution.setOutcome(outcome);
     }
 
@@ -1159,6 +1327,160 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 .orElse(null);
     }
 
+    private List<DiceRollResult> appendFirearmDamageRoundIfReady(
+            DiceRollSummary summary,
+            List<DiceRollResult> allResults) {
+        int attackRound = summary.getRoundCount();
+        List<DiceRollResult> attacks = safeResults(allResults).stream()
+                .filter(result -> Objects.equals(
+                        attackRound, result.getRoundNo()))
+                .filter(result -> DiceRollConstant.TYPE_FIREARM_ATTACK.equals(
+                        resolution(result).getType()))
+                .sorted(Comparator.comparing(
+                        DiceRollResult::getDisplayOrder,
+                        Comparator.nullsLast(Integer::compareTo)))
+                .toList();
+        if (attacks.isEmpty()
+                || attacks.stream().anyMatch(
+                        result -> result.getResolvedAt() == null)
+                || attacks.stream().anyMatch(result -> Boolean.TRUE.equals(
+                        resolution(result).getOutcome().get("finalized")))) {
+            return List.of();
+        }
+
+        boolean malfunctioned = false;
+        boolean weaponBroke = false;
+        Map<String, FirearmTargetDamage> damageByTarget =
+                new LinkedHashMap<>();
+        for (DiceRollResult attack : attacks) {
+            DiceResolutionDataVO attackResolution = resolution(attack);
+            Map<String, Object> rule = attackResolution.getRule();
+            Map<String, Object> outcome = new LinkedHashMap<>(
+                    attackResolution.getOutcome());
+            outcome.put("finalized", true);
+            if (malfunctioned) {
+                outcome.put("valid", false);
+                outcome.put("invalidatedByMalfunction", true);
+                attackResolution.setOutcome(outcome);
+                internalService.saveResult(attack);
+                continue;
+            }
+
+            boolean fumble = CocCheckOutcome.FUMBLE.name().equals(
+                    Objects.toString(outcome.get("category"), null));
+            CocFirearmRules.MalfunctionDecision malfunction =
+                    CocFirearmRules.malfunction(
+                            requireRoll(attack),
+                            fumble,
+                            intValue(rule, "malfunctionThreshold"),
+                            booleanValue(rule, "fumbleBreaksWeapon"));
+            if (malfunction.breaksWeapon()) {
+                malfunctioned = true;
+                weaponBroke = true;
+                outcome.put("valid", false);
+                outcome.put("malfunction", true);
+                attackResolution.setOutcome(outcome);
+                internalService.saveResult(attack);
+                continue;
+            }
+            outcome.put("valid", true);
+            if (malfunction.unhandledFumble()) {
+                outcome.put("unhandledFumble", true);
+            }
+            attackResolution.setOutcome(outcome);
+            internalService.saveResult(attack);
+
+            String category = Objects.toString(
+                    outcome.get("category"), "");
+            if (!CocCheckOutcome.SUCCESS.name().equals(category)
+                    && !CocCheckOutcome.CRITICAL_SUCCESS.name()
+                    .equals(category)) {
+                continue;
+            }
+            String rank = Objects.toString(outcome.get("rank"), "");
+            boolean extreme = CocDiceRules.CheckRank.EXTREME.name()
+                    .equals(rank)
+                    || CocDiceRules.CheckRank.CRITICAL.name().equals(rank);
+            CocFirearmRules.DamagePlan plan = CocFirearmRules.damagePlan(
+                    com.me.galchat.constant.FirearmFiringMode.valueOf(
+                            stringValue(rule, "firingMode")),
+                    intValue(rule, "bulletsInGroup"),
+                    extreme,
+                    booleanValue(rule, "canImpale"),
+                    intValue(rule, "difficultyIncrease") >= 2,
+                    stringValue(rule, "damageFormula"));
+            String targetName = stringValue(
+                    rule, "targetCharacterName");
+            FirearmTargetDamage target = damageByTarget.computeIfAbsent(
+                    targetName,
+                    ignored -> new FirearmTargetDamage(
+                            longValue(rule, "targetCardId"),
+                            targetName,
+                            intValue(rule, "targetConValue")));
+            target.formulas().add(plan.formula());
+            target.sourceResultIds().add(attack.getId());
+            target.addHits(plan.hitCount(), plan.impalingHitCount());
+        }
+
+        if (weaponBroke) {
+            Map<String, Object> firstRule = resolution(
+                    attacks.getFirst()).getRule();
+            CocCharacterWeapon weapon = characterCardService
+                    .requireWeaponForUpdate(
+                            longValue(firstRule, "runId"),
+                            stringValue(firstRule, "characterName"),
+                            stringValue(firstRule, "weaponName"));
+            if (!Boolean.TRUE.equals(weapon.getIsBroken())) {
+                weapon.setIsBroken(true);
+                characterCardService.updateWeapon(weapon);
+            }
+        }
+        refreshSummary(summary, allResults);
+        if (damageByTarget.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, Object> firstRule = resolution(
+                attacks.getFirst()).getRule();
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>();
+        int displayOrder = 1;
+        for (FirearmTargetDamage target : damageByTarget.values()) {
+            Map<String, Object> rule = new LinkedHashMap<>();
+            rule.put("conversationId", summary.getConversationId());
+            rule.put("runId", longValue(firstRule, "runId"));
+            rule.put("cardId", target.cardId());
+            rule.put("characterName", target.characterName());
+            rule.put("sourceCharacterName",
+                    stringValue(firstRule, "characterName"));
+            rule.put("conValue", target.conValue());
+            rule.put("firearm", true);
+            rule.put("weaponName", stringValue(firstRule, "weaponName"));
+            rule.put("sourceResultIds", List.copyOf(
+                    target.sourceResultIds()));
+            rule.put("hitCount", target.hitCount());
+            rule.put("impalingHitCount", target.impalingHitCount());
+
+            DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+            draft.setCharacterId(attacks.getFirst().getCharacterId());
+            draft.setDisplayOrder(displayOrder++);
+            draft.setDisplayType(DiceRollConstant.TYPE_DAMAGE);
+            draft.setReason(stringValue(firstRule, "weaponName")
+                    + "命中" + target.characterName());
+            draft.setFormula(String.join("+", target.formulas()));
+            draft.setResolutionData(DiceResolutionDataVO.pending(
+                    DiceRollConstant.TYPE_DAMAGE,
+                    target.sourceResultIds().getFirst(),
+                    rule));
+            drafts.add(draft);
+        }
+        List<DiceRollResult> created = internalService.appendDiceRollRound(
+                summary.getConversationId(), summary.getId(), drafts);
+        updateRoundCountFromCreated(summary, created, attackRound + 1);
+        settleAlreadyRolled(created);
+        refreshSummary(summary, mergeResults(allResults, created));
+        return created;
+    }
+
     private void updateRoundCountFromCreated(
             DiceRollSummary summary,
             List<DiceRollResult> created,
@@ -1169,6 +1491,32 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 .max(Integer::compareTo)
                 .orElse(fallbackRound);
         summary.setRoundCount(Math.max(summary.getRoundCount(), createdRound));
+    }
+
+    private int parseMalfunction(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new UserRequestException("枪械没有有效的故障值");
+        }
+        try {
+            int threshold = Integer.parseInt(value.trim());
+            if (threshold < 1 || threshold > 100) {
+                throw new NumberFormatException();
+            }
+            return threshold;
+        } catch (NumberFormatException exception) {
+            throw new UserRequestException("枪械故障值必须是1到100的整数");
+        }
+    }
+
+    private Long automaticRoller(CocDiceCharacterVO card) {
+        return switch (Objects.toString(card.actorType(), "")) {
+            case "PLAYER" -> null;
+            case "BOT" -> Objects.requireNonNullElse(
+                    card.participantId(), card.cardId());
+            case "NPC" -> card.cardId();
+            default -> throw new UserRequestException(
+                    "不支持的人物卡控制类型");
+        };
     }
 
     private void refreshSummary(DiceRollSummary summary, List<DiceRollResult> results) {
@@ -1568,6 +1916,14 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         throw new UserRequestException("掷骰影响字段无效：" + key);
     }
 
+    private boolean booleanValue(Map<String, Object> values, String key) {
+        Object value = values == null ? null : values.get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        throw new UserRequestException("掷骰规则字段无效：" + key);
+    }
+
     private int outcomeInt(DiceRollResult result, String key) {
         Map<String, Object> outcome = resolution(result).getOutcome();
         if (outcome != null && outcome.get(key) instanceof Number number) {
@@ -1595,5 +1951,55 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private static final class FirearmTargetDamage {
+        private final Long cardId;
+        private final String characterName;
+        private final int conValue;
+        private final List<String> formulas = new ArrayList<>();
+        private final List<Long> sourceResultIds = new ArrayList<>();
+        private int hitCount;
+        private int impalingHitCount;
+
+        private FirearmTargetDamage(
+                Long cardId, String characterName, int conValue) {
+            this.cardId = cardId;
+            this.characterName = characterName;
+            this.conValue = conValue;
+        }
+
+        private Long cardId() {
+            return cardId;
+        }
+
+        private String characterName() {
+            return characterName;
+        }
+
+        private int conValue() {
+            return conValue;
+        }
+
+        private List<String> formulas() {
+            return formulas;
+        }
+
+        private List<Long> sourceResultIds() {
+            return sourceResultIds;
+        }
+
+        private int hitCount() {
+            return hitCount;
+        }
+
+        private int impalingHitCount() {
+            return impalingHitCount;
+        }
+
+        private void addHits(int hits, int impalingHits) {
+            hitCount += hits;
+            impalingHitCount += impalingHits;
+        }
     }
 }

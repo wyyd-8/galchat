@@ -368,6 +368,7 @@ public class AutoCharacterCardAssembler {
                 .setAmmoCapacity(definition.ammoCapacity())
                 .setRemainingAmmo(definition.ammoCapacity())
                 .setMalfunction(definition.malfunction())
+                .setCanImpale(definition.canImpale())
                 .setIsBroken(false)
                 .setAbnormal(definition.abnormal())
                 .setRiskTags(definition.riskTags())

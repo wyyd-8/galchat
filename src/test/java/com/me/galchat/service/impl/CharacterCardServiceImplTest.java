@@ -499,7 +499,7 @@ class CharacterCardServiceImplTest {
     }
 
     @Test
-    void weaponStateUpdateCannotRepairBrokenWeapon() {
+    void weaponStateUpdateCanRepairBrokenWeapon() {
         CocCharacter card = new CocCharacter()
                 .setId(71L).setRunId(5L).setName("林恩");
         CocCharacterWeapon weapon = new CocCharacterWeapon()
@@ -510,11 +510,15 @@ class CharacterCardServiceImplTest {
         when(weaponMapper.selectByCharacterIdAndNameForUpdate(
                 71L, "左轮手枪")).thenReturn(List.of(weapon));
 
-        assertThatThrownBy(() -> service.updateWeaponState(
+        when(weaponMapper.updateById(weapon)).thenReturn(1);
+
+        KpWeaponStateDTOs.Result result = service.updateWeaponState(
                 5L, "林恩", "左轮手枪",
-                new KpWeaponStateDTOs.Update(5, false)))
-                .isInstanceOf(UserRequestException.class)
-                .hasMessage("武器修复不能通过状态更新工具完成");
+                new KpWeaponStateDTOs.Update(5, false));
+
+        assertThat(result.broken()).isFalse();
+        assertThat(result.changed()).isTrue();
+        verify(weaponMapper).updateById(weapon);
     }
 
     @Test

@@ -232,6 +232,26 @@ class CocDiceSummaryFormatterTest {
                 .isEqualTo("林恩生命+2");
     }
 
+    @Test
+    void firearmRoundReportsMalfunctionInvalidationAndUnhandledFumble() {
+        DiceRollResult unhandled = firearm(
+                81L, 1, "邪教徒甲", "FUMBLE", true, false);
+        unhandled.getResolutionData().getOutcome()
+                .put("unhandledFumble", true);
+        DiceRollResult malfunction = firearm(
+                82L, 2, "邪教徒乙", "FAILURE", false, false);
+        malfunction.getResolutionData().getOutcome()
+                .put("malfunction", true);
+        DiceRollResult invalid = firearm(
+                83L, 3, "邪教徒乙", "SUCCESS", false, true);
+
+        assertThat(formatter.formatRound(
+                List.of(unhandled, malfunction, invalid)))
+                .contains("林恩向邪教徒甲射击：大失败，待KP处理")
+                .contains("武器故障")
+                .contains("故障后失效");
+    }
+
     private DiceRollResult check(
             Long id, int round, int order, String name, String category, Integer roll) {
         Map<String, Object> rule = new LinkedHashMap<>();
@@ -256,6 +276,40 @@ class CocDiceSummaryFormatterTest {
                 .setResultData(new DiceRollResultVO("1D100", List.of(), roll))
                 .setResolutionData(resolution)
                 .setResolvedAt(category == null ? null : LocalDateTime.now());
+    }
+
+    private DiceRollResult firearm(
+            Long id,
+            int order,
+            String target,
+            String category,
+            boolean valid,
+            boolean invalidated) {
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("characterName", "林恩");
+        outcome.put("targetCharacterName", target);
+        outcome.put("category", category);
+        outcome.put("rank", category.equals("SUCCESS")
+                ? "REGULAR" : category);
+        outcome.put("valid", valid);
+        outcome.put("finalized", true);
+        if (invalidated) {
+            outcome.put("invalidatedByMalfunction", true);
+        }
+        return new DiceRollResult()
+                .setId(id)
+                .setRoundNo(1)
+                .setDisplayOrder(order)
+                .setResultData(new DiceRollResultVO(
+                        "1D100", List.of(), 98))
+                .setResolutionData(DiceResolutionDataVO.pending(
+                        "FIREARM_ATTACK", null,
+                        Map.of(
+                                "characterName", "林恩",
+                                "targetCharacterName", target,
+                                "weaponName", "冲锋枪"))
+                        .setOutcome(outcome))
+                .setResolvedAt(LocalDateTime.now());
     }
 
     private DiceRollResult opposed(

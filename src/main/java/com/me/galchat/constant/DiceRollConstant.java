@@ -14,6 +14,7 @@ public final class DiceRollConstant {
     public static final String TYPE_TEMPORARY_INSANITY_TYPE = "TEMPORARY_INSANITY_TYPE";
     public static final String TYPE_TEMPORARY_INSANITY_DURATION = "TEMPORARY_INSANITY_DURATION";
     public static final String TYPE_DAMAGE = "DAMAGE";
+    public static final String TYPE_FIREARM_ATTACK = "FIREARM_ATTACK";
     public static final String TYPE_HEALING = "HEALING";
     public static final String TYPE_MAJOR_WOUND_CON = "MAJOR_WOUND_CON";
     public static final String TYPE_UNCONSCIOUS_RECOVERY_CON =
@@ -24,6 +25,8 @@ public final class DiceRollConstant {
     public static final String TOOL_REQUEST_SAN_CHECK = "requestSanCheck";
     public static final String TOOL_REQUEST_PUSHED_CHECK = "requestPushedCheck";
     public static final String TOOL_REQUEST_OPPOSED_CHECK = "requestOpposedCheck";
+    public static final String TOOL_REQUEST_FIREARM_ATTACK =
+            "requestFirearmAttack";
 
     public static final Set<String> KP_STATE_TOOL_NAMES = Set.of(
             TOOL_REQUEST_CHECK,
@@ -31,6 +34,7 @@ public final class DiceRollConstant {
             TOOL_REQUEST_OPPOSED_CHECK,
             TOOL_REQUEST_PUSHED_CHECK,
             TOOL_REQUEST_SAN_CHECK,
+            TOOL_REQUEST_FIREARM_ATTACK,
             "rollSanLoss",
             "rollDamage",
             "rollHealing");

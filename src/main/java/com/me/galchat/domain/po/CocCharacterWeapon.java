@@ -26,6 +26,7 @@ public class CocCharacterWeapon {
     private Integer ammoCapacity;
     private Integer remainingAmmo;
     private String malfunction;
+    private Boolean canImpale;
     private Boolean isBroken;
     private Boolean abnormal;
     @TableField(typeHandler = JsonbTypeHandler.class)

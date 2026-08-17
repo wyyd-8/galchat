@@ -80,6 +80,9 @@ class CocWeaponCatalogConstantTest {
                             .isEqualTo("近≤10m；中≤20m；远≤50m");
                     assertThat(weapon.acquisitionLevel()).isEqualTo(
                             CocWeaponCatalogConstant.AcquisitionLevel.COMMON);
+                    assertThat(weapon.canImpale()).isTrue();
                 });
+        assertThat(CocWeaponCatalogConstant.require("TASER").canImpale())
+                .isFalse();
     }
 }

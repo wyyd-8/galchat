@@ -163,6 +163,32 @@ public class CocDiceSummaryFormatter {
                     + "CON检定" + (awake
                     ? "成功，脱离昏迷" : "失败，仍处于昏迷");
         }
+        if (DiceRollConstant.TYPE_FIREARM_ATTACK.equals(
+                resolution.getType())) {
+            Map<String, Object> outcome = resolution.getOutcome();
+            if (outcome == null) {
+                return "";
+            }
+            StringBuilder text = new StringBuilder()
+                    .append(stringValue(outcome, "characterName"))
+                    .append("向")
+                    .append(stringValue(outcome, "targetCharacterName"))
+                    .append("射击：")
+                    .append(checkOutcomeLabel(
+                            CocCheckOutcome.valueOf(stringValue(
+                                    outcome, "category")), outcome));
+            if (Boolean.TRUE.equals(outcome.get("unhandledFumble"))) {
+                text.append("，待KP处理");
+            }
+            if (Boolean.TRUE.equals(outcome.get("malfunction"))) {
+                text.append("，武器故障");
+            }
+            if (Boolean.TRUE.equals(
+                    outcome.get("invalidatedByMalfunction"))) {
+                text.append("，故障后失效");
+            }
+            return text.toString();
+        }
         if (DiceRollConstant.TYPE_SAN_LOSS.equals(resolution.getType())) {
             Map<String, Object> effect = resolution.getEffect();
             if (effect == null) {

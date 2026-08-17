@@ -1,6 +1,7 @@
 package com.me.galchat.service;
 
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
+import com.me.galchat.domain.dto.KpFirearmRequestDTOs;
 import com.me.galchat.domain.vo.DiceRollProgressVO;
 import com.me.galchat.domain.vo.KpDiceToolResult;
 
@@ -10,6 +11,10 @@ public interface ICocDiceOrchestrationService {
 
     KpDiceToolResult requestGroupCheck(
             Long conversationId, Long runId, KpDiceRequestDTOs.GroupCheck request);
+
+    KpDiceToolResult requestFirearmAttack(
+            Long conversationId, Long runId,
+            KpFirearmRequestDTOs.Attack request);
 
     KpDiceToolResult requestOpposedCheck(
             Long conversationId, Long runId, KpDiceRequestDTOs.Opposed request);

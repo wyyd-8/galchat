@@ -18,6 +18,7 @@ import com.me.galchat.service.impl.TrpgInvestigatorContextAssembler;
 import com.me.galchat.tool.KpChildSceneTools;
 import com.me.galchat.tool.KpClarificationTools;
 import com.me.galchat.tool.KpDiceTools;
+import com.me.galchat.tool.KpFirearmTools;
 import com.me.galchat.tool.KpPushedCheckTools;
 import com.me.galchat.tool.InvestigatorSceneTools;
 import com.me.galchat.tool.KpSceneTools;
@@ -64,6 +65,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final KpWaitingInvestigatorTools kpWaitingInvestigatorTools;
     private final TrpgChildSceneCommandService childSceneCommandService;
     private KpClarificationTools kpClarificationTools;
+    private KpFirearmTools kpFirearmTools;
 
     @Autowired
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
@@ -122,6 +124,11 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     void setKpClarificationTools(
             KpClarificationTools kpClarificationTools) {
         this.kpClarificationTools = kpClarificationTools;
+    }
+
+    @Autowired
+    void setKpFirearmTools(KpFirearmTools kpFirearmTools) {
+        this.kpFirearmTools = kpFirearmTools;
     }
 
     @Override
@@ -276,9 +283,11 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             } else if (combatRoute) {
                 messages.add(new UserMessage("""
                         读取紧邻的行动。攻击、阻拦、急救等涉及另一名参战者的行动使用TARGETED；装填等只影响行动者或其装备的行动使用SELF_OR_UTILITY。
-                        TARGETED必须识别准确目标，并判断目标是否需要获得闪避、反击或其他即时防守行动。
+                        TARGETED必须识别准确目标，并判断目标是否需要获得寻找掩护、闪避、反击或其他即时防守行动。枪械行动在一回合声明多个目标时，必须按声明顺序一次列出全部目标。
                         只输出一个JSON对象，不要Markdown，不要叙事：
                         {"actionKind":"TARGETED","targetName":"准确人物卡名称","insertDefense":true,"defenseOptions":["闪避","反击"],"reason":"简短原因"}
+                        多目标枪械攻击使用：
+                        {"actionKind":"TARGETED","targets":[{"targetName":"目标甲","insertDefense":true,"defenseOptions":["寻找掩护"]},{"targetName":"目标乙","insertDefense":false,"defenseOptions":[]}],"reason":"简短原因"}
                         或：
                         {"actionKind":"SELF_OR_UTILITY","insertDefense":false,"defenseOptions":[],"reason":"装填等简短原因"}
                         TARGETED的目标缺失、歧义、不在参战者中或行动不合法时不要猜测，改为：
@@ -425,7 +434,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     : scenePhase
                     ? sceneTools
                     : combatAdjudicate
-                    ? tools(kpDiceTools, kpModuleTools, kpSkillRuleTools,
+                    ? tools(kpDiceTools, kpFirearmTools,
+                            kpModuleTools, kpSkillRuleTools,
                             kpRunTools, kpCombatTools)
                     : combatRoute
                     ? tools(kpClarificationTools)

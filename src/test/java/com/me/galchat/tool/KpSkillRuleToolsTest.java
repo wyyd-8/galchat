@@ -60,7 +60,8 @@ class KpSkillRuleToolsTest {
                 .contains("| 12号双管霰弹枪 | 近4D6；中2D6；远1D6 | 近≤10m；中≤20m；远≤50m | 2 | 普通 |")
                 .contains("#### 1920s", "汤普森冲锋枪", "受管制")
                 .contains("#### 现代", "AK-47/AKM", "H&K MP5")
-                .contains("只能使用单发或武器明确支持的半自动模式")
+                .contains("使用requestFirearmAttack")
+                .contains("短点射和全自动")
                 .doesNotContain("| 所需技能 |", "| 价格 |", "| 故障值 |");
     }
 

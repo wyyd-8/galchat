@@ -746,6 +746,7 @@ CREATE TABLE coc_character_weapon (
     ammo_capacity INT,
     remaining_ammo INT,
     malfunction VARCHAR(50),
+    can_impale BOOLEAN NOT NULL DEFAULT FALSE,
     is_broken BOOLEAN DEFAULT FALSE,
     abnormal BOOLEAN NOT NULL DEFAULT FALSE,
     risk_tags JSONB NOT NULL DEFAULT '[]'::jsonb,

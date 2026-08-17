@@ -50,6 +50,7 @@ public final class CocWeaponCatalogConstant {
             WeaponKind kind,
             AcquisitionLevel acquisitionLevel,
             boolean autoSelectable,
+            boolean canImpale,
             boolean abnormal,
             List<String> riskTags,
             String notes) {
@@ -222,7 +223,8 @@ public final class CocWeaponCatalogConstant {
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
                 inferKind(code, requiredSkillName), AcquisitionLevel.COMMON,
-                true, false, List.of(), null);
+                true, Set.of("BOW", "CROSSBOW").contains(code),
+                false, List.of(), null);
     }
 
     private static WeaponDefinition abnormalWeapon(
@@ -233,7 +235,7 @@ public final class CocWeaponCatalogConstant {
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
                 inferKind(code, requiredSkillName), AcquisitionLevel.COMMON,
-                true, true, List.copyOf(riskTags), null);
+                true, false, true, List.copyOf(riskTags), null);
     }
 
     private static WeaponDefinition firearm(
@@ -244,7 +246,7 @@ public final class CocWeaponCatalogConstant {
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
                 WeaponKind.FIREARM, acquisitionLevel, autoSelectable,
-                false, List.of(), null);
+                true, false, List.of(), null);
     }
 
     private static WeaponKind inferKind(

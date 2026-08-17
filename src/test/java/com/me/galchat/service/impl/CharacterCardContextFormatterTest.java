@@ -122,8 +122,11 @@ class CharacterCardContextFormatterTest {
                         .setSkillName("射击:手枪")
                         .setDamage("1D10")
                         .setRange("15m")
+                        .setAttacksPerRound("1（3）")
                         .setAmmoCapacity(6)
                         .setRemainingAmmo(2)
+                        .setMalfunction("100")
+                        .setCanImpale(true)
                         .setIsBroken(true)), null);
 
         String text = formatter.formatInvestigatorWeaponStates(
@@ -135,7 +138,10 @@ class CharacterCardContextFormatterTest {
                 .contains("左轮手枪/射击:手枪")
                 .contains("伤害1D10")
                 .contains("射程15m")
+                .contains("每轮1（3）")
                 .contains("弹药2/6")
+                .contains("故障100")
+                .contains("可贯穿")
                 .contains("状态损坏");
     }
 

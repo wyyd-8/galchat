@@ -4,6 +4,7 @@ import com.me.galchat.domain.dto.CharacterCardCreateDTO;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.domain.vo.DiceRollResultVO;
@@ -21,6 +22,9 @@ public interface ICharacterCardService {
     KpWeaponStateDTOs.Result updateWeaponState(
             Long runId, String characterName, String weaponName,
             KpWeaponStateDTOs.Update update);
+    CocCharacterWeapon requireWeaponForUpdate(
+            Long runId, String characterName, String weaponName);
+    void updateWeapon(CocCharacterWeapon weapon);
     KpCharacterAttributeDTOs.Result adjustBasicAttributes(
             Long runId, String characterName,
             KpCharacterAttributeDTOs.Adjustments adjustments);

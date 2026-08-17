@@ -237,8 +237,8 @@ public class TrpgCombatLifecycleService {
         TrpgCombat combat = requireActiveCombat(conversation);
         String actionKind = root.get("actionKind") == null
                 ? "TARGETED" : root.get("actionKind").asText();
-        GroupChatReplyStep defense = defenseForRoute(turn, routeStep);
         if ("SELF_OR_UTILITY".equals(actionKind)) {
+            GroupChatReplyStep defense = defenseForRoute(turn, routeStep);
             defense.setSubjectCharacterId(null)
                     .setStatus(GroupChatConstant.STATUS_CANCELLED)
                     .setUpdatedAt(LocalDateTime.now());
@@ -251,8 +251,38 @@ public class TrpgCombatLifecycleService {
         if (!"TARGETED".equals(actionKind)) {
             throw new UserRequestException("KP战斗路由行动类型无效");
         }
-        String targetName = root.get("targetName") == null
-                ? null : root.get("targetName").asText();
+        tools.jackson.databind.JsonNode targetNodes = root.get("targets");
+        if (targetNodes != null && targetNodes.isArray()) {
+            if (routeStep.getParentStepId() == null) {
+                throw new UserRequestException("旧版战斗路由不支持多个目标");
+            }
+            if (targetNodes.isEmpty()) {
+                throw new UserRequestException("KP战斗路由缺少目标人物卡");
+            }
+            RouteDecision first = null;
+            for (tools.jackson.databind.JsonNode targetNode : targetNodes) {
+                RouteDecision decision = applyTargetRoute(
+                        conversation, turn, routeStep, combat,
+                        targetNode, root);
+                if (first == null) {
+                    first = decision;
+                }
+            }
+            return first;
+        }
+        return applyTargetRoute(
+                conversation, turn, routeStep, combat, root, root);
+    }
+
+    private RouteDecision applyTargetRoute(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep routeStep,
+            TrpgCombat combat,
+            tools.jackson.databind.JsonNode targetNode,
+            tools.jackson.databind.JsonNode root) {
+        String targetName = targetNode.get("targetName") == null
+                ? null : targetNode.get("targetName").asText();
         if (!StringUtils.hasText(targetName)) {
             throw new UserRequestException("KP战斗路由缺少目标人物卡");
         }
@@ -274,11 +304,11 @@ public class TrpgCombatLifecycleService {
                 target.getRunId(), conversation.getId())) {
             throw new UserRequestException("目标人物卡不存在");
         }
-        boolean insertDefense = root.get("insertDefense") != null
-                && root.get("insertDefense").asBoolean();
+        boolean insertDefense = targetNode.get("insertDefense") != null
+                && targetNode.get("insertDefense").asBoolean();
         List<String> options = new ArrayList<>();
-        if (root.get("defenseOptions") != null) {
-            root.get("defenseOptions").forEach(
+        if (targetNode.get("defenseOptions") != null) {
+            targetNode.get("defenseOptions").forEach(
                     node -> options.add(node.asText()));
         }
         if (insertDefense
@@ -286,6 +316,7 @@ public class TrpgCombatLifecycleService {
                 || Boolean.TRUE.equals(target.getUnconscious()))) {
             insertDefense = false;
         }
+        GroupChatReplyStep defense = defenseForRoute(turn, routeStep);
         if (insertDefense) {
             GroupReplyPlanService.CombatPlanItem controller =
                     toPlanItem(target, defense.getItemOrder());

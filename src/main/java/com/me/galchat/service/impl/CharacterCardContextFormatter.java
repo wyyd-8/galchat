@@ -347,12 +347,23 @@ public class CharacterCardContextFormatter {
                 value.append(" 射程").append(escape(
                         weapon.getRange().trim()));
             }
+            if (StringUtils.hasText(weapon.getAttacksPerRound())) {
+                value.append(" 每轮").append(escape(
+                        weapon.getAttacksPerRound().trim()));
+            }
             if (weapon.getRemainingAmmo() != null
                     || weapon.getAmmoCapacity() != null) {
                 value.append(" 弹药")
                         .append(value(weapon.getRemainingAmmo()))
                         .append('/')
                         .append(value(weapon.getAmmoCapacity()));
+            }
+            if (StringUtils.hasText(weapon.getMalfunction())) {
+                value.append(" 故障").append(escape(
+                        weapon.getMalfunction().trim()));
+            }
+            if (Boolean.TRUE.equals(weapon.getCanImpale())) {
+                value.append(" 可贯穿");
             }
             value.append(" 状态").append(
                     Boolean.TRUE.equals(weapon.getIsBroken())

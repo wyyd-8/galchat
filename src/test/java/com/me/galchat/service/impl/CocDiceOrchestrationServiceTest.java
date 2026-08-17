@@ -8,9 +8,11 @@ import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
+import com.me.galchat.domain.dto.KpFirearmRequestDTOs;
 import com.me.galchat.domain.po.DiceRollResult;
 import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.domain.vo.DiceRollAggregate;
@@ -32,6 +34,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+
+import com.me.galchat.constant.FirearmFiringMode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -141,6 +145,141 @@ class CocDiceOrchestrationServiceTest {
                             "difficulty", "HARD",
                             "modifier", "BONUS_1",
                             "pushed", false));
+        });
+    }
+
+    @Test
+    void firearmAttackPreallocatesAmmoAndStopsAfterTheLastAvailableGroup() {
+        CocDiceCharacterVO attacker = card(
+                11L, null, "林恩", Map.of("射击:冲锋枪", 40));
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "邪教徒甲")).thenReturn(
+                card(21L, 91L, "邪教徒甲", Map.of()));
+        when(cards.requireDiceCharacter(5L, "邪教徒乙")).thenReturn(
+                card(22L, 92L, "邪教徒乙", Map.of()));
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L)
+                .setCharacterId(11L)
+                .setName("汤普森冲锋枪")
+                .setSkillName("射击:冲锋枪")
+                .setDamage("1D10+2")
+                .setAmmoCapacity(20)
+                .setRemainingAmmo(6)
+                .setMalfunction("96")
+                .setCanImpale(true)
+                .setIsBroken(false);
+        when(cards.requireWeaponForUpdate(
+                5L, "林恩", "汤普森冲锋枪"))
+                .thenReturn(weapon);
+        stubCreate(7L);
+
+        KpDiceToolResult result = service.requestFirearmAttack(
+                7L,
+                5L,
+                new KpFirearmRequestDTOs.Attack(
+                        "向两名邪教徒扫射",
+                        "林恩",
+                        "汤普森冲锋枪",
+                        FirearmFiringMode.FULL_AUTO,
+                        true,
+                        List.of(
+                                new KpFirearmRequestDTOs.Target(
+                                        "邪教徒甲", 4,
+                                        CocPercentileModifier.NORMAL),
+                                new KpFirearmRequestDTOs.Target(
+                                        "邪教徒乙", 4,
+                                        CocPercentileModifier.NORMAL))));
+
+        assertThat(weapon.getRemainingAmmo()).isZero();
+        verify(cards).updateWeapon(weapon);
+        assertThat(result.results()).hasSize(2);
+        assertThat(createdDrafts())
+                .extracting(draft -> draft.getResolutionData()
+                        .getRule().get("targetCharacterName"))
+                .containsExactly("邪教徒甲", "邪教徒乙");
+        assertThat(createdDrafts())
+                .extracting(draft -> draft.getResolutionData()
+                        .getRule().get("bulletsInGroup"))
+                .containsExactly(4, 2);
+    }
+
+    @Test
+    void firearmMalfunctionKeepsEarlierDamageAndInvalidatesLaterGroups() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "枪手", Map.of("射击:冲锋枪", 40));
+        CocDiceCharacterVO target = card(
+                21L, 91L, "邪教徒", Map.of());
+        when(cards.requireDiceCharacter(5L, "枪手")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(target);
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(11L)
+                .setName("汤普森冲锋枪")
+                .setSkillName("射击:冲锋枪")
+                .setDamage("1D10+2")
+                .setAmmoCapacity(20).setRemainingAmmo(12)
+                .setMalfunction("96").setCanImpale(true)
+                .setIsBroken(false);
+        when(cards.requireWeaponForUpdate(
+                5L, "枪手", "汤普森冲锋枪"))
+                .thenReturn(weapon);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(
+                damageCard(21L, "邪教徒"));
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResultCreateDTO> drafts =
+                            invocation.getArgument(2);
+                    List<DiceRollResult> rows = materialize(101L, 1, drafts);
+                    rows.get(0).setResultData(new DiceRollResultVO(
+                            "1D100", List.of(), 20));
+                    rows.get(1).setResultData(new DiceRollResultVO(
+                            "1D100$", List.of(), 97));
+                    rows.get(2).setResultData(new DiceRollResultVO(
+                            "1D100$$", List.of(), 15));
+                    return new DiceRollAggregate(
+                            new DiceRollSummary().setId(101L)
+                                    .setConversationId(7L)
+                                    .setReason("扫射")
+                                    .setRoundCount(1)
+                                    .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                            rows);
+                });
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> materialize(
+                        101L, 2, invocation.getArgument(2)));
+
+        KpDiceToolResult result = service.requestFirearmAttack(
+                7L,
+                5L,
+                new KpFirearmRequestDTOs.Attack(
+                        "扫射",
+                        "枪手",
+                        "汤普森冲锋枪",
+                        FirearmFiringMode.FULL_AUTO,
+                        true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "邪教徒", 12,
+                                CocPercentileModifier.NORMAL))));
+
+        assertThat(weapon.getRemainingAmmo()).isZero();
+        assertThat(weapon.getIsBroken()).isTrue();
+        assertThat(result.results()).hasSize(4);
+        assertThat(result.results().subList(0, 3))
+                .extracting(detail -> detail.getResolution()
+                        .getOutcome().get("valid"))
+                .containsExactly(true, false, false);
+        @SuppressWarnings("unchecked")
+        List<DiceRollResultCreateDTO> damageDrafts =
+                (List<DiceRollResultCreateDTO>) org.mockito.Mockito
+                        .mockingDetails(internal).getInvocations().stream()
+                        .filter(invocation -> invocation.getMethod().getName()
+                                .equals("appendDiceRollRound"))
+                        .findFirst().orElseThrow().getArgument(2);
+        assertThat(damageDrafts).singleElement().satisfies(draft -> {
+            assertThat(draft.getFormula())
+                    .isEqualTo("(1D10+2)+(1D10+2)");
+            assertThat(draft.getResolutionData().getRule())
+                    .containsEntry("hitCount", 2)
+                    .containsEntry("impalingHitCount", 0);
         });
     }
 

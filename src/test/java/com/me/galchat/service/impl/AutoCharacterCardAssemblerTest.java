@@ -151,6 +151,7 @@ class AutoCharacterCardAssemblerTest {
             assertThat(weapon.getSkillName()).isEqualTo("射击:手枪");
             assertThat(weapon.getDamage()).isEqualTo("1D3+眩晕");
             assertThat(weapon.getRemainingAmmo()).isEqualTo(3);
+            assertThat(weapon.getCanImpale()).isFalse();
         });
         assertThat(completed.preview().getProfile().getEquipmentText())
                 .isEqualTo("笔记本\n钢笔\n相机\n手电筒\n火柴");

@@ -13,7 +13,7 @@ public final class KpWeaponStateDTOs {
                     required = false)
             Integer remainingAmmo,
             @ToolParam(
-                    description = "更新后的损坏状态；只能维持现状或从false改为true，不能用本工具修复",
+                    description = "更新后的损坏状态；可用于标记故障或在修复行动成功后解除损坏",
                     required = false)
             Boolean broken) {
     }

@@ -232,10 +232,6 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         }
         boolean brokenBefore = Boolean.TRUE.equals(
                 weapon.getIsBroken());
-        if (brokenBefore && Boolean.FALSE.equals(update.broken())) {
-            throw new UserRequestException(
-                    "武器修复不能通过状态更新工具完成");
-        }
         Integer ammoAfter = update.remainingAmmo() == null
                 ? weapon.getRemainingAmmo() : update.remainingAmmo();
         boolean brokenAfter = update.broken() == null
@@ -254,6 +250,35 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
                 character.getName(), weapon.getName(),
                 ammoAfter, weapon.getAmmoCapacity(),
                 brokenAfter, changed);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CocCharacterWeapon requireWeaponForUpdate(
+            Long runId, String characterName, String weaponName) {
+        if (weaponName == null || weaponName.isBlank()) {
+            throw new UserRequestException("武器名称不能为空");
+        }
+        CocCharacter character = requireCharacterByName(
+                runId, characterName);
+        List<CocCharacterWeapon> matches =
+                weaponMapper.selectByCharacterIdAndNameForUpdate(
+                        character.getId(), weaponName.trim());
+        if (matches == null || matches.isEmpty()) {
+            throw new UserRequestException("人物卡没有该武器");
+        }
+        if (matches.size() > 1) {
+            throw new UserRequestException("人物卡武器名称不唯一");
+        }
+        return matches.getFirst();
+    }
+
+    @Override
+    public void updateWeapon(CocCharacterWeapon weapon) {
+        if (weapon == null || weapon.getId() == null
+                || weaponMapper.updateById(weapon) == 0) {
+            throw new UserRequestException("武器不存在");
+        }
     }
 
     @Override

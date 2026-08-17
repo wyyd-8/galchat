@@ -123,6 +123,8 @@ class TrpgGroupAgentPolicyTest {
         var clarificationTools = mock(
                 com.me.galchat.tool.KpClarificationTools.class);
         policy.setKpClarificationTools(clarificationTools);
+        var firearmTools = mock(com.me.galchat.tool.KpFirearmTools.class);
+        policy.setKpFirearmTools(firearmTools);
         var invocation = policy.prepare(
                 conversation,
                 new GroupActionSpec(
@@ -214,7 +216,8 @@ class TrpgGroupAgentPolicyTest {
                         1),
                 new GroupContextMaterial(List.of()));
         assertThat(exposedToolNames(combatInvocation.tools()))
-                .contains("readSkillRules", "updateWeaponState")
+                .contains("readSkillRules", "updateWeaponState",
+                        "requestFirearmAttack")
                 .doesNotContain("askForClarification")
                 .doesNotContain("requestPushedCheck");
 
@@ -244,15 +247,16 @@ class TrpgGroupAgentPolicyTest {
                 .contains("左轮手枪/射击:手枪")
                 .contains("射程15m")
                 .contains("弹药4/6")
-                .contains("每次实际射击后")
+                .contains("一次调用的 `targets`")
+                .contains("之后所有已掷攻击组失效")
                 .contains("updateWeaponState")
-                .contains("一次射出3发")
+                .contains("requestFirearmAttack")
                 .contains("装填")
                 .contains("大失败")
                 .contains("武器损坏", "误伤", "走火")
-                .contains("不计算射程修正", "近、中、远")
-                .contains("单发或武器明确支持的半自动")
-                .contains("点射和全自动不能")
+                .contains("当前不自动换算射程难度", "近/中/远")
+                .contains("SINGLE", "SEMI_AUTO")
+                .contains("SHORT_BURST", "FULL_AUTO")
                 .doesNotContain("弹药与故障、射程档位")
                 .doesNotContain("不使用射程、抵近、移动修正、装填、连射、自动武器、弹药、故障");
 

@@ -467,6 +467,90 @@ class TrpgCombatLifecycleServiceTest {
     }
 
     @Test
+    void firearmRouteCanAppendOrderedDefenseStepsForSeveralTargets() {
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        var objectMapper = JsonMapper.builder().build();
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupReplyPlanService.class),
+                        planMapper,
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class),
+                        stepMapper,
+                        mock(GroupChatMessageMapper.class),
+                        characterMapper,
+                        combatMapper,
+                        objectMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setActiveReplyPlanId(10L);
+        GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep adjudication = new GroupChatReplyStep()
+                .setId(41L).setTurnId(30L).setStepNo(2)
+                .setItemOrder(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        GroupChatReplyStep route = new GroupChatReplyStep()
+                .setId(42L).setTurnId(30L).setStepNo(3)
+                .setParentStepId(41L).setRootStepId(41L)
+                .setSubjectCharacterId(70L)
+                .setActionType(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        var participants = objectMapper.createArrayNode();
+        participants.addObject().put("characterId", 70L)
+                .put("name", "枪手");
+        participants.addObject().put("characterId", 71L)
+                .put("name", "林恩");
+        participants.addObject().put("characterId", 72L)
+                .put("name", "陈默");
+        when(stepMapper.selectById(41L)).thenReturn(adjudication);
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                        .setContextId(200L));
+        when(combatMapper.selectById(200L)).thenReturn(
+                new TrpgCombat().setId(200L).setConversationId(7L)
+                        .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
+                        .setParticipants(participants));
+        when(characterMapper.selectById(71L)).thenReturn(
+                card(71L, "PLAYER", null, "林恩", 50));
+        when(characterMapper.selectById(72L)).thenReturn(
+                card(72L, "BOT", 88L, "陈默", 50));
+        when(stepMapper.selectList(any())).thenReturn(List.of(route));
+        java.util.concurrent.atomic.AtomicLong ids =
+                new java.util.concurrent.atomic.AtomicLong(43L);
+        doAnswer(invocation -> {
+            invocation.<GroupChatReplyStep>getArgument(0)
+                    .setId(ids.getAndIncrement());
+            return 1;
+        }).when(stepMapper).insert(any(GroupChatReplyStep.class));
+
+        service.completeReactionRoute(
+                conversation, turn, route,
+                "{\"actionKind\":\"TARGETED\",\"targets\":["
+                        + "{\"targetName\":\"林恩\",\"insertDefense\":true,"
+                        + "\"defenseOptions\":[\"寻找掩护\"]},"
+                        + "{\"targetName\":\"陈默\",\"insertDefense\":true,"
+                        + "\"defenseOptions\":[\"寻找掩护\"]}]}"
+        );
+
+        ArgumentCaptor<GroupChatReplyStep> inserted =
+                ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(stepMapper, org.mockito.Mockito.times(2))
+                .insert(inserted.capture());
+        assertThat(inserted.getAllValues())
+                .extracting(GroupChatReplyStep::getSubjectCharacterId)
+                .containsExactly(71L, 72L);
+        assertThat(inserted.getAllValues())
+                .extracting(GroupChatReplyStep::getStatus)
+                .containsOnly(GroupChatConstant.STATUS_PENDING);
+    }
+
+    @Test
     void onlyDeclaredAttackerIsPrioritizedAndOnlyInFirstRound() {
         GroupConversationService conversations =
                 mock(GroupConversationService.class);

@@ -189,6 +189,34 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @Test
+    void rejectsWeaponStateOverwriteAfterFirearmToolInSameReplyStep() {
+        ToolCallingManager delegate = mock(ToolCallingManager.class);
+        GroupToolCallStore store = new GroupToolCallStore(
+                mock(com.me.galchat.mapper.GroupChatToolCallMapper.class),
+                mock(tools.jackson.databind.ObjectMapper.class),
+                mock(com.me.galchat.service.impl
+                        .GroupTurnCheckpointService.class)) {
+            public boolean hasExecution(
+                    Long replyStepId, String toolName) {
+                return Long.valueOf(41L).equals(replyStepId)
+                        && "requestFirearmAttack".equals(toolName);
+            }
+        };
+        RecordingGroupToolCallingManager manager =
+                new RecordingGroupToolCallingManager(
+                        delegate, store,
+                        mock(TransactionTemplate.class));
+        Prompt prompt = prompt(Map.of(
+                ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L));
+
+        assertThatThrownBy(() -> manager.executeToolCalls(
+                prompt, responseWithCalls("updateWeaponState")))
+                .hasMessageContaining("枪械攻击工具已自动更新武器状态");
+
+        verifyNoInteractions(delegate);
+    }
+
+    @Test
     void combatFinishMarkerIsExecutedButNotRecorded() {
         ToolCallingManager delegate = mock(ToolCallingManager.class);
         GroupToolCallStore store = mock(GroupToolCallStore.class);

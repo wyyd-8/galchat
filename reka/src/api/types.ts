@@ -126,7 +126,7 @@ export interface CocCharacter {
   dying?: boolean; dead?: boolean; temporaryInsanity?: boolean; temporaryInsanityPhase?: string
 }
 export interface CocSkill { id: number; characterId: number; displayName: string; category?: string; specialization?: string; baseValue?: number; value: number; isCustom?: boolean }
-export interface CocWeapon { id: number; characterId: number; name: string; skillName?: string; damage?: string; range?: string; attacksPerRound?: string; ammoCapacity?: number; remainingAmmo?: number; malfunction?: string; isBroken?: boolean; abnormal?: boolean; notes?: string }
+export interface CocWeapon { id: number; characterId: number; name: string; skillName?: string; damage?: string; range?: string; attacksPerRound?: string; ammoCapacity?: number; remainingAmmo?: number; malfunction?: string; isBroken?: boolean; abnormal?: boolean; riskTags?: string[]; notes?: string }
 export interface CocProfile {
   appearance?: string; ideology?: string; significantPeople?: string; meaningfulLocations?: string; treasuredPossessions?: string
   traits?: string; keyConnectionCategory?: string; keyConnectionText?: string
@@ -174,7 +174,7 @@ export interface InvestigatorCardSummary {
 export interface DiceValue { sides: number; value?: number; role?: string; selected: boolean }
 export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number; placeholder?: boolean }
 export interface DiceResult { formula: string; modules: DiceModule[]; result?: number }
-export interface DiceResolution { type?: string; sourceResultId?: number; groupRule?: 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'; characterName?: string; checkName?: string; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
+export interface DiceResolution { type?: string; sourceResultId?: number; groupRule?: 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'; characterName?: string; checkName?: string; rule?: Record<string, unknown>; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
 export interface DiceRollSummary { id: number; conversationId: number; reason?: string; totalResult?: string; roundCount?: number; status: string; toolName?: string; createdAt?: string; updatedAt?: string }
 export interface DiceRollDetail { id: number; summaryId: number; characterId?: number; roundNo?: number; displayOrder?: number; displayType?: string; reason?: string; resultData?: DiceResult; resolution?: DiceResolution; resolvedAt?: string; createdAt?: string; updatedAt?: string }
 export interface DiceRollProgress { summary: DiceRollSummary; rolledResult: DiceRollDetail; createdResults: DiceRollDetail[] }

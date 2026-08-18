@@ -118,6 +118,40 @@ test('formats a CoC check rate as full, half, and fifth values', () => {
   assert.equal(formatCheckRate(undefined), '—')
 })
 
+test('shows weapon risk details only for abnormal or unrecognized weapons', () => {
+  const shouldShowWeaponRisk = (trpgToolsState as typeof trpgToolsState & {
+    shouldShowWeaponRisk?: (weapon: { abnormal?: boolean, riskTags?: string[] }) => boolean
+  }).shouldShowWeaponRisk
+
+  assert.ok(shouldShowWeaponRisk, 'TRPG tools should expose the weapon risk display rule')
+  assert.equal(shouldShowWeaponRisk({ abnormal: true, riskTags: ['显眼', '笨重'] }), true)
+  assert.equal(shouldShowWeaponRisk({ abnormal: false, riskTags: ['未识别武器'] }), true)
+  assert.equal(shouldShowWeaponRisk({ abnormal: false, riskTags: ['高噪声'] }), false)
+  assert.equal(shouldShowWeaponRisk({ abnormal: false, riskTags: [] }), false)
+})
+
+test('turns each weapon risk tag into its corresponding player guidance', () => {
+  const buildWeaponRiskGuidance = (trpgToolsState as typeof trpgToolsState & {
+    buildWeaponRiskGuidance?: (riskTags?: string[]) => Array<{ tag: string, message: string }>
+  }).buildWeaponRiskGuidance
+
+  assert.ok(buildWeaponRiskGuidance, 'TRPG tools should expose weapon risk guidance')
+  const guidance = buildWeaponRiskGuidance([
+    '显眼', '高噪声', '笨重', '严格管制', '破坏现场', '未识别武器',
+  ])
+
+  assert.deepEqual(guidance.map((item) => item.tag), [
+    '显眼', '高噪声', '笨重', '严格管制', '破坏现场', '未识别武器',
+  ])
+  assert.match(guidance[0]?.message || '', /公开携带|引起注意/)
+  assert.match(guidance[1]?.message || '', /声响|暴露位置/)
+  assert.match(guidance[2]?.message || '', /隐藏|狭窄空间/)
+  assert.match(guidance[3]?.message || '', /当地法律|执法/)
+  assert.match(guidance[4]?.message || '', /损坏线索|调查现场/)
+  assert.match(guidance[5]?.message || '', /大型棍棒/)
+  assert.match(guidance[5]?.message || '', /只能使用近战攻击/)
+})
+
 test('collapses unallocated specializations including combat groups into category rows', () => {
   const buildSkillDisplayItems = (trpgToolsState as typeof trpgToolsState & {
     buildSkillDisplayItems?: (skills: CocSkill[], activeGroup?: string | null) => Array<{

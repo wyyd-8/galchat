@@ -21,6 +21,12 @@ final class TrpgRulePrompts {
                 + "\n</kp-combat-rules>\n";
     }
 
+    static String combatActionReference() {
+        return "\n<kp-combat-action-reference>\n"
+                + TrpgRulePromptConstant.KP_COMBAT_ACTION_REFERENCE
+                + "\n</kp-combat-action-reference>\n";
+    }
+
     static String skillIndex() {
         return "\n" + CocSkillRuleConstant.KP_SKILL_INDEX + "\n";
     }

@@ -1,7 +1,11 @@
 package com.me.galchat.controller;
 
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
+import com.me.galchat.domain.dto.GroupEndExplorationDTO;
+import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
+import com.me.galchat.domain.dto.GroupTurnContinueDTO;
 import com.me.galchat.domain.vo.GroupChatEvent;
+import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.service.impl.GroupChatService;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
@@ -17,7 +21,10 @@ import reactor.core.publisher.Flux;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class GroupChatGenerationControllerTest {
@@ -56,5 +63,47 @@ class GroupChatGenerationControllerTest {
 
         assertThat(resumed).extracting(GroupChatEvent::getEventType)
                 .containsExactly("message.delta", "stream.caught_up");
+    }
+
+    @Test
+    void authenticatesBeforeStartingEveryGenerationEndpoint() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatService groupChatService = mock(GroupChatService.class);
+        TrpgTurnExecutionService turnExecutionService =
+                mock(TrpgTurnExecutionService.class);
+        GroupChatController controller = new GroupChatController(
+                conversationService,
+                mock(GroupConversationLifecycleService.class),
+                groupChatService,
+                new GroupGenerationStreamRegistry(),
+                mock(GroupChatWithdrawalService.class),
+                mock(GroupReplyPlanService.class),
+                mock(TrpgContextWindowService.class),
+                turnExecutionService,
+                mock(TrpgGameTimeService.class));
+        UserAuthException unauthorized =
+                new UserAuthException("用户未登录");
+        doThrow(unauthorized).when(conversationService)
+                .requireAuthorized(7L);
+
+        assertThatThrownBy(() -> controller.chat(
+                7L, new GroupChatRequestDTO())).isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.continueTurn(
+                7L, new GroupTurnContinueDTO())).isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.retryTurnStep(
+                7L, 8L, 9L, new GroupTurnContinueDTO()))
+                .isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.submitTurnMessage(
+                7L, 8L, 9L, new GroupChatRequestDTO()))
+                .isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.submitSceneSelection(
+                7L, 8L, 9L, new GroupSceneSelectionDTO()))
+                .isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.endExploration(
+                7L, 8L, 9L, new GroupEndExplorationDTO()))
+                .isSameAs(unauthorized);
+
+        verifyNoInteractions(groupChatService, turnExecutionService);
     }
 }

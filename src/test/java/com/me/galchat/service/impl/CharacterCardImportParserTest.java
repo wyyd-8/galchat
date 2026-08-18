@@ -63,6 +63,8 @@ class CharacterCardImportParserTest {
                 .contains("闪避", "格斗:斗殴", "射击:弓", "急救")
                 .doesNotContain("斗殴", "弓箭");
         assertThat(parsed.weapons()).hasSize(2);
+        assertThat(parsed.weapons())
+                .allSatisfy(weapon -> assertThat(weapon.getSkillName()).isNull());
         assertThat(parsed.weapons().getFirst().getDamage()).isEqualTo("1D3+DB");
         assertThat(parsed.weapons().getFirst().getCanImpale()).isFalse();
         assertThat(parsed.weapons().get(1).getCanImpale()).isTrue();

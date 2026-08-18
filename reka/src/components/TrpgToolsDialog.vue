@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, BookUser, Check, Dices, FlaskConical, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, TriangleAlert, UserRound } from '@lucide/vue'
-import {
-  TabsContent, TabsList, TabsRoot, TabsTrigger,
-  TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
-} from 'reka-ui'
+import { Activity, BookUser, Check, Dices, FlaskConical, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, UserRound } from '@lucide/vue'
+import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
 import DiceDebugPanel from '@/dice/components/DiceDebugPanel.vue'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import { api } from '@/api/client'
@@ -16,7 +14,7 @@ import type {
 import { errorMessage, notify } from '@/composables/useNotice'
 import { listDiceMessagesNewestFirst } from '@/dice/domain/dicePlayback'
 import {
-  buildSkillDisplayItems, buildToolCharacterTargets, formatCheckRate, nextSkillGroup, resolveWeaponCheckValue, toolDialogContentClass,
+  buildSkillDisplayItems, buildToolCharacterTargets, formatCheckRate, nextSkillGroup, resolveWeaponCheckValue, shouldShowWeaponRisk, toolDialogContentClass,
   useToolConfirmations,
 } from '@/components/trpgToolsState'
 
@@ -337,8 +335,7 @@ watch(() => props.conversation.id, () => {
                 </TabsContent>
 
                 <TabsContent value="combat" class="sheet-tab-content">
-                  <TooltipProvider :delay-duration="250">
-                    <div class="sheet-table-scroll">
+                  <div class="sheet-table-scroll">
                       <table class="sheet-data-table weapon-data-table">
                         <thead><tr><th>武器</th><th>成功率</th><th>伤害</th><th>射程</th><th>次数</th><th>弹药</th><th>故障值</th></tr></thead>
                         <tbody>
@@ -346,20 +343,7 @@ watch(() => props.conversation.id, () => {
                             <td>
                               <span class="weapon-name-line">
                                 <strong>{{ weapon.name }}</strong>
-                                <TooltipRoot v-if="weapon.abnormal">
-                                  <TooltipTrigger as-child><span class="weapon-risk-badge" tabindex="0"><TriangleAlert :size="9" />携带风险</span></TooltipTrigger>
-                                  <TooltipPortal>
-                                    <TooltipContent class="tooltip weapon-risk-tooltip" :side-offset="8">
-                                      <header><TriangleAlert :size="15" /><span><strong>可能妨碍调查</strong><small>实际影响取决于场景、携带方式和当前行动。</small></span></header>
-                                      <ul>
-                                        <li><strong>引人注意</strong><span>在街道、公共场所或受管制区域公开携带时，可能招来旁观、盘问、阻拦或报警，并让相关人物提高警惕。</span></li>
-                                        <li><strong>通行与隐蔽</strong><span>武器的尺寸、重量、外形或动静可能妨碍伪装、潜行、攀爬与狭窄区域通行，也可能需要先隐藏或寄存。</span></li>
-                                        <li><strong>现场与线索</strong><span>不恰当的携带或使用可能惊动目标、留下明显痕迹，或破坏需要保护和检查的调查现场。</span></li>
-                                        <li><strong>时间与资源</strong><span>为避免上述影响，调查员可能需要额外准备遮掩、运输、保管或替代装备，因此付出时间、金钱或行动机会。</span></li>
-                                      </ul>
-                                    </TooltipContent>
-                                  </TooltipPortal>
-                                </TooltipRoot>
+                                <WeaponRiskNotice v-if="shouldShowWeaponRisk(weapon)" :weapon="weapon" />
                               </span>
                               <small v-if="weapon.notes">{{ weapon.notes }}</small><em v-if="weapon.isBroken">已损坏</em>
                             </td>
@@ -373,8 +357,7 @@ watch(() => props.conversation.id, () => {
                           <tr v-if="!card.weapons.length"><td colspan="7" class="sheet-table-empty">暂无武器</td></tr>
                         </tbody>
                       </table>
-                    </div>
-                  </TooltipProvider>
+                  </div>
                   <section class="sheet-equipment-summary">
                     <strong>随身装备</strong><p>{{ card.profile?.equipmentText || '无额外装备' }}</p>
                   </section>
@@ -436,7 +419,7 @@ watch(() => props.conversation.id, () => {
             <DiceRollMessage
               :aggregate="message.diceRoll!"
               :show-icon="false"
-              @open="emit('openDice', message.diceRoll!)"
+              @open="emit('openDice', $event)"
             />
             <button
               type="button"

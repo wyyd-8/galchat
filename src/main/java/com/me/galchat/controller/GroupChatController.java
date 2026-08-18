@@ -91,6 +91,7 @@ public class GroupChatController {
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<GroupChatEvent> chat(@PathVariable Long conversationId,
                                      @RequestBody GroupChatRequestDTO request) {
+        conversationService.requireAuthorized(conversationId);
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
@@ -114,6 +115,7 @@ public class GroupChatController {
     public Flux<GroupChatEvent> continueTurn(
             @PathVariable Long conversationId,
             @RequestBody GroupTurnContinueDTO request) {
+        conversationService.requireAuthorized(conversationId);
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
@@ -129,6 +131,7 @@ public class GroupChatController {
             @PathVariable Long turnId,
             @PathVariable Long stepId,
             @RequestBody(required = false) GroupTurnContinueDTO request) {
+        conversationService.requireAuthorized(conversationId);
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
@@ -150,6 +153,7 @@ public class GroupChatController {
             @PathVariable Long turnId,
             @PathVariable Long stepId,
             @RequestBody GroupChatRequestDTO request) {
+        conversationService.requireAuthorized(conversationId);
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
@@ -165,6 +169,7 @@ public class GroupChatController {
             @PathVariable Long turnId,
             @PathVariable Long stepId,
             @RequestBody GroupSceneSelectionDTO request) {
+        conversationService.requireAuthorized(conversationId);
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
@@ -180,6 +185,7 @@ public class GroupChatController {
             @PathVariable Long turnId,
             @PathVariable Long stepId,
             @RequestBody GroupEndExplorationDTO request) {
+        conversationService.requireAuthorized(conversationId);
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),

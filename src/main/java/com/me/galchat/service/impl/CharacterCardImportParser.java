@@ -120,7 +120,7 @@ final class CharacterCardImportParser {
                     .findByExactName(name)
                     .map(CocWeaponCatalogConstant.WeaponDefinition::canImpale)
                     .orElse(false);
-            weapons.add(new CocCharacterWeapon().setName(name).setSkillName(name)
+            weapons.add(new CocCharacterWeapon().setName(name)
                     .setDamage(matcher.group(3).trim())
                     .setCanImpale(canImpale).setIsBroken(false));
         } else {

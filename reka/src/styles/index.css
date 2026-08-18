@@ -215,6 +215,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .chat-message.user { justify-content: flex-end; }
 .chat-message.narrator, .chat-message.system_event { justify-content: center; }
 .chat-message.dice_roll { min-width: 0; justify-content: center; }
+.dice-message-rounds { box-sizing: border-box; width: 100%; min-width: 0; display: grid; gap: 8px; }
 .dice-message-card { --dice-message-accent: #4f7291; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 54px; padding: 11px 15px; overflow: hidden; border: 2px solid var(--dice-message-accent); border-radius: 12px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: #30342f; background: color-mix(in srgb, var(--dice-message-accent) 5%, #faf8f2); box-shadow: 0 5px 18px rgba(48,44,35,.06); cursor: pointer; transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
 .dice-message-card:hover { border-color: var(--dice-message-accent); box-shadow: 0 8px 22px rgba(48,44,35,.1); transform: translateY(-1px); }
 .dice-message-title { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 8px; overflow: hidden; font-family: var(--font-display); font-size: 13px; font-weight: 700; text-decoration-line: underline; text-decoration-color: var(--dice-message-accent); text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
@@ -310,6 +311,14 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .scene-selection-panel > span { color: var(--muted); font-size: 13px; }
 .scene-selection-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .scene-selection-options .button { gap: 8px; }
+.clarification-prompt { margin: 10px max(24px, calc((100% - 820px) / 2)) 8px; padding: 11px 13px 11px 11px; border: 1px solid #d7cbb9; border-radius: 12px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; background: linear-gradient(100deg, #f8f2e9, #fbfaf6 72%); box-shadow: inset 3px 0 0 #a47745, 0 6px 18px rgba(75,61,43,.05); }
+.clarification-prompt-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: #8b674c; background: #eee1d1; }
+.clarification-prompt-copy { min-width: 0; display: grid; gap: 2px; }
+.clarification-prompt-copy small { color: #97714d; font-size: 8px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+.clarification-prompt-copy strong { font-family: var(--font-display); font-size: 13px; line-height: 1.35; }
+.clarification-prompt-copy > span { color: var(--muted); font-size: 10px; line-height: 1.55; }
+.clarification-prompt-status { padding: 5px 8px; border: 1px solid #d8d6cb; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; color: #66736b; background: rgba(255,255,255,.62); font-size: 9px; font-weight: 650; white-space: nowrap; }
+.clarification-prompt-status i { width: 6px; height: 6px; border-radius: 50%; background: #5f8877; box-shadow: 0 0 0 3px rgba(95,136,119,.12); }
 .turn-start-button { flex: 1; justify-content: center; }
 .reply-plan-item { padding: 8px 6px; border: 1px solid var(--line); border-radius: 9px; display: grid; grid-template-columns: auto auto auto 1fr auto; align-items: center; gap: 6px; background: var(--surface); cursor: grab; }
 .reply-plan-item.running { border-color: #8aaa9c; box-shadow: 0 0 0 2px #dfeae5; }
@@ -647,7 +656,6 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .weapon-data-table td:not(:first-child), .weapon-data-table th:not(:first-child) { text-align: center; white-space: nowrap; }
 .weapon-data-table tr.broken { color: var(--wine); background: #faf0f1; }
 .weapon-data-table td em { margin-top: 3px; padding: 2px 5px; border-radius: 99px; display: inline-block; color: var(--wine); background: #f3e3e5; font-size: 9px; font-style: normal; }
-.weapon-abnormal-note { margin-left: 5px; color: #8a5a12; font-size: 0.78em; font-style: normal; }
 .weapon-name-line { display: flex; align-items: center; gap: 6px; }
 .weapon-risk-badge { min-height: 17px; padding: 1px 6px; border: 1px solid #d8cba8; border-radius: 99px; display: inline-flex; align-items: center; gap: 3px; color: #716037; background: #f2eddf; box-shadow: inset 0 1px rgba(255,255,255,.72); cursor: help; font-size: 9px; font-weight: 700; letter-spacing: .02em; line-height: 1; white-space: nowrap; }
 .weapon-risk-badge svg { color: #aa7f28; stroke-width: 2; }
@@ -663,6 +671,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .weapon-risk-tooltip li { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 7px; }
 .weapon-risk-tooltip li strong { color: #716037; font-size: 10px; }
 .weapon-risk-tooltip li span { color: #55564f; }
+.weapon-risk-tooltip > p { margin: 9px 0 0; color: #55564f; }
 .sheet-table-empty { height: 86px; color: var(--muted); text-align: center !important; }
 .sheet-equipment-summary { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f0eee7; }
 .sheet-equipment-summary strong { font-size: 10px; }
@@ -1055,6 +1064,8 @@ button.sidebar-recent-item:hover { background: #efede6; }
   .chat-main { height: 100%; }
   .reply-panel, .direct-character-panel { display: none; }
   .message-viewport > div { padding: 24px 16px 35px !important; }
+  .clarification-prompt { margin: 8px 12px 7px; grid-template-columns: auto minmax(0, 1fr); }
+  .clarification-prompt-status { grid-column: 2; justify-self: start; }
   .composer { margin: 0 12px 12px; }
   .message-content { max-width: 86%; }
   .dice-message-card { width: 100%; }

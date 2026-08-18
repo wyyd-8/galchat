@@ -1,5 +1,6 @@
 package com.me.galchat.service.impl;
 
+import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.domain.dto.ImportedWeaponAuditModels;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterWeapon;
@@ -33,27 +34,25 @@ public class DeepSeekImportedWeaponAuditModel
     @Override
     public ImportedWeaponAuditModels.Response review(
             CocCharacter character,
-            List<CocCharacterWeapon> weapons) {
+            List<CocCharacterWeapon> weapons,
+            List<CocWeaponCatalogConstant.WeaponDefinition> catalog,
+            Map<String, String> genericTypeDefaults) {
         String response = chatClient.prompt()
                 .system("""
-                        你负责审核主动导入的《克苏鲁的呼唤》第七版调查员武器是否可能妨碍探索。
-                        只审核输入中的武器，不修改名称、技能、伤害或其他人物卡数据。每件武器必须按原weaponId返回一次。
-                        abnormal=true表示该武器相对人物所处时代与常见调查场景，存在明显的携带、使用或规则数据风险；否则为false。
-                        风险包括但不限于：过于显眼、噪声过大、笨重、严格管制、难以隐藏、妨碍通行、容易破坏现场或惊动目标。
-                        所有武器（包括枪械）都要依据规则书第十六章武器列表，按类别粗略判断伤害是否偏高：
-                        - 常规近战、弓弩与投掷武器通常为1D3至1D8，并可能附加DB、半DB或少量固定值；达到2D8或更高属于高伤害。
-                        - 手枪通常为1D6至1D10+2；明显高于这一范围，或包含更多伤害骰，属于高伤害。
-                        - 步枪、突击步枪与机枪单发通常为2D6至2D6+4；明显超过这一范围属于高伤害。
-                        - 霰弹枪近距离通常为2D6至4D6，并随距离递减；达到近距离上沿、明显超过上沿或不随距离递减，属于高伤害。
-                        - 冲锋枪单发通常为1D8至1D10+2；明显超过这一范围属于高伤害，射速和全自动不能用来提高单发伤害。
-                        - 爆炸物与重武器约为2D6至4D10；达到4D10已属高伤，6D10及以上必须判定为高伤害。
-                        这里判断的是探索风险，不是规则数据是否合法。规则书中正式列出的高伤害武器也必须判定为异常，不提供任何特殊武器豁免。
-                        只要伤害达到所属类别的高伤端，或伤害公式明显高于该类常见范围，就必须判定abnormal=true，并加入riskTags“伤害异常”。
-                        riskTags只给出1到6个简短中文标签；abnormal=false时必须返回空数组。
+                        你负责把主动导入的《克苏鲁的呼唤》第七版调查员武器匹配到给定武器目录。
+                        只根据每件导入武器的name（武器名称）进行语义匹配；不得利用或推测伤害、射程、技能、弹容量等其他字段。
+                        名称具体时，选择目录中语义最接近的武器；型号、口径、动作方式等名称信息优先于时代。
+                        名称只有宽泛类型且恰好出现在“固定默认映射”中时，必须使用映射指定的catalogCode，不得自行挑选其他同类武器。
+                        无法可靠匹配、名称不是武器或目录没有合理候选时，catalogCode必须返回JSON的null，不要返回字符串"null"，也不要强行匹配。
+                        catalogCode为null时，后端会保留原名称，使用LARGE_CLUB的其他属性兜底，并添加异常标签“未识别武器”。
+                        catalogCode只能从给定目录中原样选择，不得创造或改写。每件武器必须按原weaponId返回一次。
+                        后端会根据catalogCode补齐规则数据并保留原名称；你不要生成、修改或返回任何其他武器字段。
                         只输出一个JSON对象，不要Markdown或解释，格式严格为：
-                        {"weapons":[{"weaponId":整数,"abnormal":布尔值,"riskTags":["标签"]}]}
+                        匹配成功：{"weapons":[{"weaponId":81,"catalogCode":"PISTOL_22_AUTO"}]}
+                        无法匹配：{"weapons":[{"weaponId":81,"catalogCode":null}]}
                         """)
-                .user(buildPrompt(character, weapons))
+                .user(buildPrompt(character, weapons, catalog,
+                        genericTypeDefaults))
                 .call()
                 .content();
         logger.debug("主动导入武器审核原始响应：{}", response);
@@ -62,31 +61,39 @@ public class DeepSeekImportedWeaponAuditModel
 
     private String buildPrompt(
             CocCharacter character,
-            List<CocCharacterWeapon> weapons) {
+            List<CocCharacterWeapon> weapons,
+            List<CocWeaponCatalogConstant.WeaponDefinition> catalog,
+            Map<String, String> genericTypeDefaults) {
         List<Map<String, Object>> values = weapons.stream()
                 .map(this::weaponValue)
                 .toList();
+        List<Map<String, String>> candidates = catalog.stream()
+                .map(this::catalogValue)
+                .toList();
+        List<String> defaults = genericTypeDefaults.entrySet().stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .toList();
         return """
-                调查员：%s
                 时代：%s
-                职业：%s
-                待审核武器：%s
+                待匹配武器：%s
+                武器目录：%s
+                固定默认映射：%s
                 """.formatted(
-                text(character.getName()), text(character.getEra()),
-                text(character.getOccupation()), values);
+                text(character.getEra()), values, candidates, defaults);
     }
 
     private Map<String, Object> weaponValue(CocCharacterWeapon weapon) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("weaponId", weapon.getId());
         value.put("name", text(weapon.getName()));
-        value.put("skillName", text(weapon.getSkillName()));
-        value.put("damage", text(weapon.getDamage()));
-        value.put("range", text(weapon.getRange()));
-        value.put("attacksPerRound", text(weapon.getAttacksPerRound()));
-        value.put("ammoCapacity", weapon.getAmmoCapacity());
-        value.put("malfunction", text(weapon.getMalfunction()));
-        value.put("notes", text(weapon.getNotes()));
+        return value;
+    }
+
+    private Map<String, String> catalogValue(
+            CocWeaponCatalogConstant.WeaponDefinition definition) {
+        Map<String, String> value = new LinkedHashMap<>();
+        value.put("catalogCode", definition.code());
+        value.put("name", definition.name());
         return value;
     }
 

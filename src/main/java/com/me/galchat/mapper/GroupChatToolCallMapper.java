@@ -35,6 +35,18 @@ public interface GroupChatToolCallMapper extends BaseMapper<GroupChatToolCall> {
             """)
     Integer nextToolStepNo(@Param("replyStepId") Long replyStepId);
 
+    @Select("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM group_chat_tool_call
+                WHERE reply_step_id = #{replyStepId}
+                  AND tool_name = #{toolName}
+            )
+            """)
+    boolean existsByReplyStepIdAndToolName(
+            @Param("replyStepId") Long replyStepId,
+            @Param("toolName") String toolName);
+
     @Update("""
             UPDATE group_chat_tool_call
             SET dice_roll_summary_id = #{diceRollSummaryId}

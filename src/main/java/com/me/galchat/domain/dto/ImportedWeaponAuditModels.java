@@ -9,8 +9,7 @@ public final class ImportedWeaponAuditModels {
 
     public record Review(
             Long weaponId,
-            Boolean abnormal,
-            List<String> riskTags) {
+            String catalogCode) {
     }
 
     public record Response(List<Review> weapons) {

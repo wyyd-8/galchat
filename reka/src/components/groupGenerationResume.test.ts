@@ -219,6 +219,102 @@ test('clears a completed generation but retains an interrupted generation for re
   }
 })
 
+test('refreshes a live dice message with the follow-up rounds appended by the backend', async () => {
+  const { api } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  Object.assign(globalThis, {
+    window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: storage(),
+    sessionStorage: storage(),
+  })
+  const originalSummary = api.diceSummary
+  const originalResults = api.diceResults
+  try {
+    api.diceSummary = async () => ({
+      id: 25,
+      conversationId: 4,
+      reason: '近战攻击',
+      roundCount: 2,
+      status: 'COMPLETED',
+    })
+    api.diceResults = async () => [
+      {
+        id: 33,
+        summaryId: 25,
+        roundNo: 1,
+        displayOrder: 1,
+        displayType: 'MELEE_ATTACK',
+        resultData: { formula: '1D100', modules: [], result: 25 },
+        resolvedAt: '2026-08-18T02:28:30',
+      },
+      {
+        id: 35,
+        summaryId: 25,
+        roundNo: 2,
+        displayOrder: 1,
+        displayType: 'DAMAGE',
+        resultData: { formula: '1D6+1D4', modules: [], result: 3 },
+        resolvedAt: '2026-08-18T02:28:35',
+      },
+    ]
+
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+      createElement: () => ({}), createText: (text) => ({ text }),
+      createComment: (text) => ({ text }), setText(node, text) { node.text = text },
+      setElementText(node, text) { node.text = text },
+      parentNode: (node) => node.parent as Record<string, unknown> | null,
+      nextSibling: () => null,
+    })
+    renderer.createApp(defineComponent({
+      setup() { workspace = useWorkspace(); return () => h('div') },
+    })).mount({})
+    workspace.messages.value = [{
+      id: 312,
+      conversationId: 4,
+      speakerType: 'kp',
+      messageKind: 'dice_roll',
+      content: '',
+      sequenceNo: 24,
+      status: 'completed',
+      diceRoundNos: [1],
+      diceRoll: {
+        summary: { id: 25, conversationId: 4, roundCount: 1, status: 'PENDING' },
+        results: [{
+          id: 33,
+          summaryId: 25,
+          roundNo: 1,
+          displayOrder: 1,
+          displayType: 'MELEE_ATTACK',
+          resultData: { formula: '1D100', modules: [], result: 25 },
+          resolvedAt: '2026-08-18T02:28:30',
+        }],
+      },
+    }]
+
+    await workspace.refreshDiceRoll(25)
+
+    assert.deepEqual(workspace.messages.value[0]?.diceRoundNos, [1, 2])
+    assert.deepEqual(
+      workspace.messages.value[0]?.diceRoll?.results.map((detail) => detail.id),
+      [33, 35],
+    )
+  } finally {
+    api.diceSummary = originalSummary
+    api.diceResults = originalResults
+    Object.assign(globalThis, {
+      window: previousWindow,
+      localStorage: previousLocalStorage,
+      sessionStorage: previousSessionStorage,
+    })
+  }
+})
+
 function storage(entries: Array<[string, string]> = []): Storage {
   const values = new Map(entries)
   return {

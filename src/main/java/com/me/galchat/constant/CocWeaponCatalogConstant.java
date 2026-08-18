@@ -1,5 +1,7 @@
 package com.me.galchat.constant;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -58,31 +60,52 @@ public final class CocWeaponCatalogConstant {
     }
 
     private static final Map<String, WeaponDefinition> WEAPONS = Map.ofEntries(
-            entry("BOW", weapon("BOW", "弓箭", "射击:弓", "1D6+半DB", "30m", "1", 1, "97", WeaponEra.BOTH)),
+            entry("BOW", riskTaggedWeapon(
+                    "BOW", "弓箭", "射击:弓", "1D6+半DB", "30m", "1",
+                    1, "97", WeaponEra.BOTH, List.of("显眼", "笨重"))),
             entry("BRASS_KNUCKLES", weapon("BRASS_KNUCKLES", "黄铜指虎", "斗殴", "1D3+1+DB", "接触", "1", null, null, WeaponEra.BOTH)),
-            entry("WHIP", weapon("WHIP", "长鞭", "格斗:鞭", "1D3+半DB", "3m", "1", null, null, WeaponEra.TWENTIES)),
-            entry("CHAINSAW", abnormalWeapon(
+            entry("WHIP", riskTaggedWeapon(
+                    "WHIP", "长鞭", "格斗:鞭", "1D3+半DB", "3m", "1",
+                    null, null, WeaponEra.TWENTIES, List.of("显眼"))),
+            entry("CHAINSAW", riskTaggedWeapon(
                     "CHAINSAW", "链锯", "格斗:链锯", "2D8", "接触", "1",
                     null, "95", WeaponEra.MODERN,
                     List.of("显眼", "高噪声", "笨重", "破坏现场"))),
             entry("SAP", weapon("SAP", "包革金属棒（大头棍、护身棒）", "斗殴", "1D8+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("LARGE_CLUB", weapon("LARGE_CLUB", "大型棍棒（棒球棒、板球棒、拨火棍）", "斗殴", "1D8+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("POLICE_BATON", weapon("POLICE_BATON", "小型棍棒（警棍）", "斗殴", "1D6+DB", "接触", "1", null, null, WeaponEra.BOTH)),
-            entry("CROSSBOW", weapon("CROSSBOW", "弩", "射击:弓", "1D8+2", "50m", "1/2", 1, "96", WeaponEra.BOTH)),
+            entry("CROSSBOW", riskTaggedWeapon(
+                    "CROSSBOW", "弩", "射击:弓", "1D8+2", "50m", "1/2",
+                    1, "96", WeaponEra.BOTH, List.of("显眼", "笨重"))),
             entry("GARROTE", weapon("GARROTE", "绞索", "格斗:绞索", "1D6+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("HAND_AXE", weapon("HAND_AXE", "手斧/镰刀", "格斗:斧", "1D6+1+DB", "接触", "1", null, null, WeaponEra.BOTH)),
-            entry("LARGE_KNIFE", weapon("LARGE_KNIFE", "大型刀具（骑兵军刀等）", "斗殴", "1D8+DB", "接触", "1", null, null, WeaponEra.BOTH)),
+            entry("LARGE_KNIFE", riskTaggedWeapon(
+                    "LARGE_KNIFE", "大型刀具（骑兵军刀等）", "斗殴", "1D8+DB",
+                    "接触", "1", null, null, WeaponEra.BOTH, List.of("显眼"))),
             entry("MEDIUM_KNIFE", weapon("MEDIUM_KNIFE", "中型刀具（切肉刀等）", "斗殴", "1D4+2+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("SMALL_KNIFE", weapon("SMALL_KNIFE", "小型刀具（折叠刀等）", "斗殴", "1D4+DB", "接触", "1", null, null, WeaponEra.BOTH)),
             entry("TEAR_GAS_SPRAY", weapon("TEAR_GAS_SPRAY", "催泪喷雾", "斗殴", "眩晕", "2m", "1", null, null, WeaponEra.MODERN)),
             entry("NUNCHAKU", weapon("NUNCHAKU", "双节棍", "格斗:连枷", "1D8+DB", "接触", "1", null, null, WeaponEra.BOTH)),
-            entry("LANCE", weapon("LANCE", "矛（骑枪）", "格斗:矛", "1D8+1", "接触", "1", null, null, WeaponEra.BOTH)),
-            entry("LARGE_SWORD", weapon("LARGE_SWORD", "大型刀剑（马刀）", "格斗:刀剑", "1D8+1+DB", "接触", "1", null, null, WeaponEra.BOTH)),
-            entry("MEDIUM_SWORD", weapon("MEDIUM_SWORD", "中型刀剑（长剑、重剑）", "格斗:刀剑", "1D6+1+DB", "接触", "1", null, null, WeaponEra.BOTH)),
-            entry("LIGHT_SWORD", weapon("LIGHT_SWORD", "轻型刀剑（花剑、剑杖）", "格斗:刀剑", "1D6+DB", "接触", "1", null, null, WeaponEra.BOTH)),
+            entry("LANCE", riskTaggedWeapon(
+                    "LANCE", "矛（骑枪）", "格斗:矛", "1D8+1", "接触", "1",
+                    null, null, WeaponEra.BOTH, List.of("显眼", "笨重"))),
+            entry("LARGE_SWORD", riskTaggedWeapon(
+                    "LARGE_SWORD", "大型刀剑（马刀）", "格斗:刀剑", "1D8+1+DB",
+                    "接触", "1", null, null, WeaponEra.BOTH,
+                    List.of("显眼", "笨重"))),
+            entry("MEDIUM_SWORD", riskTaggedWeapon(
+                    "MEDIUM_SWORD", "中型刀剑（长剑、重剑）", "格斗:刀剑",
+                    "1D6+1+DB", "接触", "1", null, null, WeaponEra.BOTH,
+                    List.of("显眼"))),
+            entry("LIGHT_SWORD", riskTaggedWeapon(
+                    "LIGHT_SWORD", "轻型刀剑（花剑、剑杖）", "格斗:刀剑",
+                    "1D6+DB", "接触", "1", null, null, WeaponEra.BOTH,
+                    List.of("显眼"))),
             entry("STUN_GUN", weapon("STUN_GUN", "电击器", "斗殴", "1D3+眩晕", "接触", "1", null, "97", WeaponEra.MODERN)),
             entry("TASER", weapon("TASER", "泰瑟枪", "射击:手枪", "1D3+眩晕", "5m", "1", 3, "95", WeaponEra.MODERN)),
-            entry("WOOD_AXE", weapon("WOOD_AXE", "伐木斧", "格斗:斧", "1D8+2+DB", "接触", "1", null, null, WeaponEra.BOTH)),
+            entry("WOOD_AXE", riskTaggedWeapon(
+                    "WOOD_AXE", "伐木斧", "格斗:斧", "1D8+2+DB", "接触", "1",
+                    null, null, WeaponEra.BOTH, List.of("显眼", "笨重"))),
             entry("PISTOL_22_AUTO", firearm(
                     "PISTOL_22_AUTO", ".22自动手枪", "射击:手枪", "1D6",
                     "10m", "1（3）", 6, "100", WeaponEra.BOTH,
@@ -211,6 +234,25 @@ public final class CocWeaponCatalogConstant {
                 .findFirst();
     }
 
+    /** Stable catalog choices used only when an imported name is a broad type. */
+    public static Map<String, String> genericTypeDefaults(String era) {
+        Map<String, String> defaults = new LinkedHashMap<>();
+        defaults.put("手枪", "PISTOL_38_9MM");
+        defaults.put("左轮手枪", "REVOLVER_38_9MM");
+        defaults.put("步枪", "RIFLE_22_BOLT");
+        defaults.put("霰弹枪", "SHOTGUN_12_DOUBLE");
+        defaults.put("冲锋枪", normalizeEra(era) == WeaponEra.TWENTIES
+                ? "THOMPSON_SMG" : "MP5");
+        defaults.put("突击步枪", "AK_47");
+        defaults.put("弓", "BOW");
+        defaults.put("弩", "CROSSBOW");
+        defaults.put("刀", "MEDIUM_KNIFE");
+        defaults.put("棍棒", "LARGE_CLUB");
+        defaults.put("斧", "HAND_AXE");
+        defaults.put("剑", "MEDIUM_SWORD");
+        return Map.copyOf(defaults);
+    }
+
     private static WeaponEra normalizeEra(String era) {
         if (era == null || era.isBlank()) {
             return WeaponEra.BOTH;
@@ -234,23 +276,20 @@ public final class CocWeaponCatalogConstant {
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
                 inferKind(code, requiredSkillName), AcquisitionLevel.COMMON,
-                true, Set.of(
-                        "BOW", "CROSSBOW", "HAND_AXE",
-                        "LARGE_KNIFE", "MEDIUM_KNIFE", "SMALL_KNIFE",
-                        "LANCE", "LARGE_SWORD", "MEDIUM_SWORD",
-                        "LIGHT_SWORD", "WOOD_AXE").contains(code),
+                true, canImpale(code),
                 false, List.of(), null);
     }
 
-    private static WeaponDefinition abnormalWeapon(
+    private static WeaponDefinition riskTaggedWeapon(
             String code, String name, String requiredSkillName,
             String damage, String range, String attacksPerRound,
             Integer ammoCapacity, String malfunction, WeaponEra era,
             List<String> riskTags) {
+        List<String> risks = List.copyOf(riskTags);
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
                 inferKind(code, requiredSkillName), AcquisitionLevel.COMMON,
-                true, false, true, List.copyOf(riskTags), null);
+                true, canImpale(code), hasMultipleRisks(risks), risks, null);
     }
 
     private static WeaponDefinition firearm(
@@ -258,10 +297,27 @@ public final class CocWeaponCatalogConstant {
             String damage, String range, String attacksPerRound,
             Integer ammoCapacity, String malfunction, WeaponEra era,
             AcquisitionLevel acquisitionLevel, boolean autoSelectable) {
+        boolean bulky = Set.of(
+                "RIFLE_22_BOLT", "RIFLE_30_LEVER", "RIFLE_30_06_BOLT",
+                "SHOTGUN_12_DOUBLE", "THOMPSON_SMG", "SHOTGUN_12_PUMP",
+                "AK_47", "M4", "MP5").contains(code);
+        boolean conspicuous = bulky || "SHOTGUN_12_SAWED_OFF".equals(code);
+        List<String> riskTags = new ArrayList<>();
+        if (conspicuous) {
+            riskTags.add("显眼");
+        }
+        riskTags.add("高噪声");
+        if (bulky) {
+            riskTags.add("笨重");
+        }
+        if (acquisitionLevel == AcquisitionLevel.CONTROLLED) {
+            riskTags.add("严格管制");
+        }
+        List<String> risks = List.copyOf(riskTags);
         return new WeaponDefinition(code, name, requiredSkillName, damage,
                 range, attacksPerRound, ammoCapacity, malfunction, era,
                 WeaponKind.FIREARM, acquisitionLevel, autoSelectable,
-                true, false, List.of(), null);
+                true, hasMultipleRisks(risks), risks, null);
     }
 
     private static WeaponKind inferKind(
@@ -274,5 +330,17 @@ public final class CocWeaponCatalogConstant {
             return WeaponKind.FIREARM;
         }
         return WeaponKind.MELEE;
+    }
+
+    private static boolean canImpale(String code) {
+        return Set.of(
+                "BOW", "CROSSBOW", "HAND_AXE",
+                "LARGE_KNIFE", "MEDIUM_KNIFE", "SMALL_KNIFE",
+                "LANCE", "LARGE_SWORD", "MEDIUM_SWORD",
+                "LIGHT_SWORD", "WOOD_AXE").contains(code);
+    }
+
+    private static boolean hasMultipleRisks(List<String> riskTags) {
+        return riskTags != null && riskTags.size() >= 2;
     }
 }

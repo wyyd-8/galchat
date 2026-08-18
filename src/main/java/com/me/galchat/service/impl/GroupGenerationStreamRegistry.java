@@ -36,7 +36,7 @@ public class GroupGenerationStreamRegistry {
             String clientRequestId,
             Flux<GroupChatEvent> source) {
         if (!StringUtils.hasText(clientRequestId)) {
-            return source;
+            return source.contextCapture();
         }
         GenerationKey key = new GenerationKey(
                 conversationId, clientRequestId.trim());
@@ -85,7 +85,7 @@ public class GroupGenerationStreamRegistry {
                 Flux<GroupChatEvent> source,
                 Consumer<GenerationEntry> onTerminated) {
             this.conversationId = conversationId;
-            source.subscribe(
+            source.contextCapture().subscribe(
                     event -> {
                         eventCount.incrementAndGet();
                         Sinks.EmitResult result = events.tryEmitNext(event);

@@ -133,7 +133,13 @@ const SUCCESSFUL_CHECK_OUTCOMES = new Set([
   'SUCCESS',
 ])
 
-const PARTICIPANT_CHECK_TYPES = new Set(['CHECK', 'SAN_CHECK', 'OPPOSED_CHECK'])
+const PARTICIPANT_CHECK_TYPES = new Set([
+  'CHECK',
+  'SAN_CHECK',
+  'OPPOSED_CHECK',
+  'FIREARM_ATTACK',
+  'MELEE_ATTACK',
+])
 const VALUE_ROLL_TYPES = new Set(['DAMAGE', 'SAN_LOSS', 'HEALING'])
 
 function checkOutcomeLabel(outcome: Record<string, unknown>): string {
@@ -175,6 +181,79 @@ export function isDiceAggregatePending(aggregate: DiceRollAggregate): boolean {
   return details.length
     ? details.some((detail) => !detail.resolvedAt)
     : aggregate.summary.status === 'PENDING'
+}
+
+function diceRoundResultLine(
+  aggregate: DiceRollAggregate,
+  value: string | undefined,
+  roundNo: number,
+): string | undefined {
+  if (!value) return undefined
+  const lines = value.split(/\r?\n/).map((line) => line.trim())
+  const aggregateRounds = new Set(aggregate.results.map((detail) => detail.roundNo || 1))
+  const index = aggregateRounds.size === 1 && lines.length === 1 ? 0 : roundNo - 1
+  return lines[index] || undefined
+}
+
+function diceAggregateForRound(
+  aggregate: DiceRollAggregate,
+  roundNo: number,
+  results: DiceRollDetail[],
+): DiceRollAggregate {
+  const totalResult = diceRoundResultLine(
+    aggregate, aggregate.summary.totalResult, roundNo,
+  )
+  const semanticResult = diceRoundResultLine(
+    aggregate, aggregate.semanticResult, roundNo,
+  ) ?? totalResult
+  return {
+    ...aggregate,
+    summary: { ...aggregate.summary, totalResult },
+    results,
+    semanticResult,
+  }
+}
+
+export function splitDiceAggregateByRound(
+  aggregate: DiceRollAggregate,
+): DiceRollAggregate[] {
+  const roundNos = [...new Set(aggregate.results.map((detail) => detail.roundNo || 1))]
+    .sort((left, right) => left - right)
+  return roundNos.map((roundNo) => diceAggregateForRound(
+    aggregate,
+    roundNo,
+    aggregate.results.filter((detail) => (detail.roundNo || 1) === roundNo),
+  ))
+}
+
+export interface DicePostRollPlaybackPlan {
+  playbackAggregate: DiceRollAggregate
+  queuedAggregate: DiceRollAggregate | null
+}
+
+export function createDicePostRollPlaybackPlan(
+  aggregate: DiceRollAggregate,
+  rolledResultId: number,
+): DicePostRollPlaybackPlan {
+  const rolledResult = aggregate.results.find((detail) => detail.id === rolledResultId)
+  if (!rolledResult) throw new Error('刷新后找不到刚完成的掷骰结果')
+  const rolledRound = rolledResult.roundNo || 1
+  const playbackResults = aggregate.results.filter((detail) => (
+    (detail.roundNo || 1) === rolledRound && Boolean(detail.resolvedAt)
+  ))
+  if (!playbackResults.length) throw new Error('刚完成的掷骰结果尚未结算')
+  const queuedResults = aggregate.results.filter((detail) => {
+    const round = detail.roundNo || 1
+    return round > rolledRound || (round === rolledRound && !detail.resolvedAt)
+  })
+  return {
+    playbackAggregate: diceAggregateForRound(
+      aggregate, rolledRound, playbackResults,
+    ),
+    queuedAggregate: queuedResults.length
+      ? { ...aggregate, summary: { ...aggregate.summary }, results: queuedResults }
+      : null,
+  }
 }
 
 export function createDiceMessagePresentation(
@@ -243,10 +322,10 @@ export function shouldOfferDiceContinue(
   request: DicePlaybackRequest | null,
   summaryStatus: string,
   hasPendingResults: boolean,
+  hasQueuedRoll = false,
 ): boolean {
   return request?.offerContinueAfterComplete === true
-    && summaryStatus === 'COMPLETED'
-    && !hasPendingResults
+    && (hasQueuedRoll || (summaryStatus === 'COMPLETED' && !hasPendingResults))
 }
 
 export function createDiceAutoPlayPlan(
@@ -379,6 +458,17 @@ function aggregateGroup(
   moduleStart: number,
 ): DicePlaybackGroupPresentation {
   const outcome = detail.resolution?.outcome || {}
+  const rule = detail.resolution?.rule || {}
+  const resolutionType = detail.resolution?.type || detail.displayType
+  const ruleCheckName = typeof rule.checkName === 'string'
+    ? rule.checkName
+    : typeof rule.skillName === 'string' ? rule.skillName : undefined
+  const targetName = typeof outcome.targetCharacterName === 'string'
+    ? outcome.targetCharacterName
+    : typeof rule.targetCharacterName === 'string' ? rule.targetCharacterName : undefined
+  const combatCheckName = resolutionType === 'FIREARM_ATTACK' && targetName
+    ? `${ruleCheckName || '射击'} → ${targetName}`
+    : ruleCheckName
   return {
     label: typeof outcome.characterName === 'string'
       ? outcome.characterName
@@ -387,7 +477,7 @@ function aggregateGroup(
       : detail.reason || `参与者 ${index + 1}`,
     checkName: typeof outcome.checkName === 'string'
       ? outcome.checkName
-      : detail.resolution?.checkName || detail.displayType || '检定',
+      : detail.resolution?.checkName || combatCheckName || detail.displayType || '检定',
     outcomeLabel: checkOutcomeLabel(outcome),
     outcomeTone: checkOutcomeTone(outcome),
     success: typeof outcome.category === 'string'
@@ -526,6 +616,9 @@ export function createDiceAggregatePlaybackRequest(
     .filter((detail) => (detail.roundNo || 1) === latestRound)
     .sort((left, right) => (left.displayOrder || 0) - (right.displayOrder || 0) || left.id - right.id)
   const opposed = details.every((detail) => detail.resolution?.type === 'OPPOSED_CHECK')
+    || (details.length > 1 && details.every((detail) => (
+      detail.resolution?.type || detail.displayType
+    ) === 'MELEE_ATTACK'))
   const effectiveGroupRule = groupRule
     ?? details.map((detail) => detail.resolution?.groupRule).find((rule): rule is DiceGroupRule =>
       rule === 'ANY_SUCCESS' || rule === 'ALL_SUCCESS' || rule === 'SEPARATE')
@@ -536,7 +629,15 @@ export function createDiceAggregatePlaybackRequest(
   const groups = details.map((detail, index) => {
     const group = aggregateGroup(detail, index, moduleStart)
     moduleStart += detail.resultData.modules.length
-    return opposed ? { ...group, winner: group.label === winnerName } : group
+    const outcomeWinner = detail.resolution?.outcome?.winner
+    return opposed
+      ? {
+          ...group,
+          winner: typeof outcomeWinner === 'boolean'
+            ? outcomeWinner
+            : group.label === winnerName,
+        }
+      : group
   })
   const checkNames = [...new Set(groups.map((group) => group.checkName))]
   const groupSucceeded = effectiveGroupRule === 'ALL_SUCCESS'

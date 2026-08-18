@@ -43,6 +43,7 @@ export function useWorkspace() {
   const hasOlderGroupMessages = ref(false)
   const diceRollCache = new Map<number, Promise<DiceRollAggregate>>()
   let catchingUpGenerationId: string | null = null
+  let acceptedPlanRefreshTurnId: number | null = null
 
   const isLoggedIn = computed(() => Boolean(session.token && session.id))
   const selectedWorld = computed(() => worlds.value.find((item) => item.id === selectedWorldId.value) || null)
@@ -91,6 +92,18 @@ export function useWorkspace() {
     replyPlan.value = activeReplyPlan(plans) || freshPlan()
   }
 
+  function refreshPlanForAcceptedTurn(conversationId: number, turnId: number) {
+    if (acceptedPlanRefreshTurnId === turnId) return
+    acceptedPlanRefreshTurnId = turnId
+    void api.replyPlan(conversationId).then((plans) => {
+      if (selectedConversationId.value !== conversationId
+        || currentTurn.value?.turnId !== turnId) return
+      setReplyPlans(plans)
+    }).catch(() => {
+      if (acceptedPlanRefreshTurnId === turnId) acceptedPlanRefreshTurnId = null
+    })
+  }
+
   function loadDiceAggregate(summaryId: number, refresh = false): Promise<DiceRollAggregate> {
     if (refresh) diceRollCache.delete(summaryId)
     const cached = diceRollCache.get(summaryId)
@@ -115,13 +128,10 @@ export function useWorkspace() {
 
   async function refreshDiceRoll(summaryId: number): Promise<DiceRollAggregate> {
     const aggregate = await loadDiceAggregate(summaryId, true)
+    const diceRoundNos = [...new Set(aggregate.results.map((detail) => detail.roundNo || 1))]
     messages.value = messages.value.map((message) => {
       if (message.diceRoll?.summary.id !== summaryId) return message
-      const rounds = new Set(message.diceRoundNos || [])
-      const diceRoll = rounds.size
-        ? { ...aggregate, results: aggregate.results.filter((detail) => rounds.has(detail.roundNo || 1)) }
-        : aggregate
-      return { ...message, diceRoll }
+      return { ...message, diceRoll: aggregate, diceRoundNos }
     })
     latestDiceRoll.value = aggregate
     return aggregate
@@ -340,6 +350,10 @@ export function useWorkspace() {
       currentTurn.value = applyCurrentTurnEvent(
         currentTurn.value, event, replyPlan.value,
       )
+      if (event.eventType === 'turn.accepted' && event.turnId != null
+        && selectedConversationId.value != null) {
+        refreshPlanForAcceptedTurn(selectedConversationId.value, event.turnId)
+      }
     }
     if (selectedConversation.value?.mode === 'chat') replyTurnState.value = updateReplyTurn(replyTurnState.value, event)
     if (event.eventType === 'dice_roll.created' && event.diceRoll) {
@@ -540,7 +554,8 @@ export function useWorkspace() {
     if (!content || !conversation || conversation.status !== 'active' || loading.sending) return
     if (conversation.mode === 'trpg') {
       const turn = currentTurn.value
-      if (!turn?.waitingForUser || turn.inputType !== 'message' || !turn.stepId) {
+      const acceptsMessage = turn?.inputType === 'message' || turn?.inputType === 'clarification'
+      if (!turn?.waitingForUser || !acceptsMessage || !turn.stepId) {
         notify('消息发送失败', '当前还没有轮到用户调查员行动', 'danger')
         return
       }

@@ -794,13 +794,11 @@ public class TrpgTurnExecutionService {
             GroupChatReplyStep userStep,
             GroupChatMessage message,
             GroupConversationLockService.OwnedLock lock) {
-        boolean interactionAnswer = userStep.getParentStepId() != null
-                && GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
-                userStep.getActionType());
-        if (interactionAnswer) {
+        boolean nestedUserStep = userStep.getParentStepId() != null;
+        if (nestedUserStep) {
             advanceCompletedChild(turn, userStep);
         }
-        List<GroupChatReplyStep> remaining = interactionAnswer
+        List<GroupChatReplyStep> remaining = nestedUserStep
                 ? List.of() : stepMapper.selectList(
                         new LambdaQueryWrapper<GroupChatReplyStep>()
                                 .eq(GroupChatReplyStep::getTurnId,
@@ -821,7 +819,7 @@ public class TrpgTurnExecutionService {
                         .sequence(message.getSequenceNo())
                         .build());
         return Flux.concat(accepted,
-                        interactionAnswer
+                        nestedUserStep
                                 ? executePendingSteps(conversation, turn)
                                 : executeScheduledSteps(
                                         conversation, turn, remaining, 0))

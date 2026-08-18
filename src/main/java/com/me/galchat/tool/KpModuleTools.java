@@ -115,10 +115,9 @@ public class KpModuleTools {
             name = "updateWeaponState",
             description = """
                     按准确人物卡名称和武器名称提交武器的最新状态。
-                    实际射击后，无论命中、失败还是大失败，都要按射出的数量更新剩余弹药；允许一次消耗多发。
-                    装填时可以增加剩余弹药，但不能超过武器容量。
-                    大失败时由KP决定是否把武器标记为损坏，或改用误伤、走火等其他合理后果。
-                    本工具不能把已损坏武器修复为正常。调用后仍必须继续完成当前裁定。
+                    仅用于装填、修理检定成功后的状态恢复，或不经过枪械攻击工具的明确状态修正。
+                    requestFirearmAttack 已自动处理弹药消耗、贯穿和故障；调用该枪械攻击工具后，禁止再调用本工具覆盖结果。
+                    装填时可以增加剩余弹药，但不能超过武器容量。调用后仍必须继续完成当前裁定。
                     """)
     public KpWeaponStateDTOs.Result updateWeaponState(
             @ToolParam(description = "人物卡准确名称，不能传ID")

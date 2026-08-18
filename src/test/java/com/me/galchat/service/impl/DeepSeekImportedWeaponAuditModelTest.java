@@ -1,5 +1,6 @@
 package com.me.galchat.service.impl;
 
+import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterWeapon;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import org.springframework.ai.deepseek.DeepSeekChatModel;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,11 +24,10 @@ import static org.mockito.Mockito.when;
 class DeepSeekImportedWeaponAuditModelTest {
 
     @Test
-    void usesSimpleDamageBandsWithoutExemptingRulebookWeapons() {
+    void matchesOnlyByOriginalNameAndReturnsCatalogCode() {
         DeepSeekChatModel chatModel = mock(DeepSeekChatModel.class);
         when(chatModel.call(any(Prompt.class))).thenReturn(response("""
-                {"weapons":[{"weaponId":81,"abnormal":true,
-                "riskTags":["伤害异常","显眼","高噪声"]}]}
+                {"weapons":[{"weaponId":81,"catalogCode":"PISTOL_22_AUTO"}]}
                 """));
         DeepSeekImportedWeaponAuditModel model =
                 new DeepSeekImportedWeaponAuditModel(
@@ -38,29 +39,29 @@ class DeepSeekImportedWeaponAuditModelTest {
                 new CocCharacter().setName("林恩").setEra("1920s")
                         .setOccupation("记者"),
                 List.of(new CocCharacterWeapon().setId(81L)
-                        .setName("袖珍手枪").setSkillName("射击:手枪")
-                        .setDamage("4D10").setRange("15m")));
+                        .setName("袖珍手枪").setDamage("4D10")
+                        .setRange("15m")),
+                List.of(
+                        CocWeaponCatalogConstant.require("PISTOL_22_AUTO"),
+                        CocWeaponCatalogConstant.require("REVOLVER_38_9MM")),
+                Map.of("手枪", "PISTOL_38_9MM"));
 
         assertThat(result.weapons()).singleElement().satisfies(review -> {
             assertThat(review.weaponId()).isEqualTo(81L);
-            assertThat(review.abnormal()).isTrue();
-            assertThat(review.riskTags()).contains("伤害异常");
+            assertThat(review.catalogCode()).isEqualTo("PISTOL_22_AUTO");
         });
         Prompt prompt = capturedPrompt(chatModel);
         String systemPrompt = prompt.getInstructions().getFirst().getText();
         assertThat(systemPrompt)
-                .contains("枪械", "伤害公式明显高于", "abnormal=true", "伤害异常");
-        assertThat(systemPrompt)
-                .contains("常规近战、弓弩与投掷武器", "通常为1D3至1D8", "达到2D8")
-                .contains("手枪", "通常为1D6至1D10+2")
-                .contains("步枪、突击步枪与机枪", "通常为2D6至2D6+4")
-                .contains("霰弹枪", "近距离通常为2D6至4D6", "随距离递减")
-                .contains("冲锋枪", "通常为1D8至1D10+2")
-                .contains("爆炸物与重武器", "约为2D6至4D10", "6D10及以上")
-                .contains("规则书中正式列出的高伤害武器也必须判定为异常")
-                .doesNotContain("特殊例外", "本身不是伤害异常", "不属于“伤害异常”");
+                .contains("只根据", "武器名称", "catalogCode", "保留原名称")
+                .contains("宽泛类型", "固定默认映射")
+                .contains("无法可靠匹配", "JSON的null", "不要返回字符串\"null\"")
+                .contains("LARGE_CLUB", "未识别武器")
+                .doesNotContain("abnormal", "riskTags", "skillName");
         assertThat(prompt.getInstructions().getLast().getText())
-                .contains("1920s", "记者", "袖珍手枪", "4D10");
+                .contains("1920s", "袖珍手枪", "PISTOL_22_AUTO", ".22自动手枪")
+                .contains("手枪=PISTOL_38_9MM")
+                .doesNotContain("4D10", "15m", "damage", "range");
     }
 
     private Prompt capturedPrompt(DeepSeekChatModel model) {

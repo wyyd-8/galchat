@@ -182,6 +182,16 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 : interactionResponse ? "追问回答"
                 : GroupChatConstant.ACTION_TRPG_COMBAT.equals(action.actionType())
                 ? "战斗" : "场景探索";
+        String kpPhaseExecutionRules = combatAttack || combatDefense
+                ? "当前步骤只负责行动声明，不进行战斗裁定，也不掷骰。"
+                + "当前步骤没有可调用的工具；不得调用或模拟任何工具调用协议。"
+                + "战斗工具只由后续战斗裁定步骤使用；不得替用户决定调查员行动。"
+                : combatRoute
+                ? "当前步骤只进行战斗反应路由，不裁定成败，也不掷骰。"
+                + "除缺少关键信息时使用公开追问工具外，不调用其他工具。"
+                : "你负责描述场景、裁定规则并在需要时发起掷骰；不得替用户决定调查员行动。\n"
+                + "每次响应最多调用一个会改变状态的掷骰工具，且不得与其他工具并行调用。\n"
+                + "调用掷骰工具后本次响应会暂停；稍后恢复同一步骤时，再根据骰点结果继续裁定。";
         List<CocDiceCharacterVO> cards = characterCardService.listDiceCharacters(
                 conversation.getId());
         List<CocDiceCharacterVO> investigatorCards = cards.stream()
@@ -234,17 +244,18 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     + characterCardFormatter.formatNpcs(npcCards)
                     + "\n" + characterCardFormatter.formatActiveNpcs(
                             activeNpcCards)
+                    + (combatPhase
+                    ? TrpgRulePrompts.combatActionReference() : "")
                     + TrpgRulePrompts.residentRules()
                     + TrpgRulePrompts.skillIndex()
-                    + (combatPhase ? TrpgRulePrompts.combatRules() : "")
+                    + (combatAdjudicate
+                    ? TrpgRulePrompts.combatRules() : "")
                     + """
 
                     你是当前 TRPG 群聊唯一的KP，当前阶段是%s。KP不是可见的调查员。
-                    你负责描述场景、裁定规则并在需要时发起掷骰；不得替用户决定调查员行动。
-                    每次响应最多调用一个会改变状态的掷骰工具，且不得与其他工具并行调用。
-                    调用掷骰工具后本次响应会暂停；稍后恢复同一步骤时，再根据骰点结果继续裁定。
+                    %s
                     不得输出隐藏思考过程。
-                    """.formatted(phase)));
+                    """.formatted(phase, kpPhaseExecutionRules)));
         } else {
             List<CharacterCardVO> otherInvestigatorCards =
                     investigatorCards.stream()
@@ -329,6 +340,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + (combatAttack
                         ? " 在规则允许的范围内，不要尝试攻击昏迷/濒死的调查员。"
                         : "")
+                        + " 只输出一段简短自然语言行动声明，必须写明行动者、核心行动和目标，使用武器时写明武器。"
+                        + "当前步骤没有可调用的工具；不得输出或模拟工具调用协议，包括combatAttack、combatDefense、tool_calls、DSML、XML、JSON、参数标签或Markdown代码块。"
                         : scenePhase
                         ? "把上一次KP公开回复后的全部调查员发言视为一个共同场景提案；"
                         + "识别其中的联合行动、协助、兼容行动和冲突意图，以整个场景为单位统一裁定，"

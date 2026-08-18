@@ -57,17 +57,15 @@ test('offers luck rolling while reviewing a bound card in the third setup stage'
   assert.ok(luckIcon, 'the third setup stage should offer luck rolling for a bound card')
 })
 
-test('warns about abnormal weapons in card previews without listing risk tags', async () => {
+test('uses contextual risk details only for abnormal or unrecognized weapons in card previews', async () => {
   const source = await readFile(new URL('./TrpgCharacterBindingDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgCharacterBindingDialog should contain a template')
   const sheet = findElement(baseParse(template, { isVoidTag: (tag) => tag === 'br' }), (element) => hasClass(element, 'binding-sheet'))
   assert.ok(sheet, 'the binding dialog should render the selected character card')
 
-  const warning = findElement(sheet as unknown as RootNode, (element) => hasClass(element, 'weapon-abnormal-note'))
+  const warning = findElement(sheet as unknown as RootNode, (element) => element.tag === 'WeaponRiskNotice')
 
-  assert.ok(warning, 'abnormal weapons should show an exploration warning')
-  assert.equal(hasIfExpression(warning, 'weapon.abnormal'), true)
-  assert.match(textContent(warning), /此武器有可能妨碍探索/)
-  assert.doesNotMatch(textContent(sheet), /riskTags|显眼|高噪声/)
+  assert.ok(warning, 'card previews should use the shared contextual risk notice')
+  assert.equal(hasIfExpression(warning, 'shouldShowWeaponRisk(weapon)'), true)
 })

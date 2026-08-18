@@ -2,9 +2,11 @@ package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.vo.GroupChatEvent;
+import com.me.galchat.utils.CurrentHolder;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.util.List;
@@ -75,6 +77,96 @@ class GroupGenerationStreamRegistryTest {
         registry.start(7L, "same-id", source).collectList().block();
 
         assertThat(subscriptions).hasValue(1);
+    }
+
+    @Test
+    void preservesAuthenticatedUserAcrossReactiveSchedulerSwitches() {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+        GroupChatEvent delta = event("message.delta");
+        AtomicReference<Integer> observedUserId = new AtomicReference<>();
+        CurrentHolder.setCurrentId(12);
+
+        try {
+            List<GroupChatEvent> events = registry.start(
+                            7L, "authenticated-generation",
+                            Flux.defer(() -> {
+                                        observedUserId.set(
+                                                CurrentHolder.getCurrentId());
+                                        return Flux.just(delta);
+                                    })
+                                    .subscribeOn(
+                                            Schedulers.boundedElastic()))
+                    .collectList()
+                    .block();
+
+            assertThat(observedUserId).hasValue(12);
+            assertThat(events).contains(delta);
+        } finally {
+            CurrentHolder.remove();
+        }
+    }
+
+    @Test
+    void preservesAuthenticatedUserWhenNestedPublisherWritesItsOwnContext() {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+        AtomicReference<Integer> observedUserId = new AtomicReference<>();
+        CurrentHolder.setCurrentId(12);
+
+        try {
+            registry.start(
+                            7L, "nested-context-generation",
+                            Flux.defer(() -> {
+                                        observedUserId.set(
+                                                CurrentHolder.getCurrentId());
+                                        return Flux.just(
+                                                event("message.delta"));
+                                    })
+                                    .contextWrite(context -> context.put(
+                                            "nested-library-context", "value"))
+                                    .subscribeOn(
+                                            Schedulers.boundedElastic()))
+                    .collectList()
+                    .block();
+
+            assertThat(observedUserId).hasValue(12);
+        } finally {
+            CurrentHolder.remove();
+        }
+    }
+
+    @Test
+    void preservesAuthenticatedUserWhenGenerationIsNotRetained() {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+        AtomicReference<Integer> observedUserId = new AtomicReference<>();
+        CountDownLatch completed = new CountDownLatch(1);
+        CurrentHolder.setCurrentId(12);
+
+        try {
+            registry.start(
+                            7L, null,
+                            Flux.defer(() -> {
+                                        observedUserId.set(
+                                                CurrentHolder.getCurrentId());
+                                        return Flux.just(
+                                                event("message.delta"));
+                                    })
+                                    .contextWrite(context -> context.put(
+                                            "nested-library-context", "value"))
+                                    .subscribeOn(
+                                            Schedulers.boundedElastic()))
+                    .subscribe(
+                            ignored -> { },
+                            ignored -> completed.countDown(),
+                            completed::countDown);
+
+            assertThat(await(completed)).isTrue();
+            assertThat(observedUserId).hasValue(12);
+        } finally {
+            CurrentHolder.remove();
+        }
     }
 
     private static GroupChatEvent event(String eventType) {

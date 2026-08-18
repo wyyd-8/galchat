@@ -92,6 +92,7 @@ class TrpgGroupAgentPolicyTest {
                         .setSkillName("射击:手枪")
                         .setDamage("1D10")
                         .setRange("15m")
+                        .setAttacksPerRound("1（3）")
                         .setAmmoCapacity(6)
                         .setRemainingAmmo(4)
                         .setIsBroken(false)
@@ -240,6 +241,14 @@ class TrpgGroupAgentPolicyTest {
                 .getLast().getText())
                 .contains("无法唯一确定时调用askForClarification")
                 .contains("不确定是否需要追问时不要调用");
+        String assembledRoutePrompt = routeInvocation.prompt()
+                .getInstructions().stream()
+                .map(message -> message.getText())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertThat(assembledRoutePrompt)
+                .contains("“每轮”表示攻击或射击频率，不是伤害公式")
+                .contains("`1（3）`", "常规射击1发", "最多射击3发")
+                .doesNotContain("requestFirearmAttack", "requestMeleeAttack");
         assertThat(combatInvocation.prompt().getInstructions()
                 .getFirst().getText())
                 .contains("基础游戏循环")
@@ -262,6 +271,23 @@ class TrpgGroupAgentPolicyTest {
                 .contains("SHORT_BURST", "FULL_AUTO")
                 .doesNotContain("弹药与故障、射程档位")
                 .doesNotContain("不使用射程、抵近、移动修正、装填、连射、自动武器、弹药、故障");
+        String assembledCombatPrompt = combatInvocation.prompt()
+                .getInstructions().stream()
+                .map(message -> message.getText())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertThat(assembledCombatPrompt)
+                .contains("`requestMeleeAttack` 调用示例")
+                .contains("{\"request\":{\"reason\":\"用折刀刺击邪教徒\"")
+                .contains("\"defenseMode\":\"COUNTERATTACK\"")
+                .contains("`requestFirearmAttack` 调用示例")
+                .contains("{\"request\":{\"reason\":\"向两名邪教徒扫射\"")
+                .contains("\"firingMode\":\"FULL_AUTO\"")
+                .contains("`rollDamage` 调用示例")
+                .contains("{\"request\":{\"reason\":\"坠落伤害\",\"targets\":[{\"targetCharacterName\":\"林恩\",\"formula\":\"1D6\"}]}}")
+                .contains("这些来源模式不适用于 `rollDamage`")
+                .doesNotContain("`FOLLOW_UP` 伤害")
+                .doesNotContain("`STANDALONE` 伤害")
+                .doesNotContain("前置检定成功后的伤害");
 
         var npcAttack = policy.prepare(
                 conversation,
@@ -279,7 +305,25 @@ class TrpgGroupAgentPolicyTest {
                 .contains("在规则允许的范围内")
                 .contains("不要尝试攻击")
                 .contains("昏迷")
-                .contains("濒死");
+                .contains("濒死")
+                .contains("只输出一段简短自然语言行动声明")
+                .contains("当前步骤没有可调用的工具")
+                .contains("不得输出或模拟工具调用协议")
+                .contains("combatAttack", "tool_calls", "DSML");
+        String assembledNpcAttackPrompt = npcAttack.prompt()
+                .getInstructions().stream()
+                .map(message -> message.getText())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertThat(assembledNpcAttackPrompt)
+                .contains("“每轮”表示攻击或射击频率，不是伤害公式")
+                .contains("`1（3）`", "常规射击1发", "最多射击3发")
+                .doesNotContain("requestMeleeAttack",
+                        "requestFirearmAttack", "`rollDamage`");
+        assertThat(npcAttack.prompt().getInstructions()
+                .getFirst().getText())
+                .contains("当前步骤只负责行动声明")
+                .doesNotContain("每次响应最多调用一个会改变状态的掷骰工具");
+        assertThat(npcAttack.tools()).isEmpty();
         org.mockito.Mockito.verify(contextWindowService)
                 .recordPrompt(
                         org.mockito.ArgumentMatchers.eq(7L),

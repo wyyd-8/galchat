@@ -81,6 +81,13 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
                     "追问工具必须单独调用");
         }
         Long replyStepId = replyStepId(prompt);
+        if (toolNames.contains("updateWeaponState")
+                && store.hasExecution(
+                        replyStepId,
+                        DiceRollConstant.TOOL_REQUEST_FIREARM_ATTACK)) {
+            throw new UserRequestException(
+                    "枪械攻击工具已自动更新武器状态，不能在同一裁定步骤重复覆盖");
+        }
         if (diceToolCount == 1 || clarification) {
             return transactionTemplate.execute(status ->
                     executeAndRecord(prompt, response, replyStepId));

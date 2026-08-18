@@ -130,7 +130,7 @@ test('uses a category card to enter and leave a focused skill group', async () =
   assert.match(textContent(categoryButton), /selectedSkillGroup.*返回全部技能.*查看大类技能/)
 })
 
-test('shows abnormal weapons as a subdued carry-risk badge with detailed guidance', async () => {
+test('shows contextual risk details only for abnormal or unrecognized weapons', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
@@ -138,25 +138,11 @@ test('shows abnormal weapons as a subdued carry-risk badge with detailed guidanc
     && hasAttribute(element, 'value', 'combat'))
   assert.ok(combatPanel, 'the character sheet should contain the combat panel')
 
-  const tooltipRoot = findElement(combatPanel as unknown as RootNode, (element) => element.tag === 'TooltipRoot'
-    && hasIfExpression(element, 'weapon.abnormal'))
-  assert.ok(tooltipRoot, 'only abnormal weapons should receive an exploration risk tooltip')
-  const badge = findElement(tooltipRoot as unknown as RootNode, (element) => hasClass(element, 'weapon-risk-badge'))
-  const tooltip = findElement(tooltipRoot as unknown as RootNode, (element) => element.tag === 'TooltipContent')
-
-  assert.ok(badge, 'abnormal weapons should show a compact badge')
-  assert.equal(textContent(badge).trim(), '携带风险')
-  assert.ok(findElement(badge as unknown as RootNode, (element) => element.tag === 'TriangleAlert'),
-    'the badge should use the interface warning icon')
-  assert.ok(tooltip, 'the badge should explain the possible exploration impact on hover')
-  const tooltipText = textContent(tooltip)
-  assert.match(tooltipText, /可能妨碍调查/)
-  assert.match(tooltipText, /引人注意/)
-  assert.match(tooltipText, /通行与隐蔽/)
-  assert.match(tooltipText, /现场与线索/)
-  assert.match(tooltipText, /时间与资源/)
-  assert.doesNotMatch(tooltipText, /这些是需要留意的可能性/)
-  assert.doesNotMatch(textContent(combatPanel), /riskTags|显眼|高噪声/)
+  const notice = findElement(combatPanel as unknown as RootNode, (element) => element.tag === 'WeaponRiskNotice')
+  assert.ok(notice, 'weapons should use the shared contextual risk notice')
+  assert.equal(hasIfExpression(notice, 'shouldShowWeaponRisk(weapon)'), true,
+    'ordinary single-tag weapons should not show risk details')
+  assert.equal(hasDirectiveExpression(notice, 'bind', 'weapon'), true)
 })
 
 test('groups each attribute name and code above its value', async () => {

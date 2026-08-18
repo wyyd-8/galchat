@@ -17,6 +17,8 @@ import java.util.StringJoiner;
 @Component
 public class CharacterCardContextFormatter {
 
+    private static final String UNRECOGNIZED_WEAPON_TAG = "未识别武器";
+
     public String format(List<CocDiceCharacterVO> cards) {
         return format(cards, "investigator-cards", "investigator-card", true);
     }
@@ -94,18 +96,23 @@ public class CharacterCardContextFormatter {
             return "";
         }
         StringBuilder result = new StringBuilder(
-                "<kp-abnormal-weapon-rules>\n异常武器：");
+                "<kp-abnormal-weapon-rules>\n需注意武器：");
         StringJoiner weapons = new StringJoiner("；");
+        boolean hasUnrecognizedWeapon = false;
         for (CharacterCardVO card : cards) {
             if (card == null || card.getCharacter() == null
                     || card.getWeapons() == null) {
                 continue;
             }
             for (CocCharacterWeapon weapon : card.getWeapons()) {
-                if (!Boolean.TRUE.equals(weapon.getAbnormal())
+                boolean unrecognized = hasRiskTag(
+                        weapon, UNRECOGNIZED_WEAPON_TAG);
+                if ((!Boolean.TRUE.equals(weapon.getAbnormal())
+                        && !unrecognized)
                         || !StringUtils.hasText(weapon.getName())) {
                     continue;
                 }
+                hasUnrecognizedWeapon |= unrecognized;
                 StringBuilder value = new StringBuilder()
                         .append(escape(card.getCharacter().getName()))
                         .append('：').append(escape(weapon.getName()));
@@ -126,12 +133,29 @@ public class CharacterCardContextFormatter {
         if (weapons.length() == 0) {
             return "";
         }
-        return result.append(weapons)
-                .append("\n仅在这些风险实际影响当前行动时体现调查劣势，例如引人注意、限制通行、妨碍潜行或破坏现场。")
+        result.append(weapons)
+                .append("\n高风险武器只是一项上下文标签，不代表固定惩罚。")
+                .append("必须结合模组的时代与社会背景、当前地点及当地法律、")
+                .append("武器是否暴露和当前行动判断具体影响。")
+                .append("同一武器在荒野战斗与警察局入口可以产生不同后果。")
+                .append("仅在这些风险实际影响当前行动时体现调查劣势，例如引人注意、限制通行、妨碍潜行或破坏现场。")
                 .append("不要无理由没收武器或削弱伤害；先提示可见风险并允许调查员选择应对方式。")
-                .append("关键线索不能因此永久消失，可以增加时间、暴露、资源消耗或替代调查成本。")
-                .append("\n</kp-abnormal-weapon-rules>")
-                .toString();
+                .append("关键线索不能因此永久消失，可以增加时间、暴露、资源消耗或替代调查成本。");
+        if (hasUnrecognizedWeapon) {
+            result.append("\n带有“未识别武器”标签的武器只能调用 `requestMeleeAttack`，")
+                    .append("禁止调用 `requestFirearmAttack`，")
+                    .append("禁止调用 `rollDamage`。");
+        }
+        return result.append("\n</kp-abnormal-weapon-rules>").toString();
+    }
+
+    private boolean hasRiskTag(
+            CocCharacterWeapon weapon, String expectedTag) {
+        return weapon.getRiskTags() != null
+                && weapon.getRiskTags().stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .anyMatch(expectedTag::equals);
     }
 
     private void appendOtherInvestigator(

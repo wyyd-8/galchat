@@ -24,12 +24,14 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
 import {
   DICE_SKIN_OPTIONS,
+  createDicePostRollPlaybackPlan,
   createIncomingDiceMessagePlaybackRequest,
   createDiceMessagePlaybackRequest,
   findDiceMessageElement,
   isDiceAggregatePending,
   resolveDiceSkin,
   shouldOfferDiceContinue,
+  splitDiceAggregateByRound,
   type DiceSkin,
   type DicePlaybackMode,
   type DicePlaybackRequest,
@@ -59,6 +61,7 @@ const characterPreviewLoading = ref(false)
 const dicePlayerOpen = ref(false)
 const dicePlaybackRequest = ref<DicePlaybackRequest | null>(null)
 const diceMessageAggregate = ref<DiceRollAggregate | null>(null)
+const queuedDiceAggregates = ref<DiceRollAggregate[]>([])
 const diceShowContinue = ref(false)
 
 function createMessagePlaybackRequest(
@@ -80,6 +83,7 @@ function openDiceMessage(aggregate: DiceRollAggregate) {
   try {
     const pending = isDiceAggregatePending(aggregate)
     diceMessageAggregate.value = aggregate
+    queuedDiceAggregates.value = []
     diceShowContinue.value = false
     dicePlaybackRequest.value = createMessagePlaybackRequest(
       aggregate,
@@ -96,6 +100,7 @@ function openDiceMessage(aggregate: DiceRollAggregate) {
 function openDiceDebug(aggregate: DiceRollAggregate) {
   try {
     diceMessageAggregate.value = null
+    queuedDiceAggregates.value = []
     diceShowContinue.value = false
     dicePlaybackRequest.value = createMessagePlaybackRequest(aggregate, 'play')
     dicePlayerOpen.value = true
@@ -106,11 +111,14 @@ function openDiceDebug(aggregate: DiceRollAggregate) {
 
 function openIncomingDiceMessage(aggregate: DiceRollAggregate) {
   try {
-    diceMessageAggregate.value = aggregate
+    const [firstRound, ...laterRounds] = splitDiceAggregateByRound(aggregate)
+    if (!firstRound) throw new Error('这条骰子消息没有可显示的轮次')
+    diceMessageAggregate.value = firstRound
+    queuedDiceAggregates.value = laterRounds
     diceShowContinue.value = false
     dicePlaybackRequest.value = createIncomingDiceMessagePlaybackRequest(
       dicePlaybackRequest.value?.id || 0,
-      aggregate,
+      firstRound,
       workspace.userInfo.value?.diceSkin,
     )
     dicePlayerOpen.value = true
@@ -143,14 +151,17 @@ async function rollDiceMessage() {
   if (!pendingResult) return
   const offerContinueAfterComplete = dicePlaybackRequest.value?.offerContinueAfterComplete === true
   try {
-    await api.rollDiceResult(pendingResult.id)
+    const progress = await api.rollDiceResult(pendingResult.id)
     const refreshed = await workspace.refreshDiceRoll(aggregate.summary.id)
-    diceMessageAggregate.value = refreshed
-    const pending = isDiceAggregatePending(refreshed)
+    const plan = createDicePostRollPlaybackPlan(refreshed, progress.rolledResult.id)
+    diceMessageAggregate.value = plan.playbackAggregate
+    queuedDiceAggregates.value = plan.queuedAggregate
+      ? splitDiceAggregateByRound(plan.queuedAggregate)
+      : []
     dicePlaybackRequest.value = createMessagePlaybackRequest(
-      refreshed,
-      pending ? 'pending' : 'play',
-      !pending,
+      plan.playbackAggregate,
+      'play',
+      true,
       offerContinueAfterComplete,
     )
   } catch (error) {
@@ -171,10 +182,25 @@ function completeDiceMessageRoll() {
     dicePlaybackRequest.value,
     aggregate.summary.status,
     isDiceAggregatePending(aggregate),
+    queuedDiceAggregates.value.length > 0,
   )
 }
 
 async function continueAfterDice() {
+  const [queued, ...remaining] = queuedDiceAggregates.value
+  if (queued) {
+    queuedDiceAggregates.value = remaining
+    diceShowContinue.value = false
+    diceMessageAggregate.value = queued
+    const pending = isDiceAggregatePending(queued)
+    dicePlaybackRequest.value = createMessagePlaybackRequest(
+      queued,
+      pending ? 'pending' : 'play',
+      !pending,
+      true,
+    )
+    return
+  }
   dicePlayerOpen.value = false
   diceShowContinue.value = false
   await workspace.startTrpgTurn()

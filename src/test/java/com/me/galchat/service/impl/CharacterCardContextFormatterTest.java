@@ -176,7 +176,29 @@ class CharacterCardContextFormatterTest {
         assertThat(formatter.formatAbnormalWeaponRules(List.of(card)))
                 .contains("<kp-abnormal-weapon-rules>")
                 .contains("林恩：链锯（riskTags：显眼、高噪声）")
+                .contains("高风险武器只是一项上下文标签，不代表固定惩罚")
+                .contains("模组的时代与社会背景", "当前地点及当地法律",
+                        "武器是否暴露", "当前行动")
+                .contains("荒野战斗", "警察局入口")
                 .contains("关键线索不能因此永久消失")
                 .doesNotContain("左轮手枪");
+    }
+
+    @Test
+    void unrecognizedWeaponGetsMeleeOnlyToolConstraintWithoutAbnormalFlag() {
+        CharacterCardVO card = new CharacterCardVO(
+                new CocCharacter().setName("林恩"), List.of(),
+                List.of(new CocCharacterWeapon()
+                        .setName("神秘武器")
+                        .setAbnormal(false)
+                        .setRiskTags(List.of("未识别武器"))), null);
+
+        assertThat(formatter.formatAbnormalWeaponRules(List.of(card)))
+                .contains("需注意武器：")
+                .doesNotContain("\n异常武器：")
+                .contains("林恩：神秘武器（riskTags：未识别武器）")
+                .contains("只能调用 `requestMeleeAttack`")
+                .contains("禁止调用 `requestFirearmAttack`")
+                .contains("禁止调用 `rollDamage`");
     }
 }

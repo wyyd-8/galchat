@@ -101,4 +101,72 @@ class CocWeaponCatalogConstantTest {
         assertThat(CocWeaponCatalogConstant.require("WHIP").canImpale())
                 .isFalse();
     }
+
+    @Test
+    void broadWeaponTypesHaveStableCommonDefaults() {
+        assertThat(CocWeaponCatalogConstant.genericTypeDefaults("现代"))
+                .containsEntry("手枪", "PISTOL_38_9MM")
+                .containsEntry("左轮手枪", "REVOLVER_38_9MM")
+                .containsEntry("步枪", "RIFLE_22_BOLT")
+                .containsEntry("霰弹枪", "SHOTGUN_12_DOUBLE")
+                .containsEntry("冲锋枪", "MP5")
+                .containsEntry("突击步枪", "AK_47")
+                .containsEntry("弓", "BOW")
+                .containsEntry("弩", "CROSSBOW")
+                .containsEntry("刀", "MEDIUM_KNIFE")
+                .containsEntry("棍棒", "LARGE_CLUB")
+                .containsEntry("斧", "HAND_AXE")
+                .containsEntry("剑", "MEDIUM_SWORD");
+        assertThat(CocWeaponCatalogConstant.genericTypeDefaults("1920s"))
+                .containsEntry("冲锋枪", "THOMPSON_SMG");
+    }
+
+    @Test
+    void contextRelevantWeaponRisksAreClassifiedByTheirActualImpact() {
+        assertThat(CocWeaponCatalogConstant.require("PISTOL_22_AUTO"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.abnormal()).isFalse();
+                    assertThat(weapon.riskTags()).containsExactly("高噪声");
+                });
+        assertThat(CocWeaponCatalogConstant.require("RIFLE_22_BOLT"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.abnormal()).isTrue();
+                    assertThat(weapon.riskTags())
+                            .containsExactly("显眼", "高噪声", "笨重");
+                });
+        assertThat(CocWeaponCatalogConstant.require("AK_47"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.abnormal()).isTrue();
+                    assertThat(weapon.riskTags()).containsExactly(
+                            "显眼", "高噪声", "笨重", "严格管制");
+                });
+        assertThat(CocWeaponCatalogConstant.require("SHOTGUN_12_SAWED_OFF"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.abnormal()).isTrue();
+                    assertThat(weapon.riskTags()).containsExactly(
+                            "显眼", "高噪声", "严格管制");
+                });
+        assertThat(CocWeaponCatalogConstant.require("BOW"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.abnormal()).isTrue();
+                    assertThat(weapon.riskTags())
+                            .containsExactly("显眼", "笨重");
+                });
+        assertThat(CocWeaponCatalogConstant.require("LANCE"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.abnormal()).isTrue();
+                    assertThat(weapon.riskTags())
+                            .containsExactly("显眼", "笨重");
+                });
+        assertThat(CocWeaponCatalogConstant.require("WHIP"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.abnormal()).isFalse();
+                    assertThat(weapon.riskTags()).containsExactly("显眼");
+                });
+        assertThat(CocWeaponCatalogConstant.require("SMALL_KNIFE"))
+                .satisfies(weapon -> {
+                    assertThat(weapon.abnormal()).isFalse();
+                    assertThat(weapon.riskTags()).isEmpty();
+                });
+    }
 }

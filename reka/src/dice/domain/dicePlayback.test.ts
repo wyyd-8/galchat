@@ -61,6 +61,256 @@ function valueRollAggregate(
   }
 }
 
+function combatCheckResult(result: number): DiceResult {
+  return {
+    formula: '1D100$',
+    modules: [{
+      expression: '1D100$',
+      diceCount: 1,
+      diceSides: 100,
+      modifier: 'NORMAL',
+      dice: [
+        { sides: 10, value: result % 10, role: 'PERCENTILE_ONES', selected: true },
+        { sides: 10, value: Math.floor(result / 10), role: 'PERCENTILE_TENS', selected: true },
+      ],
+      result,
+    }],
+    result,
+  }
+}
+
+test('opens a single firearm attack as a semantic combat check', () => {
+  const aggregate: DiceRollAggregate = {
+    summary: {
+      id: 24,
+      conversationId: 4,
+      reason: '本用步枪射击阿尔法',
+      totalResult: '本向阿尔法射击：失败',
+      roundCount: 1,
+      status: 'COMPLETED',
+      toolName: 'requestFirearmAttack',
+    },
+    results: [{
+      id: 32,
+      summaryId: 24,
+      roundNo: 1,
+      displayOrder: 1,
+      displayType: 'FIREARM_ATTACK',
+      reason: '本用步枪射击阿尔法',
+      resultData: combatCheckResult(69),
+      resolution: {
+        type: 'FIREARM_ATTACK',
+        rule: {
+          skillName: '射击:步枪/霰弹枪',
+          targetCharacterName: '阿尔法',
+        },
+        outcome: {
+          characterName: '本',
+          targetCharacterName: '阿尔法',
+          category: 'FAILURE',
+          rank: 'FAILURE',
+        },
+      },
+      resolvedAt: '2026-08-18T00:18:28',
+    }],
+    semanticResult: '本向阿尔法射击：失败',
+  }
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.equal(request.presentation?.kind, 'multiplayer-check')
+  assert.deepEqual(summary.groups, [{
+    label: '本',
+    expression: '射击:步枪/霰弹枪 → 阿尔法',
+    result: '69 · 失败',
+    diceCount: 2,
+  }])
+  assert.equal(summary.resultValue, '本向阿尔法射击：失败')
+})
+
+test('opens melee attack and defense rolls as an opposed combat check', () => {
+  const aggregate: DiceRollAggregate = {
+    summary: {
+      id: 25,
+      conversationId: 4,
+      reason: '阿尔法用伸缩警棍袭击本',
+      totalResult: '阿尔法近战攻击获胜',
+      roundCount: 1,
+      status: 'COMPLETED',
+      toolName: 'requestMeleeAttack',
+    },
+    results: [
+      {
+        id: 33,
+        summaryId: 25,
+        roundNo: 1,
+        displayOrder: 1,
+        displayType: 'MELEE_ATTACK',
+        resultData: combatCheckResult(32),
+        resolution: {
+          type: 'MELEE_ATTACK',
+          rule: { checkName: '斗殴' },
+          outcome: {
+            characterName: '阿尔法', category: 'SUCCESS', rank: 'REGULAR', winner: true,
+          },
+        },
+        resolvedAt: '2026-08-18T00:30:00',
+      },
+      {
+        id: 34,
+        summaryId: 25,
+        roundNo: 1,
+        displayOrder: 2,
+        displayType: 'MELEE_ATTACK',
+        resultData: combatCheckResult(72),
+        resolution: {
+          type: 'MELEE_ATTACK',
+          rule: { checkName: '闪避' },
+          outcome: {
+            characterName: '本', category: 'FAILURE', rank: 'FAILURE', winner: false,
+          },
+        },
+        resolvedAt: '2026-08-18T00:30:00',
+      },
+    ],
+    semanticResult: '阿尔法近战攻击获胜',
+  }
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.equal(request.presentation?.kind, 'opposed-check')
+  assert.deepEqual(
+    request.presentation?.groups.map(({ label, checkName, winner }) => ({ label, checkName, winner })),
+    [
+      { label: '阿尔法', checkName: '斗殴', winner: true },
+      { label: '本', checkName: '闪避', winner: false },
+    ],
+  )
+  assert.equal(summary.resultValue, '阿尔法近战攻击获胜')
+})
+
+test('keeps the completed attack visible before offering its newly-created damage roll', () => {
+  const createPostRollPlan = Reflect.get(diceState, 'createDicePostRollPlaybackPlan') as
+    | ((aggregate: DiceRollAggregate, rolledResultId: number) => {
+        playbackAggregate: DiceRollAggregate
+        queuedAggregate: DiceRollAggregate | null
+      })
+    | undefined
+  const aggregate: DiceRollAggregate = {
+    summary: {
+      id: 25,
+      conversationId: 4,
+      reason: '用折刀刺击邪教徒',
+      totalResult: '林恩近战攻击获胜\n邪教徒生命-3',
+      roundCount: 2,
+      status: 'PENDING',
+      toolName: 'requestMeleeAttack',
+    },
+    results: [
+      {
+        id: 33,
+        summaryId: 25,
+        roundNo: 1,
+        displayOrder: 1,
+        displayType: 'MELEE_ATTACK',
+        resultData: combatCheckResult(32),
+        resolution: {
+          type: 'MELEE_ATTACK',
+          rule: { checkName: '斗殴' },
+          outcome: {
+            characterName: '林恩', category: 'SUCCESS', rank: 'REGULAR', winner: true,
+          },
+        },
+        resolvedAt: '2026-08-18T00:30:00',
+      },
+      {
+        id: 34,
+        summaryId: 25,
+        roundNo: 1,
+        displayOrder: 2,
+        displayType: 'MELEE_ATTACK',
+        resultData: combatCheckResult(72),
+        resolution: {
+          type: 'MELEE_ATTACK',
+          rule: { checkName: '闪避' },
+          outcome: {
+            characterName: '邪教徒', category: 'FAILURE', rank: 'FAILURE', winner: false,
+          },
+        },
+        resolvedAt: '2026-08-18T00:30:00',
+      },
+      {
+        id: 35,
+        summaryId: 25,
+        roundNo: 2,
+        displayOrder: 1,
+        displayType: 'DAMAGE',
+        reason: '折刀命中邪教徒',
+        resultData: createDiceDebugPreset('standard'),
+        resolution: { type: 'DAMAGE' },
+      },
+    ],
+    semanticResult: '林恩近战攻击获胜\n邪教徒生命-3',
+  }
+
+  const plan = createPostRollPlan?.(aggregate, 33)
+
+  assert.deepEqual(plan?.playbackAggregate.results.map((detail) => detail.id), [33, 34])
+  assert.equal(plan?.playbackAggregate.semanticResult, '林恩近战攻击获胜')
+  assert.equal(diceState.isDiceAggregatePending(plan!.playbackAggregate), false)
+  assert.deepEqual(plan?.queuedAggregate?.results.map((detail) => detail.id), [35])
+  assert.equal(diceState.isDiceAggregatePending(plan!.queuedAggregate!), true)
+})
+
+test('splits an automatically completed melee check and damage into two ordered playbacks', () => {
+  const splitByRound = Reflect.get(diceState, 'splitDiceAggregateByRound') as
+    | ((aggregate: DiceRollAggregate) => DiceRollAggregate[])
+    | undefined
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  aggregate.summary.roundCount = 2
+  aggregate.summary.totalResult = '林恩获胜\n邪教徒生命-3'
+  aggregate.semanticResult = '林恩获胜\n邪教徒生命-3'
+  aggregate.results.push({
+    id: 9200,
+    summaryId: aggregate.summary.id,
+    roundNo: 2,
+    displayOrder: 1,
+    displayType: 'DAMAGE',
+    reason: '折刀命中邪教徒',
+    resultData: createDiceDebugPreset('standard'),
+    resolution: {
+      type: 'DAMAGE',
+      outcome: { characterName: '邪教徒', rawDamage: 3 },
+    },
+    resolvedAt: '2026-08-18T00:30:01',
+  })
+
+  const rounds = splitByRound?.(aggregate)
+
+  assert.deepEqual(rounds?.map((round) => round.results.map((detail) => detail.id)), [
+    [9201, 9202],
+    [9200],
+  ])
+  assert.deepEqual(rounds?.map((round) => diceState.createDiceMessagePresentation(round).title), [
+    '争夺手枪',
+    '折刀命中邪教徒',
+  ])
+  assert.deepEqual(rounds?.map((round) => round.semanticResult), [
+    '林恩获胜',
+    '邪教徒生命-3',
+  ])
+  assert.deepEqual(rounds?.map((round) => round.summary.totalResult), [
+    '林恩获胜',
+    '邪教徒生命-3',
+  ])
+  const opposedRequest = rounds?.[0]
+    ? diceState.createDiceMessagePlaybackRequest(0, rounds[0], 'classic')
+    : undefined
+  assert.equal(opposedRequest?.presentation?.resultValue, '林恩获胜')
+})
+
 test('shows pending dice messages in gray regardless of their eventual result type', () => {
   const aggregate = createDiceDebugAggregatePreset('opposed-check')
   aggregate.summary.status = 'PENDING'
@@ -154,7 +404,7 @@ test('uses blue for separate multiplayer results', () => {
 
 test('offers continue only when the current playback owns the first completion', () => {
   const shouldOfferContinue = Reflect.get(diceState, 'shouldOfferDiceContinue') as
-    | ((request: DicePlaybackRequest | null, status: string, hasPendingResults: boolean) => boolean)
+    | ((request: DicePlaybackRequest | null, status: string, hasPendingResults: boolean, hasQueuedRoll?: boolean) => boolean)
     | undefined
   const firstPlayback = { offerContinueAfterComplete: true } as DicePlaybackRequest
   const historicalPlayback = { offerContinueAfterComplete: false } as DicePlaybackRequest
@@ -162,6 +412,8 @@ test('offers continue only when the current playback owns the first completion',
   assert.equal(shouldOfferContinue?.(firstPlayback, 'COMPLETED', false), true)
   assert.equal(shouldOfferContinue?.(historicalPlayback, 'COMPLETED', false), false)
   assert.equal(shouldOfferContinue?.(firstPlayback, 'PENDING', true), false)
+  assert.equal(shouldOfferContinue?.(firstPlayback, 'PENDING', true, true), true)
+  assert.equal(shouldOfferContinue?.(historicalPlayback, 'PENDING', true, true), false)
 })
 
 test('auto plays a live non-user roll after one second of idle spin', () => {

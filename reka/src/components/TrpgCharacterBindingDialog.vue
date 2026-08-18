@@ -2,9 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import { BookUser, Check, Dices, LoaderCircle, RefreshCw, Sparkles, Trash2, UserRound } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
 import { api } from '@/api/client'
 import type { Character, CharacterCard, CharacterCardCreationDraft, Conversation, InvestigatorCardSummary } from '@/api/types'
 import { buildBindingTargets, canAutoGenerateCard, loadBindingTargetContent } from '@/components/trpgSetupState'
+import { shouldShowWeaponRisk } from '@/components/trpgToolsState'
 import { errorMessage, notify } from '@/composables/useNotice'
 
 const open = defineModel<boolean>({ required: true })
@@ -221,7 +223,7 @@ watch(() => props.conversation?.id, () => {
             <div class="vitals"><b>HP {{ displayCard.character.hpCurrent }}/{{ displayCard.character.hpMax }}</b><b>SAN {{ displayCard.character.sanCurrent }}/{{ displayCard.character.sanMax }}</b><b>MP {{ displayCard.character.mpCurrent }}/{{ displayCard.character.mpMax }}</b></div>
           </div>
           <div class="attribute-grid"><span v-for="[name, value] in Object.entries({ STR: displayCard.character.str, CON: displayCard.character.con, SIZ: displayCard.character.siz, DEX: displayCard.character.dex, APP: displayCard.character.app, INT: displayCard.character.intValue, POW: displayCard.character.pow, EDU: displayCard.character.edu })" :key="name"><small>{{ name }}</small><strong>{{ value }}</strong></span></div>
-          <div class="sheet-columns"><div><strong>技能</strong><p>{{ displayCard.skills.map((item) => `${item.displayName} ${item.value}%`).join(' · ') || '暂无技能' }}</p></div><div><strong>武器与装备</strong><p><template v-for="(weapon, index) in displayCard.weapons" :key="weapon.id"><span>{{ weapon.name }}{{ weapon.damage ? ` ${weapon.damage}` : '' }}<em v-if="weapon.abnormal" class="weapon-abnormal-note">此武器有可能妨碍探索</em></span><span v-if="index < displayCard.weapons.length - 1"> · </span></template><span v-if="!displayCard.weapons.length">无武器</span><br>{{ displayCard.profile?.equipmentText || '无额外装备' }}</p></div></div>
+          <div class="sheet-columns"><div><strong>技能</strong><p>{{ displayCard.skills.map((item) => `${item.displayName} ${item.value}%`).join(' · ') || '暂无技能' }}</p></div><div><strong>武器与装备</strong><p><template v-for="(weapon, index) in displayCard.weapons" :key="weapon.id"><span>{{ weapon.name }}{{ weapon.damage ? ` ${weapon.damage}` : '' }}<WeaponRiskNotice v-if="shouldShowWeaponRisk(weapon)" :weapon="weapon" /></span><span v-if="index < displayCard.weapons.length - 1"> · </span></template><span v-if="!displayCard.weapons.length">无武器</span><br>{{ displayCard.profile?.equipmentText || '无额外装备' }}</p></div></div>
           <div v-if="draft && displayCard.profile" class="sheet-columns">
             <div><strong>形象与信念</strong><p>{{ displayCard.profile.appearance }}<br>{{ displayCard.profile.ideology }}</p></div>
             <div><strong>重要联系</strong><p>{{ displayCard.profile.significantPeople }}<br>{{ displayCard.profile.keyConnectionText }}</p></div>

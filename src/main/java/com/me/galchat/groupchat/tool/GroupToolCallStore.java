@@ -90,6 +90,13 @@ public class GroupToolCallStore implements DiceFollowUpLocator {
         mapper.bindDiceSummary(replyStepId, toolCallId, diceRollSummaryId);
     }
 
+    public boolean hasExecution(Long replyStepId, String toolName) {
+        if (replyStepId == null || toolName == null || toolName.isBlank()) {
+            return false;
+        }
+        return mapper.existsByReplyStepIdAndToolName(replyStepId, toolName);
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void saveSystemDice(
             Long replyStepId, KpDiceToolResult result) {

@@ -149,7 +149,7 @@ function handleScroll(event: Event) {
           <button v-else-if="hasOlderMessages" class="load-earlier-button" :disabled="loading" @click="emit('loadEarlier')"><LoaderCircle v-if="loading" class="spin" :size="14" /><History v-else :size="14" />加载更早记录</button>
           <div v-else-if="!messages.length" class="empty-chat"><MessageSquareText :size="30" /><h2>{{ conversation.mode === 'trpg' ? '跑团尚未开始' : '对话从这里开始' }}</h2><p>{{ emptyDescription }}</p></div>
           <article v-for="message in messages" :key="message.id" class="chat-message" :class="[message.speakerType, message.messageKind]" :data-message-id="message.id">
-            <DiceRollMessage v-if="message.messageKind === 'dice_roll' && message.diceRoll" :aggregate="message.diceRoll" @open="emit('openDice', message.diceRoll)" />
+            <DiceRollMessage v-if="message.messageKind === 'dice_roll' && message.diceRoll" :aggregate="message.diceRoll" @open="emit('openDice', $event)" />
             <template v-else>
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>
             <div class="message-content">
@@ -173,11 +173,23 @@ function handleScroll(event: Event) {
           <strong>{{ sceneProposalRole === 'lead' ? '你是本轮首位提案者' : '回应本轮共同计划' }}</strong>
           <span>{{ sceneProposalRole === 'lead' ? '请先提出一个具体、可执行的计划；其他调查员随后可以补充或提出替代方案。' : '你可以支持、补充、修改或反对已有计划，也可以提出替代方案。' }}</span>
         </div>
-        <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType === 'combat_defense'" class="scene-selection-panel">
-          <strong>轮到你防守</strong><span>{{ currentTurn.sceneName || '请选择闪避、反击或 KP 给出的其他合法反应' }}</span>
+        <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType === 'combat_defense'" class="clarification-prompt" role="status">
+          <span class="clarification-prompt-icon" aria-hidden="true"><Swords :size="18" /></span>
+          <span class="clarification-prompt-copy">
+            <small>战斗防守</small>
+            <strong>轮到你防守</strong>
+            <span>{{ currentTurn.sceneName || '请选择闪避、反击或 KP 给出的其他合法反应' }}</span>
+          </span>
+          <span class="clarification-prompt-status"><i />等待行动</span>
         </div>
-        <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'clarification'" class="scene-selection-panel">
-          <strong>KP需要确认</strong><span>你的回答可以补足细节、改变行动、重新判断，或放弃原行动。</span>
+        <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'clarification'" class="clarification-prompt" role="status">
+          <span class="clarification-prompt-icon" aria-hidden="true"><MessageSquareText :size="18" /></span>
+          <span class="clarification-prompt-copy">
+            <small>KP 追问</small>
+            <strong>等待你的确认</strong>
+            <span>可以补充细节、调整行动，或放弃原行动。</span>
+          </span>
+          <span class="clarification-prompt-status"><i />等待回复</span>
         </div>
         <div class="composer" :class="{ disabled: conversation.status !== 'active' }">
           <button v-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="emit('startTurn')"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>

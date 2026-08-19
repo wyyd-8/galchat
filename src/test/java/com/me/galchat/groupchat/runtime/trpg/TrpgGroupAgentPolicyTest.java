@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
 import com.me.galchat.domain.po.CocCharacterWeapon;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.TrpgCombat;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
@@ -19,6 +20,7 @@ import com.me.galchat.tool.KpPushedCheckTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.tool.annotation.Tool;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -180,7 +182,11 @@ class TrpgGroupAgentPolicyTest {
                 .contains("不要按调查员逐条机械回复")
                 .contains("不确定是否需要追问时不要调用")
                 .contains("团队问题只向真人玩家确认")
-                .contains("可以改变、补充或放弃原行动");
+                .contains("可以改变、补充或放弃原行动")
+                .contains("调用startCombat后")
+                .contains("战斗尚未激活")
+                .contains("不得描述先攻顺序、战斗轮或任何角色的新行动")
+                .contains("确认参战者后立即结束回复");
         assertThat(policy.actorName(5L, kp)).isEqualTo("KP");
         assertThat(invocation.tools())
                 .containsExactly(
@@ -248,6 +254,10 @@ class TrpgGroupAgentPolicyTest {
         assertThat(assembledRoutePrompt)
                 .contains("“每轮”表示攻击或射击频率，不是伤害公式")
                 .contains("`1（3）`", "常规射击1发", "最多射击3发")
+                .contains("枪械射击的目标不能用普通闪避或反击")
+                .contains("察觉到枪械攻击且有躲避空间时才可选择寻找掩护")
+                .contains("投掷武器可以闪避")
+                .contains("NPC 默认优先反击")
                 .doesNotContain("requestFirearmAttack", "requestMeleeAttack");
         assertThat(combatInvocation.prompt().getInstructions()
                 .getFirst().getText())
@@ -266,7 +276,7 @@ class TrpgGroupAgentPolicyTest {
                 .contains("装填")
                 .contains("大失败")
                 .contains("武器损坏", "误伤", "走火")
-                .contains("当前不自动换算射程难度", "近/中/远")
+                .contains("射程按人物卡基础射程换算", "近/中/远")
                 .contains("SINGLE", "SEMI_AUTO")
                 .contains("SHORT_BURST", "FULL_AUTO")
                 .doesNotContain("弹药与故障、射程档位")
@@ -276,12 +286,16 @@ class TrpgGroupAgentPolicyTest {
                 .map(message -> message.getText())
                 .collect(java.util.stream.Collectors.joining("\n"));
         assertThat(assembledCombatPrompt)
-                .contains("`requestMeleeAttack` 调用示例")
+                .contains("#### 近战通用示例")
                 .contains("{\"request\":{\"reason\":\"用折刀刺击邪教徒\"")
                 .contains("\"defenseMode\":\"COUNTERATTACK\"")
-                .contains("`requestFirearmAttack` 调用示例")
-                .contains("{\"request\":{\"reason\":\"向两名邪教徒扫射\"")
-                .contains("\"firingMode\":\"FULL_AUTO\"")
+                .contains("#### 远程通用示例")
+                .contains("{\"request\":{\"reason\":\"寻找掩护\"")
+                .contains("{\"request\":{\"reason\":\"用手枪射击林恩\"")
+                .contains("\"firingMode\":\"SINGLE\"")
+                .contains("#### 战技通用示例")
+                .contains("{\"request\":{\"reason\":\"抓住并控制邪教徒\"")
+                .contains("\"restrainedByCharacterName\":\"林恩\"")
                 .contains("`rollDamage` 调用示例")
                 .contains("{\"request\":{\"reason\":\"坠落伤害\",\"targets\":[{\"targetCharacterName\":\"林恩\",\"formula\":\"1D6\"}]}}")
                 .contains("这些来源模式不适用于 `rollDamage`")
@@ -317,6 +331,9 @@ class TrpgGroupAgentPolicyTest {
         assertThat(assembledNpcAttackPrompt)
                 .contains("“每轮”表示攻击或射击频率，不是伤害公式")
                 .contains("`1（3）`", "常规射击1发", "最多射击3发")
+                .contains("枪械射击的目标不能用普通闪避或反击")
+                .contains("投掷武器可以闪避")
+                .contains("NPC 默认优先反击")
                 .doesNotContain("requestMeleeAttack",
                         "requestFirearmAttack", "`rollDamage`");
         assertThat(npcAttack.prompt().getInstructions()
@@ -726,7 +743,7 @@ class TrpgGroupAgentPolicyTest {
     }
 
     @Test
-    void investigatorCombatActionUsesDecisionActionProtocolWithoutTools() {
+    void kpCombatIntroDescribesVisibleBattlefieldBeforeActions() {
         ICharacterCardService cardService =
                 mock(ICharacterCardService.class);
         when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
@@ -744,11 +761,95 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
-                mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgContextWindowService.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgInvestigatorContextAssembler.class),
                 mock(com.me.galchat.tool.KpCombatTools.class),
                 mock(com.me.galchat.service.impl
                         .TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool
+                        .KpWaitingInvestigatorTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgChildSceneCommandService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setWorldId(2L).setUserWorldId(5L);
+
+        var invocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_COMBAT_INTRO,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        "combat:round:1",
+                        "战斗第1轮",
+                        1,
+                        0),
+                new GroupContextMaterial(List.of()));
+
+        assertThat(invocation.tools()).isEmpty();
+        assertThat(invocation.prompt().getInstructions().getFirst()
+                .getText())
+                .contains("当前阶段是战斗环境引入")
+                .contains("不进行战斗裁定，也不掷骰");
+        assertThat(invocation.prompt().getInstructions().getLast()
+                .getText())
+                .contains("独立的战斗环境快照步骤")
+                .contains("地形", "掩体", "距离", "光照")
+                .contains("已经明确的参战者位置")
+                .contains("缺少的信息直接省略，不得自行补全")
+                .contains("不得描述先攻顺序、战斗轮开始、攻击或防守选择")
+                .contains("其他调查员、NPC和旁观者保持上一条公开消息中的状态")
+                .contains("完成静态快照后立即结束回复")
+                .contains("下一独立步骤");
+    }
+
+    @Test
+    void investigatorCombatActionUsesDecisionActionProtocolWithoutTools() {
+        ICharacterCardService cardService =
+                mock(ICharacterCardService.class);
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of(
+                card(72L, "林登", 9L),
+                combatNpcCard(81L, "参战食尸鬼"),
+                combatNpcCard(82L, "场外邪教徒")));
+        com.me.galchat.service.impl.TrpgInvestigatorContextAssembler
+                investigatorAssembler = mock(com.me.galchat.service.impl
+                .TrpgInvestigatorContextAssembler.class);
+        when(investigatorAssembler.format(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn("<controlled-investigator>林登</controlled-investigator>");
+        com.me.galchat.service.impl.TrpgCombatLifecycleService
+                combatLifecycleService = mock(com.me.galchat.service.impl
+                .TrpgCombatLifecycleService.class);
+        var participants = JsonMapper.builder().build()
+                .createArrayNode();
+        participants.addObject().put("characterId", 72L);
+        participants.addObject().put("characterId", 81L);
+        when(combatLifecycleService.requireActiveCombat(
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new TrpgCombat()
+                        .setCurrentRound(2)
+                        .setParticipants(participants));
+        TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
+                mock(ChatClient.class),
+                mock(GroupContextAssembler.class),
+                cardService,
+                new CharacterCardContextFormatter(),
+                mock(KpDiceTools.class),
+                mock(KpPushedCheckTools.class),
+                mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
+                mock(com.me.galchat.tool.InvestigatorSceneTools.class),
+                mock(com.me.galchat.tool.KpSceneTools.class),
+                mock(com.me.galchat.tool.KpRunTools.class),
+                mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
+                investigatorAssembler,
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                combatLifecycleService,
                 mock(com.me.galchat.tool.KpChildSceneTools.class),
                 mock(com.me.galchat.tool
                         .KpWaitingInvestigatorTools.class),
@@ -770,9 +871,43 @@ class TrpgGroupAgentPolicyTest {
                 new GroupContextMaterial(List.of()));
 
         assertThat(invocation.tools()).isEmpty();
+        String systemPrompt = invocation.prompt().getInstructions()
+                .getFirst().getText();
+        String npcOverview = systemPrompt.substring(
+                systemPrompt.indexOf("<combat-npc-overview"),
+                systemPrompt.indexOf("</combat-npc-overview>")
+                        + "</combat-npc-overview>".length());
+        assertThat(systemPrompt)
+                .contains("<investigator-combat-reference>")
+                .contains("近战", "射击", "每轮攻击次数", "瞄准")
+                .contains("装填一发并立刻射击", "战技")
+                .contains("寻找掩护", "闪避检定",
+                        "失去自己的下一个主动行动位")
+                .contains("被钳制不会自动跳过行动")
+                .contains("脱离钳制", "惩罚骰", "奖励骰")
+                .contains("<combat-npc-overview round=\"2\">")
+                .contains("参战食尸鬼", "处于掩护", "被眩晕（剩余2回合）")
+                .contains("被钳制（钳制者：林登）", "本轮已被近战攻击")
+                .doesNotContain("requestFirearmAttack", "requestMeleeAttack",
+                        "requestOpposedCheck", "updateCombatStates",
+                        "rollDamage", "DSML", "tool_calls");
+        assertThat(npcOverview)
+                .doesNotContain("场外邪教徒")
+                .doesNotContain("HP", "3/12", "DEX", "60", "护甲",
+                        "体格", "技能", "斗殴", "临时疯狂", "剩余4小时");
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("<decision>")
                 .contains("<action>");
+    }
+
+    private CocDiceCharacterVO combatNpcCard(Long id, String name) {
+        return new CocDiceCharacterVO(
+                id, "NPC", null, name,
+                Map.of("DEX", 60, "斗殴", 80),
+                3, 12, 0, 0, 50, 2, 4,
+                true, false, false, false,
+                true, "REAL_TIME", 4,
+                true, true, 2, 72L, "林登", true);
     }
 
     private CocDiceCharacterVO card(String name, Long participantId) {

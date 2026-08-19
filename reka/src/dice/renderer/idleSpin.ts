@@ -30,7 +30,6 @@ export function idleSpinAngle(deltaMilliseconds: number): number {
 
 export interface IdleSpinTarget {
   rotateBy: (angleRadians: number) => void
-  render: () => void
 }
 
 export interface IdleSpinScheduler {
@@ -43,7 +42,36 @@ export interface IdleSpinLoop {
   stop: () => void
 }
 
-export function createIdleSpinLoop(scheduler: IdleSpinScheduler): IdleSpinLoop {
+export interface RenderCoordinator {
+  request: () => void
+  stop: () => void
+}
+
+export function createRenderCoordinator(
+  scheduler: IdleSpinScheduler,
+  render: () => void,
+): RenderCoordinator {
+  let frameHandle: number | undefined
+
+  return {
+    request() {
+      if (frameHandle !== undefined) return
+      frameHandle = scheduler.request(() => {
+        frameHandle = undefined
+        render()
+      })
+    },
+    stop() {
+      if (frameHandle !== undefined) scheduler.cancel(frameHandle)
+      frameHandle = undefined
+    },
+  }
+}
+
+export function createIdleSpinLoop(
+  scheduler: IdleSpinScheduler,
+  renderAll?: () => void,
+): IdleSpinLoop {
   let activeTargets: IdleSpinTarget[] = []
   let frameHandle: number | undefined
   let previousTime: number | undefined
@@ -61,8 +89,8 @@ export function createIdleSpinLoop(scheduler: IdleSpinScheduler): IdleSpinLoop {
     previousTime = now
     for (const target of activeTargets) {
       if (angle > 0) target.rotateBy(angle)
-      target.render()
     }
+    renderAll?.()
     frameHandle = scheduler.request(frame)
   }
 

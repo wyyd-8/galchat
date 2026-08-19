@@ -155,7 +155,7 @@ test('adds a separate locate control to each tool dice card', async () => {
       && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
       && prop.arg.content === 'click'
       && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
-      && prop.exp.content.includes("emit('locateDice', message.id)")
+      && prop.exp.content.includes("emit('locateDice', entry.messageId)")
   )), true)
 })
 

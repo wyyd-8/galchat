@@ -46,16 +46,22 @@ public final class CocMeleeRules {
             String damageBonus,
             boolean extreme,
             boolean canImpale) {
-        String weapon = normalizeWeaponDamage(weaponDamage);
+        CocDamageRules.DamageExpression parsed =
+                normalizeWeaponDamage(weaponDamage);
+        String weapon = parsed.hpFormula();
+        if (weapon == null) {
+            return new DamagePlan(null, false, false, true);
+        }
         String bonus = normalizeDamageBonus(damageBonus);
         String ordinary = substituteDamageBonus(weapon, bonus);
         DiceUtils.prepare(ordinary);
         if (!extreme) {
-            return new DamagePlan(ordinary, false, false);
+            return new DamagePlan(ordinary, false, false, parsed.stun());
         }
         int maximum = maximumDamage(ordinary);
         if (!canImpale) {
-            return new DamagePlan(Integer.toString(maximum), true, false);
+            return new DamagePlan(
+                    Integer.toString(maximum), true, false, parsed.stun());
         }
         List<String> extraDice = new ArrayList<>();
         Matcher matcher = DICE.matcher(weapon);
@@ -66,7 +72,7 @@ public final class CocMeleeRules {
                 ? Integer.toString(maximum)
                 : maximum + "+(" + String.join("+", extraDice) + ")";
         DiceUtils.prepare(formula);
-        return new DamagePlan(formula, true, true);
+        return new DamagePlan(formula, true, true, parsed.stun());
     }
 
     private static boolean successful(CocDiceRules.CheckRank rank) {
@@ -76,16 +82,16 @@ public final class CocMeleeRules {
                 || rank == CocDiceRules.CheckRank.CRITICAL;
     }
 
-    private static String normalizeWeaponDamage(String damage) {
+    private static CocDamageRules.DamageExpression normalizeWeaponDamage(
+            String damage) {
         if (damage == null || damage.isBlank()) {
             throw new IllegalArgumentException("近战武器伤害公式不能为空");
         }
-        String normalized = damage.replaceAll("\\s+", "")
-                .replace("眩晕", "1D6");
+        String normalized = damage.replaceAll("\\s+", "");
         if (normalized.contains("；") || normalized.contains(";")) {
             throw new IllegalArgumentException("近战武器伤害公式不能包含多档伤害");
         }
-        return normalized;
+        return CocDamageRules.parse(normalized);
     }
 
     private static String normalizeDamageBonus(String damageBonus) {
@@ -129,6 +135,14 @@ public final class CocMeleeRules {
     public record DamagePlan(
             String formula,
             boolean maximumDamage,
-            boolean impaling) {
+            boolean impaling,
+            boolean stun) {
+
+        public DamagePlan(
+                String formula,
+                boolean maximumDamage,
+                boolean impaling) {
+            this(formula, maximumDamage, impaling, false);
+        }
     }
 }

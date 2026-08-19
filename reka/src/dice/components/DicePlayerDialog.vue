@@ -13,6 +13,7 @@ import {
   createDicePlayerStatus,
   createDicePlayerSummary,
   resolveDicePlayerMode,
+  resolveDiceAnimationGroups,
   shouldShowDiceRollAction,
   type DicePlaybackRequest,
   type DiceGroupOutcomePhase,
@@ -42,11 +43,13 @@ const emit = defineEmits<{ roll: []; complete: []; continue: [] }>()
 
 const tray = ref<HTMLElement | null>(null)
 const surface = ref<HTMLElement | null>(null)
+const renderLayer = ref<HTMLElement | null>(null)
 const status = ref<DicePlayerPhase>('idle')
 const groupOutcomePhase = ref<DiceGroupOutcomePhase>('concealed')
 const error = ref('')
 const dialogWidthPx = ref(980)
 let board: ThreeDiceBoard | undefined
+let disposeSharedRenderer: (() => void) | undefined
 let generation = 0
 let valueMergeTimers: number[] = []
 let groupOutcomeTimers: number[] = []
@@ -219,6 +222,7 @@ function arrangeDiceModuleRows() {
   })
   tray.value.replaceChildren(...rows)
   dialogWidthPx.value = createDicePlayerWindowWidth(rows.map((row) => row.scrollWidth))
+  board?.refreshLayout()
 }
 
 function clearDiceValueMergeTimers() {
@@ -242,8 +246,7 @@ function retireBoard() {
   const staleBoard = board
   board = undefined
   generation += 1
-  const diceCount = props.request?.result.modules.reduce((total, module) => total + module.dice.length, 0) || 1
-  window.setTimeout(() => staleBoard.dispose(), 4_100 + Math.max(0, diceCount - 1) * 90)
+  staleBoard.dispose()
 }
 
 function beginDiceValueMerge(
@@ -330,9 +333,12 @@ async function prepare(request: DicePlaybackRequest) {
     )
     groupOutcomePhase.value = initial.groupOutcomePhase
     if (!board) {
-      const { ThreeDiceBoard: DiceBoard } = await import('@/dice/renderer/ThreeDice')
+      const rendererModule = await import('@/dice/renderer/ThreeDice')
       if (currentGeneration !== generation) return
-      board = new DiceBoard(tray.value)
+      if (!renderLayer.value) return
+      const { ThreeDiceBoard: DiceBoard } = rendererModule
+      disposeSharedRenderer = rendererModule.disposeSharedDiceRenderer
+      board = new DiceBoard(tray.value, renderLayer.value)
     }
     const activeBoard = board
     activeBoard.setSkin(request.skin)
@@ -387,7 +393,10 @@ async function roll() {
       if (currentGeneration !== generation) return
       arrangeDiceModuleRows()
     }
-    await board.playResult(playableResult)
+    await board.playResult(
+      playableResult,
+      resolveDiceAnimationGroups(request, needsPreparation),
+    )
     if (currentGeneration !== generation) return
     applyDiceModuleOutcomeTones(request)
     playOutcomeVfx(request, currentGeneration)
@@ -432,6 +441,8 @@ onBeforeUnmount(() => {
   clearGroupOutcomeTimers()
   clearOutcomeVfx()
   disposeBoard()
+  disposeSharedRenderer?.()
+  disposeSharedRenderer = undefined
 })
 </script>
 
@@ -486,6 +497,7 @@ onBeforeUnmount(() => {
           />
         </div>
       </div>
+      <div ref="renderLayer" class="dice-render-layer" aria-hidden="true" />
       <div ref="tray" class="dice-player-tray" />
       <div v-if="summary" class="dice-player-selection">
         <span><i class="selected" />计入结果</span>

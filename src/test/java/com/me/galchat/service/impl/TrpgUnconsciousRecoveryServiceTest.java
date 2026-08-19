@@ -33,6 +33,87 @@ import static org.mockito.Mockito.when;
 class TrpgUnconsciousRecoveryServiceTest {
 
     @Test
+    void stunnedCharacterSkipsActiveSlotAndConsumesOneRound() {
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        ICocDiceOrchestrationService dice =
+                mock(ICocDiceOrchestrationService.class);
+        TrpgCombatLifecycleService combatLifecycle =
+                mock(TrpgCombatLifecycleService.class);
+        TrpgUnconsciousRecoveryService service =
+                new TrpgUnconsciousRecoveryService(
+                        characterMapper, dice,
+                        mock(GroupChatReplyStepMapper.class),
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatMessageMapper.class),
+                        mock(DiceRollSummaryMapper.class),
+                        mock(GroupConversationService.class),
+                        new DiceRollMessageCodec(
+                                JsonMapper.builder().build()),
+                        mock(GroupToolCallStore.class),
+                        mock(GroupTurnCheckpointService.class),
+                        combatLifecycle);
+        GroupConversation conversation = new GroupConversation().setId(7L);
+        GroupChatTurn turn = combatTurn();
+        GroupChatReplyStep attack = combatSlot().getFirst();
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(7L).setName("林恩")
+                .setStunnedRemainingRounds(3)
+                .setUnconscious(false).setDying(false).setDead(false);
+        when(characterMapper.selectById(71L)).thenReturn(card);
+        when(characterMapper.updateById(card)).thenReturn(1);
+
+        var execution = service.handle(conversation, turn, attack);
+
+        assertThat(execution.outcome())
+                .isEqualTo(TrpgUnconsciousRecoveryService.Outcome.SKIPPED);
+        assertThat(card.getStunnedRemainingRounds()).isEqualTo(2);
+        verify(characterMapper).updateById(card);
+        verify(combatLifecycle).forfeitCurrentRoundSlot(7L, 71L);
+        verify(dice, never()).requestUnconsciousRecovery(any(), any(), any());
+    }
+
+    @Test
+    void pendingCoverForfeitSkipsTheNextActiveSlotAndIsConsumed() {
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        ICocDiceOrchestrationService dice =
+                mock(ICocDiceOrchestrationService.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        TrpgCombatLifecycleService combatLifecycle =
+                mock(TrpgCombatLifecycleService.class);
+        TrpgUnconsciousRecoveryService service =
+                new TrpgUnconsciousRecoveryService(
+                        characterMapper, dice, stepMapper,
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatMessageMapper.class),
+                        mock(DiceRollSummaryMapper.class),
+                        mock(GroupConversationService.class),
+                        new DiceRollMessageCodec(
+                                JsonMapper.builder().build()),
+                        mock(GroupToolCallStore.class),
+                        mock(GroupTurnCheckpointService.class),
+                        combatLifecycle);
+        GroupConversation conversation = new GroupConversation().setId(7L);
+        GroupChatTurn turn = combatTurn();
+        GroupChatReplyStep attack = combatSlot().getFirst();
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(7L).setName("林恩")
+                .setCoverActionForfeitPending(true)
+                .setUnconscious(false).setDying(false).setDead(false);
+        when(characterMapper.selectById(71L)).thenReturn(card);
+        when(characterMapper.updateById(card)).thenReturn(1);
+
+        var execution = service.handle(conversation, turn, attack);
+
+        assertThat(execution.outcome())
+                .isEqualTo(TrpgUnconsciousRecoveryService.Outcome.SKIPPED);
+        assertThat(card.getCoverActionForfeitPending()).isFalse();
+        verify(characterMapper).updateById(card);
+        verify(combatLifecycle).forfeitCurrentRoundSlot(7L, 71L);
+        verify(dice, never()).requestUnconsciousRecovery(any(), any(), any());
+    }
+
+    @Test
     void playerRecoveryCreatesDiceAndPausesAtWaitingDiceBoundary() {
         CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
         ICocDiceOrchestrationService dice =

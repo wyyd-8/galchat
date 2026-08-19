@@ -29,6 +29,7 @@ public final class GroupChatConstant {
     public static final String ACTION_TRPG_SCENE_INTRO =
             "trpg_scene_intro";
     public static final String ACTION_TRPG_COMBAT = "trpg_combat_action";
+    public static final String ACTION_COMBAT_INTRO = "combat_intro";
     public static final String ACTION_COMBAT_ATTACK = "combat_attack";
     public static final String ACTION_COMBAT_REACTION_ROUTE = "combat_reaction_route";
     public static final String ACTION_COMBAT_DEFENSE = "combat_defense";

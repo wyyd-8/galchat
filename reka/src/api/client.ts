@@ -1,6 +1,6 @@
 import type {
   ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
-  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanRequest, Session, TrpgGameTime, TrpgGameTimePeriod, TrpgSave, UserInfo, UserToken,
+  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
 } from './types'
@@ -127,6 +127,7 @@ export const api = {
   saveReplyPlan: (id: number, plan: ReplyPlanRequest) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
   finishReplyPlan: (id: number) => request<ReplyPlan | null>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),
   currentTurn: (id: number) => request<CurrentTurn | null>(`/group-chat/conversations/${id}/turns/current`),
+  combatOverview: (id: number) => request<TrpgCombatParticipantOverview[]>(`/group-chat/conversations/${id}/combat-overview`),
 
   investigatorCards: (runId: number) => request<InvestigatorCardSummary[]>(`/character-cards/investigators?${new URLSearchParams({ runId: String(runId) })}`),
   characterCardById: (id: number) => request<CharacterCard>(`/character-cards/${id}`),

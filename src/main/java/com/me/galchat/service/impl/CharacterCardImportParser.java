@@ -76,7 +76,12 @@ final class CharacterCardImportParser {
                 .setMpCurrent(derived.mp()).setMpMax(derived.mp())
                 .setLuckCurrent(null)
                 .setArmor(0).setMajorWound(false).setUnconscious(false).setDying(false)
-                .setDead(false).setTemporaryInsanity(false);
+                .setDead(false).setTemporaryInsanity(false)
+                .setInCover(false)
+                .setCoverActionForfeitPending(false)
+                .setStunnedRemainingRounds(0)
+                .setRestrainedByCharacterId(null)
+                .setMeleeAttackedThisRound(false);
         profile.setEquipmentText(joinLines(equipment));
         if (!assets.isEmpty()) {
             profile.setAssetsText(joinLines(assets));

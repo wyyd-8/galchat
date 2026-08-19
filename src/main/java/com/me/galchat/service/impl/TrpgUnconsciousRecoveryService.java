@@ -11,6 +11,7 @@ import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.KpDiceToolResult;
+import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.dice.DiceRollMessageCodec;
 import com.me.galchat.groupchat.tool.GroupToolCallStore;
 import com.me.galchat.mapper.CocCharacterMapper;
@@ -70,6 +71,22 @@ public class TrpgUnconsciousRecoveryService {
         }
         if (Boolean.TRUE.equals(card.getDead())
                 || Boolean.TRUE.equals(card.getDying())) {
+            combatLifecycleService.forfeitCurrentRoundSlot(
+                    conversation.getId(), card.getId());
+            return new Execution(Outcome.SKIPPED, List.of());
+        }
+        boolean coverForfeit = Boolean.TRUE.equals(
+                card.getCoverActionForfeitPending());
+        int stunnedRemaining = Objects.requireNonNullElse(
+                card.getStunnedRemainingRounds(), 0);
+        if (coverForfeit || stunnedRemaining > 0) {
+            card.setCoverActionForfeitPending(false)
+                    .setStunnedRemainingRounds(
+                            Math.max(0, stunnedRemaining - 1))
+                    .setUpdatedAt(LocalDateTime.now());
+            if (characterMapper.updateById(card) == 0) {
+                throw new UserRequestException("战斗行动位状态消费失败");
+            }
             combatLifecycleService.forfeitCurrentRoundSlot(
                     conversation.getId(), card.getId());
             return new Execution(Outcome.SKIPPED, List.of());

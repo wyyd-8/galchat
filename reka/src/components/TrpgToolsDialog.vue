@@ -12,9 +12,9 @@ import type {
   InvestigatorCardSummary, TrpgSave,
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
-import { listDiceMessagesNewestFirst } from '@/dice/domain/dicePlayback'
+import { listDiceHistoryEntriesNewestFirst } from '@/dice/domain/dicePlayback'
 import {
-  buildSkillDisplayItems, buildToolCharacterTargets, formatCheckRate, nextSkillGroup, resolveWeaponCheckValue, shouldShowWeaponRisk, toolDialogContentClass,
+  buildSkillDisplayItems, buildToolCharacterTargets, formatCheckRate, formatKpPromptUpdatedAt, nextSkillGroup, resolveWeaponCheckValue, shouldShowWeaponRisk, toolDialogContentClass,
   useToolConfirmations,
 } from '@/components/trpgToolsState'
 
@@ -62,7 +62,7 @@ const contextTone = computed(() => contextPercent.value >= 90 ? 'danger' : conte
 const selectedActorName = computed(() => selectedTarget.value?.name || props.username.trim() || '当前玩家')
 const completedCardCount = computed(() => characterTargets.value.filter((target) => target.cardId !== undefined).length)
 const dialogContentClass = computed(() => toolDialogContentClass(selectedToolTab.value))
-const diceMessages = computed(() => listDiceMessagesNewestFirst(props.messages))
+const diceHistoryEntries = computed(() => listDiceHistoryEntriesNewestFirst(props.messages))
 const characterAttributes = computed(() => card.value ? [
   { code: 'STR', label: '力量', value: card.value.character.str },
   { code: 'CON', label: '体质', value: card.value.character.con },
@@ -195,7 +195,7 @@ watch(() => props.conversation.id, () => {
       <TabsContent value="status" class="tabs-content tool-section">
         <section class="tool-card">
           <div class="tool-card-heading"><span><strong>最近一次 KP 提示词长度</strong><small>{{ contextUsage ? `${contextUsage.characterCount.toLocaleString()} / ${contextUsage.softLimit.toLocaleString()} 字符` : '尚无记录' }}</small></span><button class="icon-button bordered" :disabled="busy" title="刷新" @click="execute(refreshOverview)"><RefreshCw :size="15" /></button></div>
-          <div class="context-meter" :class="contextTone"><i :style="{ width: `${Math.min(contextPercent, 100)}%` }" /></div><small>{{ contextPercent }}% · {{ contextUsage ? `更新于 ${time(contextUsage.updatedAt)}` : '模型执行一次跑团行动后显示' }}</small>
+          <div class="context-meter" :class="contextTone"><i :style="{ width: `${Math.min(contextPercent, 100)}%` }" /></div><small>{{ contextPercent }}% · {{ contextUsage ? `更新于 ${formatKpPromptUpdatedAt(contextUsage.updatedAt)}` : '模型执行一次跑团行动后显示' }}</small>
         </section>
         <section class="tool-card">
           <div class="tool-card-heading"><span><strong>行动轮自动存档</strong><small>每次开始新行动轮前自动覆盖</small></span><button class="button danger" :disabled="busy" @click="execute(rollbackTurn)"><RotateCcw :size="16" />{{ confirmRollback ? '再次点击确认回滚' : '回滚最近一轮' }}</button></div>
@@ -410,14 +410,14 @@ watch(() => props.conversation.id, () => {
       </TabsContent>
 
       <TabsContent value="dice" class="tabs-content tool-section">
-        <div v-if="diceMessages.length" class="dice-history-list">
+        <div v-if="diceHistoryEntries.length" class="dice-history-list">
           <div
-            v-for="message in diceMessages"
-            :key="message.id"
+            v-for="entry in diceHistoryEntries"
+            :key="`${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`"
             class="dice-history-item"
           >
             <DiceRollMessage
-              :aggregate="message.diceRoll!"
+              :aggregate="entry.aggregate"
               :show-icon="false"
               @open="emit('openDice', $event)"
             />
@@ -426,7 +426,7 @@ watch(() => props.conversation.id, () => {
               class="dice-history-locate"
               aria-label="定位到聊天记录"
               title="定位到聊天记录"
-              @click="emit('locateDice', message.id)"
+              @click="emit('locateDice', entry.messageId)"
             >
               <LocateFixed :size="15" />
             </button>

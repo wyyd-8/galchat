@@ -8,6 +8,7 @@ import {
   randomIdleQuaternion,
   type IdleSpinScheduler,
 } from './idleSpin.ts'
+import * as idleSpin from './idleSpin.ts'
 
 test('creates a normalized deterministic quaternion from supplied randomness', () => {
   const values = [0.25, 0.5, 0.75]
@@ -42,7 +43,10 @@ test('uses one stoppable frame loop and advances every target by the same angle'
   }
   const angles: number[][] = [[], []]
   const renders = [0, 0]
-  const loop = createIdleSpinLoop(scheduler)
+  let boardRenders = 0
+  const loop = createIdleSpinLoop(scheduler, () => {
+    boardRenders += 1
+  })
   loop.start(angles.map((targetAngles, index) => ({
     rotateBy(angleRadians) {
       targetAngles.push(angleRadians)
@@ -56,10 +60,48 @@ test('uses one stoppable frame loop and advances every target by the same angle'
   callbacks.get(2)?.(5_500)
   loop.stop()
 
-  assert.deepEqual(renders, [2, 2])
+  assert.deepEqual(renders, [0, 0])
+  assert.equal(boardRenders, 2)
   assert.ok(Math.abs(angles[0][0] - Math.PI) < 1e-12)
   assert.equal(angles[0][0], angles[1][0])
   assert.deepEqual(cancelled, [3])
+})
+
+test('coalesces every dice update in one board render and cancels it when stopped', () => {
+  const createRenderCoordinator = Reflect.get(idleSpin, 'createRenderCoordinator') as
+    | ((scheduler: IdleSpinScheduler, render: () => void) => {
+      request: () => void
+      stop: () => void
+    })
+    | undefined
+  assert.equal(typeof createRenderCoordinator, 'function')
+
+  let nextHandle = 0
+  const callbacks = new Map<number, (now: number) => void>()
+  const cancelled: number[] = []
+  let renders = 0
+  const coordinator = createRenderCoordinator?.({
+    request(callback) {
+      nextHandle += 1
+      callbacks.set(nextHandle, callback)
+      return nextHandle
+    },
+    cancel(handle) {
+      cancelled.push(handle)
+      callbacks.delete(handle)
+    },
+  }, () => {
+    renders += 1
+  })
+
+  coordinator?.request()
+  coordinator?.request()
+  callbacks.get(1)?.(16)
+  coordinator?.request()
+  coordinator?.stop()
+
+  assert.equal(renders, 1)
+  assert.deepEqual(cancelled, [2])
 })
 
 test('cancels the previous frame before restarting', () => {

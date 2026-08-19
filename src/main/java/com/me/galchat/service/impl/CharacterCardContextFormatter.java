@@ -28,6 +28,7 @@ public class CharacterCardContextFormatter {
             return "<npc-roster />";
         }
         StringBuilder result = new StringBuilder("<npc-roster>");
+        Map<Long, String> namesById = diceCardNames(cards);
         for (CocDiceCharacterVO card : cards) {
             result.append("\n- ").append(escape(card.name()));
         }
@@ -43,9 +44,53 @@ public class CharacterCardContextFormatter {
             result.append("\n- ").append(escape(card.name()))
                     .append("：HP ").append(value(card.hpCurrent()))
                     .append('/').append(value(card.hpMax()));
-            appendInlineStatuses(result, card);
+            appendInlineStatuses(result, card, namesById);
         }
         return result.append("\n</npc-state-changes>").toString();
+    }
+
+    public String formatCombatNpcOverview(
+            Integer round, List<CocDiceCharacterVO> cards) {
+        String roundValue = round == null ? "未知" : round.toString();
+        if (cards == null || cards.isEmpty()) {
+            return "<combat-npc-overview round=\"" + roundValue
+                    + "\" />";
+        }
+        StringBuilder result = new StringBuilder(
+                "<combat-npc-overview round=\"")
+                .append(roundValue).append("\">");
+        Map<Long, String> namesById = diceCardNames(cards);
+        for (CocDiceCharacterVO card : cards) {
+            if (card == null || !StringUtils.hasText(card.name())) {
+                continue;
+            }
+            result.append("\n- ").append(escape(card.name()))
+                    .append("：");
+            StringJoiner visibleStatuses = combatOverviewStatuses(
+                    card, namesById);
+            result.append(visibleStatuses.length() == 0
+                    ? "未见特殊状态" : visibleStatuses.toString());
+        }
+        return result.append("\n</combat-npc-overview>").toString();
+    }
+
+    private StringJoiner combatOverviewStatuses(
+            CocDiceCharacterVO card, Map<Long, String> namesById) {
+        StringJoiner statuses = new StringJoiner("；");
+        addStatus(statuses, card.majorWound(), "重伤");
+        addStatus(statuses, card.unconscious(), "昏迷");
+        addStatus(statuses, card.dying(), "濒死");
+        addStatus(statuses, card.dead(), "死亡");
+        appendCombatStatuses(statuses,
+                card.inCover(),
+                card.coverActionForfeitPending(),
+                card.stunnedRemainingRounds(),
+                card.restrainedByCharacterId(),
+                card.restrainedByCharacterName() == null
+                        ? namesById.get(card.restrainedByCharacterId())
+                        : card.restrainedByCharacterName(),
+                card.meleeAttackedThisRound());
+        return statuses;
     }
 
     public String formatOtherInvestigators(List<CharacterCardVO> cards) {
@@ -53,11 +98,12 @@ public class CharacterCardContextFormatter {
             return "<other-investigators />";
         }
         StringBuilder result = new StringBuilder("<other-investigators>");
+        Map<Long, String> namesById = fullCardNames(cards);
         for (CharacterCardVO card : cards) {
             if (card == null || card.getCharacter() == null) {
                 continue;
             }
-            appendOtherInvestigator(result, card);
+            appendOtherInvestigator(result, card, namesById);
         }
         if (result.length() == "<other-investigators>".length()) {
             return "<other-investigators />";
@@ -159,7 +205,8 @@ public class CharacterCardContextFormatter {
     }
 
     private void appendOtherInvestigator(
-            StringBuilder result, CharacterCardVO card) {
+            StringBuilder result, CharacterCardVO card,
+            Map<Long, String> namesById) {
         CocCharacter character = card.getCharacter();
         result.append("\n<other-investigator name=\"")
                 .append(escape(character.getName())).append('"');
@@ -179,7 +226,7 @@ public class CharacterCardContextFormatter {
                 .append("，幸运=").append(value(character.getLuckCurrent()))
                 .append("，护甲=").append(value(character.getArmor()));
         appendConfiguredSkills(result, card.getSkills());
-        appendCharacterStatuses(result, character);
+        appendCharacterStatuses(result, character, namesById);
         result.append("\n</other-investigator>");
     }
 
@@ -219,13 +266,21 @@ public class CharacterCardContextFormatter {
     }
 
     private void appendCharacterStatuses(
-            StringBuilder result, CocCharacter character) {
+            StringBuilder result, CocCharacter character,
+            Map<Long, String> namesById) {
         StringJoiner statuses = new StringJoiner("；");
         addStatus(statuses, character.getMajorWound(), "重伤");
         addStatus(statuses, character.getUnconscious(), "昏迷");
         addStatus(statuses, character.getDying(), "濒死");
         addStatus(statuses, character.getDead(), "死亡");
         addStatus(statuses, character.getTemporaryInsanity(), "临时疯狂");
+        appendCombatStatuses(statuses,
+                character.getInCover(),
+                character.getCoverActionForfeitPending(),
+                character.getStunnedRemainingRounds(),
+                character.getRestrainedByCharacterId(),
+                namesById.get(character.getRestrainedByCharacterId()),
+                character.getMeleeAttackedThisRound());
         if (statuses.length() > 0) {
             result.append("\n状态：").append(statuses);
         }
@@ -243,11 +298,12 @@ public class CharacterCardContextFormatter {
             return "";
         }
         StringBuilder result = new StringBuilder("<active-npcs>");
+        Map<Long, String> namesById = fullCardNames(cards);
         for (CharacterCardVO card : cards) {
             if (card == null || card.getCharacter() == null) {
                 continue;
             }
-            appendActiveNpc(result, card);
+            appendActiveNpc(result, card, namesById);
         }
         if (result.length() == "<active-npcs>".length()) {
             return "";
@@ -256,7 +312,8 @@ public class CharacterCardContextFormatter {
     }
 
     private void appendActiveNpc(
-            StringBuilder result, CharacterCardVO card) {
+            StringBuilder result, CharacterCardVO card,
+            Map<Long, String> namesById) {
         CocCharacter character = card.getCharacter();
         result.append("\n<active-npc name=\"")
                 .append(escape(character.getName())).append("\">");
@@ -281,6 +338,7 @@ public class CharacterCardContextFormatter {
         appendMechanicalValue(result, "体格", character.getBuild());
         appendMechanicalText(result, "DB", character.getDamageBonus());
         appendMechanicalValue(result, "MOV", character.getMov());
+        appendCharacterStatuses(result, character, namesById);
         appendSparseSkills(result, card.getSkills());
         appendWeapons(result, card.getWeapons());
         result.append("\n</active-npc>");
@@ -405,12 +463,18 @@ public class CharacterCardContextFormatter {
                 || Boolean.TRUE.equals(card.unconscious())
                 || Boolean.TRUE.equals(card.dying())
                 || Boolean.TRUE.equals(card.dead())
-                || Boolean.TRUE.equals(card.temporaryInsanity());
+                || Boolean.TRUE.equals(card.temporaryInsanity())
+                || Boolean.TRUE.equals(card.inCover())
+                || Boolean.TRUE.equals(card.coverActionForfeitPending())
+                || positive(card.stunnedRemainingRounds())
+                || card.restrainedByCharacterId() != null
+                || Boolean.TRUE.equals(card.meleeAttackedThisRound());
     }
 
     private void appendInlineStatuses(
-            StringBuilder result, CocDiceCharacterVO card) {
-        StringJoiner statuses = statuses(card);
+            StringBuilder result, CocDiceCharacterVO card,
+            Map<Long, String> namesById) {
+        StringJoiner statuses = statuses(card, namesById);
         if (statuses.length() > 0) {
             result.append("；").append(statuses);
         }
@@ -426,6 +490,7 @@ public class CharacterCardContextFormatter {
         }
         StringBuilder result = new StringBuilder("<")
                 .append(containerName).append(">");
+        Map<Long, String> namesById = diceCardNames(cards);
         for (CocDiceCharacterVO card : cards) {
             result.append("\n<").append(cardName).append(" name=\"")
                     .append(escape(card.name())).append('"');
@@ -443,7 +508,7 @@ public class CharacterCardContextFormatter {
             result.append("；CON：").append(value(card.con()));
             result.append("；护甲：").append(value(card.armor()));
             appendCheckValues(result, card.checkValues());
-            appendStatuses(result, card);
+            appendStatuses(result, card, namesById);
             result.append("\n</").append(cardName).append('>');
         }
         return result.append("\n</").append(containerName).append('>')
@@ -461,14 +526,17 @@ public class CharacterCardContextFormatter {
         result.append("\n检定值：").append(values);
     }
 
-    private void appendStatuses(StringBuilder result, CocDiceCharacterVO card) {
-        StringJoiner statuses = statuses(card);
+    private void appendStatuses(
+            StringBuilder result, CocDiceCharacterVO card,
+            Map<Long, String> namesById) {
+        StringJoiner statuses = statuses(card, namesById);
         if (statuses.length() > 0) {
             result.append("\n状态：").append(statuses);
         }
     }
 
-    private StringJoiner statuses(CocDiceCharacterVO card) {
+    private StringJoiner statuses(
+            CocDiceCharacterVO card, Map<Long, String> namesById) {
         StringJoiner statuses = new StringJoiner("；");
         if (Boolean.TRUE.equals(card.majorWound())) {
             statuses.add("重伤");
@@ -485,7 +553,70 @@ public class CharacterCardContextFormatter {
         if (Boolean.TRUE.equals(card.temporaryInsanity())) {
             statuses.add(insanityStatus(card));
         }
+        appendCombatStatuses(statuses,
+                card.inCover(),
+                card.coverActionForfeitPending(),
+                card.stunnedRemainingRounds(),
+                card.restrainedByCharacterId(),
+                card.restrainedByCharacterName() == null
+                        ? namesById.get(card.restrainedByCharacterId())
+                        : card.restrainedByCharacterName(),
+                card.meleeAttackedThisRound());
         return statuses;
+    }
+
+    private void appendCombatStatuses(
+            StringJoiner statuses,
+            Boolean inCover,
+            Boolean coverActionForfeitPending,
+            Integer stunnedRemainingRounds,
+            Long restrainedByCharacterId,
+            String restrainedByCharacterName,
+            Boolean meleeAttackedThisRound) {
+        addStatus(statuses, inCover, "处于掩护");
+        addStatus(statuses, coverActionForfeitPending,
+                "掩护行动位待消耗");
+        if (positive(stunnedRemainingRounds)) {
+            statuses.add("被眩晕（剩余" + stunnedRemainingRounds + "回合）");
+        }
+        if (restrainedByCharacterId != null) {
+            statuses.add(restrainedByCharacterName == null
+                    ? "被钳制"
+                    : "被钳制（钳制者："
+                    + restrainedByCharacterName + "）");
+        }
+        addStatus(statuses, meleeAttackedThisRound,
+                "本轮已被近战攻击");
+    }
+
+    private boolean positive(Integer value) {
+        return value != null && value > 0;
+    }
+
+    private Map<Long, String> diceCardNames(
+            List<CocDiceCharacterVO> cards) {
+        Map<Long, String> names = new java.util.LinkedHashMap<>();
+        for (CocDiceCharacterVO card : cards) {
+            if (card != null && card.cardId() != null
+                    && card.name() != null) {
+                names.put(card.cardId(), card.name());
+            }
+        }
+        return names;
+    }
+
+    private Map<Long, String> fullCardNames(
+            List<CharacterCardVO> cards) {
+        Map<Long, String> names = new java.util.LinkedHashMap<>();
+        for (CharacterCardVO card : cards) {
+            if (card != null && card.getCharacter() != null
+                    && card.getCharacter().getId() != null
+                    && card.getCharacter().getName() != null) {
+                names.put(card.getCharacter().getId(),
+                        card.getCharacter().getName());
+            }
+        }
+        return names;
     }
 
     private String insanityStatus(CocDiceCharacterVO card) {

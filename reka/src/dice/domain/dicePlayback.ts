@@ -41,6 +41,14 @@ export interface DicePlaybackPresentation {
   groups: DicePlaybackGroupPresentation[]
   groupRule?: DiceGroupRule
 }
+export interface DiceAnimationGroupTiming {
+  moduleStart: number
+  moduleCount: number
+  startDelayMs: number
+}
+export interface DiceInitialAnimationPlan {
+  groups: DiceAnimationGroupTiming[]
+}
 export interface DicePlaybackRequest {
   id: number
   result: DiceResult
@@ -51,6 +59,7 @@ export interface DicePlaybackRequest {
   mode?: DicePlaybackMode
   autoPlay?: boolean
   autoPlayDelayMs?: number
+  initialAnimation?: DiceInitialAnimationPlan
   offerContinueAfterComplete?: boolean
 }
 export interface DicePlayerSummary {
@@ -139,8 +148,14 @@ const PARTICIPANT_CHECK_TYPES = new Set([
   'OPPOSED_CHECK',
   'FIREARM_ATTACK',
   'MELEE_ATTACK',
+  'MAJOR_WOUND_CON',
 ])
-const VALUE_ROLL_TYPES = new Set(['DAMAGE', 'SAN_LOSS', 'HEALING'])
+const CHECK_TYPE_NAMES: Record<string, string> = {
+  MAJOR_WOUND_CON: 'CON',
+}
+const VALUE_ROLL_TYPES = new Set([
+  'DAMAGE', 'STUN_DURATION', 'SAN_LOSS', 'HEALING',
+])
 
 function checkOutcomeLabel(outcome: Record<string, unknown>): string {
   const category = typeof outcome.category === 'string' ? outcome.category : undefined
@@ -229,6 +244,7 @@ export function splitDiceAggregateByRound(
 export interface DicePostRollPlaybackPlan {
   playbackAggregate: DiceRollAggregate
   queuedAggregate: DiceRollAggregate | null
+  rolledGroupIndex: number
 }
 
 export function createDicePostRollPlaybackPlan(
@@ -242,6 +258,11 @@ export function createDicePostRollPlaybackPlan(
     (detail.roundNo || 1) === rolledRound && Boolean(detail.resolvedAt)
   ))
   if (!playbackResults.length) throw new Error('刚完成的掷骰结果尚未结算')
+  const orderedPlaybackResults = [...playbackResults].sort(
+    (left, right) => (left.displayOrder || 0) - (right.displayOrder || 0) || left.id - right.id,
+  )
+  const rolledGroupIndex = orderedPlaybackResults.findIndex((detail) => detail.id === rolledResultId)
+  if (rolledGroupIndex < 0) throw new Error('刚完成的掷骰结果不在当前播放轮次中')
   const queuedResults = aggregate.results.filter((detail) => {
     const round = detail.roundNo || 1
     return round > rolledRound || (round === rolledRound && !detail.resolvedAt)
@@ -253,6 +274,7 @@ export function createDicePostRollPlaybackPlan(
     queuedAggregate: queuedResults.length
       ? { ...aggregate, summary: { ...aggregate.summary }, results: queuedResults }
       : null,
+    rolledGroupIndex,
   }
 }
 
@@ -338,6 +360,59 @@ export function createDiceAutoPlayPlan(
     phase: delayMs > 0 ? 'idle' : 'ready',
     delayMs,
   }
+}
+
+export function createDiceInitialAnimationPlan(
+  request: DicePlaybackRequest,
+  primaryGroupIndex?: number,
+): DiceInitialAnimationPlan {
+  const sourceGroups = request.presentation?.groups.length
+    ? request.presentation.groups.map((group, sourceIndex) => ({
+        sourceIndex,
+        moduleStart: group.moduleStart,
+        moduleCount: group.moduleCount,
+      }))
+    : [{ sourceIndex: 0, moduleStart: 0, moduleCount: request.result.modules.length }]
+  const physicalGroups = sourceGroups.filter((group) => request.result.modules
+    .slice(group.moduleStart, group.moduleStart + group.moduleCount)
+    .some((module) => module.dice.length > 0))
+  if (!physicalGroups.length) return { groups: [] }
+
+  const primary = primaryGroupIndex === undefined
+    ? undefined
+    : physicalGroups.find((group) => group.sourceIndex === primaryGroupIndex)
+  if (!primary) {
+    const interval = physicalGroups.length <= 1
+      ? 0
+      : Math.round(Math.max(140, Math.min(280, 1_000 / (physicalGroups.length - 1))))
+    return {
+      groups: physicalGroups.map((group, index) => ({
+        moduleStart: group.moduleStart,
+        moduleCount: group.moduleCount,
+        startDelayMs: index * interval,
+      })),
+    }
+  }
+
+  const otherGroups = physicalGroups.filter((group) => group !== primary)
+  const interval = otherGroups.length
+    ? Math.round(Math.max(120, Math.min(220, 500 / otherGroups.length)))
+    : 0
+  let otherIndex = 0
+  return {
+    groups: physicalGroups.map((group) => ({
+      moduleStart: group.moduleStart,
+      moduleCount: group.moduleCount,
+      startDelayMs: group === primary ? 0 : ++otherIndex * interval,
+    })),
+  }
+}
+
+export function resolveDiceAnimationGroups(
+  request: DicePlaybackRequest,
+  replay: boolean,
+): DiceAnimationGroupTiming[] | undefined {
+  return replay ? undefined : request.initialAnimation?.groups
 }
 
 export function createDicePlayerInitialState(
@@ -445,6 +520,20 @@ export function listDiceMessagesNewestFirst(messages: GroupMessage[]): GroupMess
   ))
 }
 
+export interface DiceHistoryEntry {
+  messageId: number
+  aggregate: DiceRollAggregate
+}
+
+export function listDiceHistoryEntriesNewestFirst(messages: GroupMessage[]): DiceHistoryEntry[] {
+  return listDiceMessagesNewestFirst(messages).flatMap((message) => (
+    splitDiceAggregateByRound(message.diceRoll!).map((aggregate) => ({
+      messageId: message.id,
+      aggregate,
+    }))
+  ))
+}
+
 export function findDiceMessageElement<T extends { dataset: { messageId?: string } }>(
   elements: Iterable<T>,
   messageId: number,
@@ -462,7 +551,9 @@ function aggregateGroup(
   const resolutionType = detail.resolution?.type || detail.displayType
   const ruleCheckName = typeof rule.checkName === 'string'
     ? rule.checkName
-    : typeof rule.skillName === 'string' ? rule.skillName : undefined
+    : typeof rule.skillName === 'string'
+      ? rule.skillName
+      : resolutionType ? CHECK_TYPE_NAMES[resolutionType] : undefined
   const targetName = typeof outcome.targetCharacterName === 'string'
     ? outcome.targetCharacterName
     : typeof rule.targetCharacterName === 'string' ? rule.targetCharacterName : undefined
@@ -490,6 +581,7 @@ function aggregateGroup(
 
 function signedValue(type: string | undefined, value: number | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '?'
+  if (type === 'STUN_DURATION') return `${value}回合`
   if (value === 0) return '0'
   return `${type === 'HEALING' ? '+' : '-'}${Math.abs(value)}`
 }
@@ -719,13 +811,16 @@ export function createIncomingDiceMessagePlaybackRequest(
   skin: unknown,
 ): DicePlaybackRequest {
   const pending = isDiceAggregatePending(aggregate)
-  return {
+  const request: DicePlaybackRequest = {
     ...createDiceMessagePlaybackRequest(previousId, aggregate, skin),
     mode: pending ? 'pending' : 'play',
     autoPlay: !pending,
-    autoPlayDelayMs: pending ? undefined : 1_000,
+    autoPlayDelayMs: pending ? undefined : 500,
     offerContinueAfterComplete: true,
   }
+  return pending
+    ? request
+    : { ...request, initialAnimation: createDiceInitialAnimationPlan(request) }
 }
 
 export function createDicePlayerSummary(

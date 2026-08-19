@@ -81,6 +81,18 @@ test('uses the third-stage dialog width only while the character-card tab is sel
   assert.equal(toolDialogContentClass('dice'), '')
 })
 
+test('formats a UTC KP prompt timestamp in the selected local time zone', () => {
+  const formatKpPromptUpdatedAt = (trpgToolsState as typeof trpgToolsState & {
+    formatKpPromptUpdatedAt?: (value?: string, timeZone?: string) => string
+  }).formatKpPromptUpdatedAt
+
+  assert.ok(formatKpPromptUpdatedAt, 'TRPG tools should expose KP prompt timestamp formatting')
+  assert.equal(
+    formatKpPromptUpdatedAt('2026-08-20T08:30:00Z', 'Asia/Shanghai'),
+    '2026-08-20 16:30',
+  )
+})
+
 test('clears pending destructive confirmations when the tools dialog closes', async () => {
   const open = ref(true)
   const selectedTab = ref('status')

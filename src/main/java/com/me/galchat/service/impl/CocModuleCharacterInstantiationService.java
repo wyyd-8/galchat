@@ -114,6 +114,11 @@ public class CocModuleCharacterInstantiationService {
                 .setParticipantId(null)
                 .setCreationMethod("MODULE")
                 .setName(name)
+                .setInCover(false)
+                .setCoverActionForfeitPending(false)
+                .setStunnedRemainingRounds(0)
+                .setRestrainedByCharacterId(null)
+                .setMeleeAttackedThisRound(false)
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         characterMapper.insert(character);

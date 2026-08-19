@@ -25,7 +25,7 @@ public class KpMeleeTools {
 
     @Tool(
             name = DiceRollConstant.TOOL_REQUEST_MELEE_ATTACK,
-            description = "结算一次普通近战攻击。后端自动进行攻击与闪避/反击检定、按近战同等级规则确定胜者，并自动生成普通、最大或贯穿伤害；NONE仍要求攻击检定成功。远程武器会在本次近战中临时替换为枪托棍棒。",
+            description = "结算一次普通近战攻击。后端自动进行攻击与闪避/反击检定、按近战同等级规则确定胜者，并自动生成普通、最大或贯穿伤害以及扣除目标人物卡护甲；武器伤害含独立眩晕加数时另投1D6写入眩晕回合，不计入HP。NONE仍要求攻击检定成功。远程武器会在本次近战中临时替换为枪托棍棒。",
             returnDirect = true)
     public KpDiceToolResult requestMeleeAttack(
             @ToolParam(description = "攻击者整体参数和防守者整体参数")

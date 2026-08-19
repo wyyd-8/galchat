@@ -33,6 +33,13 @@ public class TrpgGroupTurnPolicy implements GroupTurnPolicy {
                     .toList();
         }
         List<GroupActionSpec> actions = new ArrayList<>();
+        if ("combat:round:1".equals(selection.executionKey())) {
+            actions.add(new GroupActionSpec(
+                    GroupChatConstant.ACTION_COMBAT_INTRO,
+                    GroupChatConstant.ACTOR_KP, null, null,
+                    selection.executionKey(), selection.displayName(),
+                    1, 0));
+        }
         for (var item : selection.items()) {
             int base = (item.getItemOrder() - 1) * 2;
             actions.add(new GroupActionSpec(

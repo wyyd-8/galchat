@@ -241,7 +241,12 @@ public class AutoCharacterCardAssembler {
                 .setMpCurrent(derived.mp()).setMpMax(derived.mp())
                 .setLuckCurrent(luck).setArmor(0)
                 .setMajorWound(false).setUnconscious(false).setDying(false)
-                .setDead(false).setTemporaryInsanity(false);
+                .setDead(false).setTemporaryInsanity(false)
+                .setInCover(false)
+                .setCoverActionForfeitPending(false)
+                .setStunnedRemainingRounds(0)
+                .setRestrainedByCharacterId(null)
+                .setMeleeAttackedThisRound(false);
     }
 
     private List<CocCharacterSkill> assignSkills(

@@ -9,7 +9,7 @@ public final class KpWeaponStateDTOs {
 
     public record Update(
             @ToolParam(
-                    description = "更新后的剩余弹药；射击可一次减少多发，装填可增加但不能超过容量；不修改时省略",
+                    description = "更新后的剩余弹药；射击可一次减少多发；常规逐发装填一个主动位最多增加两发，装填一发并立即射击时只增加一发，且都不能超过容量；不修改时省略",
                     required = false)
             Integer remainingAmmo,
             @ToolParam(

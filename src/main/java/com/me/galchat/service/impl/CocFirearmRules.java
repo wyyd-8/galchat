@@ -44,10 +44,22 @@ public final class CocFirearmRules {
             FirearmFiringMode mode,
             int globalGroupIndex,
             CocPercentileModifier baseModifier) {
+        return adjustment(mode, globalGroupIndex, baseModifier, 0);
+    }
+
+    public static AttackAdjustment adjustment(
+            FirearmFiringMode mode,
+            int globalGroupIndex,
+            CocPercentileModifier baseModifier,
+            int automaticSituationPenaltyDice) {
         if (mode == null || globalGroupIndex < 0) {
             throw new IllegalArgumentException("枪械检定组参数无效");
         }
-        int netPenalty = modifierValue(baseModifier);
+        if (automaticSituationPenaltyDice < 0) {
+            throw new IllegalArgumentException("枪械场景惩罚骰数量无效");
+        }
+        int netPenalty = modifierValue(baseModifier)
+                + automaticSituationPenaltyDice;
         if (mode == FirearmFiringMode.HANDGUN_MULTIPLE
                 || mode == FirearmFiringMode.SEMI_AUTO) {
             netPenalty += 1;
@@ -76,15 +88,22 @@ public final class CocFirearmRules {
         if (mode == null || bulletsInGroup < 1) {
             throw new IllegalArgumentException("枪械伤害参数无效");
         }
-        String normalized = requireDamageFormula(damageFormula);
+        CocDamageRules.DamageExpression parsed =
+                requireDamageFormula(damageFormula);
+        String normalized = parsed.hpFormula();
         boolean barrage = mode == FirearmFiringMode.FULL_AUTO
                 || mode == FirearmFiringMode.SHORT_BURST;
         int hitCount = barrage
                 ? extreme ? bulletsInGroup : Math.max(1, bulletsInGroup / 2)
                 : 1;
-        int impalingHits = extreme && canImpale && !extremeDifficulty
+        int impalingHits = normalized != null
+                && extreme && canImpale && !extremeDifficulty
                 ? barrage ? Math.max(1, bulletsInGroup / 2) : 1
                 : 0;
+        if (normalized == null) {
+            return new DamagePlan(
+                    hitCount, 0, null, List.of(), parsed.stun());
+        }
         int maximum = maximumDamage(normalized);
         List<String> terms = new ArrayList<>(hitCount);
         for (int index = 0; index < hitCount - impalingHits; index++) {
@@ -98,7 +117,11 @@ public final class CocFirearmRules {
             terms.add(Integer.toString(maximum));
         }
         return new DamagePlan(
-                hitCount, impalingHits, String.join("+", terms));
+                hitCount,
+                impalingHits,
+                String.join("+", terms),
+                List.copyOf(terms),
+                parsed.stun());
     }
 
     public static MalfunctionDecision malfunction(
@@ -116,7 +139,10 @@ public final class CocFirearmRules {
     }
 
     static int maximumDamage(String formula) {
-        String normalized = requireDamageFormula(formula);
+        String normalized = requireDamageFormula(formula).hpFormula();
+        if (normalized == null) {
+            return 0;
+        }
         int total = 0;
         int position = 0;
         Matcher matcher = DAMAGE_TERM.matcher(normalized);
@@ -144,7 +170,8 @@ public final class CocFirearmRules {
         return total;
     }
 
-    private static String requireDamageFormula(String formula) {
+    private static CocDamageRules.DamageExpression requireDamageFormula(
+            String formula) {
         if (formula == null || formula.isBlank()) {
             throw new IllegalArgumentException("枪械伤害公式不能为空");
         }
@@ -152,7 +179,7 @@ public final class CocFirearmRules {
         if (normalized.contains("；") || normalized.contains(";")) {
             throw new IllegalArgumentException("多档枪械伤害需要先在人物卡中确定当前使用的一档");
         }
-        return normalized;
+        return CocDamageRules.parse(normalized);
     }
 
     private static int modifierValue(CocPercentileModifier modifier) {
@@ -191,7 +218,17 @@ public final class CocFirearmRules {
     public record DamagePlan(
             int hitCount,
             int impalingHitCount,
-            String formula) {
+            String formula,
+            List<String> hitFormulas,
+            boolean stun) {
+
+        public DamagePlan(
+                int hitCount,
+                int impalingHitCount,
+                String formula,
+                List<String> hitFormulas) {
+            this(hitCount, impalingHitCount, formula, hitFormulas, false);
+        }
     }
 
     public record MalfunctionDecision(

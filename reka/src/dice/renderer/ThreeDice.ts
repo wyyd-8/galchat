@@ -3,13 +3,24 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 import {
   createIdleSpinLoop,
+  createRenderCoordinator,
   randomIdleQuaternion,
   type IdleSpinTarget,
 } from './idleSpin'
 import { resolveNormalDiePresentation } from './normalDiePresentation'
-import { continuousRotationTarget, interpolateRotation } from './rollRotation'
+import {
+  continuousRotationTarget,
+  createDiceStartDelays,
+  interpolateRotation,
+  type DiceAnimationGroupTiming,
+} from './rollRotation'
 import { settleCameraDistance, settleScaleFactor } from './settleScale'
 import { formatDiceGroupLabel } from '../domain/diceGroupLabel'
+import {
+  createDiceRenderViewport,
+  intersectDiceViewportRects,
+  type DiceViewportRect,
+} from '../domain/dicePlayerLayout'
 
 export interface DiceRollValue {
   sides: number
@@ -47,8 +58,8 @@ interface DiceModelConfig {
 
 interface RenderedDie {
   wrapper: HTMLElement
+  viewport: HTMLElement
   valueLabel: HTMLElement
-  renderer: THREE.WebGLRenderer
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
   model: THREE.Group
@@ -56,6 +67,7 @@ interface RenderedDie {
   faceUp: THREE.Vector3
   frontValue: string
   turnSeed: number
+  dimOverlay?: HTMLElement
   dispose: () => void
 }
 
@@ -67,6 +79,52 @@ const Z_AXIS = new THREE.Vector3(0, 0, 1)
 const loader = new GLTFLoader()
 const templatePromises = new Map<string, Promise<THREE.Group>>()
 let fogTexture: THREE.CanvasTexture | undefined
+
+interface SharedDiceRenderer {
+  renderer: THREE.WebGLRenderer
+  owner?: object
+}
+
+let sharedDiceRenderer: SharedDiceRenderer | undefined
+
+function acquireSharedRenderer(host: HTMLElement, owner: object): THREE.WebGLRenderer {
+  if (!sharedDiceRenderer) {
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      powerPreference: 'high-performance',
+    })
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.setClearColor(0x000000, 0)
+    renderer.autoClear = false
+    renderer.domElement.className = 'dice-shared-canvas'
+    renderer.domElement.setAttribute('aria-hidden', 'true')
+    sharedDiceRenderer = { renderer }
+  }
+  sharedDiceRenderer.owner = owner
+  host.append(sharedDiceRenderer.renderer.domElement)
+  sharedDiceRenderer.renderer.domElement.hidden = false
+  return sharedDiceRenderer.renderer
+}
+
+function releaseSharedRenderer(owner: object): void {
+  if (!sharedDiceRenderer || sharedDiceRenderer.owner !== owner) return
+  const { renderer } = sharedDiceRenderer
+  renderer.setScissorTest(false)
+  renderer.clear()
+  renderer.domElement.hidden = true
+  renderer.domElement.remove()
+  sharedDiceRenderer.owner = undefined
+}
+
+export function disposeSharedDiceRenderer(): void {
+  if (!sharedDiceRenderer) return
+  sharedDiceRenderer.renderer.dispose()
+  sharedDiceRenderer.renderer.forceContextLoss()
+  sharedDiceRenderer.renderer.domElement.remove()
+  sharedDiceRenderer = undefined
+}
 
 const MODEL_CONFIGS: Record<ModelKey, DiceModelConfig> = {
   d4: {
@@ -143,10 +201,6 @@ const CINNABAR_MODEL_URLS: Record<ModelKey, string> = {
   'd10-tens': new URL('../assets/models/cinnabar/D10_百分骰_00-90_朱砂鎏金_baked.glb', import.meta.url).href,
   d12: new URL('../assets/models/cinnabar/D12_十二面骰_朱砂鎏金_baked.glb', import.meta.url).href,
   d20: new URL('../assets/models/cinnabar/D20_二十面骰_朱砂鎏金_baked.glb', import.meta.url).href,
-}
-
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
 function galaxyFogTexture(): THREE.CanvasTexture {
@@ -382,17 +436,12 @@ async function createDie(
   valueLabel.textContent = displayValue
   const shadow = document.createElement('div')
   shadow.className = 'die-shadow'
-
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  renderer.setSize(168, 168, false)
-  renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = skin === 'galaxy' ? 1.26 : skin === 'moonwhite' ? 1.18 : skin === 'cinnabar' ? 1.16 : 1.12
-  renderer.domElement.className = 'three-die-canvas'
-  renderer.domElement.dataset.frontValue = ''
-  renderer.domElement.dataset.modelSource = config.key
-  renderer.domElement.dataset.diceSkin = skin
+  const viewport = document.createElement('div')
+  viewport.className = 'three-die-viewport'
+  viewport.dataset.frontValue = ''
+  viewport.dataset.modelSource = config.key
+  viewport.dataset.diceSkin = skin
+  viewport.setAttribute('aria-hidden', 'true')
 
   const scene = new THREE.Scene()
   const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20)
@@ -408,12 +457,11 @@ async function createDie(
 
   const built = await buildModel(config, faceLabel, skin)
   scene.add(built.model)
-  renderer.render(scene, camera)
-  wrapper.append(typeLabel, valueLabel, shadow, renderer.domElement)
+  wrapper.append(typeLabel, valueLabel, shadow, viewport)
   return {
     wrapper,
+    viewport,
     valueLabel,
-    renderer,
     scene,
     camera,
     model: built.model,
@@ -422,9 +470,8 @@ async function createDie(
     frontValue: displayValue,
     turnSeed,
     dispose: () => {
+      viewport.remove()
       built.dispose()
-      renderer.dispose()
-      renderer.forceContextLoss()
     },
   }
 }
@@ -457,84 +504,147 @@ function easeOutCubic(value: number): number {
   return 1 - (1 - value) ** 3
 }
 
-async function animateDie(die: RenderedDie, delay: number): Promise<void> {
-  await wait(delay)
-  die.wrapper.classList.add('is-rolling')
+interface DieAnimationState {
+  die: RenderedDie
+  delay: number
+  complete: boolean
+  finalTarget?: THREE.Quaternion
+  landingTarget?: THREE.Quaternion
+  startRotation?: THREE.Euler
+  rotation?: ReturnType<typeof continuousRotationTarget>
+  initialScale?: THREE.Vector3
+  valueAnimation?: Animation
+}
+
+async function animateDice(
+  dice: RenderedDie[],
+  signal: AbortSignal,
+  renderAll: () => void,
+  startDelays?: number[],
+): Promise<void> {
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const duration = reduceMotion ? 180 : 3_600
-  const finalTarget = uprightTarget(die.faceNormal, die.faceUp)
-  const randomRoll = (Math.random() * 2 - 1) * Math.PI
-  const landingRoll = Math.abs(randomRoll) < Math.PI / 6
-    ? Math.sign(randomRoll || 1) * Math.PI / 6
-    : randomRoll
-  const landingTarget = new THREE.Quaternion()
-    .setFromAxisAngle(Z_AXIS, landingRoll)
-    .multiply(finalTarget)
-    .normalize()
-  const startRotation = new THREE.Euler().setFromQuaternion(die.model.quaternion, 'XYZ')
-  const targetAngles = new THREE.Euler().setFromQuaternion(
-    reduceMotion ? finalTarget : landingTarget,
-    'XYZ',
-  )
-  const rotation = continuousRotationTarget(
-    startRotation,
-    targetAngles,
-    { x: 3 + die.turnSeed % 2, y: 4 + die.turnSeed % 2, z: 2 },
-  )
-  const initialScale = die.model.scale.clone()
   const rollEnd = 0.84
   const pauseEnd = 0.875
-  const startedAt = performance.now()
+  const sequenceStartedAt = performance.now()
+  const states: DieAnimationState[] = dice.map((die, index) => ({
+    die,
+    delay: startDelays?.[index] ?? index * 90,
+    complete: false,
+  }))
 
+  const initialize = (state: DieAnimationState): void => {
+    const { die } = state
+    die.wrapper.classList.add('is-rolling')
+    state.finalTarget = uprightTarget(die.faceNormal, die.faceUp)
+    const randomRoll = (Math.random() * 2 - 1) * Math.PI
+    const landingRoll = Math.abs(randomRoll) < Math.PI / 6
+      ? Math.sign(randomRoll || 1) * Math.PI / 6
+      : randomRoll
+    state.landingTarget = new THREE.Quaternion()
+      .setFromAxisAngle(Z_AXIS, landingRoll)
+      .multiply(state.finalTarget)
+      .normalize()
+    state.startRotation = new THREE.Euler().setFromQuaternion(die.model.quaternion, 'XYZ')
+    const targetAngles = new THREE.Euler().setFromQuaternion(
+      reduceMotion ? state.finalTarget : state.landingTarget,
+      'XYZ',
+    )
+    state.rotation = continuousRotationTarget(
+      state.startRotation,
+      targetAngles,
+      { x: 3 + die.turnSeed % 2, y: 4 + die.turnSeed % 2, z: 2 },
+    )
+    state.initialScale = die.model.scale.clone()
+  }
+
+  let frameHandle: number | undefined
   await new Promise<void>((resolve) => {
-    const frame = (now: number): void => {
-      const progress = Math.min((now - startedAt) / duration, 1)
-      if (reduceMotion || progress < rollEnd) {
-        const rotationProgress = easeOutCubic(reduceMotion ? progress : progress / rollEnd)
-        const currentRotation = interpolateRotation(startRotation, rotation, rotationProgress)
-        die.model.rotation.set(
-          currentRotation.x,
-          currentRotation.y,
-          currentRotation.z,
-          'XYZ',
-        )
-      } else if (progress < pauseEnd) {
-        die.model.quaternion.copy(landingTarget)
-      } else {
-        const uprightProgress = easeOutCubic((progress - pauseEnd) / (1 - pauseEnd))
-        die.model.quaternion.slerpQuaternions(landingTarget, finalTarget, uprightProgress)
-        die.model.scale.copy(initialScale).multiplyScalar(settleScaleFactor(uprightProgress))
-      }
-      die.renderer.domElement.dataset.rotationX = die.model.rotation.x.toFixed(6)
-      die.renderer.domElement.dataset.rotationY = die.model.rotation.y.toFixed(6)
-      die.renderer.domElement.dataset.rotationZ = die.model.rotation.z.toFixed(6)
-      die.renderer.render(die.scene, die.camera)
-      if (progress < 1) requestAnimationFrame(frame)
-      else resolve()
+    const finish = (): void => {
+      if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle)
+      frameHandle = undefined
+      signal.removeEventListener('abort', abort)
+      resolve()
     }
-    requestAnimationFrame(frame)
+    const abort = (): void => {
+      states.forEach((state) => state.die.wrapper.classList.remove('is-rolling'))
+      finish()
+    }
+    const frame = (now: number): void => {
+      if (signal.aborted) {
+        finish()
+        return
+      }
+      let changed = false
+      let allComplete = true
+      for (const state of states) {
+        if (state.complete) continue
+        const elapsed = now - sequenceStartedAt - state.delay
+        if (elapsed < 0) {
+          allComplete = false
+          continue
+        }
+        if (!state.finalTarget) initialize(state)
+        const { die, finalTarget, landingTarget, startRotation, rotation, initialScale } = state
+        if (!finalTarget || !landingTarget || !startRotation || !rotation || !initialScale) continue
+        const progress = Math.min(elapsed / duration, 1)
+        if (reduceMotion || progress < rollEnd) {
+          const rotationProgress = easeOutCubic(reduceMotion ? progress : progress / rollEnd)
+          const currentRotation = interpolateRotation(startRotation, rotation, rotationProgress)
+          die.model.rotation.set(currentRotation.x, currentRotation.y, currentRotation.z, 'XYZ')
+        } else if (progress < pauseEnd) {
+          die.model.quaternion.copy(landingTarget)
+        } else {
+          const uprightProgress = easeOutCubic((progress - pauseEnd) / (1 - pauseEnd))
+          die.model.quaternion.slerpQuaternions(landingTarget, finalTarget, uprightProgress)
+          die.model.scale.copy(initialScale).multiplyScalar(settleScaleFactor(uprightProgress))
+        }
+        changed = true
+        if (progress < 1) {
+          allComplete = false
+          continue
+        }
+
+        die.model.quaternion.copy(finalTarget)
+        if (!reduceMotion) die.model.scale.copy(initialScale).multiplyScalar(settleScaleFactor(1))
+        const frontDot = die.faceNormal.clone().applyQuaternion(finalTarget).dot(FRONT)
+        const upDot = die.faceUp.clone().applyQuaternion(finalTarget).dot(SCREEN_UP)
+        die.viewport.dataset.frontValue = die.frontValue
+        die.viewport.dataset.frontDot = frontDot.toFixed(6)
+        die.viewport.dataset.upDot = upDot.toFixed(6)
+        die.wrapper.classList.remove('is-rolling')
+        die.wrapper.classList.add('is-settled')
+        state.valueAnimation = die.valueLabel.animate([
+          { opacity: 0, transform: 'translateX(-50%) translateY(12px) scale(.7)' },
+          { opacity: 1, transform: 'translateX(-50%) translateY(-3px) scale(1.08)', offset: 0.72 },
+          { opacity: 1, transform: 'translateX(-50%) translateY(0) scale(1)' },
+        ], {
+          duration: reduceMotion ? 100 : 320,
+          easing: 'cubic-bezier(.2,.8,.25,1.25)',
+          fill: 'forwards',
+        })
+        state.complete = true
+      }
+      if (changed) renderAll()
+      if (allComplete) finish()
+      else frameHandle = window.requestAnimationFrame(frame)
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    frameHandle = window.requestAnimationFrame(frame)
   })
-
-  die.model.quaternion.copy(finalTarget)
-  if (!reduceMotion) die.model.scale.copy(initialScale).multiplyScalar(settleScaleFactor(1))
-  die.renderer.render(die.scene, die.camera)
-  const frontDot = die.faceNormal.clone().applyQuaternion(finalTarget).dot(FRONT)
-  const upDot = die.faceUp.clone().applyQuaternion(finalTarget).dot(SCREEN_UP)
-  die.renderer.domElement.dataset.frontValue = die.frontValue
-  die.renderer.domElement.dataset.frontDot = frontDot.toFixed(6)
-  die.renderer.domElement.dataset.upDot = upDot.toFixed(6)
-  die.wrapper.classList.remove('is-rolling')
-  die.wrapper.classList.add('is-settled')
-
-  await die.valueLabel.animate([
-    { opacity: 0, transform: 'translateX(-50%) translateY(12px) scale(.7)' },
-    { opacity: 1, transform: 'translateX(-50%) translateY(-3px) scale(1.08)', offset: 0.72 },
-    { opacity: 1, transform: 'translateX(-50%) translateY(0) scale(1)' },
-  ], {
-    duration: reduceMotion ? 100 : 320,
-    easing: 'cubic-bezier(.2,.8,.25,1.25)',
-    fill: 'forwards',
-  }).finished
+  if (signal.aborted) return
+  await Promise.all(states.map(async (state) => {
+    if (!state.valueAnimation) return
+    const cancel = (): void => state.valueAnimation?.cancel()
+    signal.addEventListener('abort', cancel, { once: true })
+    try {
+      await state.valueAnimation.finished
+    } catch {
+      // Cancelling the board also rejects the Web Animation promise.
+    } finally {
+      signal.removeEventListener('abort', cancel)
+    }
+  }))
 }
 
 function moduleHeading(
@@ -648,15 +758,47 @@ async function createModule(
 
 export class ThreeDiceBoard {
   private activeDice: RenderedDie[] = []
+  private activeModules: RenderedDie[][] = []
   private skin: DiceSkin = 'classic'
   private preparationGeneration = 0
   private preparedResult: DiceRollResult | undefined
-  private readonly idleSpin = createIdleSpinLoop({
-    request: (callback) => window.requestAnimationFrame(callback),
-    cancel: (handle) => window.cancelAnimationFrame(handle),
-  })
+  private readonly rendererOwner = {}
+  private readonly surface: HTMLElement
+  private readonly renderLayer: HTMLElement
+  private readonly scrollHost?: HTMLElement
+  private readonly renderer: THREE.WebGLRenderer
+  private readonly renderCoordinator: ReturnType<typeof createRenderCoordinator>
+  private readonly idleSpin: ReturnType<typeof createIdleSpinLoop>
+  private resizeObserver?: ResizeObserver
+  private rollController?: AbortController
+  private layoutFrameHandle?: number
+  private layoutDeadline = 0
+  private canvasWidth = 0
+  private canvasHeight = 0
+  private canvasPixelRatio = 0
+  private disposed = false
 
-  constructor(private readonly diceTray: HTMLElement) {
+  constructor(private readonly diceTray: HTMLElement, renderLayer?: HTMLElement) {
+    const surface = diceTray.closest<HTMLElement>('.dice-player-surface') || diceTray.parentElement
+    if (!surface) throw new Error('骰子托盘缺少播放器表面')
+    this.surface = surface
+    this.renderLayer = renderLayer || surface
+    this.scrollHost = diceTray.closest<HTMLElement>('.dialog-body') || undefined
+    this.renderer = acquireSharedRenderer(this.renderLayer, this.rendererOwner)
+    const scheduler = {
+      request: (callback: (now: number) => void) => window.requestAnimationFrame(callback),
+      cancel: (handle: number) => window.cancelAnimationFrame(handle),
+    }
+    this.renderCoordinator = createRenderCoordinator(scheduler, () => this.renderAll())
+    this.idleSpin = createIdleSpinLoop(scheduler, () => this.renderAll())
+    this.scrollHost?.addEventListener('scroll', this.handleLayoutChange, { passive: true })
+    this.diceTray.addEventListener('scroll', this.handleLayoutChange, { passive: true })
+    window.addEventListener('resize', this.handleLayoutChange, { passive: true })
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(this.handleLayoutChange)
+      this.resizeObserver.observe(this.surface)
+      this.resizeObserver.observe(this.diceTray)
+    }
     this.renderWaitingDice()
   }
 
@@ -667,6 +809,7 @@ export class ThreeDiceBoard {
   async prepareResult(result: DiceRollResult): Promise<void> {
     if (!result.modules.length) throw new Error('后端掷骰结果不包含骰子模块')
     const generation = ++this.preparationGeneration
+    this.cancelRoll()
     this.idleSpin.stop()
     this.preparedResult = undefined
     const modules = await Promise.all(result.modules.map((module, moduleIndex) => (
@@ -678,14 +821,15 @@ export class ThreeDiceBoard {
       return
     }
 
-    this.activeDice.forEach((die) => die.dispose())
+    this.activeDice.forEach((die) => this.disposeDie(die))
+    this.activeModules = modules.map((module) => module.dice)
     this.activeDice = nextDice
     this.diceTray.replaceChildren(...modules.map((module) => module.element))
     for (const die of this.activeDice) {
       const orientation = randomIdleQuaternion()
       die.model.quaternion.set(orientation.x, orientation.y, orientation.z, orientation.w)
-      die.renderer.render(die.scene, die.camera)
     }
+    this.renderAll()
     this.preparedResult = result
 
     if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -696,29 +840,40 @@ export class ThreeDiceBoard {
             spinStep.setFromAxisAngle(Y_AXIS, angleRadians)
             die.model.quaternion.premultiply(spinStep)
           },
-          render() {
-            die.renderer.render(die.scene, die.camera)
-          },
         }
       })
       this.idleSpin.start(targets)
     }
   }
 
-  async playResult(result: DiceRollResult): Promise<void> {
+  async playResult(
+    result: DiceRollResult,
+    animationGroups?: DiceAnimationGroupTiming[],
+  ): Promise<void> {
     if (this.preparedResult !== result || this.activeDice.length === 0) {
       await this.prepareResult(result)
     }
     if (this.preparedResult !== result) return
     this.idleSpin.stop()
     this.preparedResult = undefined
-    await Promise.all(this.activeDice.map((die, index) => animateDie(die, index * 90)))
+    this.cancelRoll()
+    const controller = new AbortController()
+    this.rollController = controller
+    const startDelays = createDiceStartDelays(
+      this.activeModules.map((module) => module.length),
+      animationGroups,
+    )
+    await animateDice(this.activeDice, controller.signal, () => this.renderAll(), startDelays)
+    if (controller.signal.aborted || this.disposed) return
+    this.rollController = undefined
     for (const die of this.activeDice) {
       const outcome = die.wrapper.dataset.percentileOutcome
       if (!outcome) continue
       die.wrapper.classList.add(outcome === 'selected' ? 'is-selected' : 'is-dimmed')
       if (outcome === 'selected') die.wrapper.setAttribute('aria-current', 'true')
+      if (outcome === 'dimmed') this.addDimOverlay(die)
     }
+    this.trackLayoutFor(420)
   }
 
   async showResult(result: DiceRollResult): Promise<void> {
@@ -726,12 +881,12 @@ export class ThreeDiceBoard {
       await this.prepareResult(result)
     }
     if (this.preparedResult !== result) return
+    this.cancelRoll()
     this.idleSpin.stop()
     for (const die of this.activeDice) {
       const finalTarget = uprightTarget(die.faceNormal, die.faceUp)
       die.model.quaternion.copy(finalTarget)
       die.model.scale.multiplyScalar(settleScaleFactor(1))
-      die.renderer.render(die.scene, die.camera)
       die.wrapper.classList.add('is-settled')
       die.valueLabel.style.opacity = '1'
       die.valueLabel.style.transform = 'translateX(-50%) translateY(0) scale(1)'
@@ -739,17 +894,37 @@ export class ThreeDiceBoard {
       if (outcome) {
         die.wrapper.classList.add(outcome === 'selected' ? 'is-selected' : 'is-dimmed')
         if (outcome === 'selected') die.wrapper.setAttribute('aria-current', 'true')
+        if (outcome === 'dimmed') this.addDimOverlay(die)
       }
     }
+    this.renderAll()
+    this.trackLayoutFor(420)
   }
 
   dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
     this.preparationGeneration += 1
+    this.cancelRoll()
     this.idleSpin.stop()
-    this.activeDice.forEach((die) => die.dispose())
+    this.renderCoordinator.stop()
+    if (this.layoutFrameHandle !== undefined) window.cancelAnimationFrame(this.layoutFrameHandle)
+    this.layoutFrameHandle = undefined
+    this.resizeObserver?.disconnect()
+    this.scrollHost?.removeEventListener('scroll', this.handleLayoutChange)
+    this.diceTray.removeEventListener('scroll', this.handleLayoutChange)
+    window.removeEventListener('resize', this.handleLayoutChange)
+    this.activeDice.forEach((die) => this.disposeDie(die))
     this.activeDice = []
+    this.activeModules = []
     this.preparedResult = undefined
     this.diceTray.replaceChildren()
+    releaseSharedRenderer(this.rendererOwner)
+  }
+
+  refreshLayout(): void {
+    this.renderCoordinator.request()
+    this.trackLayoutFor(300)
   }
 
   private renderWaitingDice(): void {
@@ -757,5 +932,112 @@ export class ThreeDiceBoard {
     placeholder.className = 'empty-tray'
     placeholder.textContent = '选择示例并点击“播放掷骰”'
     this.diceTray.replaceChildren(placeholder)
+  }
+
+  private readonly handleLayoutChange = (): void => {
+    this.renderCoordinator.request()
+  }
+
+  private cancelRoll(): void {
+    this.rollController?.abort()
+    this.rollController = undefined
+  }
+
+  private disposeDie(die: RenderedDie): void {
+    die.dimOverlay?.remove()
+    die.dispose()
+  }
+
+  private addDimOverlay(die: RenderedDie): void {
+    if (die.dimOverlay) return
+    const overlay = document.createElement('div')
+    overlay.className = 'dice-shared-dim-overlay'
+    overlay.setAttribute('aria-hidden', 'true')
+    die.dimOverlay = overlay
+    this.renderLayer.append(overlay)
+  }
+
+  private trackLayoutFor(milliseconds: number): void {
+    this.layoutDeadline = Math.max(this.layoutDeadline, performance.now() + milliseconds)
+    if (this.layoutFrameHandle !== undefined) return
+    const frame = (now: number): void => {
+      this.layoutFrameHandle = undefined
+      if (this.disposed) return
+      this.renderAll()
+      if (now < this.layoutDeadline) this.layoutFrameHandle = window.requestAnimationFrame(frame)
+    }
+    this.layoutFrameHandle = window.requestAnimationFrame(frame)
+  }
+
+  private renderAll(): void {
+    if (this.disposed || sharedDiceRenderer?.owner !== this.rendererOwner) return
+    const surfaceRect = this.surface.getBoundingClientRect()
+    const clippingRects: DiceViewportRect[] = [surfaceRect, {
+      left: 0,
+      top: 0,
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }]
+    if (this.scrollHost) clippingRects.push(this.scrollHost.getBoundingClientRect())
+    const canvasRect = intersectDiceViewportRects(clippingRects)
+    const canvas = this.renderer.domElement
+    if (!canvasRect || canvasRect.width < 1 || canvasRect.height < 1) {
+      canvas.hidden = true
+      return
+    }
+
+    canvas.hidden = false
+    canvas.style.left = `${canvasRect.left - surfaceRect.left}px`
+    canvas.style.top = `${canvasRect.top - surfaceRect.top}px`
+    canvas.style.width = `${canvasRect.width}px`
+    canvas.style.height = `${canvasRect.height}px`
+    const width = Math.max(1, Math.round(canvasRect.width))
+    const height = Math.max(1, Math.round(canvasRect.height))
+    const pixelRatio = Math.min(window.devicePixelRatio, 2)
+    if (
+      width !== this.canvasWidth
+      || height !== this.canvasHeight
+      || pixelRatio !== this.canvasPixelRatio
+    ) {
+      this.canvasWidth = width
+      this.canvasHeight = height
+      this.canvasPixelRatio = pixelRatio
+      this.renderer.setPixelRatio(pixelRatio)
+      this.renderer.setSize(width, height, false)
+    }
+    this.renderer.toneMappingExposure = this.skin === 'galaxy'
+      ? 1.26
+      : this.skin === 'moonwhite'
+        ? 1.18
+        : this.skin === 'cinnabar'
+          ? 1.16
+          : 1.12
+    this.renderer.setScissorTest(false)
+    this.renderer.setViewport(0, 0, width, height)
+    this.renderer.clear(true, true, true)
+    this.renderer.setScissorTest(true)
+
+    for (const die of this.activeDice) {
+      const slotRect = die.viewport.getBoundingClientRect()
+      const placement = createDiceRenderViewport(slotRect, canvasRect)
+      if (!placement || slotRect.width < 1 || slotRect.height < 1) {
+        if (die.dimOverlay) die.dimOverlay.hidden = true
+        continue
+      }
+      const { viewport, scissor } = placement
+      die.camera.aspect = slotRect.width / slotRect.height
+      die.camera.updateProjectionMatrix()
+      this.renderer.setViewport(viewport.x, viewport.y, viewport.width, viewport.height)
+      this.renderer.setScissor(scissor.x, scissor.y, scissor.width, scissor.height)
+      this.renderer.render(die.scene, die.camera)
+      if (die.dimOverlay) {
+        die.dimOverlay.hidden = false
+        die.dimOverlay.style.left = `${slotRect.left - surfaceRect.left}px`
+        die.dimOverlay.style.top = `${slotRect.top - surfaceRect.top}px`
+        die.dimOverlay.style.width = `${slotRect.width}px`
+        die.dimOverlay.style.height = `${slotRect.height}px`
+      }
+    }
+    this.renderer.setScissorTest(false)
   }
 }

@@ -918,12 +918,16 @@ public class TrpgTurnExecutionService {
                 planResolver.resolve(conversation, runtime);
         List<GroupActionSpec> actions =
                 withSceneIntro(conversation, resolved);
-        int syntheticSteps = actions.stream().anyMatch(action ->
-                GroupChatConstant.ACTION_TRPG_SCENE_INTRO.equals(
-                        action.actionType())) ? 1 : 0;
+        int syntheticSteps = (int) actions.stream()
+                .filter(action ->
+                        GroupChatConstant.ACTION_TRPG_SCENE_INTRO.equals(
+                                action.actionType())
+                        || GroupChatConstant.ACTION_COMBAT_INTRO.equals(
+                                action.actionType()))
+                .count();
         int actionLimit = GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
                 resolved.source())
-                ? GroupChatConstant.MAX_REPLY_STEPS * 2
+                ? GroupChatConstant.MAX_REPLY_STEPS * 2 + syntheticSteps
                 : GroupChatConstant.MAX_REPLY_STEPS + syntheticSteps;
         if (actions.size() > actionLimit) {
             throw new UserRequestException(

@@ -578,6 +578,11 @@ CREATE TABLE coc_character (
     temporary_insanity BOOLEAN DEFAULT FALSE,
     temporary_insanity_phase VARCHAR(20),
     temporary_insanity_remaining_rounds INT,
+    in_cover BOOLEAN NOT NULL DEFAULT FALSE,
+    cover_action_forfeit_pending BOOLEAN NOT NULL DEFAULT FALSE,
+    stunned_remaining_rounds INT NOT NULL DEFAULT 0,
+    restrained_by_character_id BIGINT,
+    melee_attacked_this_round BOOLEAN NOT NULL DEFAULT FALSE,
     quick_notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -588,6 +593,15 @@ CREATE INDEX idx_coc_character_run_actor
 
 CREATE INDEX idx_coc_character_participant
     ON coc_character (participant_id);
+
+ALTER TABLE coc_character
+    ADD CONSTRAINT ck_coc_character_stunned_remaining_rounds
+        CHECK (stunned_remaining_rounds >= 0),
+    ADD CONSTRAINT fk_coc_character_restrained_by
+        FOREIGN KEY (restrained_by_character_id)
+        REFERENCES coc_character (id)
+        ON DELETE SET NULL
+        DEFERRABLE INITIALLY DEFERRED;
 
 CREATE UNIQUE INDEX uk_coc_character_run_participant
     ON coc_character (run_id, participant_id)

@@ -37,6 +37,13 @@ final class TrpgRulePrompts {
                 + "\n</investigator-resident-rules>\n";
     }
 
+    static String investigatorCombatReference() {
+        return "\n<investigator-combat-reference>\n"
+                + InvestigatorRulePromptConstant
+                .INVESTIGATOR_COMBAT_REFERENCE
+                + "\n</investigator-combat-reference>\n";
+    }
+
     static String investigatorThinkingModeRules() {
         return InvestigatorRulePromptConstant.INVESTIGATOR_THINKING_MODE_RULES;
     }

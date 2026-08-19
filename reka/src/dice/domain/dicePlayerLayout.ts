@@ -18,6 +18,18 @@ export interface DiceOutcomeVfxLayout {
   sizePx: number
 }
 
+export interface DiceViewportRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+export interface DiceRenderViewport {
+  viewport: { x: number; y: number; width: number; height: number }
+  scissor: { x: number; y: number; width: number; height: number }
+}
+
 export function createDicePlayerLayout(groupCount: number): DicePlayerLayout {
   const count = Math.max(0, Math.floor(groupCount))
   if (count === 0) {
@@ -77,4 +89,38 @@ export function mergeDiceOutcomeVfxRects(
   const right = Math.max(...rects.map((rect) => rect.left + rect.width))
   const bottom = Math.max(...rects.map((rect) => rect.top + rect.height))
   return { left, top, width: right - left, height: bottom - top }
+}
+
+export function intersectDiceViewportRects(
+  rects: DiceViewportRect[],
+): DiceViewportRect | undefined {
+  if (!rects.length) return undefined
+  const left = Math.max(...rects.map((rect) => rect.left))
+  const top = Math.max(...rects.map((rect) => rect.top))
+  const right = Math.min(...rects.map((rect) => rect.left + rect.width))
+  const bottom = Math.min(...rects.map((rect) => rect.top + rect.height))
+  if (right <= left || bottom <= top) return undefined
+  return { left, top, width: right - left, height: bottom - top }
+}
+
+export function createDiceRenderViewport(
+  slot: DiceViewportRect,
+  canvas: DiceViewportRect,
+): DiceRenderViewport | undefined {
+  const visible = intersectDiceViewportRects([slot, canvas])
+  if (!visible) return undefined
+  return {
+    viewport: {
+      x: slot.left - canvas.left,
+      y: canvas.top + canvas.height - (slot.top + slot.height),
+      width: slot.width,
+      height: slot.height,
+    },
+    scissor: {
+      x: visible.left - canvas.left,
+      y: canvas.top + canvas.height - (visible.top + visible.height),
+      width: visible.width,
+      height: visible.height,
+    },
+  }
 }

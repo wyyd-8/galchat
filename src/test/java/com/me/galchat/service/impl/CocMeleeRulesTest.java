@@ -49,11 +49,11 @@ class CocMeleeRulesTest {
     }
 
     @Test
-    void normalDamageExpandsDamageBonusHalfBonusAndTemporaryStunDice() {
+    void normalDamageDoesNotCountStunDurationAsHpDamage() {
         assertThat(CocMeleeRules.damagePlan(
                 "1D3+眩晕+半DB", "+1D6", false, false))
-                .isEqualTo(new CocMeleeRules.DamagePlan(
-                        "1D3+1D6+(1D6)/2", false, false));
+                .extracting(CocMeleeRules.DamagePlan::formula)
+                .isEqualTo("1D3+(1D6)/2");
     }
 
     @Test

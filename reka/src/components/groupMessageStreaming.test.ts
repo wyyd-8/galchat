@@ -148,3 +148,143 @@ test('keeps continued streaming output below the dice message from the same repl
     })
   }
 })
+
+test('replaces the failed message while retrying the same reply step', async () => {
+  const { api, streamTrpgTurn } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  const storage = new Map<string, string>()
+  Object.assign(globalThis, {
+    window: {
+      addEventListener() {},
+      clearTimeout,
+      setTimeout,
+    },
+    localStorage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+      key: (index: number) => [...storage.keys()][index] ?? null,
+      get length() { return storage.size },
+    },
+    sessionStorage: {
+      getItem: () => null,
+      setItem() {},
+      removeItem() {},
+      clear() {},
+      key: () => null,
+      length: 0,
+    },
+  })
+
+  const originalRetry = streamTrpgTurn.retry
+  const originalGroupMessages = api.groupMessages
+  const originalReplyPlan = api.replyPlan
+  const originalCurrentTurn = api.currentTurn
+  const originalCombatOverview = api.combatOverview
+  try {
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {},
+      insert(child, parent) {
+        const children = (parent.children ||= []) as Array<Record<string, unknown>>
+        children.push(child)
+        child.parent = parent
+      },
+      remove() {},
+      createElement: () => ({}),
+      createText: (text) => ({ text }),
+      createComment: (text) => ({ text }),
+      setText(node, text) { node.text = text },
+      setElementText(node, text) { node.text = text },
+      parentNode: (node) => node.parent as Record<string, unknown> | null,
+      nextSibling: () => null,
+    })
+    renderer.createApp(defineComponent({
+      setup() {
+        workspace = useWorkspace()
+        return () => h('div')
+      },
+    })).mount({})
+    workspace.conversations.value = [{
+      id: 7,
+      userWorldId: 3,
+      worldId: 2,
+      mode: 'trpg',
+      title: '旧宅调查',
+      status: 'active',
+    }]
+    workspace.selectedConversationId.value = 7
+    const failedMessage: GroupMessage = {
+      id: 100,
+      conversationId: 7,
+      turnId: 42,
+      replyStepId: 9,
+      speakerType: 'character',
+      speakerId: 101,
+      speakerName: 'A',
+      messageKind: 'dialogue',
+      content: '旧的失败内容',
+      sequenceNo: 10,
+      status: 'failed',
+    }
+    workspace.messages.value = [failedMessage]
+
+    let streamingSnapshot: Array<Pick<GroupMessage, 'id' | 'replyStepId' | 'content' | 'status'>> = []
+    streamTrpgTurn.retry = async (_id, _turnId, _stepId, _clientRequestId, onEvent) => {
+      onEvent({
+        eventType: 'reply.started', conversationId: 7, turnId: 42,
+        replyStepId: 9, messageId: 101, sequence: 11,
+        messageKind: 'dialogue', speaker: { type: 'character', id: 101, name: 'A' },
+      })
+      onEvent({
+        eventType: 'message.delta', conversationId: 7, turnId: 42,
+        replyStepId: 9, messageId: 101, sequence: 11,
+        messageKind: 'dialogue', speaker: { type: 'character', id: 101, name: 'A' },
+        delta: '新的重试内容',
+      })
+      streamingSnapshot = workspace.messages.value.map(({ id, replyStepId, content, status }) => ({
+        id, replyStepId, content, status,
+      }))
+      onEvent({
+        eventType: 'message.completed', conversationId: 7, turnId: 42,
+        replyStepId: 9, messageId: 101, sequence: 11,
+        messageKind: 'dialogue', speaker: { type: 'character', id: 101, name: 'A' },
+        content: '新的重试内容',
+      })
+    }
+    api.groupMessages = async () => [{
+      ...failedMessage,
+      id: 101,
+      content: '新的重试内容',
+      sequenceNo: 11,
+      status: 'completed',
+    }]
+    api.replyPlan = async () => [{ source: 'SCENE', displayName: '旧宅', items: [] }]
+    api.currentTurn = async () => null
+    api.combatOverview = async () => []
+
+    await workspace.retryStep(failedMessage)
+
+    assert.deepEqual(streamingSnapshot, [{
+      id: 101,
+      replyStepId: 9,
+      content: '新的重试内容',
+      status: 'streaming',
+    }])
+  } finally {
+    streamTrpgTurn.retry = originalRetry
+    api.groupMessages = originalGroupMessages
+    api.replyPlan = originalReplyPlan
+    api.currentTurn = originalCurrentTurn
+    api.combatOverview = originalCombatOverview
+    Object.assign(globalThis, {
+      window: previousWindow,
+      localStorage: previousLocalStorage,
+      sessionStorage: previousSessionStorage,
+    })
+  }
+})

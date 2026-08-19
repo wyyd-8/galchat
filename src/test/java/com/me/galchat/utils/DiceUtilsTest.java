@@ -64,6 +64,19 @@ class DiceUtilsTest {
     }
 
     @Test
+    void maxFunctionClampsArmorForEachHitIndependently() {
+        String formula = "max(0,(1D1+1)-3)+max(0,(1D1+5)-3)";
+
+        DiceRollResultVO prepared = DiceUtils.prepare(formula);
+        DiceRollResultVO rolled = DiceUtils.roll(
+                formula, new SequenceRandom(0, 0));
+
+        assertNull(prepared.getResult());
+        assertEquals(2, prepared.getModules().size());
+        assertEquals(3, rolled.getResult());
+    }
+
+    @Test
     void rollsEveryDieAndUsesArithmeticPrecedence() {
         DiceRollResultVO result = DiceUtils.roll("3D6 + 1D4 * 2", new SequenceRandom(0, 1, 2, 3));
 

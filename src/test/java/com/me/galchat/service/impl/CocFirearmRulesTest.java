@@ -51,6 +51,15 @@ class CocFirearmRulesTest {
     }
 
     @Test
+    void firearmDamageDoesNotCountStunDurationAsHpDamage() {
+        CocFirearmRules.DamagePlan damage = CocFirearmRules.damagePlan(
+                FirearmFiringMode.SINGLE, 1, false,
+                false, false, "1D3+眩晕");
+
+        assertThat(damage.formula()).isEqualTo("(1D3)");
+    }
+
+    @Test
     void fumbleOnlyBreaksAtMalfunctionThresholdWhenKpChoosesIt() {
         assertThat(CocFirearmRules.malfunction(
                 98, true, 96, false))

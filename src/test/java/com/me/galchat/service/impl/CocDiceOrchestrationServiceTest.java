@@ -205,11 +205,88 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
+    void firearmAttackAutomaticallyPenalizesTargetAlreadyInCover() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "枪手", Map.of("射击:手枪", 60));
+        CocDiceCharacterVO target = cardInCover(
+                21L, 91L, "掩护中的目标", Map.of());
+        when(cards.requireDiceCharacter(5L, "枪手")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "掩护中的目标"))
+                .thenReturn(target);
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(11L)
+                .setName("手枪").setSkillName("射击:手枪")
+                .setDamage("1D10").setAmmoCapacity(6).setRemainingAmmo(1)
+                .setMalfunction("100").setCanImpale(true)
+                .setIsBroken(false);
+        when(cards.requireWeaponForUpdate(5L, "枪手", "手枪"))
+                .thenReturn(weapon);
+        stubCreate(7L);
+
+        service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "射击掩护中的目标", "枪手", "手枪",
+                        FirearmFiringMode.SINGLE, true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "掩护中的目标", 1,
+                                CocPercentileModifier.NORMAL))));
+
+        assertThat(createdDrafts()).singleElement().satisfies(draft -> {
+            assertThat(draft.getFormula()).isEqualTo("1D100$");
+            assertThat(draft.getResolutionData().getRule())
+                    .containsEntry("automaticSituationPenaltyDice", 1);
+        });
+    }
+
+    @Test
+    void firearmAttackAutomaticallyCombinesMovementSmallTargetAndPosturePenalties() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "奔跑中的枪手", Map.of("射击:手枪", 60));
+        CocDiceCharacterVO target = cardWithBuild(
+                21L, 91L, "快速移动的小型目标", Map.of(), -2);
+        when(cards.requireDiceCharacter(5L, "奔跑中的枪手"))
+                .thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "快速移动的小型目标"))
+                .thenReturn(target);
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(11L)
+                .setName("手枪").setSkillName("射击:手枪")
+                .setDamage("1D10").setAmmoCapacity(6).setRemainingAmmo(1)
+                .setMalfunction("100").setCanImpale(true)
+                .setIsBroken(false);
+        when(cards.requireWeaponForUpdate(5L, "奔跑中的枪手", "手枪"))
+                .thenReturn(weapon);
+        stubCreate(7L);
+
+        service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "在奔跑中射击小型移动目标",
+                        "奔跑中的枪手",
+                        "手枪",
+                        FirearmFiringMode.SINGLE,
+                        true,
+                        true,
+                        true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "快速移动的小型目标",
+                                1,
+                                CocPercentileModifier.BONUS_1,
+                                true))));
+
+        assertThat(createdDrafts()).singleElement().satisfies(draft -> {
+            assertThat(draft.getFormula()).isEqualTo("1D100$$");
+            assertThat(draft.getResolutionData().getRule())
+                    .containsEntry("automaticSituationPenaltyDice", 4)
+                    .containsEntry("difficultyIncrease", 1);
+        });
+    }
+
+    @Test
     void firearmMalfunctionKeepsEarlierDamageAndInvalidatesLaterGroups() {
         CocDiceCharacterVO attacker = card(
                 11L, 88L, "枪手", Map.of("射击:冲锋枪", 40));
-        CocDiceCharacterVO target = card(
-                21L, 91L, "邪教徒", Map.of());
+        CocDiceCharacterVO target = cardWithArmor(
+                21L, 91L, "邪教徒", Map.of(), 3);
         when(cards.requireDiceCharacter(5L, "枪手")).thenReturn(attacker);
         when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(target);
         CocCharacterWeapon weapon = new CocCharacterWeapon()
@@ -223,8 +300,11 @@ class CocDiceOrchestrationServiceTest {
         when(cards.requireWeaponForUpdate(
                 5L, "枪手", "汤普森冲锋枪"))
                 .thenReturn(weapon);
-        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(
-                damageCard(21L, "邪教徒"));
+        CocCharacter targetEntity = damageCard(21L, "邪教徒")
+                .setHpCurrent(100)
+                .setHpMax(100)
+                .setArmor(3);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(targetEntity);
         when(internal.createDiceRoll(any(), any(), any()))
                 .thenAnswer(invocation -> {
                     List<DiceRollResultCreateDTO> drafts =
@@ -245,8 +325,13 @@ class CocDiceOrchestrationServiceTest {
                             rows);
                 });
         when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
-                .thenAnswer(invocation -> materialize(
-                        101L, 2, invocation.getArgument(2)));
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 2, invocation.getArgument(2));
+                    rows.forEach(row -> row.setResultData(
+                            DiceUtils.roll(row.getResultData().getFormula())));
+                    return rows;
+                });
 
         KpDiceToolResult result = service.requestFirearmAttack(
                 7L,
@@ -264,6 +349,12 @@ class CocDiceOrchestrationServiceTest {
         assertThat(weapon.getRemainingAmmo()).isZero();
         assertThat(weapon.getIsBroken()).isTrue();
         assertThat(result.results()).hasSize(4);
+        int appliedDamage = result.results().getLast()
+                .getResultData().getResult();
+        assertThat(targetEntity.getHpCurrent())
+                .isEqualTo(100 - appliedDamage);
+        assertThat(result.results().getLast().getResolution().getEffect())
+                .containsEntry("hpLoss", appliedDamage);
         assertThat(result.results().subList(0, 3))
                 .extracting(detail -> detail.getResolution()
                         .getOutcome().get("valid"))
@@ -277,25 +368,91 @@ class CocDiceOrchestrationServiceTest {
                         .findFirst().orElseThrow().getArgument(2);
         assertThat(damageDrafts).singleElement().satisfies(draft -> {
             assertThat(draft.getFormula())
-                    .isEqualTo("(1D10+2)+(1D10+2)");
+                    .isEqualTo("max(0,(1D10+2)-3)+max(0,(1D10+2)-3)");
             assertThat(draft.getResolutionData().getRule())
                     .containsEntry("hitCount", 2)
-                    .containsEntry("impalingHitCount", 0);
+                    .containsEntry("impalingHitCount", 0)
+                    .containsEntry("armor", 3)
+                    .containsEntry("automaticArmor", true);
         });
+    }
+
+    @Test
+    void firearmStunWeaponCreatesSeparateDamageAndStunDice() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "电击手", Map.of("射击:手枪", 60));
+        CocDiceCharacterVO target = card(
+                21L, 91L, "目标", Map.of());
+        when(cards.requireDiceCharacter(5L, "电击手")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "目标")).thenReturn(target);
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(11L)
+                .setName("泰瑟枪").setSkillName("射击:手枪")
+                .setDamage("1D3+眩晕")
+                .setAmmoCapacity(1).setRemainingAmmo(1)
+                .setMalfunction("95").setCanImpale(false)
+                .setIsBroken(false);
+        when(cards.requireWeaponForUpdate(
+                5L, "电击手", "泰瑟枪")).thenReturn(weapon);
+        CocCharacter targetEntity = damageCard(21L, "目标");
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(targetEntity);
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 1, invocation.getArgument(2));
+                    rows.getFirst().setResultData(new DiceRollResultVO(
+                            "1D100", List.of(), 20));
+                    return new DiceRollAggregate(
+                            new DiceRollSummary().setId(101L)
+                                    .setConversationId(7L)
+                                    .setReason("电击")
+                                    .setRoundCount(1)
+                                    .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                            rows);
+                });
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 2, invocation.getArgument(2));
+                    rows.get(0).setResultData(new DiceRollResultVO(
+                            "(1D3)", List.of(), 2));
+                    rows.get(1).setResultData(new DiceRollResultVO(
+                            "1D6", List.of(), 4));
+                    return rows;
+                });
+
+        KpDiceToolResult result = service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "电击", "电击手", "泰瑟枪",
+                        FirearmFiringMode.SINGLE, true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "目标", 1, CocPercentileModifier.NORMAL))));
+
+        assertThat(result.results())
+                .extracting(detail -> detail.getResolution().getType())
+                .containsExactly("FIREARM_ATTACK", "DAMAGE", "STUN_DURATION");
+        assertThat(targetEntity.getHpCurrent()).isEqualTo(8);
+        assertThat(targetEntity.getStunnedRemainingRounds()).isEqualTo(4);
+        assertThat(result.semanticResult())
+                .contains("目标生命-2")
+                .contains("目标被眩晕4回合");
     }
 
     @Test
     void meleeExtremeKnifeAttackAutomaticallyAppendsImpalingDamage() {
         CocDiceCharacterVO attacker = card(
                 11L, 88L, "林恩", Map.of("斗殴", 60));
-        CocDiceCharacterVO defender = card(
-                21L, 91L, "邪教徒", Map.of("闪避", 40));
+        CocDiceCharacterVO defender = cardWithArmor(
+                21L, 91L, "邪教徒", Map.of("闪避", 40), 3);
         when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(attacker);
         when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(defender);
         CocCharacter attackerEntity = damageCard(11L, "林恩")
                 .setDamageBonus("+1D4");
         CocCharacter defenderEntity = damageCard(21L, "邪教徒")
-                .setDamageBonus("0");
+                .setHpCurrent(100)
+                .setHpMax(100)
+                .setDamageBonus("0")
+                .setArmor(3);
         when(cards.lockDiceCharacter(5L, 11L)).thenReturn(attackerEntity);
         when(cards.lockDiceCharacter(5L, 21L)).thenReturn(defenderEntity);
         when(cards.requireWeaponForUpdate(5L, "林恩", "折刀"))
@@ -319,8 +476,13 @@ class CocDiceOrchestrationServiceTest {
                             rows);
                 });
         when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
-                .thenAnswer(invocation -> materialize(
-                        101L, 2, invocation.getArgument(2)));
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 2, invocation.getArgument(2));
+                    rows.forEach(row -> row.setResultData(
+                            DiceUtils.roll(row.getResultData().getFormula())));
+                    return rows;
+                });
 
         KpDiceToolResult result = service.requestMeleeAttack(
                 7L, 5L, new KpMeleeRequestDTOs.Attack(
@@ -333,6 +495,12 @@ class CocDiceOrchestrationServiceTest {
                                 null, CocPercentileModifier.NORMAL)));
 
         assertThat(result.results()).hasSize(3);
+        int appliedDamage = result.results().getLast()
+                .getResultData().getResult();
+        assertThat(defenderEntity.getHpCurrent())
+                .isEqualTo(100 - appliedDamage);
+        assertThat(result.results().getLast().getResolution().getEffect())
+                .containsEntry("hpLoss", appliedDamage);
         @SuppressWarnings("unchecked")
         List<DiceRollResultCreateDTO> damageDrafts =
                 (List<DiceRollResultCreateDTO>) org.mockito.Mockito
@@ -341,12 +509,147 @@ class CocDiceOrchestrationServiceTest {
                                 .equals("appendDiceRollRound"))
                         .findFirst().orElseThrow().getArgument(2);
         assertThat(damageDrafts).singleElement().satisfies(draft -> {
-            assertThat(draft.getFormula()).isEqualTo("10+(1D4)");
+            assertThat(draft.getFormula())
+                    .isEqualTo("max(0,(10+(1D4))-3)");
             assertThat(draft.getResolutionData().getRule())
                     .containsEntry("characterName", "邪教徒")
                     .containsEntry("sourceCharacterName", "林恩")
-                    .containsEntry("impaling", true);
+                    .containsEntry("impaling", true)
+                    .containsEntry("armor", 3)
+                    .containsEntry("automaticArmor", true);
         });
+    }
+
+    @Test
+    void npcMeleeMajorWoundLeavesTheWoundedPlayersConRollPending() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "阿尔法", Map.of("斗殴", 60));
+        CocDiceCharacterVO defender = card(
+                21L, null, "本", Map.of());
+        when(cards.requireDiceCharacter(5L, "阿尔法")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "本")).thenReturn(defender);
+        CocCharacter attackerEntity = damageCard(11L, "阿尔法")
+                .setDamageBonus("0");
+        CocCharacter defenderEntity = damageCard(21L, "本")
+                .setDamageBonus("0");
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(attackerEntity);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(defenderEntity);
+        when(cards.requireWeaponForUpdate(5L, "阿尔法", "伸缩警棍"))
+                .thenReturn(new CocCharacterWeapon()
+                        .setId(82L).setName("伸缩警棍").setSkillName("斗殴")
+                        .setDamage("6").setCanImpale(false)
+                        .setIsBroken(false));
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 1, invocation.getArgument(2));
+                    rows.getFirst().setResultData(new DiceRollResultVO(
+                            "1D100", List.of(), 20));
+                    return new DiceRollAggregate(
+                            new DiceRollSummary().setId(101L)
+                                    .setConversationId(7L)
+                                    .setReason("阿尔法攻击本")
+                                    .setRoundCount(1)
+                                    .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                            rows);
+                });
+        AtomicLong round = new AtomicLong(1L);
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L,
+                            Math.toIntExact(round.incrementAndGet()),
+                            invocation.getArgument(2));
+                    if (DiceRollConstant.TYPE_DAMAGE.equals(
+                            rows.getFirst().getResolutionData().getType())) {
+                        rows.getFirst().setResultData(
+                                new DiceRollResultVO("6", List.of(), 6));
+                    }
+                    return rows;
+                });
+
+        KpDiceToolResult result = service.requestMeleeAttack(
+                7L, 5L, new KpMeleeRequestDTOs.Attack(
+                        "阿尔法攻击本",
+                        new KpMeleeRequestDTOs.Attacker(
+                                "阿尔法", "伸缩警棍",
+                                CocPercentileModifier.NORMAL),
+                        new KpMeleeRequestDTOs.Defender(
+                                "本", MeleeDefenseMode.NONE,
+                                null, CocPercentileModifier.NORMAL)));
+
+        assertThat(result.results()).hasSize(3);
+        assertThat(result.results().getLast()).satisfies(con -> {
+            assertThat(con.getResolution().getType())
+                    .isEqualTo(DiceRollConstant.TYPE_MAJOR_WOUND_CON);
+            assertThat(con.getCharacterId()).isNull();
+            assertThat(con.getResultData().getResult()).isNull();
+            assertThat(con.getResultData().getModules()).isNotEmpty();
+            assertThat(con.getResolution().getCheckName()).isEqualTo("CON");
+        });
+        assertThat(result.summary().getStatus())
+                .isEqualTo(DiceRollConstant.STATUS_PENDING);
+    }
+
+    @Test
+    void meleeStunWeaponCreatesSeparateDamageAndStunDice() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "电击手", Map.of("斗殴", 60));
+        CocDiceCharacterVO defender = card(
+                21L, 91L, "目标", Map.of());
+        when(cards.requireDiceCharacter(5L, "电击手")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "目标")).thenReturn(defender);
+        CocCharacter attackerEntity = damageCard(11L, "电击手")
+                .setDamageBonus("0");
+        CocCharacter defenderEntity = damageCard(21L, "目标")
+                .setDamageBonus("0");
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(attackerEntity);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(defenderEntity);
+        when(cards.requireWeaponForUpdate(5L, "电击手", "电击器"))
+                .thenReturn(new CocCharacterWeapon()
+                        .setId(82L).setName("电击器").setSkillName("斗殴")
+                        .setDamage("1D3+眩晕").setCanImpale(false)
+                        .setIsBroken(false));
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 1, invocation.getArgument(2));
+                    rows.getFirst().setResultData(new DiceRollResultVO(
+                            "1D100", List.of(), 20));
+                    return new DiceRollAggregate(
+                            new DiceRollSummary().setId(101L)
+                                    .setConversationId(7L)
+                                    .setReason("电击")
+                                    .setRoundCount(1)
+                                    .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                            rows);
+                });
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            101L, 2, invocation.getArgument(2));
+                    rows.get(0).setResultData(new DiceRollResultVO(
+                            "1D3", List.of(), 2));
+                    rows.get(1).setResultData(new DiceRollResultVO(
+                            "1D6", List.of(), 4));
+                    return rows;
+                });
+
+        KpDiceToolResult result = service.requestMeleeAttack(
+                7L, 5L, new KpMeleeRequestDTOs.Attack(
+                        "电击",
+                        new KpMeleeRequestDTOs.Attacker(
+                                "电击手", "电击器",
+                                CocPercentileModifier.NORMAL),
+                        new KpMeleeRequestDTOs.Defender(
+                                "目标", MeleeDefenseMode.NONE,
+                                null, CocPercentileModifier.NORMAL)));
+
+        assertThat(result.results())
+                .extracting(detail -> detail.getResolution().getType())
+                .containsExactly("MELEE_ATTACK", "DAMAGE", "STUN_DURATION");
+        assertThat(defenderEntity.getHpCurrent()).isEqualTo(8);
+        assertThat(defenderEntity.getStunnedRemainingRounds()).isEqualTo(4);
     }
 
     @Test
@@ -411,6 +714,50 @@ class CocDiceOrchestrationServiceTest {
                     .containsEntry("sourceCharacterName", "邪教徒")
                     .containsEntry("maximumDamage", false);
         });
+    }
+
+    @Test
+    void repeatedMeleeAttackMarksDefenderAndAddsAutomaticBonusDie() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "林恩", Map.of("斗殴", 40));
+        CocDiceCharacterVO defender = card(
+                21L, 91L, "邪教徒", Map.of("闪避", 30));
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(defender);
+        CocCharacter attackerEntity = damageCard(11L, "林恩")
+                .setDamageBonus("0");
+        CocCharacter defenderEntity = damageCard(21L, "邪教徒")
+                .setDamageBonus("0")
+                .setMeleeAttackedThisRound(false);
+        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(attackerEntity);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(defenderEntity);
+        stubCreate(7L);
+        KpMeleeRequestDTOs.Attack request = new KpMeleeRequestDTOs.Attack(
+                "连续围攻",
+                new KpMeleeRequestDTOs.Attacker(
+                        "林恩", null, CocPercentileModifier.NORMAL),
+                new KpMeleeRequestDTOs.Defender(
+                        "邪教徒", MeleeDefenseMode.NONE,
+                        null, CocPercentileModifier.NORMAL));
+
+        service.requestMeleeAttack(7L, 5L, request);
+        service.requestMeleeAttack(7L, 5L, request);
+
+        assertThat(defenderEntity.getMeleeAttackedThisRound()).isTrue();
+        verify(cards).updateDiceCharacter(defenderEntity);
+        List<String> attackerFormulas = org.mockito.Mockito
+                .mockingDetails(internal).getInvocations().stream()
+                .filter(invocation -> invocation.getMethod().getName()
+                        .equals("createDiceRoll"))
+                .map(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    List<DiceRollResultCreateDTO> drafts =
+                            invocation.getArgument(2);
+                    return drafts.getFirst().getFormula();
+                })
+                .toList();
+        assertThat(attackerFormulas)
+                .containsExactly("1D100", "1D100#");
     }
 
     @Test
@@ -1038,7 +1385,8 @@ class CocDiceOrchestrationServiceTest {
 
     @Test
     void standaloneDamageCreatesFirstRoundAndAppliesHp() {
-        CocDiceCharacterVO targetCard = card(12L, 88L, "陈默", 45);
+        CocDiceCharacterVO targetCard = cardWithArmor(
+                12L, 88L, "陈默", Map.of("侦查", 45), 3);
         when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(targetCard);
         when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
             List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
@@ -1066,6 +1414,7 @@ class CocDiceOrchestrationServiceTest {
                 .setHpCurrent(10)
                 .setHpMax(10)
                 .setCon(50)
+                .setArmor(3)
                 .setMajorWound(false)
                 .setUnconscious(false)
                 .setDead(false);
@@ -1082,6 +1431,129 @@ class CocDiceOrchestrationServiceTest {
         assertThat(result.summary().getRoundCount()).isEqualTo(1);
         assertThat(locked.getHpCurrent()).isEqualTo(7);
         assertThat(result.semanticResult()).contains("陈默生命-3");
+    }
+
+    @Test
+    void standaloneDamageSplitsHpAndStunAndKeepsTheLongerDuration() {
+        CocDiceCharacterVO targetCard = card(
+                12L, 88L, "陈默", 45);
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(targetCard);
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            111L, 1, invocation.getArgument(2));
+                    rows.get(0).setResultData(new DiceRollResultVO(
+                            "1D3", List.of(), 2));
+                    rows.get(1).setResultData(new DiceRollResultVO(
+                            "1D6", List.of(), 3));
+                    return new DiceRollAggregate(
+                            new DiceRollSummary()
+                                    .setId(111L)
+                                    .setConversationId(7L)
+                                    .setReason("电击")
+                                    .setRoundCount(1)
+                                    .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                            rows);
+                });
+        CocCharacter locked = damageCard(12L, "陈默")
+                .setStunnedRemainingRounds(5);
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        KpDiceToolResult result = service.rollDamage(
+                7L, 5L, new KpDiceRequestDTOs.Damage(
+                        "电击",
+                        List.of(new KpDiceRequestDTOs.DamageTarget(
+                                "陈默", "1D3+眩晕"))));
+
+        assertThat(result.results())
+                .extracting(detail -> detail.getResolution().getType())
+                .containsExactly("DAMAGE", "STUN_DURATION");
+        assertThat(locked.getHpCurrent()).isEqualTo(8);
+        assertThat(locked.getStunnedRemainingRounds()).isEqualTo(5);
+        assertThat(result.semanticResult())
+                .isEqualTo("陈默生命-2；陈默被眩晕5回合（本次1D6=3，维持原时长）");
+    }
+
+    @Test
+    void pureStunDoesNotCreateHpDamage() {
+        CocDiceCharacterVO targetCard = card(
+                12L, 88L, "陈默", 45);
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(targetCard);
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            111L, 1, invocation.getArgument(2));
+                    rows.getFirst().setResultData(new DiceRollResultVO(
+                            "1D6", List.of(), 4));
+                    return new DiceRollAggregate(
+                            new DiceRollSummary()
+                                    .setId(111L)
+                                    .setConversationId(7L)
+                                    .setReason("催泪喷雾")
+                                    .setRoundCount(1)
+                                    .setStatus(DiceRollConstant.STATUS_COMPLETED),
+                            rows);
+                });
+        CocCharacter locked = damageCard(12L, "陈默");
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        KpDiceToolResult result = service.rollDamage(
+                7L, 5L, new KpDiceRequestDTOs.Damage(
+                        "催泪喷雾",
+                        List.of(new KpDiceRequestDTOs.DamageTarget(
+                                "陈默", "眩晕"))));
+
+        assertThat(result.results()).singleElement().satisfies(detail -> {
+            assertThat(detail.getResolution().getType())
+                    .isEqualTo("STUN_DURATION");
+            assertThat(detail.getResultData().getFormula()).isEqualTo("1D6");
+        });
+        assertThat(locked.getHpCurrent()).isEqualTo(10);
+        assertThat(locked.getStunnedRemainingRounds()).isEqualTo(4);
+    }
+
+    @Test
+    void onePlayerClickRollsDamageAndStunFromTheSameTargetTogether() {
+        CocDiceCharacterVO targetCard = card(
+                12L, null, "林恩", 70);
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(targetCard);
+        AtomicReference<List<DiceRollResult>> rowsRef = new AtomicReference<>();
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(111L)
+                .setConversationId(7L)
+                .setReason("电击")
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> rows = materialize(
+                            111L, 1, invocation.getArgument(2));
+                    rows.get(0).setResultData(DiceUtils.prepare("1D1*2"));
+                    rows.get(1).setResultData(DiceUtils.prepare("1D6"));
+                    rowsRef.set(rows);
+                    return new DiceRollAggregate(summary, rows);
+                });
+        CocCharacter locked = damageCard(12L, "林恩");
+        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
+
+        service.rollDamage(
+                7L, 5L, new KpDiceRequestDTOs.Damage(
+                        "电击",
+                        List.of(new KpDiceRequestDTOs.DamageTarget(
+                                "林恩", "1D1*2+眩晕"))));
+        when(internal.requireResult(201L))
+                .thenAnswer(ignored -> rowsRef.get().getFirst());
+        when(internal.requireSummaryForUpdate(111L)).thenReturn(summary);
+        when(internal.listResultEntities(111L))
+                .thenAnswer(ignored -> rowsRef.get());
+
+        service.rollPlayerResult(201L);
+
+        assertThat(rowsRef.get())
+                .allSatisfy(row -> assertThat(row.getResolvedAt()).isNotNull());
+        assertThat(locked.getHpCurrent()).isEqualTo(8);
+        assertThat(locked.getStunnedRemainingRounds()).isBetween(1, 6);
+        verify(internal, times(2)).saveResult(any());
     }
 
     @Test
@@ -1718,6 +2190,42 @@ class CocDiceOrchestrationServiceTest {
             Long participantId,
             String name,
             Map<String, Integer> checkValues) {
+        return cardWithArmor(
+                cardId, participantId, name, checkValues, 0);
+    }
+
+    private CocDiceCharacterVO cardWithArmor(
+            Long cardId,
+            Long participantId,
+            String name,
+            Map<String, Integer> checkValues,
+            int armor) {
+        return new CocDiceCharacterVO(
+                cardId,
+                participantId == null ? "PLAYER" : "BOT",
+                participantId,
+                name,
+                checkValues,
+                10,
+                10,
+                60,
+                60,
+                50,
+                armor,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null);
+    }
+
+    private CocDiceCharacterVO cardInCover(
+            Long cardId,
+            Long participantId,
+            String name,
+            Map<String, Integer> checkValues) {
         return new CocDiceCharacterVO(
                 cardId,
                 participantId == null ? "PLAYER" : "BOT",
@@ -1736,6 +2244,44 @@ class CocDiceOrchestrationServiceTest {
                 false,
                 false,
                 null,
-                null);
+                null,
+                true,
+                false,
+                0,
+                null,
+                false);
+    }
+
+    private CocDiceCharacterVO cardWithBuild(
+            Long cardId,
+            Long participantId,
+            String name,
+            Map<String, Integer> checkValues,
+            int build) {
+        return new CocDiceCharacterVO(
+                cardId,
+                participantId == null ? "PLAYER" : "BOT",
+                participantId,
+                name,
+                checkValues,
+                10,
+                10,
+                60,
+                60,
+                50,
+                build,
+                0,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null,
+                null,
+                false,
+                false,
+                0,
+                null,
+                false);
     }
 }

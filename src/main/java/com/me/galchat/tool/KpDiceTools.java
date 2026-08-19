@@ -97,7 +97,8 @@ public class KpDiceTools {
     @Tool(
             name = "rollDamage",
             description = "在独立掷骰流程中结算已经成立的伤害。"
-                    + "KP手动从伤害公式中扣除目标护甲；后端不会自动扣除护甲。",
+                    + "公式可把眩晕作为独立加数；后端会另投1D6并与已有眩晕剩余回合取较大值，不计入HP伤害。"
+                    + "后端不会自动判断护甲，也不会自动扣除护甲；若KP手动判断护甲适用，必须只对HP伤害部分减甲，例如max(0,(1D3)-2)+眩晕。",
             returnDirect = true)
     public KpDiceToolResult rollDamage(
             @ToolParam(description = "伤害原因、目标角色与表达式")

@@ -313,7 +313,10 @@ public class TrpgCombatLifecycleService {
         }
         if (insertDefense
                 && (Boolean.TRUE.equals(target.getDead())
-                || Boolean.TRUE.equals(target.getUnconscious()))) {
+                || Boolean.TRUE.equals(target.getDying())
+                || Boolean.TRUE.equals(target.getUnconscious())
+                || Objects.requireNonNullElse(
+                target.getStunnedRemainingRounds(), 0) > 0)) {
             insertDefense = false;
         }
         GroupChatReplyStep defense = defenseForRoute(turn, routeStep);
@@ -626,6 +629,7 @@ public class TrpgCombatLifecycleService {
             GroupConversation conversation,
             TrpgCombat combat,
             ArrayNode results) {
+        clearCombatStates(combat);
         String summary = buildSummary(results);
         LocalDateTime now = LocalDateTime.now();
         GroupChatMessage message = new GroupChatMessage()
@@ -648,6 +652,40 @@ public class TrpgCombatLifecycleService {
                 .setUpdatedAt(now);
         combatMapper.updateById(combat);
         replyPlanService.finishActiveUnderLock(conversation);
+    }
+
+    void clearCombatStates(TrpgCombat combat) {
+        if (combat == null || combat.getParticipants() == null
+                || !combat.getParticipants().isArray()) {
+            return;
+        }
+        Set<Long> characterIds = new HashSet<>();
+        combat.getParticipants().forEach(node -> {
+            if (node.get("characterId") != null) {
+                characterIds.add(node.get("characterId").asLong());
+            }
+        });
+        if (characterIds.isEmpty()) {
+            return;
+        }
+        List<CocCharacter> cards = characterMapper.selectList(
+                new LambdaQueryWrapper<CocCharacter>()
+                        .in(CocCharacter::getId, characterIds));
+        if (cards == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (CocCharacter card : cards) {
+            card.setInCover(false)
+                    .setCoverActionForfeitPending(false)
+                    .setStunnedRemainingRounds(0)
+                    .setRestrainedByCharacterId(null)
+                    .setMeleeAttackedThisRound(false)
+                    .setUpdatedAt(now);
+            if (characterMapper.updateById(card) == 0) {
+                throw new UserRequestException("战斗人物卡状态清理失败");
+            }
+        }
     }
 
     private String buildSummary(ArrayNode results) {
@@ -867,12 +905,47 @@ public class TrpgCombatLifecycleService {
     public void startNextRoundUnderLock(
             GroupConversation conversation) {
         TrpgCombat combat = requireActiveCombat(conversation);
+        clearRoundMeleeAttackStates(combat);
         int nextRound = combat.getCurrentRound() + 1;
         combat.setCurrentRound(nextRound)
                 .setUpdatedAt(LocalDateTime.now());
         combatMapper.updateById(combat);
         replyPlanService.replaceCombatRoundUnderLock(
                 conversation, nextRound, currentOrder(combat));
+    }
+
+    void clearRoundMeleeAttackStates(TrpgCombat combat) {
+        if (combat == null || combat.getParticipants() == null
+                || !combat.getParticipants().isArray()) {
+            return;
+        }
+        Set<Long> characterIds = new HashSet<>();
+        combat.getParticipants().forEach(node -> {
+            if (node.get("characterId") != null) {
+                characterIds.add(node.get("characterId").asLong());
+            }
+        });
+        if (characterIds.isEmpty()) {
+            return;
+        }
+        List<CocCharacter> cards = characterMapper.selectList(
+                new LambdaQueryWrapper<CocCharacter>()
+                        .in(CocCharacter::getId, characterIds));
+        if (cards == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (CocCharacter card : cards) {
+            if (!Boolean.TRUE.equals(
+                    card.getMeleeAttackedThisRound())) {
+                continue;
+            }
+            card.setMeleeAttackedThisRound(false)
+                    .setUpdatedAt(now);
+            if (characterMapper.updateById(card) == 0) {
+                throw new UserRequestException("近战轮次状态清理失败");
+            }
+        }
     }
 
     /**

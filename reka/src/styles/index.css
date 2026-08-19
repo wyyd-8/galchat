@@ -258,6 +258,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .empty-chat p { font-size: 12px; }
 .composer { margin: 0 max(24px, calc((100% - 820px) / 2)) 20px; padding: 8px 8px 8px 13px; border: 1px solid var(--line-strong); border-radius: 13px; display: grid; grid-template-columns: 1fr auto; align-items: end; background: var(--surface-strong); box-shadow: 0 12px 35px rgba(43,42,37,.08); }
 .composer textarea { max-height: 130px; min-height: 41px; padding: 10px 4px; border: 0; resize: none; outline: none; background: transparent; line-height: 1.5; }
+.composer-actions { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .send-button { width: 39px; height: 39px; border: 0; border-radius: 9px; display: grid; place-items: center; color: #fff; background: var(--pine); cursor: pointer; }
 .reply-panel { padding: 21px 16px; border-left: 1px solid var(--line); overflow-y: auto; background: #efede7; }
 .trpg-time-panel { margin-bottom: 18px; padding: 12px; border: 1px solid #d7cbb9; border-radius: 10px; background: #f7f1e8; }
@@ -300,6 +301,23 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .trpg-actor-row.failed, .trpg-actor-row.blocked { border-color: #b98288; background: #f8eeee; }
 .trpg-actor-row.failed .trpg-status-icon, .trpg-actor-row.blocked .trpg-status-icon { color: var(--wine); }
 .trpg-actor-row.scene-paused, .trpg-actor-row.waiting-scene { opacity: .72; }
+.trpg-execution-scene.combat .trpg-actor-row { cursor: default; }
+.trpg-execution-scene.combat .trpg-actor-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--scene-accent) 62%, white); outline-offset: 2px; }
+.trpg-combat-overview-tooltip { z-index: 70; width: min(286px, calc(100vw - 24px)); padding: 12px; border: 1px solid #c9b8b2; border-radius: 11px; color: var(--ink); background: rgba(252,250,246,.98); box-shadow: 0 14px 38px rgba(48,38,35,.18); }
+.trpg-combat-overview-tooltip > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.trpg-combat-overview-tooltip > header > span { min-width: 0; display: grid; gap: 2px; }
+.trpg-combat-overview-tooltip > header strong { overflow: hidden; font-family: var(--font-display); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.trpg-combat-overview-tooltip > header small { color: #87535b; font-size: 9px; font-weight: 700; letter-spacing: .08em; }
+.trpg-combat-overview-tooltip > header em { padding: 3px 6px; border-radius: 999px; color: #61736b; background: #eaf1ed; font-size: 9px; font-style: normal; white-space: nowrap; }
+.trpg-combat-overview-metrics { margin: 11px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.trpg-combat-overview-metrics > div { min-width: 0; padding: 6px 7px; border: 1px solid #dfd8cd; border-radius: 7px; display: grid; gap: 2px; background: #f7f3ec; }
+.trpg-combat-overview-metrics dt { color: var(--muted); font-size: 8px; }
+.trpg-combat-overview-metrics dd { margin: 0; overflow: hidden; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.trpg-combat-overview-statuses { margin-top: 10px; padding-top: 9px; border-top: 1px solid #e0d9cf; }
+.trpg-combat-overview-statuses > small { display: block; margin-bottom: 6px; color: var(--muted); font-size: 8px; font-weight: 700; letter-spacing: .08em; }
+.trpg-combat-overview-statuses > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.trpg-combat-overview-statuses span { padding: 3px 6px; border: 1px solid #d7c2c5; border-radius: 999px; color: #784b53; background: #f6ecee; font-size: 9px; }
+.trpg-combat-overview-statuses p { margin: 0; color: var(--muted); font-size: 10px; }
 .trpg-participant-group { margin-top: 7px; padding: 4px; border: 1px solid #c7c8c3; border-radius: 8px; display: grid; background: #e8e9e6; }
 .trpg-participant-group .trpg-actor-row { min-height: 27px; padding-right: 3px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .trpg-participant-group .trpg-actor-row + .trpg-actor-row { border-top: 1px solid rgba(100,100,95,.15); }
@@ -756,6 +774,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-player-surface::after { position: absolute; z-index: -1; right: 8%; bottom: 54px; left: 8%; height: 92px; border: 1px solid rgba(var(--dice-accent-rgb),.16); border-top-color: rgba(255,255,255,.34); border-radius: 50%; content: ''; background: radial-gradient(ellipse at center, rgba(var(--dice-accent-rgb),.12), transparent 67%); filter: blur(.2px); transform: perspective(290px) rotateX(69deg); transform-origin: center bottom; }
 .dice-player-stage-bar { position: absolute; z-index: 4; top: 18px; right: 20px; left: 20px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; pointer-events: none; }
 .dice-outcome-vfx-layer { position: absolute; z-index: 3; inset: 0; overflow: hidden; pointer-events: none; }
+.dice-render-layer { position: absolute; z-index: 2; inset: 0; overflow: hidden; pointer-events: none; }
 .dice-outcome-vfx-burst { width: var(--vfx-size); height: var(--vfx-size); position: absolute; top: var(--vfx-top); left: var(--vfx-left); transform: translate(-50%, -50%); }
 .dice-outcome-vfx-core, .dice-outcome-vfx-fog { position: absolute; top: 50%; left: 50%; border-radius: 50%; pointer-events: none; will-change: opacity, transform; }
 .dice-outcome-vfx-core { width: 100%; height: 100%; }
@@ -802,8 +821,10 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-player-surface .dice-value-merge-token { min-width: 38px; min-height: 26px; position: absolute; z-index: 7; padding: 4px 9px; border: 1px solid rgba(var(--dice-accent-rgb),.13); border-radius: 999px; display: inline-grid; place-items: center; color: var(--dice-accent); background: rgba(255,255,255,.84); box-shadow: 0 6px 16px rgba(37,53,46,.08); font-family: var(--font-display); font-size: 15px; font-weight: 700; line-height: 1; opacity: 1; pointer-events: none; transform: translate(-50%, -50%); transition: opacity 260ms ease var(--value-fade-delay), transform var(--value-merge-duration) cubic-bezier(.22,.78,.2,1); }
 .dice-player-surface .dice-value-merge-token.is-moving { opacity: 0; transform: translate(calc(-50% + var(--group-merge-x)), -50%) scale(.74); }
 .dice-player-surface .die-shadow { position: absolute; bottom: 18px; left: 50%; width: 132px; height: 31px; border-radius: 50%; background: rgba(26,29,26,.26); filter: blur(13px); opacity: .42; transform: translateX(-50%) scale(.9); }
-.dice-player-surface .three-die-canvas { position: absolute; top: 0; left: 4px; z-index: 2; width: 160px; height: 160px; background: transparent; }
-.dice-player-surface .percentile-roll .three-die-canvas { left: 7px; width: 168px; height: 168px; }
+.dice-player-surface .dice-shared-canvas { position: absolute; z-index: 0; display: block; background: transparent; pointer-events: none; }
+.dice-player-surface .three-die-viewport { position: absolute; top: 0; left: 4px; width: 160px; height: 160px; pointer-events: none; }
+.dice-player-surface .percentile-roll .three-die-viewport { left: 7px; width: 168px; height: 168px; }
+.dice-player-surface .dice-shared-dim-overlay { position: absolute; z-index: 1; border-radius: 50%; background: rgba(232,235,231,.58); backdrop-filter: grayscale(.65) saturate(.3) brightness(.85); pointer-events: none; transition: opacity 240ms ease; }
 .dice-player-surface .percentile-roll .is-selected { background: none; filter: drop-shadow(0 12px 15px rgba(var(--dice-accent-rgb),.16)); }
 .dice-player-surface .percentile-tens-die.is-dimmed { filter: grayscale(.65) saturate(.3) brightness(.85); opacity: .3; transform: scale(.94); }
 .dice-player-surface.show-die-values .percentile-tens-die.is-dimmed.is-settled { transform: translateY(-12px) scale(.94); }
@@ -952,7 +973,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
   .dice-player-surface .percentile-roll { gap: 4px; }
   .dice-player-surface .percentile-tens { gap: 4px; }
   .dice-player-surface .percentile-roll .die-slot { width: 86px; height: 124px; }
-  .dice-player-surface .percentile-roll .three-die-canvas { left: 0; width: 86px; height: 86px; }
+  .dice-player-surface .percentile-roll .three-die-viewport { left: 0; width: 86px; height: 86px; }
   .dice-player-surface .percentile-roll .die-shadow { bottom: 20px; width: 68px; height: 17px; filter: blur(7px); }
   .dice-player-surface .die-value { min-width: 32px; min-height: 22px; padding: 3px 7px; font-size: 13px; }
   .dice-player-selection { bottom: 11px; left: 13px; }

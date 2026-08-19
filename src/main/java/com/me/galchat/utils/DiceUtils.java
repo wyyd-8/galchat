@@ -128,6 +128,15 @@ public final class DiceUtils {
                 return value;
             }
 
+            if (match("max")) {
+                require("(");
+                long first = parseAddition();
+                require(",");
+                long second = parseAddition();
+                require(")");
+                return generateResults ? Math.max(first, second) : 1;
+            }
+
             skipWhitespace();
             int start = position;
             long number = parseUnsignedInteger();

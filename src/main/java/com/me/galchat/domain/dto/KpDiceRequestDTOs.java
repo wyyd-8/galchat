@@ -106,7 +106,7 @@ public final class KpDiceRequestDTOs {
     public record DamageTarget(
             @ToolParam(description = "承受伤害的角色名，必须与当前跑团中的角色卡名称一致")
             String targetCharacterName,
-            @ToolParam(description = "对该目标执行的伤害表达式，例如1D6或1D8+2")
+            @ToolParam(description = "对该目标执行的伤害表达式，例如1D6、1D8+2、1D3+眩晕或纯眩晕；眩晕必须是独立加数")
             String formula) {
     }
 

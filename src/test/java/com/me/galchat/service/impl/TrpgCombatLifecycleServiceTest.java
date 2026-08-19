@@ -467,6 +467,76 @@ class TrpgCombatLifecycleServiceTest {
     }
 
     @Test
+    void stunnedTargetCannotReceiveAReactionDefenseStep() {
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        var objectMapper = JsonMapper.builder().build();
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupReplyPlanService.class),
+                        planMapper,
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class),
+                        stepMapper,
+                        mock(GroupChatMessageMapper.class),
+                        characterMapper,
+                        combatMapper,
+                        objectMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setActiveReplyPlanId(10L);
+        GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep route = new GroupChatReplyStep()
+                .setId(42L)
+                .setTurnId(30L)
+                .setStepNo(2)
+                .setSubjectCharacterId(72L)
+                .setActionType(
+                        GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        var participants = objectMapper.createArrayNode();
+        participants.addObject().put("characterId", 71L)
+                .put("name", "林恩");
+        participants.addObject().put("characterId", 72L)
+                .put("name", "食尸鬼");
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                        .setContextId(200L));
+        when(combatMapper.selectById(200L)).thenReturn(
+                new TrpgCombat().setId(200L).setConversationId(7L)
+                        .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
+                        .setParticipants(participants));
+        when(characterMapper.selectById(71L)).thenReturn(
+                card(71L, "PLAYER", null, "林恩", 50)
+                        .setStunnedRemainingRounds(2)
+                        .setUnconscious(false)
+                        .setDying(false)
+                        .setDead(false));
+        GroupChatReplyStep defense = new GroupChatReplyStep()
+                .setId(43L)
+                .setTurnId(30L)
+                .setStepNo(3)
+                .setItemOrder(3)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_DEFENSE)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(stepMapper.selectList(any())).thenReturn(List.of(defense));
+
+        var decision = service.completeReactionRoute(
+                conversation, turn, route,
+                "{\"targetName\":\"林恩\",\"insertDefense\":true,"
+                        + "\"defenseOptions\":[\"闪避\",\"反击\"]}");
+
+        assertThat(decision.targetCharacterId()).isEqualTo(71L);
+        assertThat(decision.insertDefense()).isFalse();
+        assertThat(defense.getSubjectCharacterId()).isEqualTo(71L);
+        assertThat(defense.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_CANCELLED);
+    }
+
+    @Test
     void firearmRouteCanAppendOrderedDefenseStepsForSeveralTargets() {
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
@@ -595,9 +665,11 @@ class TrpgCombatLifecycleServiceTest {
                 71L, "PLAYER", null, "林恩", 40)
                 .setUnconscious(true);
         CocCharacter fastNpc = card(
-                72L, "NPC", null, "食尸鬼", 90);
+                72L, "NPC", null, "食尸鬼", 90)
+                .setMeleeAttackedThisRound(true);
         CocCharacter bot = card(
-                73L, "BOT", 9L, "陈默", 60);
+                73L, "BOT", 9L, "陈默", 60)
+                .setMeleeAttackedThisRound(true);
         CocCharacter undeclaredInvestigator = card(
                 74L, "BOT", 10L, "赵雅", 70);
         when(conversations.requireActive(7L))
@@ -612,6 +684,8 @@ class TrpgCombatLifecycleServiceTest {
                         undeclaredInvestigator),
                         List.of(slowPlayer, fastNpc, bot,
                                 undeclaredInvestigator));
+        when(characterMapper.updateById(any(CocCharacter.class)))
+                .thenReturn(1);
         doAnswer(invocation -> {
             invocation.<TrpgCombat>getArgument(0).setId(200L);
             return 1;
@@ -663,6 +737,11 @@ class TrpgCombatLifecycleServiceTest {
                 .thenReturn(combatCaptor.getValue());
 
         service.startNextRoundUnderLock(conversation);
+
+        assertThat(fastNpc.getMeleeAttackedThisRound()).isFalse();
+        assertThat(bot.getMeleeAttackedThisRound()).isFalse();
+        verify(characterMapper).updateById(fastNpc);
+        verify(characterMapper).updateById(bot);
 
         org.mockito.ArgumentCaptor<
                 List<GroupReplyPlanService.CombatPlanItem>> secondRound =
@@ -728,6 +807,43 @@ class TrpgCombatLifecycleServiceTest {
                 .isEqualTo(GroupChatConstant.STATUS_PENDING);
         verify(stepMapper, org.mockito.Mockito.times(4))
                 .updateById(any(GroupChatReplyStep.class));
+    }
+
+    @Test
+    void clearingCombatResetsEveryTemporaryCharacterCondition() {
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        TrpgCombatLifecycleService service = new TrpgCombatLifecycleService(
+                mock(GroupConversationService.class),
+                mock(GroupReplyPlanService.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupChatTurnMapper.class),
+                mock(GroupChatToolCallMapper.class),
+                mock(GroupChatReplyStepMapper.class),
+                mock(GroupChatMessageMapper.class),
+                characterMapper,
+                mock(TrpgCombatMapper.class),
+                JsonMapper.builder().build());
+        CocCharacter card = card(71L, "PLAYER", null, "林恩", 60)
+                .setInCover(true)
+                .setCoverActionForfeitPending(true)
+                .setStunnedRemainingRounds(3)
+                .setRestrainedByCharacterId(72L)
+                .setMeleeAttackedThisRound(true);
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(characterMapper.updateById(any(CocCharacter.class)))
+                .thenReturn(1);
+        var participants = JsonMapper.builder().build().createArrayNode();
+        participants.addObject().put("characterId", 71L);
+
+        service.clearCombatStates(
+                new TrpgCombat().setParticipants(participants));
+
+        assertThat(card.getInCover()).isFalse();
+        assertThat(card.getCoverActionForfeitPending()).isFalse();
+        assertThat(card.getStunnedRemainingRounds()).isZero();
+        assertThat(card.getRestrainedByCharacterId()).isNull();
+        assertThat(card.getMeleeAttackedThisRound()).isFalse();
+        verify(characterMapper).updateById(card);
     }
 
     private CocCharacter card(

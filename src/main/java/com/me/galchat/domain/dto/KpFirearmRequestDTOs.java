@@ -22,8 +22,23 @@ public final class KpFirearmRequestDTOs {
             FirearmFiringMode firingMode,
             @ToolParam(description = "若故障阈值上的结果同时为大失败，是否选择武器故障；false表示由KP在工具完成后给出误伤等其他后果")
             boolean fumbleBreaksWeapon,
+            @ToolParam(description = "射手本次是否处于高速移动中；true时后端自动增加一颗惩罚骰，省略时为false", required = false)
+            Boolean shooterMovingFast,
+            @ToolParam(description = "射手本次射击姿势是否明显受限；true时后端自动增加一颗惩罚骰，省略时为false", required = false)
+            Boolean firingPostureRestricted,
             @ToolParam(description = "按声明顺序列出本轮全部射击目标、为该目标分配的子弹和基础奖惩骰")
             List<Target> targets) {
+
+        public Attack(
+                String reason,
+                String characterName,
+                String weaponName,
+                FirearmFiringMode firingMode,
+                boolean fumbleBreaksWeapon,
+                List<Target> targets) {
+            this(reason, characterName, weaponName, firingMode,
+                    fumbleBreaksWeapon, false, false, targets);
+        }
     }
 
     public record Target(
@@ -31,7 +46,16 @@ public final class KpFirearmRequestDTOs {
             String targetCharacterName,
             @ToolParam(description = "声明向该目标发射的子弹数；弹药不足时后端只分配剩余弹药，之后的目标不再检定")
             int bulletCount,
-            @ToolParam(description = "仅包含距离、掩护等场景因素的基础修正，不要包含连射、多次检定或转换目标自动产生的惩罚骰；省略时为NORMAL", required = false)
-            CocPercentileModifier baseModifier) {
+            @ToolParam(description = "仅包含射程、瞄准、光线等尚未结构化的场景因素；不要包含掩护、高速移动、小型目标、射击姿势受限或射击模式自动产生的惩罚骰；省略时为NORMAL", required = false)
+            CocPercentileModifier baseModifier,
+            @ToolParam(description = "目标本次是否处于高速移动中；true时后端自动增加一颗惩罚骰，省略时为false", required = false)
+            Boolean targetMovingFast) {
+
+        public Target(
+                String targetCharacterName,
+                int bulletCount,
+                CocPercentileModifier baseModifier) {
+            this(targetCharacterName, bulletCount, baseModifier, false);
+        }
     }
 }

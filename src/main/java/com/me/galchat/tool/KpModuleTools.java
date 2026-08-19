@@ -117,7 +117,7 @@ public class KpModuleTools {
                     按准确人物卡名称和武器名称提交武器的最新状态。
                     仅用于装填、修理检定成功后的状态恢复，或不经过枪械攻击工具的明确状态修正。
                     requestFirearmAttack 已自动处理弹药消耗、贯穿和故障；调用该枪械攻击工具后，禁止再调用本工具覆盖结果。
-                    装填时可以增加剩余弹药，但不能超过武器容量。调用后仍必须继续完成当前裁定。
+                    常规逐发装填占用完整主动位且最多增加两发，不能超过武器容量；装填一发并立即射击时只增加一发，随后射击需手动合并一颗惩罚骰。调用后仍必须继续完成当前裁定。
                     """)
     public KpWeaponStateDTOs.Result updateWeaponState(
             @ToolParam(description = "人物卡准确名称，不能传ID")

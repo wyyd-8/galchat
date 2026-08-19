@@ -397,6 +397,31 @@ class CharacterCardServiceImplTest {
     }
 
     @Test
+    void diceCharacterSummaryResolvesRestrainerNameForPrompt() {
+        CocCharacter restrainer = new CocCharacter()
+                .setId(71L)
+                .setRunId(5L)
+                .setActorType("PLAYER")
+                .setName("林恩");
+        CocCharacter restrained = new CocCharacter()
+                .setId(81L)
+                .setRunId(5L)
+                .setActorType("NPC")
+                .setName("邪教徒")
+                .setRestrainedByCharacterId(71L);
+        when(characterMapper.selectList(any())).thenReturn(List.of(
+                restrainer, restrained));
+        when(skillMapper.selectList(any())).thenReturn(List.of());
+
+        String json = JsonMapper.builder().build()
+                .writeValueAsString(service.listDiceCharacters(5L));
+
+        assertThat(json)
+                .contains("\"restrainedByCharacterId\":71")
+                .contains("\"restrainedByCharacterName\":\"林恩\"");
+    }
+
+    @Test
     void rejectsMissingCardNamesInsideOneRun() {
         when(characterMapper.selectList(any())).thenReturn(List.of());
 

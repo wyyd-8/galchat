@@ -258,6 +258,7 @@ test('keeps the completed attack visible before offering its newly-created damag
   const plan = createPostRollPlan?.(aggregate, 33)
 
   assert.deepEqual(plan?.playbackAggregate.results.map((detail) => detail.id), [33, 34])
+  assert.equal(Reflect.get(plan || {}, 'rolledGroupIndex'), 0)
   assert.equal(plan?.playbackAggregate.semanticResult, '林恩近战攻击获胜')
   assert.equal(diceState.isDiceAggregatePending(plan!.playbackAggregate), false)
   assert.deepEqual(plan?.queuedAggregate?.results.map((detail) => detail.id), [35])
@@ -416,7 +417,7 @@ test('offers continue only when the current playback owns the first completion',
   assert.equal(shouldOfferContinue?.(historicalPlayback, 'PENDING', true, true), false)
 })
 
-test('auto plays a live non-user roll after one second of idle spin', () => {
+test('auto plays a live non-user roll after a short idle with character groups staggered', () => {
   const createIncomingRequest = Reflect.get(diceState, 'createIncomingDiceMessagePlaybackRequest') as
     | ((previousId: number, aggregate: DiceRollAggregate, skin: 'classic') => DicePlaybackRequest)
     | undefined
@@ -432,17 +433,70 @@ test('auto plays a live non-user roll after one second of idle spin', () => {
     mode: request?.mode,
     autoPlay: request?.autoPlay,
     autoPlayDelayMs: request?.autoPlayDelayMs,
+    initialAnimation: request && Reflect.get(request, 'initialAnimation'),
     offerContinueAfterComplete: request?.offerContinueAfterComplete,
   }, {
     id: 9,
     mode: 'play',
     autoPlay: true,
-    autoPlayDelayMs: 1_000,
+    autoPlayDelayMs: 500,
+    initialAnimation: {
+      groups: [
+        { moduleStart: 0, moduleCount: 1, startDelayMs: 0 },
+        { moduleStart: 1, moduleCount: 1, startDelayMs: 280 },
+        { moduleStart: 2, moduleCount: 1, startDelayMs: 560 },
+      ],
+    },
     offerContinueAfterComplete: true,
   })
   assert.deepEqual(request && createAutoPlayPlan?.(request), {
     phase: 'idle',
-    delayMs: 1_000,
+    delayMs: 500,
+  })
+})
+
+test('starts the user character first and staggers every other character afterwards', () => {
+  const createInitialAnimation = Reflect.get(diceState, 'createDiceInitialAnimationPlan') as
+    | ((request: DicePlaybackRequest, primaryGroupIndex?: number) => {
+      groups: Array<{ moduleStart: number; moduleCount: number; startDelayMs: number }>
+    })
+    | undefined
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  const request = diceState.createDiceMessagePlaybackRequest(10, aggregate, 'classic')
+
+  assert.equal(typeof createInitialAnimation, 'function')
+  assert.deepEqual(createInitialAnimation?.(request, 1), {
+    groups: [
+      { moduleStart: 0, moduleCount: 1, startDelayMs: 220 },
+      { moduleStart: 1, moduleCount: 1, startDelayMs: 0 },
+      { moduleStart: 2, moduleCount: 1, startDelayMs: 440 },
+    ],
+  })
+})
+
+test('uses character timing only for the first performance and leaves replay unchanged', () => {
+  const resolveAnimationGroups = Reflect.get(diceState, 'resolveDiceAnimationGroups') as
+    | ((request: DicePlaybackRequest, replay: boolean) => unknown)
+    | undefined
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  const request = diceState.createDiceMessagePlaybackRequest(10, aggregate, 'classic')
+  const initialAnimation = diceState.createDiceInitialAnimationPlan(request, 0)
+  const timedRequest = { ...request, initialAnimation }
+
+  assert.equal(typeof resolveAnimationGroups, 'function')
+  assert.deepEqual(resolveAnimationGroups?.(timedRequest, false), initialAnimation.groups)
+  assert.equal(resolveAnimationGroups?.(timedRequest, true), undefined)
+})
+
+test('keeps every module of a plain single-character roll in one animation group', () => {
+  const request = createDicePlaybackRequest(
+    0,
+    createDiceDebugPreset('group'),
+    'classic',
+  )
+
+  assert.deepEqual(diceState.createDiceInitialAnimationPlan(request), {
+    groups: [{ moduleStart: 0, moduleCount: 2, startDelayMs: 0 }],
   })
 })
 
@@ -620,6 +674,39 @@ test('lists every hydrated dice message in reverse current-chat position', () =>
   assert.deepEqual(messages.map((message) => message.id), [10, 20, 30])
 })
 
+test('creates one tool history entry with its own locator for every dice round', () => {
+  const listDiceHistoryEntries = Reflect.get(diceState, 'listDiceHistoryEntriesNewestFirst') as
+    | ((messages: GroupMessage[]) => Array<{ messageId: number; aggregate: DiceRollAggregate }>)
+    | undefined
+  const older = createDiceDebugAggregatePreset('multiplayer-check')
+  const latest = createDiceDebugAggregatePreset('opposed-check')
+  latest.results = [
+    { ...latest.results[0]!, id: 301, roundNo: 1 },
+    { ...latest.results[1]!, id: 302, roundNo: 2 },
+  ]
+  const messages: GroupMessage[] = [
+    {
+      id: 10, conversationId: 1, speakerType: 'kp', messageKind: 'dice_roll',
+      content: '', sequenceNo: 10, status: 'completed', diceRoll: older,
+    },
+    {
+      id: 30, conversationId: 1, speakerType: 'kp', messageKind: 'dice_roll',
+      content: '', sequenceNo: 30, status: 'completed', diceRoll: latest,
+    },
+  ]
+
+  assert.equal(typeof listDiceHistoryEntries, 'function')
+  const entries = listDiceHistoryEntries?.(messages)
+  assert.deepEqual(entries?.map((entry) => ({
+    messageId: entry.messageId,
+    roundNo: entry.aggregate.results[0]?.roundNo,
+  })), [
+    { messageId: 30, roundNo: 1 },
+    { messageId: 30, roundNo: 2 },
+    { messageId: 10, roundNo: 1 },
+  ])
+})
+
 test('finds the chat element that owns a tool dice message id', () => {
   const findElement = Reflect.get(diceState, 'findDiceMessageElement') as
     | (<T extends { dataset: { messageId?: string } }>(elements: T[], messageId: number) => T | undefined)
@@ -763,6 +850,38 @@ test('creates a persisted single check through the same participant presentation
   assert.equal(summary?.formulaValue, '1 人参与 · 侦查 · 分别展示')
 })
 
+test('uses the single-participant check interface for a major-wound CON roll', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.summary.reason = '本重伤CON检定'
+  aggregate.summary.status = 'PENDING'
+  aggregate.results = [{
+    ...aggregate.results[0]!,
+    displayType: 'MAJOR_WOUND_CON',
+    reason: '本重伤CON检定',
+    resolvedAt: undefined,
+    resultData: createDiceDebugPreset('normal-percentile'),
+    resolution: {
+      type: 'MAJOR_WOUND_CON',
+      characterName: '本',
+    },
+  }]
+  aggregate.results[0]!.resultData!.result = undefined
+  aggregate.results[0]!.resultData!.modules.forEach((module) => {
+    module.result = undefined
+    module.dice.forEach((die) => { die.value = undefined })
+  })
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.equal(request.presentation?.kind, 'multiplayer-check')
+  assert.equal(request.presentation?.groups[0]?.checkName, 'CON')
+  assert.deepEqual(summary.groups, [
+    { label: '本', expression: 'CON', result: '— · 已结算', diceCount: 2 },
+  ])
+  assert.equal(diceState.resolveDicePlayerMode({ ...request, mode: 'pending' }), 'pending')
+})
+
 test('uses pending participant display fields instead of the roll title', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
   aggregate.summary.reason = '追踪受伤足迹并观察周围环境'
@@ -804,6 +923,41 @@ test('uses the participant value presentation for an ordinary single damage die'
   assert.equal(request?.presentation?.kind, 'value-roll')
   assert.deepEqual(summary?.groups, [
     { label: '林恩', expression: '1D100', result: '-27', diceCount: 2 },
+  ])
+})
+
+test('keeps damage and stun duration in one value-roll presentation', () => {
+  const aggregate = valueRollAggregate('rollDamage', 'DAMAGE', [{
+    name: '林恩',
+    result: { formula: '1D3', modules: [], result: 2 },
+  }])
+  aggregate.results.push({
+    id: 9311,
+    summaryId: 9300,
+    roundNo: 1,
+    displayOrder: 2,
+    displayType: 'STUN_DURATION',
+    reason: '电击',
+    resultData: {
+      formula: '1D6',
+      modules: [{
+        expression: '1D6', diceCount: 1, diceSides: 6, modifier: 'NORMAL',
+        dice: [{ sides: 6, value: 4, role: 'NORMAL', selected: true }], result: 4,
+      }],
+      result: 4,
+    },
+    resolution: { type: 'STUN_DURATION', outcome: { characterName: '林恩' } },
+    resolvedAt: '2026-08-20T12:00:00',
+  })
+  aggregate.semanticResult = '林恩生命-2；林恩被眩晕4回合'
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.equal(request.presentation?.kind, 'value-roll')
+  assert.deepEqual(summary.groups, [
+    { label: '林恩', expression: '1D3', result: '-2', diceCount: 0 },
+    { label: '林恩', expression: '1D6', result: '4回合', diceCount: 1 },
   ])
 })
 

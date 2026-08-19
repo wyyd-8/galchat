@@ -170,9 +170,11 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
 
     @Override
     public CocDiceCharacterVO requireDiceCharacter(Long runId, String characterName) {
-        return buildDiceCharacter(
-                requireCharacterByName(runId, characterName),
-                skillDefMapper.selectList(null));
+        CocCharacter character = requireCharacterByName(
+                runId, characterName);
+        return buildDiceCharacter(character,
+                skillDefMapper.selectList(null),
+                resolveRestrainerName(character));
     }
 
     @Override
@@ -471,11 +473,18 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         requireRunId(runId);
         List<CocDiceCharacterVO> result = new ArrayList<>();
         List<CocSkillDef> definitions = skillDefMapper.selectList(null);
-        for (CocCharacter character : characterMapper.selectList(
+        List<CocCharacter> characters = characterMapper.selectList(
                 new LambdaQueryWrapper<CocCharacter>()
                         .eq(CocCharacter::getRunId, runId)
-                        .orderByAsc(CocCharacter::getId))) {
-            result.add(buildDiceCharacter(character, definitions));
+                        .orderByAsc(CocCharacter::getId));
+        Map<Long, String> namesById = new LinkedHashMap<>();
+        for (CocCharacter character : characters) {
+            namesById.put(character.getId(), character.getName());
+        }
+        for (CocCharacter character : characters) {
+            result.add(buildDiceCharacter(character, definitions,
+                    namesById.get(
+                            character.getRestrainedByCharacterId())));
         }
         return List.copyOf(result);
     }
@@ -527,7 +536,8 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
     }
 
     private CocDiceCharacterVO buildDiceCharacter(
-            CocCharacter character, List<CocSkillDef> definitions) {
+            CocCharacter character, List<CocSkillDef> definitions,
+            String restrainedByCharacterName) {
         Map<String, Integer> checkValues = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         putAliases(checkValues, character.getStr(), "STR", "力量");
         putAliases(checkValues, character.getCon(), "CON", "体质");
@@ -561,6 +571,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
                 character.getSanCurrent(),
                 character.getSanMax(),
                 character.getCon(),
+                character.getBuild(),
                 character.getArmor(),
                 character.getMajorWound(),
                 character.getUnconscious(),
@@ -568,7 +579,27 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
                 character.getDead(),
                 character.getTemporaryInsanity(),
                 character.getTemporaryInsanityPhase(),
-                character.getTemporaryInsanityRemainingHours());
+                character.getTemporaryInsanityRemainingHours(),
+                character.getInCover(),
+                character.getCoverActionForfeitPending(),
+                character.getStunnedRemainingRounds(),
+                character.getRestrainedByCharacterId(),
+                restrainedByCharacterName,
+                character.getMeleeAttackedThisRound());
+    }
+
+    private String resolveRestrainerName(CocCharacter character) {
+        if (character.getRestrainedByCharacterId() == null) {
+            return null;
+        }
+        CocCharacter restrainer = characterMapper.selectById(
+                character.getRestrainedByCharacterId());
+        if (restrainer == null
+                || !java.util.Objects.equals(
+                character.getRunId(), restrainer.getRunId())) {
+            return null;
+        }
+        return restrainer.getName();
     }
 
     private void putAliases(

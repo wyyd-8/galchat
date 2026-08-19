@@ -1,7 +1,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { api, clearSession, currentSession, saveSession, streamGroupGeneration, streamGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
 import type {
-  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem, TrpgGameTimePeriod,
+  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgGameTimePeriod,
   UserInfo, UserWorld, WorldDetail, WorldSave, WorldTemplate,
 } from '@/api/types'
 import { beginReplyTurn, updateReplyTurn, type ReplyTurnState } from '@/components/replyTurnStatus'
@@ -37,6 +37,7 @@ export function useWorkspace() {
   const messageInput = ref('')
   const messageScroller = ref<HTMLElement | null>(null)
   const currentTurn = ref<CurrentTurn | null>(null)
+  const combatOverview = ref<TrpgCombatParticipantOverview[]>([])
   const replyTurnState = ref<ReplyTurnState | null>(null)
   const latestDiceRoll = ref<DiceRollAggregate | null>(null)
   const incomingDiceRoll = ref<DiceRollAggregate | null>(null)
@@ -83,7 +84,7 @@ export function useWorkspace() {
   }
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
-    conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; replyTurnState.value = null; modules.value = []
+    conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; combatOverview.value = []; replyTurnState.value = null; modules.value = []
     latestDiceRoll.value = null; incomingDiceRoll.value = null; hasOlderGroupMessages.value = false; diceRollCache.clear()
   }
 
@@ -126,6 +127,16 @@ export function useWorkspace() {
     return Promise.all(source.map((message) => hydrateDiceMessage(message, loadDiceAggregate)))
   }
 
+  async function loadCombatOverview(
+    conversationId: number,
+  ): Promise<TrpgCombatParticipantOverview[]> {
+    try {
+      return await api.combatOverview(conversationId)
+    } catch {
+      return []
+    }
+  }
+
   async function refreshDiceRoll(summaryId: number): Promise<DiceRollAggregate> {
     const aggregate = await loadDiceAggregate(summaryId, true)
     const diceRoundNos = [...new Set(aggregate.results.map((detail) => detail.roundNo || 1))]
@@ -134,6 +145,11 @@ export function useWorkspace() {
       return { ...message, diceRoll: aggregate, diceRoundNos }
     })
     latestDiceRoll.value = aggregate
+    if (selectedConversation.value?.mode === 'trpg') {
+      combatOverview.value = await loadCombatOverview(
+        selectedConversation.value.id,
+      )
+    }
     return aggregate
   }
   function logout() { clearSession(); Object.assign(session, currentSession()); userInfo.value = null; resetWorkspace() }
@@ -240,16 +256,17 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; combatOverview.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
-      const [conversationDetail, history, plans, turn] = await Promise.all([
-        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id),
+      const [conversationDetail, history, plans, turn, overview] = await Promise.all([
+        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), loadCombatOverview(id),
       ])
       conversations.value = conversations.value.map((item) => item.id === id ? { ...item, ...conversationDetail } : item)
       messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
       hasOlderGroupMessages.value = history.length === 50
       setReplyPlans(plans)
       currentTurn.value = turn
+      combatOverview.value = overview
       const plannedParticipantIds = [...new Set(replyPlan.value.items
         .filter((item) => item.actorType === 'character')
         .map((item) => item.actorId)
@@ -450,12 +467,13 @@ export function useWorkspace() {
     }
   }
   async function syncTrpgState(conversation: Conversation) {
-    const [history, plans, turn] = await Promise.all([
-      api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id),
+    const [history, plans, turn, overview] = await Promise.all([
+      api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id), loadCombatOverview(conversation.id),
     ])
     messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
     setReplyPlans(plans)
     currentTurn.value = turn
+    combatOverview.value = overview
   }
   async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
     const conversation = selectedConversation.value
@@ -534,6 +552,7 @@ export function useWorkspace() {
     if (!conversation || conversation.mode !== 'trpg' || !message.turnId || !message.replyStepId || loading.sending) return
     loading.sending = true
     try {
+      messages.value = messages.value.filter((item) => item.id !== message.id)
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
       await consumeGeneration(
         conversation.id,
@@ -611,7 +630,7 @@ export function useWorkspace() {
   onMounted(boot)
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
-    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, messageScroller, currentTurn, replyTurnState,
+    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, messageScroller, currentTurn, combatOverview, replyTurnState,
     latestDiceRoll, incomingDiceRoll, hasOlderGroupMessages,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,

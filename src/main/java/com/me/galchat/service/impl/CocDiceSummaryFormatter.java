@@ -254,6 +254,23 @@ public class CocDiceSummaryFormatter {
             }
             return text.toString();
         }
+        if (DiceRollConstant.TYPE_STUN_DURATION.equals(
+                resolution.getType())) {
+            Map<String, Object> effect = resolution.getEffect();
+            if (effect == null) {
+                return "";
+            }
+            String characterName = stringValue(
+                    resolution.getRule(), "characterName");
+            int stunAfter = intValue(effect, "stunAfter");
+            int rolledDuration = intValue(effect, "rolledDuration");
+            if (booleanValue(effect, "stunChanged")) {
+                return characterName + "被眩晕" + stunAfter + "回合";
+            }
+            return characterName + "被眩晕" + stunAfter
+                    + "回合（本次1D6=" + rolledDuration
+                    + "，维持原时长）";
+        }
         if (DiceRollConstant.TYPE_HEALING.equals(resolution.getType())) {
             Map<String, Object> effect = resolution.getEffect();
             if (effect == null) {

@@ -59,6 +59,11 @@ public class CocCharacter {
     private String quickNotes;
     @TableField("temporary_insanity_remaining_rounds")
     private Integer temporaryInsanityRemainingHours;
+    private Boolean inCover = false;
+    private Boolean coverActionForfeitPending = false;
+    private Integer stunnedRemainingRounds = 0;
+    private Long restrainedByCharacterId;
+    private Boolean meleeAttackedThisRound = false;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

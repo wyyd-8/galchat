@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { continuousRotationTarget, interpolateRotation } from './rollRotation.ts'
+import * as rollRotation from './rollRotation.ts'
 
 const FULL_TURN = Math.PI * 2
 const moduloTurn = (value: number): number => ((value % FULL_TURN) + FULL_TURN) % FULL_TURN
@@ -26,4 +27,28 @@ test('ends at an equivalent target after positive full turns', () => {
   assert.ok(Math.abs(moduloTurn(end.x) - moduloTurn(desired.x)) < 1e-12)
   assert.ok(Math.abs(moduloTurn(end.y) - moduloTurn(desired.y)) < 1e-12)
   assert.ok(Math.abs(moduloTurn(end.z) - moduloTurn(desired.z)) < 1e-12)
+})
+
+test('maps character group starts onto every die while preserving the group-internal stagger', () => {
+  const createStartDelays = Reflect.get(rollRotation, 'createDiceStartDelays') as
+    | ((
+      moduleDiceCounts: number[],
+      groups?: Array<{ moduleStart: number; moduleCount: number; startDelayMs: number }>,
+    ) => number[])
+    | undefined
+
+  assert.equal(typeof createStartDelays, 'function')
+  assert.deepEqual(createStartDelays?.([2, 1, 3], [
+    { moduleStart: 0, moduleCount: 2, startDelayMs: 0 },
+    { moduleStart: 2, moduleCount: 1, startDelayMs: 220 },
+  ]), [0, 90, 180, 220, 310, 400])
+})
+
+test('keeps the original global stagger when no first-play timing is supplied', () => {
+  const createStartDelays = Reflect.get(rollRotation, 'createDiceStartDelays') as
+    | ((moduleDiceCounts: number[]) => number[])
+    | undefined
+
+  assert.equal(typeof createStartDelays, 'function')
+  assert.deepEqual(createStartDelays?.([2, 1, 3]), [0, 90, 180, 270, 360, 450])
 })

@@ -66,6 +66,21 @@ class KpSkillRuleToolsTest {
     }
 
     @Test
+    void dodgeRuleUsesCombatSpecificTieResolutionInsteadOfSkillValues() {
+        KpSkillRuleTools tools = new KpSkillRuleTools();
+
+        String dodgeRule = tools.readSkillRules(
+                List.of("闪避"), context(GroupChatConstant.ACTOR_KP))
+                .get("闪避");
+
+        assertThat(dodgeRule)
+                .contains("只比较成功等级")
+                .contains("同级时闪避者胜")
+                .contains("同级时攻击者胜")
+                .doesNotContain("先比较成功等级，再比较人物卡检定值");
+    }
+
+    @Test
     void unknownAndBlankSkillNamesAreRejected() {
         KpSkillRuleTools tools = new KpSkillRuleTools();
 

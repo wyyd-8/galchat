@@ -133,9 +133,36 @@ public class TrpgInvestigatorContextAssembler {
         addStatus(statuses, card.getDying(), "濒死");
         addStatus(statuses, card.getDead(), "死亡");
         addStatus(statuses, card.getTemporaryInsanity(), "临时疯狂");
+        addStatus(statuses, card.getInCover(), "处于掩护");
+        addStatus(statuses, card.getCoverActionForfeitPending(),
+                "掩护行动位待消耗");
+        if (card.getStunnedRemainingRounds() != null
+                && card.getStunnedRemainingRounds() > 0) {
+            statuses.add("被眩晕（剩余"
+                    + card.getStunnedRemainingRounds() + "回合）");
+        }
+        if (card.getRestrainedByCharacterId() != null) {
+            CocCharacter restrainer = characterMapper.selectById(
+                    card.getRestrainedByCharacterId());
+            if (restrainer != null
+                    && conversationMatches(card, restrainer)
+                    && StringUtils.hasText(restrainer.getName())) {
+                statuses.add("被钳制（钳制者："
+                        + restrainer.getName() + "）");
+            } else {
+                statuses.add("被钳制");
+            }
+        }
+        addStatus(statuses, card.getMeleeAttackedThisRound(),
+                "本轮已被近战攻击");
         if (statuses.length() > 0) {
             append(result, "状态", statuses.toString());
         }
+    }
+
+    private boolean conversationMatches(
+            CocCharacter card, CocCharacter other) {
+        return java.util.Objects.equals(card.getRunId(), other.getRunId());
     }
 
     private void appendSkills(StringBuilder result, CocCharacter card) {
@@ -164,13 +191,32 @@ public class TrpgInvestigatorContextAssembler {
             return;
         }
         StringJoiner values = new StringJoiner("；");
-        weapons.forEach(weapon -> values.add(
-                weapon.getName() + "（伤害"
-                        + value(weapon.getDamage()) + "，弹药"
-                        + value(weapon.getRemainingAmmo()) + "/"
-                        + value(weapon.getAmmoCapacity()) + "，状态"
-                        + (Boolean.TRUE.equals(weapon.getIsBroken())
-                        ? "损坏" : "正常") + "）"));
+        weapons.forEach(weapon -> {
+            StringBuilder weaponText = new StringBuilder()
+                    .append(weapon.getName()).append("（");
+            StringJoiner fields = new StringJoiner("，");
+            if (StringUtils.hasText(weapon.getSkillName())) {
+                fields.add("技能" + weapon.getSkillName().trim());
+            }
+            fields.add("伤害" + value(weapon.getDamage()));
+            if (StringUtils.hasText(weapon.getRange())) {
+                fields.add("射程" + weapon.getRange().trim());
+            }
+            if (StringUtils.hasText(weapon.getAttacksPerRound())) {
+                fields.add("每轮" + weapon.getAttacksPerRound().trim());
+            }
+            fields.add("弹药" + value(weapon.getRemainingAmmo()) + "/"
+                    + value(weapon.getAmmoCapacity()));
+            if (StringUtils.hasText(weapon.getMalfunction())) {
+                fields.add("故障" + weapon.getMalfunction().trim());
+            }
+            if (Boolean.TRUE.equals(weapon.getCanImpale())) {
+                fields.add("可贯穿");
+            }
+            fields.add("状态" + (Boolean.TRUE.equals(weapon.getIsBroken())
+                    ? "损坏" : "正常"));
+            values.add(weaponText.append(fields).append('）').toString());
+        });
         append(result, "武器", values.toString());
     }
 

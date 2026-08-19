@@ -134,6 +134,13 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         int remaining = weapon.getRemainingAmmo();
         int globalGroupIndex = 0;
         int displayOrder = 1;
+        int shooterSituationPenaltyDice = 0;
+        if (Boolean.TRUE.equals(request.shooterMovingFast())) {
+            shooterSituationPenaltyDice++;
+        }
+        if (Boolean.TRUE.equals(request.firingPostureRestricted())) {
+            shooterSituationPenaltyDice++;
+        }
         List<DiceRollResultCreateDTO> drafts = new ArrayList<>();
         Set<String> targetNames = new HashSet<>();
         for (KpFirearmRequestDTOs.Target target : request.targets()) {
@@ -148,6 +155,17 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             }
             CocDiceCharacterVO targetCard = characterCardService
                     .requireDiceCharacter(runId, targetName);
+            boolean targetInCover = Boolean.TRUE.equals(
+                    targetCard.inCover());
+            boolean targetMovingFast = Boolean.TRUE.equals(
+                    target.targetMovingFast());
+            boolean smallTarget = targetCard.build() != null
+                    && targetCard.build() <= -2;
+            int automaticSituationPenaltyDice =
+                    shooterSituationPenaltyDice
+                            + (targetInCover ? 1 : 0)
+                            + (targetMovingFast ? 1 : 0)
+                            + (smallTarget ? 1 : 0);
             int allocated = Math.min(remaining, target.bulletCount());
             remaining -= allocated;
             for (int groupSize : CocFirearmRules.groupSizes(
@@ -155,7 +173,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 CocFirearmRules.AttackAdjustment adjustment =
                         CocFirearmRules.adjustment(
                                 request.firingMode(), globalGroupIndex++,
-                                target.baseModifier());
+                                target.baseModifier(),
+                                automaticSituationPenaltyDice);
                 if (adjustment.impossible()) {
                     continue;
                 }
@@ -170,10 +189,20 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 rule.put("targetCardId", targetCard.cardId());
                 rule.put("targetCharacterName", targetCard.name());
                 rule.put("targetConValue", targetCard.con());
+                rule.put("targetArmor", normalizeArmor(targetCard.armor()));
                 rule.put("firingMode", request.firingMode().name());
                 rule.put("bulletsInGroup", groupSize);
                 rule.put("modifier", adjustment.modifier().name());
                 rule.put("difficultyIncrease", adjustment.difficultyIncrease());
+                rule.put("automaticSituationPenaltyDice",
+                        automaticSituationPenaltyDice);
+                rule.put("targetInCover", targetInCover);
+                rule.put("shooterMovingFast", Boolean.TRUE.equals(
+                        request.shooterMovingFast()));
+                rule.put("targetMovingFast", targetMovingFast);
+                rule.put("firingPostureRestricted", Boolean.TRUE.equals(
+                        request.firingPostureRestricted()));
+                rule.put("smallTarget", smallTarget);
                 rule.put("malfunctionThreshold", malfunctionThreshold);
                 rule.put("fumbleBreaksWeapon", request.fumbleBreaksWeapon());
                 rule.put("canImpale", Boolean.TRUE.equals(
@@ -241,6 +270,13 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 runId, attacker.name(), request.attacker().weaponName());
         int attackValue = requireCheckValue(
                 attacker, attackWeapon.skillName());
+        boolean defenderAlreadyAttacked = Boolean.TRUE.equals(
+                defenderEntity.getMeleeAttackedThisRound());
+        CocPercentileModifier attackModifier = normalizeModifier(
+                request.attacker().modifier());
+        if (defenderAlreadyAttacked) {
+            attackModifier = addBonusDie(attackModifier);
+        }
 
         List<DiceRollResultCreateDTO> drafts = new ArrayList<>();
         drafts.add(meleeCheckDraft(
@@ -251,7 +287,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 attackWeapon,
                 attackerEntity.getDamageBonus(),
                 attackValue,
-                normalizeModifier(request.attacker().modifier()),
+                attackModifier,
                 defenseMode,
                 request.reason(),
                 1));
@@ -282,8 +318,24 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     request.reason(),
                     2));
         }
+        if (!defenderAlreadyAttacked) {
+            defenderEntity.setMeleeAttackedThisRound(true)
+                    .setUpdatedAt(LocalDateTime.now());
+            characterCardService.updateDiceCharacter(defenderEntity);
+        }
         return createMeleeAndSettle(
                 conversationId, request.reason(), drafts);
+    }
+
+    private CocPercentileModifier addBonusDie(
+            CocPercentileModifier modifier) {
+        return switch (modifier) {
+            case BONUS_2 -> CocPercentileModifier.BONUS_2;
+            case BONUS_1 -> CocPercentileModifier.BONUS_2;
+            case NORMAL -> CocPercentileModifier.BONUS_1;
+            case PENALTY_1 -> CocPercentileModifier.NORMAL;
+            case PENALTY_2 -> CocPercentileModifier.PENALTY_1;
+        };
     }
 
     private CocCharacter requireMeleeCharacter(Long runId, Long cardId) {
@@ -370,6 +422,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         rule.put("opponentCardId", opponent.cardId());
         rule.put("opponentCharacterName", opponent.name());
         rule.put("opponentConValue", opponent.con());
+        rule.put("opponentArmor", normalizeArmor(opponent.armor()));
         if (weapon != null) {
             rule.put("weaponName", weapon.name());
             rule.put("damageFormula", weapon.damage());
@@ -633,13 +686,21 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         List<KpDiceRequestDTOs.DamageTarget> targets =
                 requireDamageTargets(request.targets());
 
-        List<DiceRollResultCreateDTO> drafts = new ArrayList<>(targets.size());
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>(
+                targets.size() * 2);
+        int displayOrder = 1;
         for (int index = 0; index < targets.size(); index++) {
             KpDiceRequestDTOs.DamageTarget target = targets.get(index);
-            requireFormula(target.formula(), "伤害公式不能为空");
+            CocDamageRules.DamageExpression damage =
+                    requireDamageExpression(target.formula());
+            if (damage.hpFormula() != null) {
+                requireFormula(damage.hpFormula(), "伤害公式不能为空");
+            }
             CocDiceCharacterVO card = characterCardService.requireDiceCharacter(
                     runId, target.targetCharacterName().trim());
-            if (card.con() == null || card.con() < 1 || card.con() > 100) {
+            if (damage.hpFormula() != null
+                    && (card.con() == null
+                    || card.con() < 1 || card.con() > 100)) {
                 throw new UserRequestException(
                         "角色“" + card.name() + "”的CON值无效");
             }
@@ -648,17 +709,19 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             rule.put("runId", runId);
             rule.put("cardId", card.cardId());
             rule.put("characterName", card.name());
-            rule.put("conValue", card.con());
-
-            DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
-            draft.setCharacterId(card.participantId());
-            draft.setDisplayOrder(index + 1);
-            draft.setDisplayType(DiceRollConstant.TYPE_DAMAGE);
-            draft.setReason(request.reason().trim());
-            draft.setFormula(target.formula().trim());
-            draft.setResolutionData(DiceResolutionDataVO.pending(
-                    DiceRollConstant.TYPE_DAMAGE, null, rule));
-            drafts.add(draft);
+            rule.put("rollBundleKey", "damage:" + index + ":" + card.cardId());
+            if (damage.hpFormula() != null) {
+                rule.put("conValue", card.con());
+                drafts.add(damageDraft(
+                        card.participantId(), displayOrder++,
+                        request.reason().trim(), damage.hpFormula(),
+                        null, rule));
+            }
+            if (damage.stun()) {
+                drafts.add(stunDraft(
+                        card.participantId(), displayOrder++,
+                        request.reason().trim(), null, rule));
+            }
         }
 
         DiceRollAggregate aggregate = internalService.createDiceRoll(
@@ -826,18 +889,18 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         if (!Objects.equals(summary.getRoundCount(), result.getRoundNo())) {
             throw new UserRequestException("该结果不属于当前掷骰轮次");
         }
-        DiceRollResultVO placeholder = result.getResultData();
-        if (placeholder == null || !StringUtils.hasText(placeholder.getFormula())
-                || placeholder.getResult() != null
-                || placeholder.getModules() == null
-                || placeholder.getModules().isEmpty()) {
-            throw new UserRequestException("该位置不是待完成的玩家掷骰");
+        List<DiceRollResult> storedResults = safeResults(
+                internalService.listResultEntities(summary.getId()));
+        List<DiceRollResult> rollBundle = pendingPlayerRollBundle(
+                result, storedResults);
+        for (DiceRollResult pending : rollBundle) {
+            DiceRollResultVO placeholder = requirePendingPlayerPlaceholder(
+                    pending, summary.getRoundCount());
+            pending.setResultData(DiceUtils.roll(placeholder.getFormula()));
         }
-
-        result.setResultData(DiceUtils.roll(placeholder.getFormula()));
-        settleResult(result);
+        settleAlreadyRolled(rollBundle);
         List<DiceRollResult> allResults = mergeResults(
-                internalService.listResultEntities(summary.getId()), List.of(result));
+                storedResults, rollBundle);
         settleCompletedInsanityPairs(allResults);
         refreshSummary(summary, allResults);
         List<DiceRollResult> created = new ArrayList<>(
@@ -873,6 +936,53 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 created.stream().map(DiceRollDetailVO::from).toList());
     }
 
+    private List<DiceRollResult> pendingPlayerRollBundle(
+            DiceRollResult requested,
+            List<DiceRollResult> storedResults) {
+        Object savedBundleKey = resolution(requested).getRule()
+                .get("rollBundleKey");
+        if (!(savedBundleKey instanceof String bundleKey)
+                || bundleKey.isBlank()) {
+            return List.of(requested);
+        }
+        List<DiceRollResult> bundled = safeResults(storedResults).stream()
+                .filter(candidate -> candidate.getCharacterId() == null)
+                .filter(candidate -> candidate.getResolvedAt() == null)
+                .filter(candidate -> Objects.equals(
+                        requested.getRoundNo(), candidate.getRoundNo()))
+                .filter(candidate -> bundleKey.equals(
+                        resolution(candidate).getRule().get("rollBundleKey")))
+                .map(candidate -> Objects.equals(
+                        requested.getId(), candidate.getId())
+                        ? requested : candidate)
+                .sorted(Comparator.comparing(
+                        DiceRollResult::getDisplayOrder,
+                        Comparator.nullsLast(Integer::compareTo)))
+                .toList();
+        if (bundled.stream().noneMatch(candidate -> Objects.equals(
+                requested.getId(), candidate.getId()))) {
+            throw new UserRequestException("同次掷骰数据不完整");
+        }
+        return bundled;
+    }
+
+    private DiceRollResultVO requirePendingPlayerPlaceholder(
+            DiceRollResult result,
+            Integer currentRound) {
+        if (!Objects.equals(currentRound, result.getRoundNo())) {
+            throw new UserRequestException("该结果不属于当前掷骰轮次");
+        }
+        DiceRollResultVO placeholder = result.getResultData();
+        if (placeholder == null
+                || !StringUtils.hasText(placeholder.getFormula())
+                || placeholder.getResult() != null
+                || placeholder.getModules() == null
+                || placeholder.getModules().isEmpty()) {
+            throw new UserRequestException("该位置不是待完成的玩家掷骰");
+        }
+        return placeholder;
+    }
+
     private KpDiceToolResult createAndSettle(
             Long conversationId, String reason, List<DiceRollResultCreateDTO> drafts) {
         DiceRollAggregate aggregate = internalService.createDiceRoll(
@@ -883,6 +993,43 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 aggregate.results());
         refreshSummary(aggregate.summary(), allResults);
         return toolResult(aggregate.summary(), aggregate.results());
+    }
+
+    private DiceRollResultCreateDTO damageDraft(
+            Long rollerId,
+            int displayOrder,
+            String reason,
+            String formula,
+            Long sourceResultId,
+            Map<String, Object> rule) {
+        DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+        draft.setCharacterId(rollerId);
+        draft.setDisplayOrder(displayOrder);
+        draft.setDisplayType(DiceRollConstant.TYPE_DAMAGE);
+        draft.setReason(reason);
+        draft.setFormula(formula);
+        draft.setResolutionData(DiceResolutionDataVO.pending(
+                DiceRollConstant.TYPE_DAMAGE, sourceResultId,
+                new LinkedHashMap<>(rule)));
+        return draft;
+    }
+
+    private DiceRollResultCreateDTO stunDraft(
+            Long rollerId,
+            int displayOrder,
+            String reason,
+            Long sourceResultId,
+            Map<String, Object> rule) {
+        DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
+        draft.setCharacterId(rollerId);
+        draft.setDisplayOrder(displayOrder);
+        draft.setDisplayType(DiceRollConstant.TYPE_STUN_DURATION);
+        draft.setReason(reason);
+        draft.setFormula("1D6");
+        draft.setResolutionData(DiceResolutionDataVO.pending(
+                DiceRollConstant.TYPE_STUN_DURATION, sourceResultId,
+                new LinkedHashMap<>(rule)));
+        return draft;
     }
 
     private KpDiceToolResult createFirearmAndSettle(
@@ -973,6 +1120,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             settleInsanityDie(result, resolution);
         } else if (DiceRollConstant.TYPE_DAMAGE.equals(type)) {
             settleDamageResult(result, resolution);
+        } else if (DiceRollConstant.TYPE_STUN_DURATION.equals(type)) {
+            settleStunDurationResult(result, resolution);
         } else if (DiceRollConstant.TYPE_HEALING.equals(type)) {
             settleHealingResult(result, resolution);
         } else if (DiceRollConstant.TYPE_MAJOR_WOUND_CON.equals(type)) {
@@ -1165,6 +1314,39 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         effect.put("dying", dyingAfter);
         effect.put("deadBefore", deadBefore);
         effect.put("dead", deadAfter);
+        resolution.setEffect(effect);
+    }
+
+    private void settleStunDurationResult(
+            DiceRollResult result, DiceResolutionDataVO resolution) {
+        int rolledDuration = requireRoll(result);
+        if (rolledDuration < 1 || rolledDuration > 6) {
+            throw new UserRequestException("眩晕持续时间骰必须为1到6");
+        }
+        Map<String, Object> rule = resolution.getRule();
+        CocCharacter card = characterCardService.lockDiceCharacter(
+                longValue(rule, "runId"), longValue(rule, "cardId"));
+        if (card == null) {
+            throw new UserRequestException("承受眩晕的角色卡不存在");
+        }
+        int before = Math.max(0, Objects.requireNonNullElse(
+                card.getStunnedRemainingRounds(), 0));
+        int after = Math.max(before, rolledDuration);
+        if (after != before) {
+            card.setStunnedRemainingRounds(after)
+                    .setUpdatedAt(LocalDateTime.now());
+            characterCardService.updateDiceCharacter(card);
+        }
+
+        Map<String, Object> outcome = new LinkedHashMap<>();
+        outcome.put("characterName", stringValue(rule, "characterName"));
+        outcome.put("rolledDuration", rolledDuration);
+        resolution.setOutcome(outcome);
+        Map<String, Object> effect = new LinkedHashMap<>();
+        effect.put("stunBefore", before);
+        effect.put("rolledDuration", rolledDuration);
+        effect.put("stunAfter", after);
+        effect.put("stunChanged", after != before);
         resolution.setEffect(effect);
     }
 
@@ -1412,11 +1594,17 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             rule.put("cardId", longValue(damageRule, "cardId"));
             rule.put("characterName", stringValue(
                     damageRule, "characterName"));
+            rule.put("checkName", "CON");
             rule.put("targetValue", intValue(damageRule, "conValue"));
             rule.put("hpLoss", effectInt(damage, "hpLoss"));
 
+            CocDiceCharacterVO wounded = characterCardService
+                    .requireDiceCharacter(
+                            longValue(damageRule, "runId"),
+                            stringValue(damageRule, "characterName"));
+
             DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
-            draft.setCharacterId(damage.getCharacterId());
+            draft.setCharacterId(automaticRoller(wounded));
             draft.setDisplayOrder(index + 1);
             draft.setDisplayType(DiceRollConstant.TYPE_MAJOR_WOUND_CON);
             draft.setReason(stringValue(rule, "characterName") + "重伤CON检定");
@@ -1615,23 +1803,32 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         rule.put("sourceCharacterName",
                 stringValue(sourceRule, "characterName"));
         rule.put("conValue", intValue(sourceRule, "opponentConValue"));
+        int armor = intValue(sourceRule, "opponentArmor");
         rule.put("melee", true);
+        rule.put("armor", armor);
+        rule.put("automaticArmor", true);
         rule.put("weaponName", stringValue(sourceRule, "weaponName"));
         rule.put("maximumDamage", plan.maximumDamage());
         rule.put("impaling", plan.impaling());
+        rule.put("rollBundleKey", "melee:" + source.getId());
 
-        DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
-        draft.setCharacterId(source.getCharacterId());
-        draft.setDisplayOrder(1);
-        draft.setDisplayType(DiceRollConstant.TYPE_DAMAGE);
-        draft.setReason(stringValue(sourceRule, "weaponName")
+        String damageReason = stringValue(sourceRule, "weaponName")
                 + "命中" + stringValue(
-                sourceRule, "opponentCharacterName"));
-        draft.setFormula(plan.formula());
-        draft.setResolutionData(DiceResolutionDataVO.pending(
-                DiceRollConstant.TYPE_DAMAGE, source.getId(), rule));
+                sourceRule, "opponentCharacterName");
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>(2);
+        int displayOrder = 1;
+        if (plan.formula() != null) {
+            drafts.add(damageDraft(
+                    source.getCharacterId(), displayOrder++, damageReason,
+                    applyArmor(plan.formula(), armor), source.getId(), rule));
+        }
+        if (plan.stun()) {
+            drafts.add(stunDraft(
+                    source.getCharacterId(), displayOrder,
+                    damageReason, source.getId(), rule));
+        }
         List<DiceRollResult> created = internalService.appendDiceRollRound(
-                summary.getConversationId(), summary.getId(), List.of(draft));
+                summary.getConversationId(), summary.getId(), drafts);
         updateRoundCountFromCreated(summary, created, attackRound + 1);
         settleAlreadyRolled(created);
         refreshSummary(summary, mergeResults(allResults, created));
@@ -1727,8 +1924,12 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     ignored -> new FirearmTargetDamage(
                             longValue(rule, "targetCardId"),
                             targetName,
-                            intValue(rule, "targetConValue")));
-            target.formulas().add(plan.formula());
+                            intValue(rule, "targetConValue"),
+                            intValue(rule, "targetArmor")));
+            plan.hitFormulas().stream()
+                    .map(formula -> applyArmor(formula, target.armor()))
+                    .forEach(target.formulas()::add);
+            target.addStun(plan.stun());
             target.sourceResultIds().add(attack.getId());
             target.addHits(plan.hitCount(), plan.impalingHitCount());
         }
@@ -1765,24 +1966,32 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     stringValue(firstRule, "characterName"));
             rule.put("conValue", target.conValue());
             rule.put("firearm", true);
+            rule.put("armor", target.armor());
+            rule.put("automaticArmor", true);
             rule.put("weaponName", stringValue(firstRule, "weaponName"));
             rule.put("sourceResultIds", List.copyOf(
                     target.sourceResultIds()));
             rule.put("hitCount", target.hitCount());
             rule.put("impalingHitCount", target.impalingHitCount());
+            rule.put("rollBundleKey", "firearm:"
+                    + target.sourceResultIds().getFirst()
+                    + ":" + target.cardId());
 
-            DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
-            draft.setCharacterId(attacks.getFirst().getCharacterId());
-            draft.setDisplayOrder(displayOrder++);
-            draft.setDisplayType(DiceRollConstant.TYPE_DAMAGE);
-            draft.setReason(stringValue(firstRule, "weaponName")
-                    + "命中" + target.characterName());
-            draft.setFormula(String.join("+", target.formulas()));
-            draft.setResolutionData(DiceResolutionDataVO.pending(
-                    DiceRollConstant.TYPE_DAMAGE,
-                    target.sourceResultIds().getFirst(),
-                    rule));
-            drafts.add(draft);
+            String damageReason = stringValue(firstRule, "weaponName")
+                    + "命中" + target.characterName();
+            Long rollerId = attacks.getFirst().getCharacterId();
+            Long sourceResultId = target.sourceResultIds().getFirst();
+            if (!target.formulas().isEmpty()) {
+                drafts.add(damageDraft(
+                        rollerId, displayOrder++, damageReason,
+                        String.join("+", target.formulas()),
+                        sourceResultId, rule));
+            }
+            if (target.stun()) {
+                drafts.add(stunDraft(
+                        rollerId, displayOrder++, damageReason,
+                        sourceResultId, rule));
+            }
         }
         List<DiceRollResult> created = internalService.appendDiceRollRound(
                 summary.getConversationId(), summary.getId(), drafts);
@@ -2075,6 +2284,16 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         }
     }
 
+    private CocDamageRules.DamageExpression requireDamageExpression(
+            String formula) {
+        try {
+            return CocDamageRules.parse(formula);
+        } catch (IllegalArgumentException exception) {
+            throw new UserRequestException(
+                    "伤害公式无效：" + exception.getMessage());
+        }
+    }
+
     private void requireConversation(DiceRollSummary summary, Long conversationId) {
         if (!conversationId.equals(summary.getConversationId())) {
             throw new UserRequestException("前一次掷骰不属于当前群聊");
@@ -2193,20 +2412,41 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
+    private int normalizeArmor(Integer armor) {
+        return Math.max(0, Objects.requireNonNullElse(armor, 0));
+    }
+
+    private String applyArmor(String formula, int armor) {
+        if (armor <= 0) {
+            return formula;
+        }
+        String grouped = formula.startsWith("(") && formula.endsWith(")")
+                ? formula : "(" + formula + ")";
+        String adjusted = "max(0," + grouped + "-" + armor + ")";
+        DiceUtils.prepare(adjusted);
+        return adjusted;
+    }
+
     private static final class FirearmTargetDamage {
         private final Long cardId;
         private final String characterName;
         private final int conValue;
+        private final int armor;
         private final List<String> formulas = new ArrayList<>();
         private final List<Long> sourceResultIds = new ArrayList<>();
         private int hitCount;
         private int impalingHitCount;
+        private boolean stun;
 
         private FirearmTargetDamage(
-                Long cardId, String characterName, int conValue) {
+                Long cardId,
+                String characterName,
+                int conValue,
+                int armor) {
             this.cardId = cardId;
             this.characterName = characterName;
             this.conValue = conValue;
+            this.armor = armor;
         }
 
         private Long cardId() {
@@ -2219,6 +2459,10 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
 
         private int conValue() {
             return conValue;
+        }
+
+        private int armor() {
+            return armor;
         }
 
         private List<String> formulas() {
@@ -2237,9 +2481,17 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             return impalingHitCount;
         }
 
+        private boolean stun() {
+            return stun;
+        }
+
         private void addHits(int hits, int impalingHits) {
             hitCount += hits;
             impalingHitCount += impalingHits;
+        }
+
+        private void addStun(boolean added) {
+            stun = stun || added;
         }
     }
 

@@ -80,6 +80,25 @@ class TrpgInvestigatorContextAssemblerTest {
     }
 
     @Test
+    void combatIncludesWeaponFieldsNeededToChooseAnAttack() {
+        Fixture fixture = fixture();
+
+        String context = fixture.assembler().format(
+                fixture.conversation(),
+                action(GroupChatConstant.ACTION_TRPG_COMBAT));
+
+        assertThat(context)
+                .contains("左轮手枪")
+                .contains("技能射击:手枪")
+                .contains("伤害1d10")
+                .contains("射程15m")
+                .contains("每轮1（3）")
+                .contains("弹药5/6")
+                .contains("故障100")
+                .contains("可贯穿");
+    }
+
+    @Test
     void resolvesTheBoundCardByPrimaryKey() {
         Fixture fixture = fixture();
 
@@ -88,6 +107,37 @@ class TrpgInvestigatorContextAssemblerTest {
                 action(GroupChatConstant.ACTION_TRPG_SCENE));
 
         verify(fixture.characterMapper()).selectById(51L);
+    }
+
+    @Test
+    void controlledCardShowsRestrainerNameInsteadOfDatabaseId() {
+        Fixture fixture = fixture();
+        fixture.card().setRestrainedByCharacterId(71L);
+        when(fixture.characterMapper().selectById(71L)).thenReturn(
+                new CocCharacter().setId(71L).setRunId(5L)
+                        .setName("林恩"));
+
+        String context = fixture.assembler().format(
+                fixture.conversation(),
+                action(GroupChatConstant.ACTION_TRPG_COMBAT));
+
+        assertThat(context)
+                .contains("被钳制（钳制者：林恩）")
+                .doesNotContain("钳制者人物卡ID");
+    }
+
+    @Test
+    void unresolvedRestrainerNeverLeaksDatabaseIdToControlledCard() {
+        Fixture fixture = fixture();
+        fixture.card().setRestrainedByCharacterId(999L);
+
+        String context = fixture.assembler().format(
+                fixture.conversation(),
+                action(GroupChatConstant.ACTION_TRPG_COMBAT));
+
+        assertThat(context)
+                .contains("状态：被钳制")
+                .doesNotContain("钳制者人物卡ID", "999");
     }
 
     private Fixture fixture() {
@@ -147,9 +197,14 @@ class TrpgInvestigatorContextAssemblerTest {
         when(weaponMapper.selectList(any())).thenReturn(List.of(
                 new CocCharacterWeapon()
                         .setName("左轮手枪")
+                        .setSkillName("射击:手枪")
                         .setDamage("1d10")
+                        .setRange("15m")
+                        .setAttacksPerRound("1（3）")
                         .setAmmoCapacity(6)
                         .setRemainingAmmo(5)
+                        .setMalfunction("100")
+                        .setCanImpale(true)
                         .setIsBroken(false)
                         .setAbnormal(true)
                         .setRiskTags(List.of("显眼", "高噪声"))));
@@ -170,6 +225,7 @@ class TrpgInvestigatorContextAssemblerTest {
                         skillDefMapper,
                         new CharacterSkillResolver()),
                 characterMapper,
+                card,
                 new GroupConversation()
                         .setId(5L)
                         .setUserWorldId(5L));
@@ -190,6 +246,7 @@ class TrpgInvestigatorContextAssemblerTest {
     private record Fixture(
             TrpgInvestigatorContextAssembler assembler,
             CocCharacterMapper characterMapper,
+            CocCharacter card,
             GroupConversation conversation) {
     }
 }

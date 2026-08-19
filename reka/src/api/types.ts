@@ -171,6 +171,11 @@ export interface InvestigatorCardSummary {
   temporaryInsanityPhase?: string; temporaryInsanityRemainingHours?: number
 }
 
+export interface TrpgCombatParticipantOverview {
+  characterId: number; name: string; investigator: boolean; statuses: string[]
+  hpCurrent?: number; hpMax?: number; armor?: number; dex?: number; build?: number; mov?: number; damageBonus?: string
+}
+
 export interface DiceValue { sides: number; value?: number; role?: string; selected: boolean }
 export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number; placeholder?: boolean }
 export interface DiceResult { formula: string; modules: DiceModule[]; result?: number }

@@ -2,6 +2,7 @@ package com.me.galchat.groupchat.runtime.trpg;
 
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.TrpgCombat;
 import com.me.galchat.domain.vo.CocDiceCharacterVO;
 import com.me.galchat.domain.vo.CharacterCardVO;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
@@ -39,7 +40,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Component
 public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
@@ -149,6 +152,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 .equals(action.actionType());
         boolean sceneIntro = GroupChatConstant.ACTION_TRPG_SCENE_INTRO
                 .equals(action.actionType());
+        boolean combatIntro = GroupChatConstant.ACTION_COMBAT_INTRO
+                .equals(action.actionType());
         boolean activeChildScene = scenePhase
                 && GroupChatConstant.ACTOR_KP.equals(actor.type())
                 && childSceneCommandService.isActiveChildScene(
@@ -169,12 +174,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         boolean interactionResponse = GroupChatConstant
                 .ACTION_TRPG_INTERACTION_RESPONSE
                 .equals(action.actionType());
-        boolean combatPhase = combatAttack || combatDefense
+        boolean combatPhase = combatIntro || combatAttack || combatDefense
                 || combatAdjudicate || combatRoute
                 || GroupChatConstant.ACTION_TRPG_COMBAT
                 .equals(action.actionType());
         String phase = selectionPhase ? "选景"
                 : sceneIntro ? "场景引入"
+                : combatIntro ? "战斗环境引入"
                 : combatAttack ? "战斗攻击"
                 : combatDefense ? "战斗防守"
                 : combatRoute ? "战斗反应路由"
@@ -182,10 +188,15 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 : interactionResponse ? "追问回答"
                 : GroupChatConstant.ACTION_TRPG_COMBAT.equals(action.actionType())
                 ? "战斗" : "场景探索";
-        String kpPhaseExecutionRules = combatAttack || combatDefense
+        String kpPhaseExecutionRules = combatIntro
+                ? "当前步骤只描述战斗环境，不进行战斗裁定，也不掷骰。"
+                + "当前步骤没有可调用的工具；不得替任何参战者决定行动。"
+                + "每个回复只能完成当前阶段指定的工作，不得预演、顺带执行或描述后续阶段。"
+                : combatAttack || combatDefense
                 ? "当前步骤只负责行动声明，不进行战斗裁定，也不掷骰。"
                 + "当前步骤没有可调用的工具；不得调用或模拟任何工具调用协议。"
                 + "战斗工具只由后续战斗裁定步骤使用；不得替用户决定调查员行动。"
+                + "只有当前行动绑定的人物卡可以产生新行动；其他调查员、NPC和旁观者保持上一条公开消息中的状态。"
                 : combatRoute
                 ? "当前步骤只进行战斗反应路由，不裁定成败，也不掷骰。"
                 + "除缺少关键信息时使用公开追问工具外，不调用其他工具。"
@@ -265,11 +276,17 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                                     card.cardId()))
                             .filter(java.util.Objects::nonNull)
                             .toList();
+            String combatNpcOverview = combatPhase
+                    ? investigatorCombatNpcOverview(conversation, cards)
+                    : "";
             messages.add(new SystemMessage(
                     investigatorContextAssembler.format(
                             conversation, action) + "\n"
                     + characterCardFormatter.formatOtherInvestigators(
                             otherInvestigatorCards)
+                    + (combatPhase
+                    ? TrpgRulePrompts.investigatorCombatReference() : "")
+                    + combatNpcOverview
                     + TrpgRulePrompts.investigatorResidentRules()
                     + """
 
@@ -298,10 +315,20 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 messages.add(new UserMessage("""
                         这是当前SCENE Plan第一次进入行动轮。先公开引入当前地点：只描述调查员刚进入时能够观察到的事实，不替调查员决定行动，不泄露未公开真相。
                         """));
+            } else if (combatIntro) {
+                messages.add(new UserMessage("""
+                        这是独立的战斗环境快照步骤。只输出一个自然语言段落，描述已经明确存在的静态战场事实：会影响战术判断的地形、掩体、距离、光照，以及上下文已经明确的参战者位置。
+                        只陈述参战者此刻能够观察到且已由公开上下文确认的事实，不泄露隐藏信息。缺少的信息直接省略，不得自行补全。
+                        使用“位于、相距、摆放着、可以看见”等静态表达。不得描述任何角色在本步骤中新发生的移动、攻击、防守、拔出武器或姿态变化；不得根据人物性格、装备或合理性补写未发生的动作。
+                        其他调查员、NPC和旁观者保持上一条公开消息中的状态；除非其位置已经公开且与战场观察直接相关，否则不要提及，更不得替其决定退开、旁观、逃跑或协助。
+                        不得描述先攻顺序、战斗轮开始、攻击或防守选择，不得询问闪避、反击或下一步行动，也不得裁定攻击、伤害或状态。
+                        完成静态快照后立即结束回复。系统会在下一独立步骤处理首位角色的行动。
+                        """));
             } else if (combatRoute) {
                 messages.add(new UserMessage("""
                         读取紧邻的行动。攻击、阻拦、急救等涉及另一名参战者的行动使用TARGETED；装填等只影响行动者或其装备的行动使用SELF_OR_UTILITY。
                         TARGETED必须识别准确目标，并判断目标是否需要获得寻找掩护、闪避、反击或其他即时防守行动。枪械行动在一回合声明多个目标时，必须按声明顺序一次列出全部目标。
+                        目标已死亡、濒死、昏迷或被眩晕（剩余眩晕回合数大于0）时，必须令insertDefense=false且defenseOptions为空；不得为其插入寻找掩护、闪避或反击。
                         只输出一个JSON对象，不要Markdown，不要叙事：
                         {"actionKind":"TARGETED","targetName":"准确人物卡名称","insertDefense":true,"defenseOptions":["闪避","反击"],"reason":"简短原因"}
                         多目标枪械攻击使用：
@@ -350,6 +377,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "只有缺失信息会实质改变裁定时才调用askForClarification，一次只问一名调查员一个公开问题；"
                         + "不确定是否需要追问时不要调用。调查员已经明确理解重大风险时不得重复确认；"
                         + "团队问题只向真人玩家确认。追问回答可以改变、补充或放弃原行动，最新回答覆盖冲突的旧行动。"
+                        + "调用startCombat后，当前步骤仍是战斗前的场景步骤，战斗尚未激活；"
+                        + "公开消息只能确认被登记的参战者，不得描述先攻顺序、战斗轮或任何角色的新行动，"
+                        + "也不得替未参战角色决定移动、旁观、逃跑或协助。确认参战者后立即结束回复，"
+                        + "战斗环境和首个行动留给后续独立步骤。"
                         : "根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。")
                         + (scenePhase
                         ? """
@@ -459,7 +490,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                             kpRunTools, kpCombatTools)
                     : combatRoute
                     ? tools(kpClarificationTools)
-                    : combatAttack || combatDefense
+                    : combatIntro || combatAttack || combatDefense
                     ? List.of()
                     : tools(kpDiceTools, kpModuleTools, kpSkillRuleTools,
                             kpRunTools);
@@ -486,6 +517,35 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             }
         }
         return List.copyOf(result);
+    }
+
+    private String investigatorCombatNpcOverview(
+            GroupConversation conversation,
+            List<CocDiceCharacterVO> cards) {
+        TrpgCombat combat;
+        try {
+            combat = combatLifecycleService.requireActiveCombat(
+                    conversation);
+        } catch (com.me.galchat.exception.UserRequestException ignored) {
+            return "";
+        }
+        if (combat == null || combat.getParticipants() == null
+                || !combat.getParticipants().isArray()) {
+            return "";
+        }
+        Set<Long> participantIds = new HashSet<>();
+        combat.getParticipants().forEach(node -> {
+            if (node.get("characterId") != null) {
+                participantIds.add(node.get("characterId").asLong());
+            }
+        });
+        List<CocDiceCharacterVO> participatingNpcs = cards.stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(card -> "NPC".equals(card.actorType()))
+                .filter(card -> participantIds.contains(card.cardId()))
+                .toList();
+        return "\n" + characterCardFormatter.formatCombatNpcOverview(
+                combat.getCurrentRound(), participatingNpcs) + "\n";
     }
 
     private boolean isControlledInvestigator(

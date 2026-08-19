@@ -644,6 +644,108 @@ class TrpgTurnExecutionServiceTest {
     }
 
     @Test
+    void firstCombatRoundAllowsIntroInAdditionToMaximumCombatSteps() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupTurnPlanResolver planResolver =
+                mock(GroupTurnPlanResolver.class);
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatService groupChatService = mock(GroupChatService.class);
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversationService, lockService, planResolver,
+                runtimeRegistry, turnMapper, stepMapper,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class), groupChatService,
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE)
+                .setActiveReplyPlanId(31L);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        List<GroupActionSpec> actions = new ArrayList<>();
+        actions.add(new GroupActionSpec(
+                GroupChatConstant.ACTION_COMBAT_INTRO,
+                GroupChatConstant.ACTOR_KP, null, null,
+                "combat:round:1", "战斗第1轮", 1, 0));
+        for (int index = 0; index < GroupChatConstant.MAX_REPLY_STEPS;
+             index++) {
+            long subjectId = 100L + index;
+            actions.add(new GroupActionSpec(
+                    GroupChatConstant.ACTION_COMBAT_ATTACK,
+                    GroupChatConstant.ACTOR_KP, null, subjectId,
+                    "combat:round:1", "战斗第1轮", 1,
+                    index * 2 + 1));
+            actions.add(new GroupActionSpec(
+                    GroupChatConstant.ACTION_COMBAT_ADJUDICATE,
+                    GroupChatConstant.ACTOR_KP, null, subjectId,
+                    "combat:round:1", "战斗第1轮", 1,
+                    index * 2 + 2));
+        }
+        when(planResolver.resolve(conversation, runtime))
+                .thenReturn(new GroupTurnPlanResolver.ResolvedTurnPlan(
+                        GroupChatConstant.PLAN_SOURCE_COMBAT,
+                        41L, actions));
+        AtomicLong ids = new AtomicLong(100L);
+        when(turnMapper.insert(any(GroupChatTurn.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatTurn>getArgument(0)
+                            .setId(ids.incrementAndGet());
+                    return 1;
+                });
+        List<GroupChatReplyStep> insertedSteps = new ArrayList<>();
+        when(stepMapper.insert(any(GroupChatReplyStep.class)))
+                .thenAnswer(invocation -> {
+                    GroupChatReplyStep step = invocation.getArgument(0);
+                    step.setId(ids.incrementAndGet());
+                    insertedSteps.add(step);
+                    return 1;
+                });
+        when(stepMapper.selectList(any()))
+                .thenAnswer(invocation -> List.copyOf(insertedSteps));
+        when(groupChatService.streamPersistedStep(
+                org.mockito.ArgumentMatchers.eq(conversation),
+                any(GroupChatTurn.class),
+                any(GroupChatReplyStep.class)))
+                .thenReturn(Flux.empty());
+
+        service.continueTurn(7L, new GroupTurnContinueDTO())
+                .collectList().block();
+
+        assertThat(insertedSteps).hasSize(25);
+        assertThat(insertedSteps.getFirst().getActionType())
+                .isEqualTo(GroupChatConstant.ACTION_COMBAT_INTRO);
+    }
+
+    @Test
     void submitUserMessageContinuesTheSameTurnAndRunsLaterSteps() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);

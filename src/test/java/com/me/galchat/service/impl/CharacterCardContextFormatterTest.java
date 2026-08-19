@@ -75,6 +75,60 @@ class CharacterCardContextFormatterTest {
     }
 
     @Test
+    void combatConditionsAreVisibleInCompactAndFullCardContexts() {
+        CocDiceCharacterVO compactRestrainer = new CocDiceCharacterVO(
+                71L, "PLAYER", null, "林恩", Map.of("斗殴", 50),
+                10, 10, 0, 0, 50, 0,
+                false, false, false, false,
+                false, null, null);
+        CocDiceCharacterVO compact = new CocDiceCharacterVO(
+                81L, "NPC", null, "食尸鬼", Map.of("闪避", 30),
+                10, 10, 0, 0, 50, 0,
+                false, false, false, false,
+                false, null, null,
+                true, true, 2, 71L, true);
+        CocCharacter fullRestrainer = new CocCharacter()
+                .setId(71L).setName("林恩");
+        CocCharacter full = new CocCharacter()
+                .setId(81L).setName("食尸鬼")
+                .setInCover(true)
+                .setCoverActionForfeitPending(true)
+                .setStunnedRemainingRounds(2)
+                .setRestrainedByCharacterId(71L)
+                .setMeleeAttackedThisRound(true);
+
+        assertThat(formatter.formatNpcs(List.of(compactRestrainer, compact)))
+                .contains("处于掩护")
+                .contains("掩护行动位待消耗")
+                .contains("被眩晕（剩余2回合）")
+                .contains("被钳制（钳制者：林恩）")
+                .contains("本轮已被近战攻击");
+        assertThat(formatter.formatOtherInvestigators(List.of(
+                new CharacterCardVO(fullRestrainer, List.of(), List.of(), null),
+                new CharacterCardVO(full, List.of(), List.of(), null))))
+                .contains("处于掩护")
+                .contains("掩护行动位待消耗")
+                .contains("被眩晕（剩余2回合）")
+                .contains("被钳制（钳制者：林恩）")
+                .contains("本轮已被近战攻击");
+    }
+
+    @Test
+    void fullCardDoesNotExposeUnresolvedRestrainerDatabaseId() {
+        CocCharacter restrained = new CocCharacter()
+                .setId(81L).setName("邪教徒")
+                .setRestrainedByCharacterId(71L);
+
+        String text = formatter.formatActiveNpcs(List.of(
+                new CharacterCardVO(
+                        restrained, List.of(), List.of(), null)));
+
+        assertThat(text)
+                .contains("状态：被钳制")
+                .doesNotContain("钳制者人物卡ID");
+    }
+
+    @Test
     void otherInvestigatorsUseCanonicalAttributesAndConfiguredSkillsWithoutProfile() {
         CocCharacter teammate = new CocCharacter()
                 .setId(72L).setParticipantId(10L).setName("林恩")

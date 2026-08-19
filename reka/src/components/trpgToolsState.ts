@@ -57,6 +57,27 @@ export function formatCheckRate(value?: number): string {
   return `${value}% / ${Math.floor(value / 2)}% / ${Math.floor(value / 5)}%`
 }
 
+export function formatKpPromptUpdatedAt(
+  value?: string,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+): string {
+  if (!value) return '暂无记录'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '暂无记录'
+
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).filter((part) => part.type !== 'literal')
+    .map((part) => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
+}
+
 function normalizedSkillGroupName(value?: string): string {
   return (value || '').trim().replaceAll('：', ':')
 }

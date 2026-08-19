@@ -14,6 +14,7 @@ public final class DiceRollConstant {
     public static final String TYPE_TEMPORARY_INSANITY_TYPE = "TEMPORARY_INSANITY_TYPE";
     public static final String TYPE_TEMPORARY_INSANITY_DURATION = "TEMPORARY_INSANITY_DURATION";
     public static final String TYPE_DAMAGE = "DAMAGE";
+    public static final String TYPE_STUN_DURATION = "STUN_DURATION";
     public static final String TYPE_FIREARM_ATTACK = "FIREARM_ATTACK";
     public static final String TYPE_MELEE_ATTACK = "MELEE_ATTACK";
     public static final String TYPE_HEALING = "HEALING";

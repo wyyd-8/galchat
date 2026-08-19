@@ -96,3 +96,51 @@ test('merges every module rectangle belonging to one participant effect', () => 
   })
   assert.equal(mergeRects?.([]), undefined)
 })
+
+test('limits the shared dice canvas to the visible dialog area', () => {
+  const intersectRects = Reflect.get(dicePlayerLayout, 'intersectDiceViewportRects') as
+    | ((rects: Array<{ left: number; top: number; width: number; height: number }>) => {
+      left: number
+      top: number
+      width: number
+      height: number
+    } | undefined)
+    | undefined
+
+  assert.equal(typeof intersectRects, 'function')
+  assert.deepEqual(intersectRects?.([
+    { left: 100, top: 40, width: 800, height: 1_100 },
+    { left: 70, top: 80, width: 900, height: 520 },
+    { left: 0, top: 0, width: 1_280, height: 720 },
+  ]), {
+    left: 100,
+    top: 80,
+    width: 800,
+    height: 520,
+  })
+  assert.equal(intersectRects?.([
+    { left: 0, top: 0, width: 20, height: 20 },
+    { left: 30, top: 30, width: 20, height: 20 },
+  ]), undefined)
+})
+
+test('keeps a partially clipped die aligned to its full square viewport', () => {
+  const createViewport = Reflect.get(dicePlayerLayout, 'createDiceRenderViewport') as
+    | ((
+      slot: { left: number; top: number; width: number; height: number },
+      canvas: { left: number; top: number; width: number; height: number },
+    ) => {
+      viewport: { x: number; y: number; width: number; height: number }
+      scissor: { x: number; y: number; width: number; height: number }
+    } | undefined)
+    | undefined
+
+  assert.equal(typeof createViewport, 'function')
+  assert.deepEqual(createViewport?.(
+    { left: 70, top: 120, width: 160, height: 160 },
+    { left: 100, top: 80, width: 800, height: 520 },
+  ), {
+    viewport: { x: -30, y: 320, width: 160, height: 160 },
+    scissor: { x: 0, y: 320, width: 130, height: 160 },
+  })
+})

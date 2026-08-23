@@ -11,6 +11,7 @@ export type DiceSkin = typeof DICE_SKIN_OPTIONS[number]['value']
 export type DicePlayerPhase = 'idle' | 'loading' | 'ready' | 'playing' | 'complete' | 'error'
 export type DicePlaybackMode = 'pending' | 'play' | 'settled'
 export type DiceGroupRule = 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'
+export type DiceCheckDifficulty = 'REGULAR' | 'HARD' | 'EXTREME'
 export type DiceGroupOutcomePhase = 'concealed' | 'individual' | 'highlighted' | 'merging' | 'merged'
 export type DiceOutcomeTone = 'critical-success' | 'success' | 'failure' | 'fumble' | 'none'
 export type DiceSpecialOutcomeTone = Extract<DiceOutcomeTone, 'critical-success' | 'fumble'>
@@ -24,6 +25,8 @@ export interface DiceMessagePresentation {
 export interface DicePlaybackGroupPresentation {
   label: string
   checkName: string
+  difficulty?: DiceCheckDifficulty
+  difficultyLabel?: string
   outcomeLabel: string
   outcomeTone: DiceOutcomeTone
   success: boolean
@@ -152,6 +155,11 @@ const PARTICIPANT_CHECK_TYPES = new Set([
 ])
 const CHECK_TYPE_NAMES: Record<string, string> = {
   MAJOR_WOUND_CON: 'CON',
+}
+const CHECK_DIFFICULTY_LABELS: Record<DiceCheckDifficulty, string> = {
+  REGULAR: '普通',
+  HARD: '困难',
+  EXTREME: '极难',
 }
 const VALUE_ROLL_TYPES = new Set([
   'DAMAGE', 'STUN_DURATION', 'SAN_LOSS', 'HEALING',
@@ -560,6 +568,11 @@ function aggregateGroup(
   const combatCheckName = resolutionType === 'FIREARM_ATTACK' && targetName
     ? `${ruleCheckName || '射击'} → ${targetName}`
     : ruleCheckName
+  const savedDifficulty = detail.resolution?.difficulty ?? rule.difficulty
+  const difficulty = typeof savedDifficulty === 'string'
+    && savedDifficulty in CHECK_DIFFICULTY_LABELS
+    ? savedDifficulty as DiceCheckDifficulty
+    : undefined
   return {
     label: typeof outcome.characterName === 'string'
       ? outcome.characterName
@@ -569,6 +582,8 @@ function aggregateGroup(
     checkName: typeof outcome.checkName === 'string'
       ? outcome.checkName
       : detail.resolution?.checkName || combatCheckName || detail.displayType || '检定',
+    difficulty,
+    difficultyLabel: difficulty ? CHECK_DIFFICULTY_LABELS[difficulty] : undefined,
     outcomeLabel: checkOutcomeLabel(outcome),
     outcomeTone: checkOutcomeTone(outcome),
     success: typeof outcome.category === 'string'

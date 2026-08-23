@@ -22,6 +22,7 @@ class DiceRollDetailVOTest {
                         "cardId", 77L,
                         "characterName", "康特·奈尔",
                         "checkName", "侦查",
+                        "difficulty", "HARD",
                         "targetValue", 70));
         DiceRollResult entity = new DiceRollResult()
                 .setId(1L)
@@ -34,6 +35,7 @@ class DiceRollDetailVOTest {
         assertThat(json)
                 .contains("\"characterName\":\"康特·奈尔\"")
                 .contains("\"checkName\":\"侦查\"")
+                .contains("\"difficulty\":\"HARD\"")
                 .doesNotContain("cardId", "targetValue");
     }
 

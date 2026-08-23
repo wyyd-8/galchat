@@ -745,7 +745,8 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-player-window .dialog-description { margin-top: 4px; color: #85877f; font-size: 11px; }
 .dice-player-window .icon-button { border: 1px solid rgba(70,76,70,.12); border-radius: 50%; background: #f6f4ee; }
 .dice-player-window .icon-button:hover { background: #ece9df; }
-.dice-player-window .dialog-body { padding: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: rgba(41,79,73,.28) transparent; scrollbar-width: thin; }
+.dice-player-window .dialog-body { padding: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+.dice-player-stage-scroll { min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: rgba(41,79,73,.28) transparent; scrollbar-width: thin; }
 .dice-player-window--damage { border-color: rgba(93,35,40,.48); background: #e8d7d4; box-shadow: 0 38px 100px rgba(44,22,24,.38), 0 8px 24px rgba(86,39,44,.2); }
 .dice-player-window--damage .dialog-header { border-bottom-color: rgba(93,35,40,.24); background: rgba(241,226,222,.99); }
 .dice-player-window--damage .dialog-body { background: #d4bfc1; }
@@ -824,7 +825,6 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-player-surface .dice-shared-canvas { position: absolute; z-index: 0; display: block; background: transparent; pointer-events: none; }
 .dice-player-surface .three-die-viewport { position: absolute; top: 0; left: 4px; width: 160px; height: 160px; pointer-events: none; }
 .dice-player-surface .percentile-roll .three-die-viewport { left: 7px; width: 168px; height: 168px; }
-.dice-player-surface .dice-shared-dim-overlay { position: absolute; z-index: 1; border-radius: 50%; background: rgba(232,235,231,.58); backdrop-filter: grayscale(.65) saturate(.3) brightness(.85); pointer-events: none; transition: opacity 240ms ease; }
 .dice-player-surface .percentile-roll .is-selected { background: none; filter: drop-shadow(0 12px 15px rgba(var(--dice-accent-rgb),.16)); }
 .dice-player-surface .percentile-tens-die.is-dimmed { filter: grayscale(.65) saturate(.3) brightness(.85); opacity: .3; transform: scale(.94); }
 .dice-player-surface.show-die-values .percentile-tens-die.is-dimmed.is-settled { transform: translateY(-12px) scale(.94); }
@@ -858,6 +858,11 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-group-result-box > span strong { color: #3f4944; font-size: 10px; }
 .dice-group-result-box > span small { margin-top: 3px; color: #838982; font-size: 8px; }
 .dice-group-result-box > span .dice-group-result-number { color: var(--dice-accent); font-weight: 700; }
+.dice-group-result-box > span .dice-group-check { display: flex; align-items: center; gap: 4px; }
+.dice-group-check > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dice-check-difficulty { flex: 0 0 auto; padding: 1px 4px; border: 1px solid rgba(67,104,91,.2); border-radius: 999px; color: #557369; background: rgba(97,132,117,.1); font-size: 7px; font-style: normal; font-weight: 800; line-height: 1.35; letter-spacing: .04em; }
+.dice-check-difficulty.is-hard { border-color: rgba(138,98,29,.24); color: #8a621d; background: rgba(190,147,61,.12); }
+.dice-check-difficulty.is-extreme { border-color: rgba(139,53,67,.24); color: #8b3543; background: rgba(153,65,80,.1); }
 .dice-group-result-box > b { max-width: 76px; color: var(--pine); font-size: 10px; line-height: 1.4; text-align: right; }
 .dice-group-result-box.is-concealed { border-style: dashed; border-color: rgba(72,82,76,.14); background: #f4f4f0; box-shadow: none; }
 .dice-group-result-box.is-failure { border-color: rgba(138,63,72,.13); background: #faf2f2; }

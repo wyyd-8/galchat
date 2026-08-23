@@ -29,6 +29,51 @@ import static org.mockito.Mockito.when;
 class TrpgModuleContextAssemblerTest {
 
     @Test
+    void kpContextTreatsFutureModuleSectionsAsReferenceOnly() {
+        CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
+        CocModuleContextMapper contextMapper =
+                mock(CocModuleContextMapper.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        TrpgModuleContextAssembler assembler =
+                new TrpgModuleContextAssembler(
+                        moduleMapper, contextMapper, locationMapper,
+                        mock(CocModuleClueMapper.class),
+                        mock(CocModuleMaterialMapper.class),
+                        mock(GroupReplyPlanMapper.class),
+                        mock(CocCharacterMapper.class),
+                        mock(TrpgMaterialStateStore.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setModuleId(3L);
+        when(moduleMapper.selectById(3L)).thenReturn(new CocModule()
+                .setId(3L)
+                .setName("古树林中")
+                .setIntroduction("进入森林搜寻人质"));
+        when(contextMapper.selectOne(any())).thenReturn(
+                new CocModuleContext()
+                        .setTruthBackground("幕后真相")
+                        .setTimeline("第三天日落后发生仪式")
+                        .setEndingContent("调查员可能阻止仪式"));
+        when(locationMapper.selectList(any())).thenReturn(List.of(
+                new CocModuleLocation().setId(21L)
+                        .setName("第一天－上午")
+                        .setSummary("通报会与出发准备")
+                        .setContent("当前场景正文")));
+
+        String result = assembler.formatKpContext(conversation);
+
+        assertThat(result)
+                .contains("<module-progress-boundary-rules>")
+                .contains("时间线、幕后真相、结局内容")
+                .contains("下一场景开头简要介绍")
+                .contains("不代表相应事件已经发生")
+                .contains("不得把下一场景简介续写为当前场景事实")
+                .contains("选景阶段仍可自由选择模组场景")
+                .contains("</module-progress-boundary-rules>");
+    }
+
+    @Test
     void dynamicChildSceneUsesOnlyItsSelectedMainSceneContent() {
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleContextMapper contextMapper =

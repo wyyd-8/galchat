@@ -22,7 +22,10 @@ import {
 } from '@/dice/domain/dicePlayback'
 import {
   createDiceGroupMergePlan,
+  createDiceGroupMergeSequencePlan,
+  createDiceResultRevealPlan,
   createDiceValueMergeTokenLayout,
+  scrollDiceRowIntoView,
   shouldMergeDiceModuleValues,
 } from '@/dice/domain/diceGroupMerge'
 import {
@@ -43,9 +46,11 @@ const emit = defineEmits<{ roll: []; complete: []; continue: [] }>()
 
 const tray = ref<HTMLElement | null>(null)
 const surface = ref<HTMLElement | null>(null)
+const stageScroll = ref<HTMLElement | null>(null)
 const renderLayer = ref<HTMLElement | null>(null)
 const status = ref<DicePlayerPhase>('idle')
 const groupOutcomePhase = ref<DiceGroupOutcomePhase>('concealed')
+const revealedDiceResultGroups = ref<boolean[]>([])
 const error = ref('')
 const dialogWidthPx = ref(980)
 let board: ThreeDiceBoard | undefined
@@ -54,6 +59,7 @@ let generation = 0
 let valueMergeTimers: number[] = []
 let groupOutcomeTimers: number[] = []
 let outcomeVfxTimers: number[] = []
+let rowScrollPlayback: AbortController | undefined
 
 type SpecialOutcomeTone = Extract<DiceOutcomeTone, 'critical-success' | 'fumble'>
 interface OutcomeVfxParticle {
@@ -106,6 +112,31 @@ const groupOutcomeVisibility = computed(() => createGroupOutcomeVisibility(
   props.request?.presentation?.groupRule,
 ))
 const isWinnerHighlighted = computed(() => isOpposedCheck.value && groupOutcomeVisibility.value.highlightWinner)
+const isFinalDiceResultRevealed = computed(() => {
+  const groupCount = summary.value?.groups.length || 0
+  return groupCount > 0
+    && revealedDiceResultGroups.value.length >= groupCount
+    && revealedDiceResultGroups.value.slice(0, groupCount).every(Boolean)
+})
+
+function isDiceGroupResultRevealed(index: number): boolean {
+  return groupOutcomeVisibility.value.revealIndividualResults
+    && revealedDiceResultGroups.value[index] === true
+}
+
+function resetDiceResultReveal(revealAll = false) {
+  revealedDiceResultGroups.value = Array.from(
+    { length: summary.value?.groups.length || 0 },
+    () => revealAll,
+  )
+}
+
+function revealDiceResultGroup(index: number, playGeneration: number) {
+  if (generation !== playGeneration) return
+  const next = [...revealedDiceResultGroups.value]
+  next[index] = true
+  revealedDiceResultGroups.value = next
+}
 
 function clearGroupOutcomeTimers() {
   groupOutcomeTimers.forEach((timer) => window.clearTimeout(timer))
@@ -171,13 +202,17 @@ function playOutcomeVfx(request: DicePlaybackRequest, playGeneration: number) {
   }, 1_450))
 }
 
-function scheduleGroupOutcomeMerge(request: DicePlaybackRequest, playGeneration: number) {
+function scheduleGroupOutcomeMerge(
+  request: DicePlaybackRequest,
+  playGeneration: number,
+  diceMergeCompletionDelayMs: number,
+) {
   clearGroupOutcomeTimers()
   if (!request.presentation) return
   groupOutcomePhase.value = 'individual'
   if (request.presentation.kind === 'opposed-check') {
-    const highlightDelayMs = 1_100
-    const mergeDelayMs = 2_500
+    const highlightDelayMs = diceMergeCompletionDelayMs + 480
+    const mergeDelayMs = diceMergeCompletionDelayMs + 1_600
     groupOutcomeTimers.push(window.setTimeout(() => {
       if (generation === playGeneration) groupOutcomePhase.value = 'highlighted'
     }, highlightDelayMs))
@@ -191,7 +226,7 @@ function scheduleGroupOutcomeMerge(request: DicePlaybackRequest, playGeneration:
   }
   if (request.presentation.kind !== 'multiplayer-check') return
   if (request.presentation.groupRule === 'SEPARATE') return
-  const mergeDelayMs = 1_300 + Math.max(0, request.presentation.groups.length - 1) * 280
+  const mergeDelayMs = diceMergeCompletionDelayMs + 400
   groupOutcomeTimers.push(window.setTimeout(() => {
     if (generation === playGeneration) groupOutcomePhase.value = 'merging'
   }, mergeDelayMs))
@@ -226,6 +261,8 @@ function arrangeDiceModuleRows() {
 }
 
 function clearDiceValueMergeTimers() {
+  rowScrollPlayback?.abort()
+  rowScrollPlayback = undefined
   valueMergeTimers.forEach((timer) => window.clearTimeout(timer))
   valueMergeTimers = []
   tray.value?.querySelectorAll('.dice-value-merge-token').forEach((token) => token.remove())
@@ -280,12 +317,43 @@ function beginDiceValueMerge(
   })
 }
 
-function prepareDiceValueMerges(request: DicePlaybackRequest, playGeneration: number) {
-  if (!tray.value) return
+function focusDiceRow(row: HTMLElement, durationMs: number) {
+  const scrollElement = stageScroll.value
+  if (!scrollElement || !row.isConnected) return
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  rowScrollPlayback?.abort()
+  rowScrollPlayback = new AbortController()
+  scrollDiceRowIntoView(scrollElement, row, {
+    reducedMotion,
+    durationMs,
+    signal: rowScrollPlayback.signal,
+  })
+}
+
+function prepareDiceValueMerges(request: DicePlaybackRequest, playGeneration: number): number {
+  if (!tray.value) return 0
   clearDiceValueMergeTimers()
   const modules = Array.from(tray.value.querySelectorAll<HTMLElement>('.dice-module'))
+  const rows = Array.from(tray.value.querySelectorAll<HTMLElement>('.dice-player-row'))
+  const mergeableGroups = modules.map((moduleElement) => shouldMergeDiceModuleValues(
+    moduleElement.classList.contains('is-value-placeholder'),
+  ))
+  const sequence = createDiceGroupMergeSequencePlan(
+    playerLayout.value.rowGroupCounts,
+    mergeableGroups,
+  )
+
+  sequence.rowFocuses.forEach((focus) => {
+    const row = rows[focus.rowIndex]
+    if (!row) return
+    valueMergeTimers.push(window.setTimeout(() => {
+      if (generation === playGeneration) focusDiceRow(row, focus.durationMs)
+    }, focus.delayMs))
+  })
+
   modules.forEach((moduleElement, groupIndex) => {
-    if (!shouldMergeDiceModuleValues(moduleElement.classList.contains('is-value-placeholder'))) return
+    const sequenceGroup = sequence.groups[groupIndex]
+    if (!sequenceGroup || !mergeableGroups[groupIndex]) return
     const values = Array.from(moduleElement.querySelectorAll<HTMLElement>('.die-value'))
     const mergeTarget = moduleElement.querySelector<HTMLElement>('.dice-row, .percentile-roll')
     const targetRect = (mergeTarget || moduleElement).getBoundingClientRect()
@@ -307,8 +375,25 @@ function prepareDiceValueMerges(request: DicePlaybackRequest, playGeneration: nu
         plan.fadeDelayMs,
         playGeneration,
       )
-    }, plan.delayMs))
+    }, sequenceGroup.mergeDelayMs))
   })
+
+  const resultGroups = request.presentation?.groups.length
+    ? request.presentation.groups
+    : modules.map((_, moduleStart) => ({ moduleStart, moduleCount: 1 }))
+  const revealPlan = createDiceResultRevealPlan(
+    resultGroups,
+    sequence.groups.map((group) => group.revealDelayMs),
+  )
+  revealPlan.forEach((result) => {
+    valueMergeTimers.push(window.setTimeout(() => {
+      revealDiceResultGroup(result.resultGroupIndex, playGeneration)
+    }, result.revealDelayMs))
+  })
+  return Math.max(
+    sequence.completionDelayMs,
+    ...revealPlan.map((result) => result.revealDelayMs),
+  )
 }
 
 async function prepare(request: DicePlaybackRequest) {
@@ -318,11 +403,13 @@ async function prepare(request: DicePlaybackRequest) {
   clearOutcomeVfx()
   applyDiceModuleOutcomeTones()
   dialogWidthPx.value = 980
+  resetDiceResultReveal()
   open.value = true
   status.value = 'loading'
   error.value = ''
   await nextTick()
   if (!tray.value || currentGeneration !== generation) return
+  if (stageScroll.value) stageScroll.value.scrollTop = 0
 
   try {
     const mode = resolveDicePlayerMode(request)
@@ -332,6 +419,7 @@ async function prepare(request: DicePlaybackRequest) {
       request.presentation?.groupRule,
     )
     groupOutcomePhase.value = initial.groupOutcomePhase
+    resetDiceResultReveal(initial.groupOutcomePhase !== 'concealed')
     if (!board) {
       const rendererModule = await import('@/dice/renderer/ThreeDice')
       if (currentGeneration !== generation) return
@@ -383,6 +471,8 @@ async function roll() {
   clearGroupOutcomeTimers()
   clearOutcomeVfx()
   applyDiceModuleOutcomeTones()
+  resetDiceResultReveal()
+  if (stageScroll.value) stageScroll.value.scrollTop = 0
   status.value = 'playing'
   error.value = ''
 
@@ -400,9 +490,9 @@ async function roll() {
     if (currentGeneration !== generation) return
     applyDiceModuleOutcomeTones(request)
     playOutcomeVfx(request, currentGeneration)
-    prepareDiceValueMerges(request, currentGeneration)
+    const diceMergeCompletionDelayMs = prepareDiceValueMerges(request, currentGeneration)
     status.value = 'complete'
-    scheduleGroupOutcomeMerge(request, currentGeneration)
+    scheduleGroupOutcomeMerge(request, currentGeneration, diceMergeCompletionDelayMs)
     emit('complete')
   } catch (cause) {
     if (currentGeneration !== generation) return
@@ -456,59 +546,61 @@ onBeforeUnmount(() => {
     :content-class="dialogContentClass"
     :content-style="dialogContentStyle"
   >
-    <section
-      ref="surface"
-      class="dice-player-surface"
-      :class="[
-        `is-${status}`,
-        {
-          'show-die-values': presentation.showDieValues,
-        },
-      ]"
-      :style="stageStyle"
-      :data-skin="request?.skin || 'classic'"
-      :data-layout-columns="playerLayout.columns"
-      :data-layout-rows="playerLayout.rows"
-    >
-      <div v-if="summary" class="dice-player-stage-bar">
-        <div class="dice-player-state" aria-live="polite">
-          <i aria-hidden="true" />
-          <span>
-            <strong>{{ presentation.label }}</strong>
-            <small>{{ presentation.hint }}</small>
-          </span>
+    <div ref="stageScroll" class="dice-player-stage-scroll">
+      <section
+        ref="surface"
+        class="dice-player-surface"
+        :class="[
+          `is-${status}`,
+          {
+            'show-die-values': presentation.showDieValues,
+          },
+        ]"
+        :style="stageStyle"
+        :data-skin="request?.skin || 'classic'"
+        :data-layout-columns="playerLayout.columns"
+        :data-layout-rows="playerLayout.rows"
+      >
+        <div v-if="summary" class="dice-player-stage-bar">
+          <div class="dice-player-state" aria-live="polite">
+            <i aria-hidden="true" />
+            <span>
+              <strong>{{ presentation.label }}</strong>
+              <small>{{ presentation.hint }}</small>
+            </span>
+          </div>
+          <span class="dice-player-modifier">{{ summary.modifierLabel }}</span>
         </div>
-        <span class="dice-player-modifier">{{ summary.modifierLabel }}</span>
-      </div>
-      <div v-if="outcomeEffects.length" class="dice-outcome-vfx-layer" aria-hidden="true">
-        <div
-          v-for="effect in outcomeEffects"
-          :key="effect.id"
-          class="dice-outcome-vfx-burst"
-          :class="`is-${effect.tone}`"
-          :style="effect.style"
-        >
-          <i class="dice-outcome-vfx-core" />
-          <i
-            v-for="particle in effect.particles"
-            :key="particle.id"
-            class="dice-outcome-vfx-fog"
-            :style="particle.style"
-          />
+        <div v-if="outcomeEffects.length" class="dice-outcome-vfx-layer" aria-hidden="true">
+          <div
+            v-for="effect in outcomeEffects"
+            :key="effect.id"
+            class="dice-outcome-vfx-burst"
+            :class="`is-${effect.tone}`"
+            :style="effect.style"
+          >
+            <i class="dice-outcome-vfx-core" />
+            <i
+              v-for="particle in effect.particles"
+              :key="particle.id"
+              class="dice-outcome-vfx-fog"
+              :style="particle.style"
+            />
+          </div>
         </div>
-      </div>
-      <div ref="renderLayer" class="dice-render-layer" aria-hidden="true" />
-      <div ref="tray" class="dice-player-tray" />
-      <div v-if="summary" class="dice-player-selection">
-        <span><i class="selected" />计入结果</span>
-        <span v-if="summary.selectionLabel.includes('舍弃')"><i class="discarded" />未采用</span>
-        <b>{{ summary.selectionLabel }}</b>
-      </div>
-      <div v-if="status === 'error'" class="dice-player-error" role="alert">
-        <CircleAlert :size="18" />
-        <div><strong>没有完成这次播放</strong><span>{{ error }}</span></div>
-      </div>
-    </section>
+        <div ref="renderLayer" class="dice-render-layer" aria-hidden="true" />
+        <div ref="tray" class="dice-player-tray" />
+        <div v-if="summary" class="dice-player-selection">
+          <span><i class="selected" />计入结果</span>
+          <span v-if="summary.selectionLabel.includes('舍弃')"><i class="discarded" />未采用</span>
+          <b>{{ summary.selectionLabel }}</b>
+        </div>
+        <div v-if="status === 'error'" class="dice-player-error" role="alert">
+          <CircleAlert :size="18" />
+          <div><strong>没有完成这次播放</strong><span>{{ error }}</span></div>
+        </div>
+      </section>
+    </div>
     <footer
       v-if="request && summary"
       class="dice-player-result"
@@ -537,7 +629,7 @@ onBeforeUnmount(() => {
               <article
                 class="dice-group-result-box"
                 :class="[
-                  groupOutcomeVisibility.revealIndividualResults
+                  isDiceGroupResultRevealed(index)
                     ? isValueRoll ? 'is-value'
                       : request.presentation.groups[index]?.outcomeTone !== 'none'
                         ? `is-${request.presentation.groups[index]?.outcomeTone}`
@@ -552,9 +644,16 @@ onBeforeUnmount(() => {
                 <span>
                   <strong>{{ group.label }}</strong>
                   <small class="dice-group-result-number">{{ formatDiceGroupLabel(request.presentation.groups[index]!.moduleStart, request.presentation.groups[index]!.moduleCount) }}</small>
-                  <small>{{ group.expression }}</small>
+                  <small class="dice-group-check">
+                    <em
+                      v-if="request.presentation.groups[index]?.difficultyLabel"
+                      class="dice-check-difficulty"
+                      :class="`is-${request.presentation.groups[index]?.difficulty?.toLowerCase()}`"
+                    >{{ request.presentation.groups[index]?.difficultyLabel }}</em>
+                    <span>{{ group.expression }}</span>
+                  </small>
                 </span>
-                <b v-if="groupOutcomeVisibility.revealIndividualResults">{{ group.result }}</b>
+                <b v-if="isDiceGroupResultRevealed(index)">{{ group.result }}</b>
               </article>
               <div
                 v-if="isOpposedCheck && index < summary.groups.length - 1"
@@ -592,12 +691,12 @@ onBeforeUnmount(() => {
         <div
           class="dice-player-score"
           :class="{
-            'is-concealed': !presentation.revealResult,
+            'is-concealed': !presentation.revealResult || !isFinalDiceResultRevealed,
             'is-semantic': request.presentation,
           }"
         >
           <span>{{ summary.resultLabel }}</span>
-          <strong>{{ presentation.revealResult ? summary.resultValue : '?' }}</strong>
+          <strong>{{ presentation.revealResult && isFinalDiceResultRevealed ? summary.resultValue : '?' }}</strong>
         </div>
         <div class="dice-player-result-copy">
           <span>{{ summary.formulaLabel }}</span>

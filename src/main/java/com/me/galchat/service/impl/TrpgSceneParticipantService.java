@@ -106,6 +106,30 @@ public class TrpgSceneParticipantService {
                         .orderByAsc(GroupReplyPlanItem::getId));
     }
 
+    public SceneSummaryState summaryState(
+            GroupConversation conversation, GroupReplyPlan scene) {
+        if (conversation == null || scene == null
+                || !java.util.Objects.equals(
+                conversation.getId(), scene.getConversationId())) {
+            throw new UserRequestException("子场景摘要状态不存在");
+        }
+        List<String> investigators = new ArrayList<>();
+        for (GroupReplyPlanItem item : orderedItems(scene.getId())) {
+            if (!isInvestigator(item)) {
+                continue;
+            }
+            if (!StringUtils.hasText(
+                    item.getSubjectCharacterName())) {
+                throw new UserRequestException(
+                        "场景调查员名称快照不存在");
+            }
+            investigators.add(item.getSubjectCharacterName());
+        }
+        return new SceneSummaryState(
+                scenePath(conversation.getModuleId(), scene),
+                List.copyOf(investigators));
+    }
+
     private String scenePath(
             Long moduleId, GroupReplyPlan activeScene) {
         List<GroupReplyPlan> chain = new ArrayList<>();
@@ -158,5 +182,10 @@ public class TrpgSceneParticipantService {
             List<String> activeInvestigatorNames,
             List<Long> activeInvestigatorCharacterIds,
             List<String> waitingInvestigatorNames) {
+    }
+
+    public record SceneSummaryState(
+            String scenePath,
+            List<String> investigatorNames) {
     }
 }

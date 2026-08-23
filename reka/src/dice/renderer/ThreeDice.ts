@@ -14,8 +14,10 @@ import {
   interpolateRotation,
   type DiceAnimationGroupTiming,
 } from './rollRotation'
+import { applyDiscardedDieAppearance } from './discardedDieAppearance'
 import { settleCameraDistance, settleScaleFactor } from './settleScale'
 import { formatDiceGroupLabel } from '../domain/diceGroupLabel'
+import { findDiceStageScrollHost } from '../domain/diceGroupMerge'
 import {
   createDiceRenderViewport,
   intersectDiceViewportRects,
@@ -67,7 +69,6 @@ interface RenderedDie {
   faceUp: THREE.Vector3
   frontValue: string
   turnSeed: number
-  dimOverlay?: HTMLElement
   dispose: () => void
 }
 
@@ -783,7 +784,7 @@ export class ThreeDiceBoard {
     if (!surface) throw new Error('骰子托盘缺少播放器表面')
     this.surface = surface
     this.renderLayer = renderLayer || surface
-    this.scrollHost = diceTray.closest<HTMLElement>('.dialog-body') || undefined
+    this.scrollHost = findDiceStageScrollHost<HTMLElement>(diceTray)
     this.renderer = acquireSharedRenderer(this.renderLayer, this.rendererOwner)
     const scheduler = {
       request: (callback: (now: number) => void) => window.requestAnimationFrame(callback),
@@ -871,7 +872,7 @@ export class ThreeDiceBoard {
       if (!outcome) continue
       die.wrapper.classList.add(outcome === 'selected' ? 'is-selected' : 'is-dimmed')
       if (outcome === 'selected') die.wrapper.setAttribute('aria-current', 'true')
-      if (outcome === 'dimmed') this.addDimOverlay(die)
+      if (outcome === 'dimmed') applyDiscardedDieAppearance(die.model)
     }
     this.trackLayoutFor(420)
   }
@@ -894,7 +895,7 @@ export class ThreeDiceBoard {
       if (outcome) {
         die.wrapper.classList.add(outcome === 'selected' ? 'is-selected' : 'is-dimmed')
         if (outcome === 'selected') die.wrapper.setAttribute('aria-current', 'true')
-        if (outcome === 'dimmed') this.addDimOverlay(die)
+        if (outcome === 'dimmed') applyDiscardedDieAppearance(die.model)
       }
     }
     this.renderAll()
@@ -944,17 +945,7 @@ export class ThreeDiceBoard {
   }
 
   private disposeDie(die: RenderedDie): void {
-    die.dimOverlay?.remove()
     die.dispose()
-  }
-
-  private addDimOverlay(die: RenderedDie): void {
-    if (die.dimOverlay) return
-    const overlay = document.createElement('div')
-    overlay.className = 'dice-shared-dim-overlay'
-    overlay.setAttribute('aria-hidden', 'true')
-    die.dimOverlay = overlay
-    this.renderLayer.append(overlay)
   }
 
   private trackLayoutFor(milliseconds: number): void {
@@ -1020,23 +1011,13 @@ export class ThreeDiceBoard {
     for (const die of this.activeDice) {
       const slotRect = die.viewport.getBoundingClientRect()
       const placement = createDiceRenderViewport(slotRect, canvasRect)
-      if (!placement || slotRect.width < 1 || slotRect.height < 1) {
-        if (die.dimOverlay) die.dimOverlay.hidden = true
-        continue
-      }
+      if (!placement || slotRect.width < 1 || slotRect.height < 1) continue
       const { viewport, scissor } = placement
       die.camera.aspect = slotRect.width / slotRect.height
       die.camera.updateProjectionMatrix()
       this.renderer.setViewport(viewport.x, viewport.y, viewport.width, viewport.height)
       this.renderer.setScissor(scissor.x, scissor.y, scissor.width, scissor.height)
       this.renderer.render(die.scene, die.camera)
-      if (die.dimOverlay) {
-        die.dimOverlay.hidden = false
-        die.dimOverlay.style.left = `${slotRect.left - surfaceRect.left}px`
-        die.dimOverlay.style.top = `${slotRect.top - surfaceRect.top}px`
-        die.dimOverlay.style.width = `${slotRect.width}px`
-        die.dimOverlay.style.height = `${slotRect.height}px`
-      }
     }
     this.renderer.setScissorTest(false)
   }

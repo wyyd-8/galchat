@@ -351,6 +351,15 @@ export function useWorkspace() {
     return messages.value.find((item) => item.replyStepId === event.replyStepId)
   }
 
+  function findReplyStartMessage(event: GroupChatEvent): GroupMessage | undefined {
+    const exact = event.messageId == null
+      ? undefined
+      : messages.value.find((item) => item.id === event.messageId)
+    return exact || messages.value.find((item) => (
+      item.replyStepId === event.replyStepId && item.status === 'failed'
+    ))
+  }
+
   function applyEvent(event: GroupChatEvent) {
     if (event.eventType === 'stream.caught_up') {
       catchingUpGenerationId = null
@@ -391,7 +400,7 @@ export function useWorkspace() {
     }
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
-      const existing = findEventMessage(event)
+      const existing = findReplyStartMessage(event)
       if (existing) {
         Object.assign(existing, { id: event.messageId || tempMessageId--, turnId: event.turnId,
           speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
@@ -552,7 +561,6 @@ export function useWorkspace() {
     if (!conversation || conversation.mode !== 'trpg' || !message.turnId || !message.replyStepId || loading.sending) return
     loading.sending = true
     try {
-      messages.value = messages.value.filter((item) => item.id !== message.id)
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
       await consumeGeneration(
         conversation.id,

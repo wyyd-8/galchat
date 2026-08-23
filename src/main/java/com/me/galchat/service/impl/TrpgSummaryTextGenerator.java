@@ -32,4 +32,19 @@ public class TrpgSummaryTextGenerator {
                 .call()
                 .content();
     }
+
+    public String summarizeChildClues(String evidence) {
+        return summaryClient.prompt(new Prompt(List.of(
+                        new SystemMessage("""
+                                你负责从刚结束的COC子场景候选证据中只提取可用线索。
+                                线索必须是输入中KP已经公开描述或已经展示的材料内容。
+                                不得记录人物行动、移动、抵达、离开、会合、购买、检定过程、对话过程或后续计划。
+                                不得推断输入之外的信息，不得把意图、猜测或计划写成事实。
+                                每条线索使用“- ”开头；没有可用线索时只输出“无”。
+                                不输出参与者、时间、地点、标题或分析过程。
+                                """),
+                        new UserMessage(evidence))))
+                .call()
+                .content();
+    }
 }

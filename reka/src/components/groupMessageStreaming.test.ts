@@ -149,6 +149,142 @@ test('keeps continued streaming output below the dice message from the same repl
   }
 })
 
+test('reuses a failed KP message when continuing the same reply step', async () => {
+  const { api, streamTrpgTurn } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  const storage = new Map<string, string>()
+  Object.assign(globalThis, {
+    window: {
+      addEventListener() {},
+      clearTimeout,
+      setTimeout,
+    },
+    localStorage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+      key: (index: number) => [...storage.keys()][index] ?? null,
+      get length() { return storage.size },
+    },
+    sessionStorage: {
+      getItem: () => null,
+      setItem() {},
+      removeItem() {},
+      clear() {},
+      key: () => null,
+      length: 0,
+    },
+  })
+
+  const originalContinue = streamTrpgTurn.continue
+  const originalGroupMessages = api.groupMessages
+  const originalReplyPlan = api.replyPlan
+  const originalCurrentTurn = api.currentTurn
+  const originalCombatOverview = api.combatOverview
+  try {
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {},
+      insert(child, parent) {
+        const children = (parent.children ||= []) as Array<Record<string, unknown>>
+        children.push(child)
+        child.parent = parent
+      },
+      remove() {},
+      createElement: () => ({}),
+      createText: (text) => ({ text }),
+      createComment: (text) => ({ text }),
+      setText(node, text) { node.text = text },
+      setElementText(node, text) { node.text = text },
+      parentNode: (node) => node.parent as Record<string, unknown> | null,
+      nextSibling: () => null,
+    })
+    renderer.createApp(defineComponent({
+      setup() {
+        workspace = useWorkspace()
+        return () => h('div')
+      },
+    })).mount({})
+    workspace.conversations.value = [{
+      id: 7,
+      userWorldId: 3,
+      worldId: 2,
+      mode: 'trpg',
+      title: '旧宅调查',
+      status: 'active',
+    }]
+    workspace.selectedConversationId.value = 7
+    workspace.messages.value = [{
+      id: 100,
+      conversationId: 7,
+      turnId: 42,
+      replyStepId: 9,
+      speakerType: 'kp',
+      speakerName: 'KP',
+      messageKind: 'dialogue',
+      content: '旧的失败内容',
+      sequenceNo: 10,
+      status: 'failed',
+    }]
+    workspace.reasoning[9] = '旧的思考内容'
+
+    let streamingSnapshot: Array<Pick<GroupMessage, 'id' | 'replyStepId' | 'content' | 'status'>> = []
+    let streamingReasoning = ''
+    streamTrpgTurn.continue = async (_id, _clientRequestId, onEvent) => {
+      onEvent({
+        eventType: 'reply.started', conversationId: 7, turnId: 42,
+        replyStepId: 9, messageId: 101, sequence: 11,
+        messageKind: 'dialogue', speaker: { type: 'kp', name: 'KP' },
+      })
+      onEvent({
+        eventType: 'reasoning.delta', conversationId: 7, turnId: 42,
+        replyStepId: 9, messageId: 101, sequence: 11,
+        messageKind: 'dialogue', speaker: { type: 'kp', name: 'KP' },
+        delta: '新的思考内容',
+      })
+      onEvent({
+        eventType: 'message.delta', conversationId: 7, turnId: 42,
+        replyStepId: 9, messageId: 101, sequence: 11,
+        messageKind: 'dialogue', speaker: { type: 'kp', name: 'KP' },
+        delta: '新的回复内容',
+      })
+      streamingSnapshot = workspace.messages.value.map(({ id, replyStepId, content, status }) => ({
+        id, replyStepId, content, status,
+      }))
+      streamingReasoning = workspace.reasoning[9] || ''
+    }
+    api.groupMessages = async () => []
+    api.replyPlan = async () => [{ source: 'COMBAT', displayName: '战斗第2轮', items: [] }]
+    api.currentTurn = async () => null
+    api.combatOverview = async () => []
+
+    await workspace.startTrpgTurn()
+
+    assert.deepEqual(streamingSnapshot, [{
+      id: 101,
+      replyStepId: 9,
+      content: '新的回复内容',
+      status: 'streaming',
+    }])
+    assert.equal(streamingReasoning, '新的思考内容')
+  } finally {
+    streamTrpgTurn.continue = originalContinue
+    api.groupMessages = originalGroupMessages
+    api.replyPlan = originalReplyPlan
+    api.currentTurn = originalCurrentTurn
+    api.combatOverview = originalCombatOverview
+    Object.assign(globalThis, {
+      window: previousWindow,
+      localStorage: previousLocalStorage,
+      sessionStorage: previousSessionStorage,
+    })
+  }
+})
+
 test('replaces the failed message while retrying the same reply step', async () => {
   const { api, streamTrpgTurn } = await import('../api/client.ts')
   const { useWorkspace } = await import('../composables/useWorkspace.ts')

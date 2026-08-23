@@ -850,6 +850,28 @@ test('creates a persisted single check through the same participant presentation
   assert.equal(summary?.formulaValue, '1 人参与 · 侦查 · 分别展示')
 })
 
+test('keeps each check difficulty available for the player difficulty badge', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  const difficulties = ['REGULAR', 'HARD', 'EXTREME'] as const
+  aggregate.results.forEach((detail, index) => {
+    Object.assign(detail.resolution!, { difficulty: difficulties[index] })
+  })
+
+  const request = createDiceAggregatePlaybackRequest(0, aggregate, 'classic')
+
+  assert.deepEqual(
+    request.presentation?.groups.map((group) => ({
+      difficulty: group.difficulty,
+      difficultyLabel: group.difficultyLabel,
+    })),
+    [
+      { difficulty: 'REGULAR', difficultyLabel: '普通' },
+      { difficulty: 'HARD', difficultyLabel: '困难' },
+      { difficulty: 'EXTREME', difficultyLabel: '极难' },
+    ],
+  )
+})
+
 test('uses the single-participant check interface for a major-wound CON roll', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
   aggregate.summary.reason = '本重伤CON检定'

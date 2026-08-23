@@ -77,6 +77,7 @@ public class TrpgModuleContextAssembler {
         appendLine(result, "调查员创建", module.getInvestigatorCreation());
         result.append("</module>\n");
         appendGlobal(result, global);
+        appendProgressBoundaryRules(result);
 
         result.append("<location-title-index>\n");
         for (CocModuleLocation location : locations) {
@@ -188,6 +189,18 @@ public class TrpgModuleContextAssembler {
                 global.getEndingContent());
         appendElement(result, "extra-content", global.getExtraContent());
         result.append("</module-global-context>\n");
+    }
+
+    private void appendProgressBoundaryRules(StringBuilder result) {
+        result.append("""
+                <module-progress-boundary-rules>
+                时间线、幕后真相、结局内容以及模组正文中的“下一场景开头简要介绍”都只是KP参考信息，不代表相应事件已经发生。
+                当前公开剧情只能依据已公开聊天记录、工具结果、数据库运行时状态和当前场景正文推进；不得把未来安排、隐藏真相或结局当作已发生事实。
+                “AI推进提示”属于非剧情标注：按照其中的当前场景推进方式进行裁定，并在标注说明的结束时机到达后结束当前场景。
+                下一场景简介只用于衔接判断；进入下一场景前，不得把下一场景简介续写为当前场景事实，也不得提前执行其中的行动或结果。
+                这些标注不构成后端顺序限制；KP在选景阶段仍可自由选择模组场景，但选定后只能使用实际进入的当前场景内容。
+                </module-progress-boundary-rules>
+                """);
     }
 
     private void appendQuickNotes(StringBuilder result, Long runId) {

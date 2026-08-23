@@ -286,6 +286,34 @@ test('shows the corresponding dice group number below every participant name', a
   )
 })
 
+test('renders a styled difficulty badge before each check name', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+  const check = findElementByClass(baseParse(template), 'dice-group-check')
+  const badge = check && findElement(check as unknown as RootNode, (element) => (
+    element.tag === 'em' && element.props.some((prop) => (
+      prop.type === NodeTypes.ATTRIBUTE
+        && prop.name === 'class'
+        && prop.value?.content === 'dice-check-difficulty'
+    ))
+  ))
+
+  assert.ok(check, 'participant result cards should group difficulty with the check name')
+  assert.ok(badge, 'checks with a difficulty should render a dedicated badge')
+  assert.ok(
+    check.children.indexOf(badge) < check.children.findIndex((child) => (
+      child.type === NodeTypes.ELEMENT && child.tag === 'span'
+    )),
+    'the difficulty badge should appear before the check name',
+  )
+
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  assert.match(cssRule(styles, '.dice-check-difficulty'), /border-radius:\s*999px/)
+  assert.match(cssRule(styles, '.dice-check-difficulty.is-hard'), /color:\s*#8a621d/)
+  assert.match(cssRule(styles, '.dice-check-difficulty.is-extreme'), /color:\s*#8b3543/)
+})
+
 test('places the dice player and its overlay on a foreground dialog layer', async () => {
   const playerSource = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const playerTemplate = playerSource.match(/<template>([\s\S]*)<\/template>/)?.[1]
@@ -318,6 +346,69 @@ test('places the dice player and its overlay on a foreground dialog layer', asyn
   const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
   assert.match(cssRule(styles, '.dialog-overlay.dialog-layer-foreground'), /z-index:\s*60/)
   assert.match(cssRule(styles, '.dialog-content.dialog-layer-foreground'), /z-index:\s*61/)
+})
+
+test('keeps the result footer visible while an oversized dice stage scrolls', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+
+  const root = baseParse(template)
+  const playerDialog = findElement(root, (element) => element.tag === 'BaseDialog')
+  const stageScroller = findElementByClass(root, 'dice-player-stage-scroll')
+  const surface = stageScroller && findElementByClass(stageScroller as unknown as RootNode, 'dice-player-surface')
+  const footer = findElementByClass(root, 'dice-player-result')
+
+  assert.ok(playerDialog, 'DicePlayerDialog should render a BaseDialog')
+  assert.ok(stageScroller, 'the dice stage should have its own scroll region')
+  assert.ok(surface, 'the scroll region should contain the animated dice stage')
+  assert.ok(footer, 'the player should render its result footer')
+  assert.ok(
+    playerDialog.children.indexOf(stageScroller) < playerDialog.children.indexOf(footer),
+    'the independently scrolling stage should precede the fixed result footer',
+  )
+
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  const body = cssRule(styles, '.dice-player-window .dialog-body')
+  const scrollRegion = cssRule(styles, '.dice-player-stage-scroll')
+
+  assert.match(body, /display:\s*grid/)
+  assert.match(body, /grid-template-rows:\s*minmax\(0,\s*1fr\)\s+auto/)
+  assert.match(body, /overflow:\s*hidden/)
+  assert.match(scrollRegion, /min-height:\s*0/)
+  assert.match(scrollRegion, /overflow-y:\s*auto/)
+})
+
+test('reveals each lower result only after its dice group merge completes', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+  const root = baseParse(template)
+  const stageScroller = findElementByClass(root, 'dice-player-stage-scroll')
+  const resultBox = findElementByClass(root, 'dice-group-result-box')
+  const resultValue = resultBox && findElement(resultBox as unknown as RootNode, (element) => element.tag === 'b')
+  const score = findElementByClass(root, 'dice-player-score')
+  const finalValue = score && findElement(score as unknown as RootNode, (element) => element.tag === 'strong')
+
+  assert.ok(stageScroller, 'the animated stage needs a dedicated scroll element')
+  assert.equal(stageScroller.props.some((prop) => (
+    prop.type === NodeTypes.ATTRIBUTE
+      && prop.name === 'ref'
+      && prop.value?.content === 'stageScroll'
+  )), true, 'the merge sequence should be able to scroll the stage')
+  assert.ok(resultValue, 'group result boxes should contain a result value')
+  assert.equal(resultValue.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'if'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content === 'isDiceGroupResultRevealed(index)'
+  )), true, 'each group value should wait for its own merge completion')
+  assert.ok(finalValue, 'single-result rolls should contain a final value')
+  assert.equal(finalValue.children.some((child) => (
+    child.type === NodeTypes.INTERPOLATION
+      && child.content.type === NodeTypes.SIMPLE_EXPRESSION
+      && child.content.content.includes('isFinalDiceResultRevealed')
+  )), true, 'a single final result should wait for the dice merge to finish')
 })
 
 test('stretches each dice message card across the chat message row', async () => {

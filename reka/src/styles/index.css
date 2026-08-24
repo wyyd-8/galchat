@@ -294,8 +294,10 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .trpg-actor-row { min-height: 29px; padding: 5px 6px 5px 8px; border: 1px solid color-mix(in srgb, var(--scene-accent) 18%, var(--line)); border-radius: 7px; display: grid; grid-template-columns: minmax(0, 1fr) 20px; align-items: center; gap: 6px; background: rgba(255,255,255,.54); transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
 .trpg-actor-row .trpg-actor-name { min-width: 0; overflow: hidden; color: var(--ink); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .trpg-status-icon { width: 20px; height: 20px; display: inline-grid; place-items: center; color: #8b8b83; }
-.trpg-actor-row.running, .trpg-actor-row.waiting_input, .trpg-actor-row.waiting_dice { border-color: #7fa195; background: #f2f8f5; box-shadow: inset 2px 0 0 #64877a; }
-.trpg-actor-row.running .trpg-status-icon, .trpg-actor-row.waiting_input .trpg-status-icon, .trpg-actor-row.waiting_dice .trpg-status-icon { color: #52786d; }
+.trpg-actor-row.running, .trpg-actor-row.waiting_input, .trpg-actor-row.waiting_dice { grid-template-columns: minmax(0, 1fr) auto; border-color: #7583a8; background: #eef1f8; box-shadow: inset 3px 0 0 #536a98, 0 2px 8px rgba(83,106,152,.12); }
+.trpg-actor-row.running .trpg-status-icon, .trpg-actor-row.waiting_input .trpg-status-icon, .trpg-actor-row.waiting_dice .trpg-status-icon { width: auto; padding: 2px 5px; border-radius: 999px; display: inline-flex; gap: 4px; color: #465b88; background: #dce3f2; }
+.trpg-actor-row.running .trpg-status-icon svg, .trpg-actor-row.waiting_input .trpg-status-icon svg, .trpg-actor-row.waiting_dice .trpg-status-icon svg { animation: trpg-active-pulse 1.8s ease-in-out infinite; }
+.trpg-active-label { font-size: 8px; font-weight: 750; letter-spacing: .04em; line-height: 1; white-space: nowrap; }
 .trpg-actor-row.completed { opacity: .66; }
 .trpg-actor-row.completed .trpg-status-icon { color: #5f7d68; }
 .trpg-actor-row.failed, .trpg-actor-row.blocked { border-color: #b98288; background: #f8eeee; }
@@ -1029,6 +1031,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 @keyframes dialog-in { from { opacity: 0; transform: translate(-50%, -48%) scale(.98); } }
 @keyframes panel-in { from { opacity: 0; transform: translateX(-8px); } }
 @keyframes blink { 50% { opacity: 0; } }
+@keyframes trpg-active-pulse { 0%, 100% { opacity: .58; transform: scale(.9); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (min-width: 1120px) {

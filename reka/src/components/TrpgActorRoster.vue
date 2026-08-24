@@ -27,6 +27,12 @@ const statusIcons: Partial<Record<string, Component>> = {
   waiting_input: MessageCircle,
 }
 
+const activeEventLabels: Partial<Record<string, string>> = {
+  running: '行动中',
+  waiting_input: '待输入',
+  waiting_dice: '待掷骰',
+}
+
 function actorIcon(actor: TrpgExecutionActor): Component | undefined {
   return statusIcons[actor.status]
 }
@@ -34,6 +40,10 @@ function actorIcon(actor: TrpgExecutionActor): Component | undefined {
 function actorKey(actor: TrpgExecutionActor): string {
   const item = actor.item
   return `${item.actorType}-${item.actorId ?? 'none'}-${item.subjectCharacterId ?? 'none'}-${item.order}`
+}
+
+function activeEventLabel(actor: TrpgExecutionActor): string | undefined {
+  return activeEventLabels[actor.status]
 }
 
 function actorHoverCard(actor: TrpgExecutionActor): TrpgCombatHoverCard {
@@ -55,6 +65,7 @@ function actorHoverCard(actor: TrpgExecutionActor): TrpgCombatHoverCard {
             <div class="trpg-actor-row" :class="actor.status" :aria-label="`${actor.name}，${actor.statusLabel}`" tabindex="0">
               <span class="trpg-actor-name">{{ actor.name }}</span>
               <span class="trpg-status-icon" aria-hidden="true">
+                <small v-if="activeEventLabel(actor)" class="trpg-active-label">{{ activeEventLabel(actor) }}</small>
                 <component :is="actorIcon(actor)" v-if="actorIcon(actor)" :size="13" :stroke-width="1.8" />
               </span>
             </div>
@@ -83,6 +94,7 @@ function actorHoverCard(actor: TrpgExecutionActor): TrpgCombatHoverCard {
         <div v-else class="trpg-actor-row" :class="actor.status" :title="actor.statusLabel" :aria-label="`${actor.name}，${actor.statusLabel}`">
           <span class="trpg-actor-name">{{ actor.name }}</span>
           <span class="trpg-status-icon" aria-hidden="true">
+            <small v-if="activeEventLabel(actor)" class="trpg-active-label">{{ activeEventLabel(actor) }}</small>
             <component :is="actorIcon(actor)" v-if="actorIcon(actor)" :size="13" :stroke-width="1.8" />
           </span>
         </div>

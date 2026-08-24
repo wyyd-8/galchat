@@ -19,6 +19,8 @@ import com.me.galchat.tool.KpDiceTools;
 import com.me.galchat.tool.KpPushedCheckTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.tool.annotation.Tool;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -34,6 +36,71 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class TrpgGroupAgentPolicyTest {
+
+    @Test
+    void kpSceneIntroUsesCurrentRuntimeInsteadOfCompletedSceneSummary() {
+        ICharacterCardService cardService = mock(ICharacterCardService.class);
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
+        TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
+                mock(ChatClient.class),
+                mock(GroupContextAssembler.class),
+                cardService,
+                new CharacterCardContextFormatter(),
+                mock(KpDiceTools.class),
+                mock(KpPushedCheckTools.class),
+                mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
+                mock(com.me.galchat.tool.InvestigatorSceneTools.class),
+                mock(com.me.galchat.tool.KpSceneTools.class),
+                mock(com.me.galchat.tool.KpRunTools.class),
+                mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
+                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool
+                        .KpWaitingInvestigatorTools.class),
+                mock(com.me.galchat.service.impl
+                        .TrpgChildSceneCommandService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setWorldId(2L).setUserWorldId(5L);
+
+        var invocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_TRPG_SCENE_INTRO,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        "scene:41",
+                        "本宁顿图书馆",
+                        1,
+                        1),
+                new GroupContextMaterial(List.of(
+                        new SystemMessage("""
+                                <current-scene-runtime>
+                                当前场景：第一天－上午 - 本宁顿图书馆
+                                引入完成后参与行动的调查员：
+                                - 埃莉诺·哈珀
+                                </current-scene-runtime>"""),
+                        new UserMessage("""
+                                <context-summary status="completed">
+                                已结束地点：本宁顿旗帜报报社
+                                场景参与者：沃尔顿·红莲
+                                </context-summary>"""))));
+
+        assertThat(invocation.prompt().getInstructions().getLast().getText())
+                .contains("当前SCENE计划名称：“本宁顿图书馆”")
+                .contains("以 <current-scene-runtime> 指定的当前场景和参与者为唯一准则")
+                .contains("<context-summary status=\"completed\">")
+                .contains("不得继续或重新引入其中已经结束的场景")
+                .contains("不要使用其中的参与者代替当前参与者")
+                .contains("不得附加括号式或其他场外行动提示")
+                .contains("不要建议调查员换一种查法")
+                .contains("完成当前叙述后立即结束回复");
+    }
 
     @Test
     void kpUsesWorldPromptAllCardsAndDirectDiceInstructions() {
@@ -190,7 +257,10 @@ class TrpgGroupAgentPolicyTest {
                 .contains("UNARMED、LARGE_CLUB、MEDIUM_KNIFE、PISTOL、SMALL_RIFLE、HUNTING_RIFLE")
                 .contains("战斗尚未激活")
                 .contains("不得描述先攻顺序、战斗轮或任何角色的新行动")
-                .contains("确认参战者后立即结束回复");
+                .contains("确认参战者后立即结束回复")
+                .contains("不得附加括号式或其他场外行动提示")
+                .contains("不要建议调查员换一种查法")
+                .contains("完成当前叙述后立即结束回复");
         assertThat(policy.actorName(5L, kp)).isEqualTo("KP");
         assertThat(invocation.tools())
                 .containsExactly(

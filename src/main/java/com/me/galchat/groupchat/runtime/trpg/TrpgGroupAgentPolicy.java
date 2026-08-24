@@ -47,6 +47,13 @@ import java.util.Set;
 @Component
 public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
 
+    private static final String KP_EXPLORATION_OUTPUT_RULES = """
+
+            公开回复只输出当前步骤允许的场景叙述或裁定结果。
+            不得附加括号式或其他场外行动提示；不要建议调查员换一种查法、询问NPC、再次检索或检定、收手或离开，也不要用提问或备选项催促下一步。这些后续行动由调查员在下一轮自行决定。
+            完成当前叙述后立即结束回复。
+            """;
+
     private final ChatClient chatClient;
     private final GroupContextAssembler contextAssembler;
     private final ICharacterCardService characterCardService;
@@ -313,8 +320,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         """));
             } else if (sceneIntro) {
                 messages.add(new UserMessage("""
-                        这是当前SCENE Plan第一次进入行动轮。先公开引入当前地点：只描述调查员刚进入时能够观察到的事实，不替调查员决定行动，不泄露未公开真相。
-                        """));
+                        这是当前SCENE Plan第一次进入行动轮。
+                        当前SCENE计划名称：“%s”。
+                        必须以 <current-scene-runtime> 指定的当前场景和参与者为唯一准则。
+                        <context-summary status="completed"> 只提供过去已经公开的事实和获得的线索；不得继续或重新引入其中已经结束的场景，也不要使用其中的参与者代替当前参与者。
+                        先公开引入当前地点：只描述调查员刚进入时能够观察到的事实，不替调查员决定行动，不泄露未公开真相。
+                        """.formatted(action.groupName())
+                        + KP_EXPLORATION_OUTPUT_RULES));
             } else if (combatIntro) {
                 messages.add(new UserMessage("""
                         这是独立的战斗环境快照步骤。只输出一个自然语言段落，描述已经明确存在的静态战场事实：会影响战术判断的地形、掩体、距离、光照，以及上下文已经明确的参战者位置。
@@ -409,6 +421,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         ? combatLifecycleService.adjudicationPrompt(
                                 conversation.getId(), action)
                         + " 在没有剩余检定或掷骰需求、且应结束战斗时调用markCombatFinished；调用后继续输出完整公开裁定和收束。"
+                        : "")
+                        + (scenePhase
+                        ? KP_EXPLORATION_OUTPUT_RULES
                         : "")));
             }
         } else {

@@ -3,6 +3,7 @@ package com.me.galchat.tool;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.KpCombatStateDTOs;
+import com.me.galchat.domain.dto.KpQuickNpcDTOs;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.impl.TrpgCombatLifecycleService;
@@ -31,8 +32,12 @@ public class KpCombatTools {
                     + "公开消息只能确认被登记的参战者，不得描述先攻顺序、战斗轮或任何角色的新行动，也不得替未参战角色决定移动、旁观、逃跑或协助。"
                     + "确认参战者后立即结束回复，战斗环境和首个行动留给后续独立步骤。")
     public TrpgCombatLifecycleService.StartResult startCombat(
-            @ToolParam(description = "准确的人物卡名称列表，至少两名")
+            @ToolParam(description = "已有准确人物卡的参战者名称列表；可为空，和quickNpcs合计至少两名")
             List<String> participantNames,
+            @ToolParam(
+                    description = "临时 NPC 列表；每项填写唯一名称、强度档位和典型武器，可与现有人物卡混用",
+                    required = false)
+            List<KpQuickNpcDTOs.Spec> quickNpcs,
             @ToolParam(description = "DEX，或仅第一轮已提前声明攻击的调查员优先的INVESTIGATORS_FIRST")
             String orderMode,
             @ToolParam(
@@ -43,7 +48,8 @@ public class KpCombatTools {
         KpContext kp = requireKp(context);
         return combatLifecycleService.requestStart(
                 kp.conversationId(), kp.replyStepId(),
-                participantNames, orderMode, declaredAttackerNames);
+                participantNames, quickNpcs,
+                orderMode, declaredAttackerNames);
     }
 
     @Tool(

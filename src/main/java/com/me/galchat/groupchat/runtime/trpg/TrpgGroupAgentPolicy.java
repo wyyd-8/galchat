@@ -377,6 +377,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "只有缺失信息会实质改变裁定时才调用askForClarification，一次只问一名调查员一个公开问题；"
                         + "不确定是否需要追问时不要调用。调查员已经明确理解重大风险时不得重复确认；"
                         + "团队问题只向真人玩家确认。追问回答可以改变、补充或放弃原行动，最新回答覆盖冲突的旧行动。"
+                        + "发起战斗时，已有准确人物卡的角色放入participantNames；未有人物卡的临时 NPC 放入quickNpcs，"
+                        + "只填写唯一名称、强度WEAK、MEDIUM、STRONG之一，以及武器UNARMED、LARGE_CLUB、MEDIUM_KNIFE、PISTOL、SMALL_RIFLE、HUNTING_RIFLE之一。"
                         + "调用startCombat后，当前步骤仍是战斗前的场景步骤，战斗尚未激活；"
                         + "公开消息只能确认被登记的参战者，不得描述先攻顺序、战斗轮或任何角色的新行动，"
                         + "也不得替未参战角色决定移动、旁观、逃跑或协助。确认参战者后立即结束回复，"

@@ -27,6 +27,8 @@ public class TrpgCombat implements Serializable {
     @TableField(typeHandler = JsonbTypeHandler.class)
     private JsonNode participants;
     @TableField(typeHandler = JsonbTypeHandler.class)
+    private JsonNode quickNpcSpecs;
+    @TableField(typeHandler = JsonbTypeHandler.class)
     private JsonNode activeTurnResults;
     private Long startRequestedStepId;
     private Long finishRequestedStepId;

@@ -3,6 +3,7 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.KpQuickNpcDTOs;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatMessage;
@@ -24,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -33,6 +35,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -51,6 +54,7 @@ public class TrpgCombatLifecycleService {
     private final GroupChatMessageMapper messageMapper;
     private final CocCharacterMapper characterMapper;
     private final TrpgCombatMapper combatMapper;
+    private final TrpgQuickNpcTemplateService quickNpcTemplateService;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -800,6 +804,19 @@ public class TrpgCombatLifecycleService {
             List<String> participantNames,
             String requestedOrderMode,
             List<String> declaredAttackerNames) {
+        return requestStart(
+                conversationId, replyStepId, participantNames,
+                List.of(), requestedOrderMode, declaredAttackerNames);
+    }
+
+    @Transactional
+    public StartResult requestStart(
+            Long conversationId,
+            Long replyStepId,
+            List<String> participantNames,
+            List<KpQuickNpcDTOs.Spec> quickNpcs,
+            String requestedOrderMode,
+            List<String> declaredAttackerNames) {
         GroupConversation conversation =
                 conversationService.requireActive(conversationId);
         requireTrpg(conversation);
@@ -836,6 +853,12 @@ public class TrpgCombatLifecycleService {
         String orderMode = normalizeOrderMode(requestedOrderMode);
         List<String> names = normalizeNames(participantNames);
         List<CocCharacter> cards = requireCards(conversationId, names);
+        List<KpQuickNpcDTOs.Spec> normalizedQuickNpcs =
+                quickNpcTemplateService.validateForRequest(
+                        conversationId, quickNpcs, Set.copyOf(names));
+        if (names.size() + normalizedQuickNpcs.size() < 2) {
+            throw new UserRequestException("战斗至少需要两名参战者");
+        }
         Set<Long> declaredAttackerIds = normalizeDeclaredAttackerIds(
                 orderMode, declaredAttackerNames, cards);
         LocalDateTime now = LocalDateTime.now();
@@ -847,12 +870,19 @@ public class TrpgCombatLifecycleService {
                 .setCurrentRound(1)
                 .setParticipants(participantSnapshot(
                         cards, declaredAttackerIds))
+                .setQuickNpcSpecs(objectMapper.valueToTree(
+                        normalizedQuickNpcs))
                 .setActiveTurnResults(objectMapper.createArrayNode())
                 .setStartRequestedStepId(replyStepId)
                 .setCreatedAt(now)
                 .setUpdatedAt(now);
         combatMapper.insert(combat);
-        return new StartResult(combat.getId(), orderMode, names);
+        List<String> allNames = new ArrayList<>(names);
+        normalizedQuickNpcs.stream()
+                .map(KpQuickNpcDTOs.Spec::name)
+                .forEach(allNames::add);
+        return new StartResult(
+                combat.getId(), orderMode, List.copyOf(allNames));
     }
 
     /**
@@ -891,6 +921,15 @@ public class TrpgCombatLifecycleService {
                 startStep.getStatus())) {
             return false;
         }
+        Set<Long> declaredAttackerIds = declaredAttackerIds(
+                combat.getParticipants());
+        List<CocCharacter> participants = new ArrayList<>(
+                cardsFromParticipantSnapshot(combat));
+        participants.addAll(quickNpcTemplateService.materialize(
+                combat.getConversationId(),
+                quickNpcSpecs(combat.getQuickNpcSpecs())));
+        combat.setParticipants(participantSnapshot(
+                participants, declaredAttackerIds));
         List<GroupReplyPlanService.CombatPlanItem> order =
                 currentOrder(combat);
         replyPlanService.startCombatUnderLock(
@@ -1232,6 +1271,71 @@ public class TrpgCombatLifecycleService {
         return result;
     }
 
+    private Set<Long> declaredAttackerIds(JsonNode participants) {
+        if (participants == null || !participants.isArray()) {
+            return Set.of();
+        }
+        Set<Long> ids = new HashSet<>();
+        participants.forEach(node -> {
+            if (node.path("declaredFirstRoundAttack")
+                    .asBoolean(false)
+                    && node.get("characterId") != null) {
+                ids.add(node.get("characterId").asLong());
+            }
+        });
+        return Set.copyOf(ids);
+    }
+
+    private List<CocCharacter> cardsFromParticipantSnapshot(
+            TrpgCombat combat) {
+        if (combat.getParticipants() == null
+                || !combat.getParticipants().isArray()
+                || combat.getParticipants().isEmpty()) {
+            return List.of();
+        }
+        List<Long> ids = new ArrayList<>();
+        combat.getParticipants().forEach(node -> {
+            if (node.get("characterId") != null) {
+                ids.add(node.get("characterId").asLong());
+            }
+        });
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        List<CocCharacter> cards = characterMapper.selectList(
+                new LambdaQueryWrapper<CocCharacter>()
+                        .eq(CocCharacter::getRunId,
+                                combat.getConversationId())
+                        .in(CocCharacter::getId, ids));
+        Map<Long, CocCharacter> byId = cards.stream().collect(
+                Collectors.toMap(
+                        CocCharacter::getId,
+                        Function.identity(),
+                        (first, ignored) -> first));
+        List<CocCharacter> ordered = new ArrayList<>();
+        for (Long id : ids) {
+            CocCharacter card = byId.get(id);
+            if (card == null) {
+                throw new UserRequestException(
+                        "待激活战斗的参战人物卡不存在：" + id);
+            }
+            ordered.add(card);
+        }
+        return List.copyOf(ordered);
+    }
+
+    private List<KpQuickNpcDTOs.Spec> quickNpcSpecs(JsonNode specs) {
+        if (specs == null || !specs.isArray() || specs.isEmpty()) {
+            return List.of();
+        }
+        List<KpQuickNpcDTOs.Spec> result = new ArrayList<>();
+        specs.forEach(node -> result.add(new KpQuickNpcDTOs.Spec(
+                node.path("name").asText(null),
+                node.path("strength").asText(null),
+                node.path("weapon").asText(null))));
+        return List.copyOf(result);
+    }
+
     private Set<Long> normalizeDeclaredAttackerIds(
             String orderMode,
             List<String> rawNames,
@@ -1283,6 +1387,9 @@ public class TrpgCombatLifecycleService {
 
     private List<CocCharacter> requireCards(
             Long runId, List<String> names) {
+        if (names == null || names.isEmpty()) {
+            return List.of();
+        }
         List<CocCharacter> cards = characterMapper.selectList(
                 new LambdaQueryWrapper<CocCharacter>()
                         .eq(CocCharacter::getRunId, runId)
@@ -1303,8 +1410,8 @@ public class TrpgCombatLifecycleService {
     }
 
     private List<String> normalizeNames(List<String> names) {
-        if (names == null || names.size() < 2) {
-            throw new UserRequestException("战斗至少需要两名参战者");
+        if (names == null || names.isEmpty()) {
+            return List.of();
         }
         List<String> result = new ArrayList<>();
         Set<String> unique = new HashSet<>();

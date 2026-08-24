@@ -833,6 +833,7 @@ CREATE TABLE trpg_combat (
     order_mode VARCHAR(30) NOT NULL,
     current_round INT NOT NULL DEFAULT 1,
     participants JSONB NOT NULL,
+    quick_npc_specs JSONB NOT NULL DEFAULT '[]'::jsonb,
     active_turn_results JSONB NOT NULL DEFAULT '[]'::jsonb,
     start_requested_step_id BIGINT,
     finish_requested_step_id BIGINT,

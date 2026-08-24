@@ -3,11 +3,13 @@ package com.me.galchat.domain.dto;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.domain.po.TrpgCombat;
 import com.me.galchat.service.impl.TrpgSaveServiceImpl;
 import com.me.galchat.typehandler.JsonbTypeHandler;
 import org.apache.ibatis.type.JdbcType;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -25,6 +27,11 @@ class TrpgSaveSnapshotJsonTest {
     @Test
     void jsonbRoundTripKeepsTypedRowsAndPrivateQuickNotesBackup()
             throws Exception {
+        var quickNpcSpecs = JsonMapper.builder().build().createArrayNode();
+        quickNpcSpecs.addObject()
+                .put("name", "仓库守卫")
+                .put("strength", "MEDIUM")
+                .put("weapon", "PISTOL");
         TrpgSaveSnapshotDTO snapshot = new TrpgSaveSnapshotDTO()
                 .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setConversationId(51L)
@@ -44,7 +51,11 @@ class TrpgSaveSnapshotJsonTest {
                         .setId(401L)
                         .setRunId(51L)
                         .setQuickNotes("藏着钥匙")))
-                .setCharacterQuickNotes(Map.of(401L, "藏着钥匙"));
+                .setCharacterQuickNotes(Map.of(401L, "藏着钥匙"))
+                .setCombats(List.of(new TrpgCombat()
+                        .setId(501L)
+                        .setConversationId(51L)
+                        .setQuickNpcSpecs(quickNpcSpecs)));
         JsonbTypeHandler handler = new JsonbTypeHandler(
                 TrpgSaveSnapshotDTO.class);
         PreparedStatement statement = mock(PreparedStatement.class);
@@ -77,5 +88,9 @@ class TrpgSaveSnapshotJsonTest {
                 .containsExactly(401L, "林默");
         assertThat(restored.getCharacterQuickNotes())
                 .containsEntry(401L, "藏着钥匙");
+        assertThat(restored.getCombats()).singleElement()
+                .extracting(combat -> combat.getQuickNpcSpecs()
+                        .get(0).get("name").asText())
+                .isEqualTo("仓库守卫");
     }
 }

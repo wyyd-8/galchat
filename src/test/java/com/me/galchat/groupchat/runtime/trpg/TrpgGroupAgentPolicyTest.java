@@ -184,6 +184,10 @@ class TrpgGroupAgentPolicyTest {
                 .contains("团队问题只向真人玩家确认")
                 .contains("可以改变、补充或放弃原行动")
                 .contains("调用startCombat后")
+                .contains("未有人物卡的临时 NPC")
+                .contains("quickNpcs")
+                .contains("WEAK、MEDIUM、STRONG")
+                .contains("UNARMED、LARGE_CLUB、MEDIUM_KNIFE、PISTOL、SMALL_RIFLE、HUNTING_RIFLE")
                 .contains("战斗尚未激活")
                 .contains("不得描述先攻顺序、战斗轮或任何角色的新行动")
                 .contains("确认参战者后立即结束回复");

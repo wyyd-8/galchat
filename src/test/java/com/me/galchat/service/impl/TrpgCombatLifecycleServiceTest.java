@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.KpQuickNpcDTOs;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
@@ -25,10 +26,215 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TrpgCombatLifecycleServiceTest {
+
+    @Test
+    void quickNpcsAreDeferredUntilTheCompletedSceneTurnActivatesCombat() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupReplyPlanService plans = mock(GroupReplyPlanService.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        CocCharacterMapper characterMapper =
+                mock(CocCharacterMapper.class);
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        TrpgQuickNpcTemplateService quickNpcs =
+                mock(TrpgQuickNpcTemplateService.class);
+        var objectMapper = JsonMapper.builder().build();
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        conversations, plans, planMapper, turnMapper,
+                        mock(GroupChatToolCallMapper.class),
+                        stepMapper, mock(GroupChatMessageMapper.class),
+                        characterMapper, combatMapper,
+                        quickNpcs, objectMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE)
+                .setActiveReplyPlanId(10L);
+        GroupReplyPlan scene = new GroupReplyPlan()
+                .setId(10L).setConversationId(7L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setContextId(100L);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setPlanId(10L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setPlanContextId(100L);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(40L).setTurnId(30L)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        CocCharacter investigator = card(
+                71L, "PLAYER", null, "林恩", 50);
+        CocCharacter guard = card(
+                101L, "NPC", null, "仓库守卫", 60);
+        CocCharacter captain = card(
+                102L, "NPC", null, "守卫队长", 70);
+        List<KpQuickNpcDTOs.Spec> rawSpecs = List.of(
+                new KpQuickNpcDTOs.Spec(
+                        " 仓库守卫 ", "medium", "pistol"),
+                new KpQuickNpcDTOs.Spec(
+                        "守卫队长", "STRONG", "MEDIUM_KNIFE"));
+        List<KpQuickNpcDTOs.Spec> normalizedSpecs = List.of(
+                new KpQuickNpcDTOs.Spec(
+                        "仓库守卫", "MEDIUM", "PISTOL"),
+                new KpQuickNpcDTOs.Spec(
+                        "守卫队长", "STRONG", "MEDIUM_KNIFE"));
+        when(conversations.requireActive(7L)).thenReturn(conversation);
+        when(planMapper.selectById(10L)).thenReturn(scene);
+        when(stepMapper.selectById(40L)).thenReturn(step);
+        when(turnMapper.selectById(30L)).thenReturn(turn);
+        when(combatMapper.selectCount(any())).thenReturn(0L);
+        when(characterMapper.selectList(any())).thenReturn(
+                List.of(investigator),
+                List.of(investigator, guard, captain));
+        when(quickNpcs.validateForRequest(
+                7L, rawSpecs, java.util.Set.of("林恩")))
+                .thenReturn(normalizedSpecs);
+        when(quickNpcs.materialize(7L, normalizedSpecs))
+                .thenReturn(List.of(guard, captain));
+        doAnswer(invocation -> {
+            invocation.<TrpgCombat>getArgument(0).setId(200L);
+            return 1;
+        }).when(combatMapper).insert(any(TrpgCombat.class));
+
+        var requested = service.requestStart(
+                7L, 40L, List.of("林恩"), rawSpecs,
+                GroupChatConstant.COMBAT_ORDER_DEX, List.of());
+
+        assertThat(requested.participants())
+                .containsExactly("林恩", "仓库守卫", "守卫队长");
+        ArgumentCaptor<TrpgCombat> pending =
+                ArgumentCaptor.forClass(TrpgCombat.class);
+        verify(combatMapper).insert(pending.capture());
+        assertThat(pending.getValue().getParticipants())
+                .extracting(node -> node.get("name").asText())
+                .containsExactly("林恩");
+        assertThat(pending.getValue().getQuickNpcSpecs())
+                .extracting(node -> node.get("name").asText())
+                .containsExactly("仓库守卫", "守卫队长");
+        verify(quickNpcs, never()).materialize(any(), any());
+
+        when(combatMapper.selectList(any()))
+                .thenReturn(List.of(pending.getValue()));
+
+        assertThat(service.finalizeStartAfterTurn(
+                conversation, turn)).isTrue();
+
+        verify(quickNpcs).materialize(7L, normalizedSpecs);
+        assertThat(pending.getValue().getParticipants())
+                .extracting(node -> node.get("name").asText())
+                .containsExactly("林恩", "仓库守卫", "守卫队长");
+        ArgumentCaptor<List<GroupReplyPlanService.CombatPlanItem>> order =
+                ArgumentCaptor.forClass(List.class);
+        verify(plans).startCombatUnderLock(
+                org.mockito.ArgumentMatchers.eq(conversation),
+                org.mockito.ArgumentMatchers.eq(200L),
+                org.mockito.ArgumentMatchers.eq(1),
+                order.capture());
+        assertThat(order.getValue())
+                .extracting(GroupReplyPlanService.CombatPlanItem
+                        ::subjectCharacterName)
+                .containsExactly("守卫队长", "仓库守卫", "林恩");
+    }
+
+    @Test
+    void twoQuickNpcsCanStartCombatWithoutExistingParticipants() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        CocCharacterMapper characterMapper =
+                mock(CocCharacterMapper.class);
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        TrpgQuickNpcTemplateService quickNpcs =
+                mock(TrpgQuickNpcTemplateService.class);
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        conversations, mock(GroupReplyPlanService.class),
+                        planMapper, turnMapper,
+                        mock(GroupChatToolCallMapper.class),
+                        stepMapper, mock(GroupChatMessageMapper.class),
+                        characterMapper, combatMapper,
+                        quickNpcs, JsonMapper.builder().build());
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE)
+                .setActiveReplyPlanId(10L);
+        GroupReplyPlan scene = new GroupReplyPlan()
+                .setId(10L).setSource(GroupChatConstant.PLAN_SOURCE_SCENE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L).setPlanId(10L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(40L).setTurnId(30L)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE);
+        List<KpQuickNpcDTOs.Spec> specs = List.of(
+                new KpQuickNpcDTOs.Spec("守卫甲", "WEAK", "UNARMED"),
+                new KpQuickNpcDTOs.Spec("守卫乙", "MEDIUM", "PISTOL"));
+        when(conversations.requireActive(7L)).thenReturn(conversation);
+        when(planMapper.selectById(10L)).thenReturn(scene);
+        when(stepMapper.selectById(40L)).thenReturn(step);
+        when(turnMapper.selectById(30L)).thenReturn(turn);
+        when(combatMapper.selectCount(any())).thenReturn(0L);
+        when(quickNpcs.validateForRequest(
+                7L, specs, java.util.Set.of())).thenReturn(specs);
+        doAnswer(invocation -> {
+            invocation.<TrpgCombat>getArgument(0).setId(200L);
+            return 1;
+        }).when(combatMapper).insert(any(TrpgCombat.class));
+
+        var result = service.requestStart(
+                7L, 40L, List.of(), specs,
+                GroupChatConstant.COMBAT_ORDER_DEX, List.of());
+
+        assertThat(result.participants())
+                .containsExactly("守卫甲", "守卫乙");
+        verify(characterMapper, never()).selectList(any());
+    }
+
+    @Test
+    void retryCancelsPendingQuickNpcCombatWithoutCreatingCards() {
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        TrpgQuickNpcTemplateService quickNpcs =
+                mock(TrpgQuickNpcTemplateService.class);
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupReplyPlanService.class),
+                        mock(GroupReplyPlanMapper.class),
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class),
+                        mock(GroupChatReplyStepMapper.class),
+                        mock(GroupChatMessageMapper.class),
+                        mock(CocCharacterMapper.class),
+                        combatMapper, quickNpcs,
+                        JsonMapper.builder().build());
+        TrpgCombat pending = new TrpgCombat()
+                .setId(200L)
+                .setStatus(GroupChatConstant.COMBAT_STATUS_START_REQUESTED)
+                .setStartRequestedStepId(40L);
+        when(combatMapper.selectList(any()))
+                .thenReturn(List.of(pending));
+
+        service.clearControlMarkersForRetry(40L);
+
+        assertThat(pending.getStatus()).isEqualTo(
+                GroupChatConstant.COMBAT_STATUS_CANCELLED);
+        verify(combatMapper).updateById(pending);
+        verify(quickNpcs, never()).materialize(any(), any());
+    }
 
     @Test
     void preparingAdjudicationCreatesFirstRouteAsDirectOrderedChild() {
@@ -134,6 +340,7 @@ class TrpgCombatLifecycleServiceTest {
                         stepMapper, messageMapper,
                         mock(CocCharacterMapper.class),
                         mock(TrpgCombatMapper.class),
+                        mock(TrpgQuickNpcTemplateService.class),
                         JsonMapper.builder().build());
         GroupChatReplyStep attack = new GroupChatReplyStep()
                 .setId(40L).setTurnId(30L).setStepNo(1)
@@ -201,6 +408,7 @@ class TrpgCombatLifecycleServiceTest {
                         stepMapper, messageMapper,
                         mock(CocCharacterMapper.class),
                         mock(TrpgCombatMapper.class),
+                        mock(TrpgQuickNpcTemplateService.class),
                         JsonMapper.builder().build());
         GroupChatReplyStep route1 = childStep(
                 43L, 3, 42L,
@@ -252,6 +460,7 @@ class TrpgCombatLifecycleServiceTest {
                         planMapper, mock(GroupChatTurnMapper.class),
                         toolCalls, stepMapper, messages,
                         mock(CocCharacterMapper.class), combats,
+                        mock(TrpgQuickNpcTemplateService.class),
                         objectMapper);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(10L);
@@ -331,6 +540,7 @@ class TrpgCombatLifecycleServiceTest {
                         mock(GroupChatMessageMapper.class),
                         mock(CocCharacterMapper.class),
                         combatMapper,
+                        mock(TrpgQuickNpcTemplateService.class),
                         objectMapper);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(10L);
@@ -393,6 +603,7 @@ class TrpgCombatLifecycleServiceTest {
                 mock(GroupChatMessageMapper.class),
                 mock(CocCharacterMapper.class),
                 mock(TrpgCombatMapper.class),
+                mock(TrpgQuickNpcTemplateService.class),
                 JsonMapper.builder().build());
     }
 
@@ -415,6 +626,7 @@ class TrpgCombatLifecycleServiceTest {
                         mock(GroupChatMessageMapper.class),
                         characterMapper,
                         combatMapper,
+                        mock(TrpgQuickNpcTemplateService.class),
                         objectMapper);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(10L);
@@ -485,6 +697,7 @@ class TrpgCombatLifecycleServiceTest {
                         mock(GroupChatMessageMapper.class),
                         characterMapper,
                         combatMapper,
+                        mock(TrpgQuickNpcTemplateService.class),
                         objectMapper);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(10L);
@@ -555,6 +768,7 @@ class TrpgCombatLifecycleServiceTest {
                         mock(GroupChatMessageMapper.class),
                         characterMapper,
                         combatMapper,
+                        mock(TrpgQuickNpcTemplateService.class),
                         objectMapper);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setActiveReplyPlanId(10L);
@@ -642,6 +856,7 @@ class TrpgCombatLifecycleServiceTest {
                         mock(GroupChatToolCallMapper.class),
                         stepMapper, mock(GroupChatMessageMapper.class),
                         characterMapper, combatMapper,
+                        mock(TrpgQuickNpcTemplateService.class),
                         JsonMapper.builder().build());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
@@ -772,6 +987,7 @@ class TrpgCombatLifecycleServiceTest {
                 mock(GroupChatMessageMapper.class),
                 mock(CocCharacterMapper.class),
                 mock(TrpgCombatMapper.class),
+                mock(TrpgQuickNpcTemplateService.class),
                 JsonMapper.builder().build());
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(30L)
@@ -822,6 +1038,7 @@ class TrpgCombatLifecycleServiceTest {
                 mock(GroupChatMessageMapper.class),
                 characterMapper,
                 mock(TrpgCombatMapper.class),
+                mock(TrpgQuickNpcTemplateService.class),
                 JsonMapper.builder().build());
         CocCharacter card = card(71L, "PLAYER", null, "林恩", 60)
                 .setInCover(true)

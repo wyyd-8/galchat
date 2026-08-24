@@ -99,3 +99,106 @@ test('renders an explicit event label for every active-turn actor', async (conte
   assert.match(html, /class="trpg-actor-row waiting_input"[^>]*>[\s\S]*?class="trpg-active-label">待输入<\/small>/)
   assert.match(html, /class="trpg-actor-row waiting_dice"[^>]*>[\s\S]*?class="trpg-active-label">待掷骰<\/small>/)
 })
+
+test('makes exploration investigator rows keyboard-focusable for their overview card', async (context) => {
+  const vite = await createServer({
+    appType: 'custom',
+    configFile: false,
+    root: fileURLToPath(new URL('../..', import.meta.url)),
+    plugins: [vue()],
+    resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  })
+  context.after(() => vite.close())
+  const { default: TrpgActorRoster } = await vite.ssrLoadModule('/src/components/TrpgActorRoster.vue')
+  const scene: TrpgExecutionScene = {
+    plan: { id: 21, source: 'SCENE', displayName: '报社', items: [] },
+    kind: 'main',
+    status: 'current',
+    statusLabel: '当前场景',
+    activeActors: [{
+      item: { order: 1, actorType: 'character', actorId: 101, subjectCharacterId: 501 },
+      name: '沃尔顿',
+      status: 'running',
+      statusLabel: '行动中',
+      genericKp: false,
+    }],
+    waitingActors: [],
+    readyActors: [],
+    childScenes: [],
+  }
+
+  const html = await renderToString(createSSRApp({
+    render: () => h(TrpgActorRoster, {
+      scene,
+      combatOverview: [],
+      investigatorCards: [{
+        cardId: 501,
+        actorType: 'PLAYER',
+        name: '沃尔顿',
+        checkValues: { 侦查: 65, 聆听: 40, 图书馆使用: 55 },
+      }],
+    }),
+  }))
+
+  assert.match(html, /class="trpg-actor-row running"[^>]*tabindex="0"/)
+})
+
+test('renders waiting and finished investigators as labeled overview rows', async (context) => {
+  const vite = await createServer({
+    appType: 'custom',
+    configFile: false,
+    root: fileURLToPath(new URL('../..', import.meta.url)),
+    plugins: [vue()],
+    resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  })
+  context.after(() => vite.close())
+  const { default: TrpgActorRoster } = await vite.ssrLoadModule('/src/components/TrpgActorRoster.vue')
+  const scene: TrpgExecutionScene = {
+    plan: { id: 22, source: 'SCENE', displayName: '林线入口', items: [] },
+    kind: 'main',
+    status: 'current',
+    statusLabel: '当前场景',
+    activeActors: [{
+      item: { order: 1, actorType: 'character', actorId: 101, subjectCharacterId: 501 },
+      name: '威尔',
+      status: 'running',
+      statusLabel: '行动中',
+      genericKp: false,
+    }],
+    waitingActors: [{
+      item: { order: 2, actorType: 'character', actorId: 102, subjectCharacterId: 502 },
+      name: '查理',
+      status: 'waiting',
+      statusLabel: '暂不参与',
+      genericKp: false,
+    }],
+    readyActors: [{
+      item: { order: 3, actorType: 'character', actorId: 103, subjectCharacterId: 503 },
+      name: '安娜',
+      status: 'ready',
+      statusLabel: '已完成本场景探索',
+      genericKp: false,
+    }],
+    childScenes: [],
+  }
+
+  const html = await renderToString(createSSRApp({
+    render: () => h(TrpgActorRoster, {
+      scene,
+      combatOverview: [],
+      investigatorCards: [
+        { cardId: 501, actorType: 'PLAYER', name: '威尔', checkValues: {} },
+        { cardId: 502, actorType: 'BOT', name: '查理', checkValues: {} },
+        { cardId: 503, actorType: 'BOT', name: '安娜', checkValues: {} },
+      ],
+    }),
+  }))
+
+  assert.match(html, /class="trpg-participant-label"[^>]*>[\s\S]*?暂不参与[\s\S]*?1 人/)
+  assert.match(html, /class="trpg-participant-label"[^>]*>[\s\S]*?已完成[\s\S]*?1 人/)
+  assert.equal(html.match(/tabindex="0"/g)?.length, 3)
+  assert.match(html, /class="trpg-row-state-label">暂缓<\/small>/)
+  assert.match(html, /class="trpg-row-state-label">已完成<\/small>/)
+})

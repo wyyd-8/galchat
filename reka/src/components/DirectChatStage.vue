@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ArrowLeft, BrainCircuit, History, LoaderCircle, RotateCcw, Send, Settings2 } from '@lucide/vue'
 import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger } from 'reka-ui'
 import type { Character, DirectMessage, UserWorld } from '@/api/types'
-import { scrollConversationToLatest } from './reasoningScroll'
+import { resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
@@ -18,7 +18,11 @@ const conversationalMessages = computed(() => props.messages.filter((item) => it
 let latestScrollFrame = 0
 
 watch(() => `${props.loading.sending}:${props.messages.map((message) => `${message.id}:${message.role}:${Boolean(message.content.trim())}`).join('|')}`, syncThinkingState, { immediate: true, flush: 'sync' })
-watch(() => props.character.characterId, () => { lastScrollTop.value = 0; initialScrollPending.value = true }, { immediate: true })
+watch(() => props.character.characterId, () => {
+  lastScrollTop.value = 0
+  initialScrollPending.value = true
+  if (scroller.value) resetConversationScrollFollowing(scroller.value)
+}, { immediate: true })
 watch(() => props.loading.history, (loading) => {
   if (!loading && initialScrollPending.value) { initialScrollPending.value = false; scrollToLatest() }
 }, { immediate: true, flush: 'post' })
@@ -57,10 +61,14 @@ function bindScroller(element: unknown) {
 }
 function handleScroll(event: Event) {
   const viewport = event.currentTarget as HTMLElement
+  updateConversationScrollFollowing(viewport)
   const currentTop = viewport.scrollTop
   const movingUp = currentTop < lastScrollTop.value
   lastScrollTop.value = currentTop
   if (movingUp && currentTop <= 32 && props.hasOlderMessages && !props.loading.history) emit('loadEarlier')
+}
+function handleReasoningScroll(event: Event) {
+  updateReasoningScrollFollowing(event.currentTarget as HTMLElement)
 }
 function composition(value: boolean, event: CompositionEvent) {
   composing.value = value; const target = event.target as HTMLTextAreaElement; emit('composition', value, target.value)
@@ -83,7 +91,7 @@ function keydown(event: KeyboardEvent) {
           <button v-else-if="hasOlderMessages" class="load-earlier-button" :disabled="loading.history" @click="emit('loadEarlier')"><LoaderCircle v-if="loading.history" class="spin" :size="14" /><History v-else :size="14" />加载更早记录</button>
           <div v-else-if="!messages.length" class="empty-chat"><BrainCircuit :size="30" /><h2>和 {{ character.characterName }} 开始对话</h2><p>角色会结合世界背景、历史记忆和好感度回应。</p></div>
           <template v-for="message in messages" :key="message.id">
-            <CollapsibleRoot v-if="message.role === 'thinking'" v-model:open="thinkingOpen[message.id]" class="direct-thinking"><CollapsibleTrigger class="reasoning-trigger">思考过程</CollapsibleTrigger><CollapsibleContent class="reasoning-content" :data-reasoning-streaming="thinkingPhase.get(message.id) === 'thinking' ? 'true' : undefined">{{ message.content }}</CollapsibleContent></CollapsibleRoot>
+            <CollapsibleRoot v-if="message.role === 'thinking'" v-model:open="thinkingOpen[message.id]" class="direct-thinking"><CollapsibleTrigger class="reasoning-trigger">思考过程</CollapsibleTrigger><CollapsibleContent class="reasoning-content" :data-reasoning-streaming="thinkingPhase.get(message.id) === 'thinking' ? 'true' : undefined" @scroll="handleReasoningScroll">{{ message.content }}</CollapsibleContent></CollapsibleRoot>
             <div v-else-if="message.role === 'tool'" class="direct-tool">{{ message.content }}</div>
             <article v-else class="chat-message" :class="message.role">
               <div v-if="message.role === 'assistant'" class="message-avatar" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</div>

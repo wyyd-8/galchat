@@ -5,19 +5,20 @@ import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
-import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMessage, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgGameTimePeriod } from '@/api/types'
+import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgGameTimePeriod } from '@/api/types'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import TrpgActorRoster from './TrpgActorRoster.vue'
 import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
 import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
 import { syncReasoningDisclosure, type ReasoningPhase } from './reasoningDisclosure'
-import { scrollConversationToLatest } from './reasoningScroll'
+import { resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
 import { buildTrpgExecutionState, type TrpgExecutionScene } from './trpgExecutionState'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; combatOverview?: TrpgCombatParticipantOverview[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
+const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
   combatOverview: () => [],
+  investigatorCards: () => [],
 })
 const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; openDice: [aggregate: DiceRollAggregate]; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
@@ -77,7 +78,12 @@ let latestScrollFrame = 0
 
 watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(message.replyStepId && props.reasoning[message.replyStepId])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
 watch(() => props.replyPlan, (plan) => { loadedPlanSignature.value = replyPlanSignature(plan.items) }, { immediate: true, flush: 'sync' })
-watch(() => props.conversation.id, () => { lastScrollTop.value = 0; initialScrollPending.value = true; timeEditing.value = false }, { immediate: true })
+watch(() => props.conversation.id, () => {
+  lastScrollTop.value = 0
+  initialScrollPending.value = true
+  timeEditing.value = false
+  if (scroller.value) resetConversationScrollFollowing(scroller.value)
+}, { immediate: true })
 watch(() => props.loading, (loading) => {
   if (!loading && initialScrollPending.value) { initialScrollPending.value = false; scrollToLatest() }
 }, { immediate: true, flush: 'post' })
@@ -134,10 +140,14 @@ function sceneIcon(scene: TrpgExecutionScene): Component {
 }
 function handleScroll(event: Event) {
   const viewport = event.currentTarget as HTMLElement
+  updateConversationScrollFollowing(viewport)
   const currentTop = viewport.scrollTop
   const movingUp = currentTop < lastScrollTop.value
   lastScrollTop.value = currentTop
   if (movingUp && currentTop <= 32 && props.hasOlderMessages && !props.loading) emit('loadEarlier')
+}
+function handleReasoningScroll(event: Event) {
+  updateReasoningScrollFollowing(event.currentTarget as HTMLElement)
 }
 </script>
 
@@ -158,7 +168,7 @@ function handleScroll(event: Event) {
               <div class="message-meta"><strong>{{ message.speakerType === 'user' ? '你' : message.speakerType === 'narrator' ? '叙事' : message.speakerType === 'kp' ? (message.speakerName || 'KP') : message.speakerName || character(message.speakerId)?.characterName || '角色' }}</strong><span v-if="message.status === 'streaming'" class="typing-dot">正在回应</span><span v-if="message.status === 'failed'" class="failed-label">生成失败</span></div>
               <CollapsibleRoot v-if="message.replyStepId && reasoning[message.replyStepId]" v-model:open="reasoningOpen[message.replyStepId]" class="reasoning-block">
                 <CollapsibleTrigger class="reasoning-trigger">思考过程 <ChevronDown :size="14" /></CollapsibleTrigger>
-                <CollapsibleContent class="reasoning-content" :data-reasoning-streaming="reasoningPhase.get(message.replyStepId) === 'thinking' ? 'true' : undefined">{{ reasoning[message.replyStepId] }}</CollapsibleContent>
+                <CollapsibleContent class="reasoning-content" :data-reasoning-streaming="reasoningPhase.get(message.replyStepId) === 'thinking' ? 'true' : undefined" @scroll="handleReasoningScroll">{{ reasoning[message.replyStepId] }}</CollapsibleContent>
               </CollapsibleRoot>
               <div v-if="message.decisionContent" class="decision-block"><span>角色决策</span><p>{{ message.decisionContent }}</p></div>
               <p>{{ message.content }}<span v-if="message.status === 'streaming'" class="stream-caret" /></p>
@@ -228,10 +238,10 @@ function handleScroll(event: Event) {
                     <strong>{{ child.plan.displayName }}</strong>
                     <span class="trpg-scene-status-icon" :title="child.statusLabel" role="img" :aria-label="child.statusLabel"><component :is="sceneIcon(child)" :size="13" :stroke-width="1.8" /></span>
                   </header>
-                  <TrpgActorRoster :scene="child" :combat-overview="combatOverview" />
+                  <TrpgActorRoster :scene="child" :combat-overview="combatOverview" :investigator-cards="investigatorCards" />
                 </section>
               </div>
-              <TrpgActorRoster :scene="scene" :combat-overview="combatOverview" />
+              <TrpgActorRoster :scene="scene" :combat-overview="combatOverview" :investigator-cards="investigatorCards" />
             </section>
             <div v-if="!trpgExecution.scenes.length" class="plan-empty">暂无场景计划</div>
           </template>

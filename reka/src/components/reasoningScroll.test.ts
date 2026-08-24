@@ -39,3 +39,71 @@ test('does not move reasoning that is no longer streaming', async () => {
 
   assert.equal(completedReasoning.scrollTop, 42)
 })
+
+test('stops following message output after the user scrolls away from the bottom', async () => {
+  const module = await import('./reasoningScroll.ts')
+  const viewport = {
+    scrollTop: 120,
+    scrollHeight: 900,
+    clientHeight: 400,
+    querySelectorAll() { return [] },
+  }
+
+  module.updateConversationScrollFollowing(viewport as unknown as HTMLElement)
+  viewport.scrollHeight = 980
+  module.scrollConversationToLatest(viewport as unknown as HTMLElement)
+
+  assert.equal(viewport.scrollTop, 120)
+})
+
+test('resumes following message output when the user returns to the bottom', async () => {
+  const module = await import('./reasoningScroll.ts')
+  const viewport = {
+    scrollTop: 500,
+    scrollHeight: 900,
+    clientHeight: 400,
+    querySelectorAll() { return [] },
+  }
+
+  module.updateConversationScrollFollowing(viewport as unknown as HTMLElement)
+  viewport.scrollHeight = 980
+  module.scrollConversationToLatest(viewport as unknown as HTMLElement)
+
+  assert.equal(viewport.scrollTop, 980)
+})
+
+test('lets the user browse streaming reasoning without unlocking the message viewport', async () => {
+  const module = await import('./reasoningScroll.ts')
+  const reasoning = { scrollTop: 40, scrollHeight: 360, clientHeight: 150 }
+  const viewport = {
+    scrollTop: 500,
+    scrollHeight: 900,
+    clientHeight: 400,
+    querySelectorAll() { return [reasoning] },
+  }
+
+  module.updateReasoningScrollFollowing(reasoning as unknown as HTMLElement)
+  reasoning.scrollHeight = 420
+  viewport.scrollHeight = 980
+  module.scrollConversationToLatest(viewport as unknown as HTMLElement)
+
+  assert.equal(reasoning.scrollTop, 40)
+  assert.equal(viewport.scrollTop, 980)
+})
+
+test('restores following when a different conversation opens in the same viewport', async () => {
+  const module = await import('./reasoningScroll.ts')
+  const viewport = {
+    scrollTop: 120,
+    scrollHeight: 900,
+    clientHeight: 400,
+    querySelectorAll() { return [] },
+  }
+
+  module.updateConversationScrollFollowing(viewport as unknown as HTMLElement)
+  module.resetConversationScrollFollowing(viewport as unknown as HTMLElement)
+  viewport.scrollHeight = 980
+  module.scrollConversationToLatest(viewport as unknown as HTMLElement)
+
+  assert.equal(viewport.scrollTop, 980)
+})

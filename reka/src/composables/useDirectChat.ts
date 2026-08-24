@@ -1,6 +1,7 @@
 import { computed, nextTick, onUnmounted, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { api, createChatSocket, streamChat } from '@/api/client'
 import type { Character, ChatHistory, ChatMessagePayload, DirectMessage, UserWorld } from '@/api/types'
+import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/components/reasoningScroll'
 import { errorMessage, notify } from './useNotice'
 
 interface DirectChatContext {
@@ -53,7 +54,13 @@ export function useDirectChat(context: DirectChatContext) {
     if (!world?.id || !world.worldId || !character) return null
     return { type: 'chat', worldId: world.worldId, userWorldId: world.id, characterId: character.characterId, message }
   }
-  async function scrollToBottom(behavior: ScrollBehavior = 'auto') { await nextTick(); scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior }) }
+  async function scrollToBottom(force = false) {
+    await nextTick()
+    const viewport = scroller.value
+    if (!viewport) return
+    if (force) resetConversationScrollFollowing(viewport)
+    scrollConversationToLatest(viewport)
+  }
 
   async function selectCharacter(id: number) {
     selectedCharacterId.value = id; input.value = ''; messages.value = []; hasOlderMessages.value = false; closeSocket()
@@ -65,7 +72,7 @@ export function useDirectChat(context: DirectChatContext) {
       messages.value = history.flatMap(historyMessages)
       hasOlderMessages.value = history.length === 30
       if (world.thinkStatus === false) void ensureSocket(world.id).catch(() => undefined)
-      await scrollToBottom('auto')
+      await scrollToBottom(true)
     } catch (error) { notify('单聊记录加载失败', errorMessage(error), 'danger') }
     finally { loading.history = false }
   }

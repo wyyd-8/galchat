@@ -1,11 +1,12 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { api, clearSession, currentSession, saveSession, streamGroupGeneration, streamGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
 import type {
-  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgGameTimePeriod,
+  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgGameTimePeriod,
   UserInfo, UserWorld, WorldDetail, WorldSave, WorldTemplate,
 } from '@/api/types'
 import { beginReplyTurn, updateReplyTurn, type ReplyTurnState } from '@/components/replyTurnStatus'
 import { activeReplyPlan } from '@/components/replyPlanState'
+import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/components/reasoningScroll'
 import { decodeParticipantIds, encodeParticipantIds, resolveParticipantIds } from '@/components/trpgSetupState'
 import { applyGameTimeEvent } from '@/components/gameTimeState'
 import { applyCurrentTurnEvent } from '@/components/trpgExecutionState'
@@ -38,6 +39,7 @@ export function useWorkspace() {
   const messageScroller = ref<HTMLElement | null>(null)
   const currentTurn = ref<CurrentTurn | null>(null)
   const combatOverview = ref<TrpgCombatParticipantOverview[]>([])
+  const investigatorCards = ref<InvestigatorCardSummary[]>([])
   const replyTurnState = ref<ReplyTurnState | null>(null)
   const latestDiceRoll = ref<DiceRollAggregate | null>(null)
   const incomingDiceRoll = ref<DiceRollAggregate | null>(null)
@@ -84,7 +86,7 @@ export function useWorkspace() {
   }
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
-    conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; combatOverview.value = []; replyTurnState.value = null; modules.value = []
+    conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; modules.value = []
     latestDiceRoll.value = null; incomingDiceRoll.value = null; hasOlderGroupMessages.value = false; diceRollCache.clear()
   }
 
@@ -137,6 +139,16 @@ export function useWorkspace() {
     }
   }
 
+  async function loadInvestigatorCards(
+    conversationId: number,
+  ): Promise<InvestigatorCardSummary[]> {
+    try {
+      return await api.investigatorCards(conversationId)
+    } catch {
+      return []
+    }
+  }
+
   async function refreshDiceRoll(summaryId: number): Promise<DiceRollAggregate> {
     const aggregate = await loadDiceAggregate(summaryId, true)
     const diceRoundNos = [...new Set(aggregate.results.map((detail) => detail.roundNo || 1))]
@@ -146,9 +158,12 @@ export function useWorkspace() {
     })
     latestDiceRoll.value = aggregate
     if (selectedConversation.value?.mode === 'trpg') {
-      combatOverview.value = await loadCombatOverview(
-        selectedConversation.value.id,
-      )
+      const [overview, cards] = await Promise.all([
+        loadCombatOverview(selectedConversation.value.id),
+        loadInvestigatorCards(selectedConversation.value.id),
+      ])
+      combatOverview.value = overview
+      investigatorCards.value = cards
     }
     return aggregate
   }
@@ -256,10 +271,10 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; combatOverview.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
-      const [conversationDetail, history, plans, turn, overview] = await Promise.all([
-        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), loadCombatOverview(id),
+      const [conversationDetail, history, plans, turn, overview, cards] = await Promise.all([
+        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), loadCombatOverview(id), loadInvestigatorCards(id),
       ])
       conversations.value = conversations.value.map((item) => item.id === id ? { ...item, ...conversationDetail } : item)
       messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
@@ -267,6 +282,7 @@ export function useWorkspace() {
       setReplyPlans(plans)
       currentTurn.value = turn
       combatOverview.value = overview
+      investigatorCards.value = cards
       const plannedParticipantIds = [...new Set(replyPlan.value.items
         .filter((item) => item.actorType === 'character')
         .map((item) => item.actorId)
@@ -285,7 +301,7 @@ export function useWorkspace() {
       } else {
         participantIds.value = plannedParticipantIds
       }
-      await scrollToBottom('auto')
+      await scrollToBottom(true)
     } catch (error) { notify('会话加载失败', errorMessage(error), 'danger') }
     finally { loading.chat = false }
     if (selectedConversationId.value === id && storedGeneration(id)) {
@@ -476,13 +492,14 @@ export function useWorkspace() {
     }
   }
   async function syncTrpgState(conversation: Conversation) {
-    const [history, plans, turn, overview] = await Promise.all([
-      api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id), loadCombatOverview(conversation.id),
+    const [history, plans, turn, overview, cards] = await Promise.all([
+      api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id), loadCombatOverview(conversation.id), loadInvestigatorCards(conversation.id),
     ])
     messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
     setReplyPlans(plans)
     currentTurn.value = turn
     combatOverview.value = overview
+    investigatorCards.value = cards
   }
   async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
     const conversation = selectedConversation.value
@@ -632,13 +649,19 @@ export function useWorkspace() {
     }
     finally { loading.sending = false; await scrollToBottom() }
   }
-  async function scrollToBottom(behavior: ScrollBehavior = 'auto') { await nextTick(); messageScroller.value?.scrollTo({ top: messageScroller.value.scrollHeight, behavior }) }
+  async function scrollToBottom(force = false) {
+    await nextTick()
+    const viewport = messageScroller.value
+    if (!viewport) return
+    if (force) resetConversationScrollFollowing(viewport)
+    scrollConversationToLatest(viewport)
+  }
 
   window.addEventListener(UNAUTHORIZED_EVENT, logout)
   onMounted(boot)
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
-    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, messageScroller, currentTurn, combatOverview, replyTurnState,
+    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, messageScroller, currentTurn, combatOverview, investigatorCards, replyTurnState,
     latestDiceRoll, incomingDiceRoll, hasOlderGroupMessages,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,

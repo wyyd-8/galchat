@@ -16,6 +16,7 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.po.TrpgCombat;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
+import com.me.galchat.domain.po.TrpgWeaponStash;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -43,6 +44,7 @@ public class TrpgSaveSnapshotDTO {
     private List<CocCharacterProfile> characterProfiles;
     private List<CocCharacterSkill> characterSkills;
     private List<CocCharacterWeapon> characterWeapons;
+    private List<TrpgWeaponStash> weaponStash;
     private List<TrpgCombat> combats;
     private List<RestorableTurnSnapshot> restorableTurns;
     private GroupTurnCheckpoint checkpoint;

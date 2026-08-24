@@ -27,4 +27,15 @@ class CocSkillRuleConstantTest {
                 .allSatisfy((name, description) ->
                         assertThat(description).contains(name));
     }
+
+    @Test
+    void shootingRuleListsEverySupportedRangedWeaponForAcquisition() {
+        String shooting = CocSkillRuleConstant.SKILL_RULES_BY_NAME
+                .get("射击");
+
+        assertThat(shooting)
+                .contains("| 弓箭 |")
+                .contains("| 弩 |")
+                .contains("| 泰瑟枪 |");
+    }
 }

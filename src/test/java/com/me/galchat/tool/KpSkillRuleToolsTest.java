@@ -54,8 +54,9 @@ class KpSkillRuleToolsTest {
                 .contains("#### 1920s", "长鞭")
                 .contains("#### 现代", "链锯");
         assertThat(result.get("射击:手枪"))
-                .contains("### 可用热武器列表")
+                .contains("### 可用远程武器列表")
                 .contains("| 名称 | 伤害 | 射程 | 弹容量 | 获取级别 |")
+                .contains("| 弓箭 |", "| 弩 |", "| 泰瑟枪 |")
                 .contains("| .38/9mm左轮手枪 | 1D10 | 15m | 6 | 普通 |")
                 .contains("| 12号双管霰弹枪 | 近4D6；中2D6；远1D6 | 近≤10m；中≤20m；远≤50m | 2 | 普通 |")
                 .contains("#### 1920s", "汤普森冲锋枪", "受管制")

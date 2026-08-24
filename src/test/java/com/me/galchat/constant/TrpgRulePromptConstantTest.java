@@ -184,6 +184,20 @@ class TrpgRulePromptConstantTest {
     }
 
     @Test
+    void equipmentGuidanceUsesPersistentStashAndUnvalidatedPurchases() {
+        assertThat(TrpgRulePromptConstant.KP_RESIDENT_RULES)
+                .contains("主动丢弃武器无需检定")
+                .contains("`stashWeapon`")
+                .contains("DISCARDED", "DISARMED", "SEIZED")
+                .contains("工具返回的暂存武器 ID")
+                .contains("`equipWeaponFromStash`")
+                .contains("`purchaseEquipment`")
+                .contains("可以同时为多个人物卡添加")
+                .contains("不校验价格、资金、时代、库存或技能")
+                .contains("格斗或射击技能详细规则中的准确名称");
+    }
+
+    @Test
     void combatDtoToolExamplesUseTheirRequestParameterWrapper() {
         assertThat(TrpgRulePromptConstant.KP_COMBAT_RULES)
                 .contains(

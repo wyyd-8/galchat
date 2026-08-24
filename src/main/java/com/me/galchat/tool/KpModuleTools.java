@@ -3,14 +3,16 @@ package com.me.galchat.tool;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.domain.dto.KpEquipmentDTOs;
 import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.TrpgMaterialService;
+import com.me.galchat.service.impl.TrpgEquipmentService;
 import com.me.galchat.service.impl.TrpgModuleQueryService;
 import com.me.galchat.utils.TypeConvertUtils;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -19,12 +21,31 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 
 @Component
-@RequiredArgsConstructor
 public class KpModuleTools {
 
     private final TrpgModuleQueryService queryService;
     private final TrpgMaterialService materialService;
     private final ICharacterCardService characterCardService;
+    private final TrpgEquipmentService equipmentService;
+
+    @Autowired
+    public KpModuleTools(
+            TrpgModuleQueryService queryService,
+            TrpgMaterialService materialService,
+            ICharacterCardService characterCardService,
+            TrpgEquipmentService equipmentService) {
+        this.queryService = queryService;
+        this.materialService = materialService;
+        this.characterCardService = characterCardService;
+        this.equipmentService = equipmentService;
+    }
+
+    public KpModuleTools(
+            TrpgModuleQueryService queryService,
+            TrpgMaterialService materialService,
+            ICharacterCardService characterCardService) {
+        this(queryService, materialService, characterCardService, null);
+    }
 
     @Tool(
             name = "readModuleLocation",
@@ -130,6 +151,47 @@ public class KpModuleTools {
         KpContext kp = requireKpContext(context);
         return characterCardService.updateWeaponState(
                 kp.runId(), characterName, weaponName, update);
+    }
+
+    @Tool(
+            name = "stashWeapon",
+            description = "将人物卡当前持有的准确武器原样移入武器暂存库，并自动记录当前场景地点。用于主动丢弃、被打落或被夺取。")
+    public KpEquipmentDTOs.StashResult stashWeapon(
+            @ToolParam(description = "原持有者的人物卡准确名称，不能传ID")
+            String characterName,
+            @ToolParam(description = "该人物卡持有的准确武器名称，不能传ID")
+            String weaponName,
+            @ToolParam(description = "DISCARDED主动丢弃、DISARMED被打落、SEIZED被夺取")
+            KpEquipmentDTOs.StashReason reason,
+            ToolContext context) {
+        KpContext kp = requireKpContext(context);
+        return equipmentService.stashWeapon(
+                kp.runId(), characterName, weaponName, reason);
+    }
+
+    @Tool(
+            name = "equipWeaponFromStash",
+            description = "按武器暂存ID取出武器，并为指定人物卡重新装备。武器原有弹药、损坏和其他状态保持不变。")
+    public KpEquipmentDTOs.EquipResult equipWeaponFromStash(
+            @ToolParam(description = "KP上下文中武器暂存库展示的武器ID")
+            Long weaponId,
+            @ToolParam(description = "重新装备该武器的人物卡准确名称，不能传人物卡ID")
+            String targetCharacterName,
+            ToolContext context) {
+        KpContext kp = requireKpContext(context);
+        return equipmentService.equipWeaponFromStash(
+                kp.runId(), weaponId, targetCharacterName);
+    }
+
+    @Tool(
+            name = "purchaseEquipment",
+            description = "一次为一个或多个人物卡添加购买到的武器或普通物品。不校验价格、资金、时代、库存或技能；武器必须使用战斗技能规则所列的准确名称。")
+    public KpEquipmentDTOs.PurchaseResult purchaseEquipment(
+            @ToolParam(description = "本次购买后各人物卡实际获得的全部武器和物品")
+            KpEquipmentDTOs.PurchaseRequest request,
+            ToolContext context) {
+        KpContext kp = requireKpContext(context);
+        return equipmentService.purchaseEquipment(kp.runId(), request);
     }
 
     private KpContext requireKpContext(ToolContext context) {

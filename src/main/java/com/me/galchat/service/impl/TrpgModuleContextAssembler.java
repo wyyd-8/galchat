@@ -10,6 +10,7 @@ import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.CocModuleMaterial;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
+import com.me.galchat.domain.po.TrpgWeaponStash;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocModuleClueMapper;
@@ -18,7 +19,8 @@ import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.CocModuleMapper;
 import com.me.galchat.mapper.CocModuleMaterialMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
-import lombok.RequiredArgsConstructor;
+import com.me.galchat.mapper.TrpgWeaponStashMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -27,7 +29,6 @@ import java.util.Set;
 import java.util.HashSet;
 
 @Component
-@RequiredArgsConstructor
 public class TrpgModuleContextAssembler {
 
     private final CocModuleMapper moduleMapper;
@@ -38,6 +39,43 @@ public class TrpgModuleContextAssembler {
     private final GroupReplyPlanMapper planMapper;
     private final CocCharacterMapper characterMapper;
     private final TrpgMaterialStateStore materialStateStore;
+    private final TrpgWeaponStashMapper weaponStashMapper;
+
+    @Autowired
+    public TrpgModuleContextAssembler(
+            CocModuleMapper moduleMapper,
+            CocModuleContextMapper contextMapper,
+            CocModuleLocationMapper locationMapper,
+            CocModuleClueMapper clueMapper,
+            CocModuleMaterialMapper materialMapper,
+            GroupReplyPlanMapper planMapper,
+            CocCharacterMapper characterMapper,
+            TrpgMaterialStateStore materialStateStore,
+            TrpgWeaponStashMapper weaponStashMapper) {
+        this.moduleMapper = moduleMapper;
+        this.contextMapper = contextMapper;
+        this.locationMapper = locationMapper;
+        this.clueMapper = clueMapper;
+        this.materialMapper = materialMapper;
+        this.planMapper = planMapper;
+        this.characterMapper = characterMapper;
+        this.materialStateStore = materialStateStore;
+        this.weaponStashMapper = weaponStashMapper;
+    }
+
+    public TrpgModuleContextAssembler(
+            CocModuleMapper moduleMapper,
+            CocModuleContextMapper contextMapper,
+            CocModuleLocationMapper locationMapper,
+            CocModuleClueMapper clueMapper,
+            CocModuleMaterialMapper materialMapper,
+            GroupReplyPlanMapper planMapper,
+            CocCharacterMapper characterMapper,
+            TrpgMaterialStateStore materialStateStore) {
+        this(moduleMapper, contextMapper, locationMapper, clueMapper,
+                materialMapper, planMapper, characterMapper,
+                materialStateStore, null);
+    }
 
     public String formatKpContext(GroupConversation conversation) {
         if (conversation == null || conversation.getModuleId() == null) {
@@ -112,7 +150,46 @@ public class TrpgModuleContextAssembler {
         }
         result.append("</material-title-index>\n");
         appendQuickNotes(result, conversation.getId());
+        appendWeaponStash(result, conversation.getId());
         return result.toString();
+    }
+
+    private void appendWeaponStash(StringBuilder result, Long runId) {
+        if (weaponStashMapper == null) {
+            return;
+        }
+        List<TrpgWeaponStash> rows = weaponStashMapper.selectList(
+                new LambdaQueryWrapper<TrpgWeaponStash>()
+                        .eq(TrpgWeaponStash::getRunId, runId)
+                        .orderByAsc(TrpgWeaponStash::getWeaponId));
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        result.append("<weapon-stash>\n");
+        for (TrpgWeaponStash row : rows) {
+            TrpgWeaponStash.WeaponSnapshot weapon =
+                    row.getWeaponSnapshot();
+            if (weapon == null) {
+                throw new UserRequestException("武器暂存快照不存在");
+            }
+            result.append("- ID=").append(row.getWeaponId())
+                    .append("｜名称=").append(weapon.getName())
+                    .append("｜原持有者=")
+                    .append(row.getSourceCharacterName())
+                    .append("｜位置=").append(row.getLocationName())
+                    .append("｜原因=").append(row.getStashReason());
+            if (weapon.getAmmoCapacity() != null) {
+                result.append("｜弹药=")
+                        .append(weapon.getRemainingAmmo() == null
+                                ? "未知" : weapon.getRemainingAmmo())
+                        .append('/').append(weapon.getAmmoCapacity());
+            }
+            result.append("｜状态=")
+                    .append(Boolean.TRUE.equals(weapon.getIsBroken())
+                            ? "损坏" : "正常")
+                    .append('\n');
+        }
+        result.append("</weapon-stash>\n");
     }
 
     private Long mainLocationId(GroupConversation conversation) {

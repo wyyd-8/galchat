@@ -173,7 +173,7 @@ public final class CocSkillRuleConstant {
 - **链锯：** 使用对应专攻发动近战；只有大失败时才可能由KP裁定武器损坏或其他与使用直接相关的一种后果，不使用独立故障阈值或持续伤害规则。
                     """ + acquisitionCatalog(
                     "可用冷兵器列表",
-                    CocWeaponCatalogConstant.WeaponKind.MELEE, false)),
+                    false, CocWeaponCatalogConstant.WeaponKind.MELEE)),
             Map.entry("射击", """
 ## 技能：射击（专攻）
 
@@ -183,8 +183,10 @@ public final class CocSkillRuleConstant {
 - **步枪/霰弹枪：** 可以共享人物卡上实际登记的专攻名，但命中后的伤害只能使用当前上下文明确提供的公式。
 - **弓：** 按人物卡上实际登记的射击专攻检定；不自动追加肉体伤害加值。
                     """ + acquisitionCatalog(
-                    "可用热武器列表",
-                    CocWeaponCatalogConstant.WeaponKind.FIREARM, true)),
+                    "可用远程武器列表",
+                    true,
+                    CocWeaponCatalogConstant.WeaponKind.FIREARM,
+                    CocWeaponCatalogConstant.WeaponKind.OTHER_RANGED)),
             Map.entry("急救", """
 ## 技能：急救
 
@@ -575,8 +577,8 @@ public final class CocSkillRuleConstant {
 
     private static String acquisitionCatalog(
             String title,
-            CocWeaponCatalogConstant.WeaponKind kind,
-            boolean firearm) {
+            boolean firearm,
+            CocWeaponCatalogConstant.WeaponKind... kinds) {
         StringBuilder result = new StringBuilder()
                 .append("\n### ").append(title).append("\n\n")
                 .append("下列武器表示系统支持的模组内获取候选，不代表当前人物已经持有，")
@@ -585,23 +587,29 @@ public final class CocSkillRuleConstant {
             result.append("战斗中的枪械使用requestFirearmAttack，支持单发、手枪连射、半自动、短点射和全自动；")
                     .append("必须在一次调用中声明本主动位全部目标。人物卡仍保存多档伤害文本的霰弹枪暂用普通检定与伤害工具结算。\n\n");
         }
-        appendEraWeapons(result, kind,
+        appendEraWeapons(result, kinds,
                 CocWeaponCatalogConstant.WeaponEra.BOTH, "通用");
-        appendEraWeapons(result, kind,
+        appendEraWeapons(result, kinds,
                 CocWeaponCatalogConstant.WeaponEra.TWENTIES, "1920s");
-        appendEraWeapons(result, kind,
+        appendEraWeapons(result, kinds,
                 CocWeaponCatalogConstant.WeaponEra.MODERN, "现代");
         return result.toString();
     }
 
     private static void appendEraWeapons(
             StringBuilder result,
-            CocWeaponCatalogConstant.WeaponKind kind,
+            CocWeaponCatalogConstant.WeaponKind[] kinds,
             CocWeaponCatalogConstant.WeaponEra era,
             String eraLabel) {
+        java.util.Set<CocWeaponCatalogConstant.WeaponKind> includedKinds =
+                java.util.Set.of(kinds);
         List<CocWeaponCatalogConstant.WeaponDefinition> weapons =
-                CocWeaponCatalogConstant.weaponsByKind(kind).stream()
+                CocWeaponCatalogConstant.weapons().values().stream()
+                        .filter(weapon -> includedKinds.contains(
+                                weapon.kind()))
                         .filter(weapon -> weapon.era() == era)
+                        .sorted(java.util.Comparator.comparing(
+                                CocWeaponCatalogConstant.WeaponDefinition::code))
                         .toList();
         if (weapons.isEmpty()) {
             return;

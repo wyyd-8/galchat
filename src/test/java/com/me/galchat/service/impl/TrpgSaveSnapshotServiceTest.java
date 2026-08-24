@@ -15,6 +15,7 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.TrpgCombat;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
+import com.me.galchat.domain.po.TrpgWeaponStash;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
@@ -33,6 +34,7 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.GroupTurnCheckpointMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
 import com.me.galchat.mapper.TrpgSaveRestoreMapper;
+import com.me.galchat.mapper.TrpgWeaponStashMapper;
 import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.service.ITrpgRedisStateService;
@@ -43,6 +45,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Arrays;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +59,17 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class TrpgSaveSnapshotServiceTest {
+
+    @Test
+    void snapshotServiceDependsOnWeaponStashPersistence() {
+        assertThat(Arrays.stream(
+                        TrpgSaveSnapshotService.class
+                                .getDeclaredConstructors())
+                .flatMap(constructor -> Arrays.stream(
+                        constructor.getParameterTypes())))
+                .contains(com.me.galchat.mapper
+                        .TrpgWeaponStashMapper.class);
+    }
 
     @Mock
     private TrpgSaveRestoreMapper restoreMapper;
@@ -75,6 +89,8 @@ class TrpgSaveSnapshotServiceTest {
     private CocCharacterSkillMapper skillMapper;
     @Mock
     private CocCharacterWeaponMapper weaponMapper;
+    @Mock
+    private TrpgWeaponStashMapper weaponStashMapper;
     @Mock
     private TrpgCombatMapper combatMapper;
     @Mock
@@ -112,6 +128,7 @@ class TrpgSaveSnapshotServiceTest {
                 profileMapper,
                 skillMapper,
                 weaponMapper,
+                weaponStashMapper,
                 combatMapper,
                 checkpointMapper,
                 turnMapper,
@@ -161,6 +178,17 @@ class TrpgSaveSnapshotServiceTest {
         TrpgCombat combat = new TrpgCombat()
                 .setId(501L)
                 .setConversationId(51L);
+        TrpgWeaponStash stashedWeapon = new TrpgWeaponStash()
+                .setWeaponId(901L)
+                .setRunId(51L)
+                .setSourceCharacterName("林默")
+                .setLocationName("森林 - 营地")
+                .setStashReason("DISCARDED")
+                .setWeaponSnapshot(
+                        new TrpgWeaponStash.WeaponSnapshot()
+                                .setName("弓箭")
+                                .setRemainingAmmo(1)
+                                .setIsBroken(false));
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(2L)
                 .setConversationId(51L)
@@ -197,6 +225,8 @@ class TrpgSaveSnapshotServiceTest {
         when(profileMapper.selectList(any())).thenReturn(List.of());
         when(skillMapper.selectList(any())).thenReturn(List.of());
         when(weaponMapper.selectList(any())).thenReturn(List.of());
+        when(weaponStashMapper.selectList(any()))
+                .thenReturn(List.of(stashedWeapon));
         when(combatMapper.selectList(any())).thenReturn(List.of(combat));
         when(turnMapper.selectList(any())).thenReturn(List.of(turn));
         when(stepMapper.selectList(any())).thenReturn(List.of(step));
@@ -232,6 +262,8 @@ class TrpgSaveSnapshotServiceTest {
         assertThat(snapshot.getCharacters()).containsExactly(character);
         assertThat(snapshot.getCharacterQuickNotes())
                 .containsEntry(401L, "藏着钥匙");
+        assertThat(snapshot.getWeaponStash())
+                .containsExactly(stashedWeapon);
         assertThat(snapshot.getCombats()).containsExactly(combat);
         assertThat(snapshot.getRestorableTurns()).singleElement()
                 .satisfies(turnSnapshot -> {
@@ -400,6 +432,15 @@ class TrpgSaveSnapshotServiceTest {
                 .setCharacterProfiles(List.of())
                 .setCharacterSkills(List.of())
                 .setCharacterWeapons(List.of())
+                .setWeaponStash(List.of(new TrpgWeaponStash()
+                        .setWeaponId(901L)
+                        .setRunId(51L)
+                        .setSourceCharacterName("林默")
+                        .setLocationName("森林 - 营地")
+                        .setStashReason("DISCARDED")
+                        .setWeaponSnapshot(
+                                new TrpgWeaponStash.WeaponSnapshot()
+                                        .setName("弓箭"))))
                 .setCombats(List.of())
                 .setConversationState(new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
                         .setActiveReplyPlanId(101L)
@@ -438,6 +479,8 @@ class TrpgSaveSnapshotServiceTest {
         verify(conversationMapper).update(eq(null), any());
         verify(runtimeChildSceneMapper).delete(any());
         verify(runtimeChildSceneMapper).insert(runtimeChildScene);
+        verify(weaponStashMapper).delete(any());
+        verify(weaponStashMapper).insert(any(TrpgWeaponStash.class));
     }
 
     @Test
@@ -526,6 +569,7 @@ class TrpgSaveSnapshotServiceTest {
                 .setCharacterProfiles(List.of())
                 .setCharacterSkills(List.of())
                 .setCharacterWeapons(List.of())
+                .setWeaponStash(List.of())
                 .setCombats(List.of());
     }
 

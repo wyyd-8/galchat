@@ -21,6 +21,7 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.po.TrpgCombat;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
+import com.me.galchat.domain.po.TrpgWeaponStash;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
@@ -40,6 +41,7 @@ import com.me.galchat.mapper.GroupTurnCheckpointMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
 import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import com.me.galchat.mapper.TrpgSaveRestoreMapper;
+import com.me.galchat.mapper.TrpgWeaponStashMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.service.ITrpgRedisStateService;
 import com.me.galchat.service.ITrpgSaveSnapshotService;
@@ -77,6 +79,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
     private final CocCharacterProfileMapper profileMapper;
     private final CocCharacterSkillMapper skillMapper;
     private final CocCharacterWeaponMapper weaponMapper;
+    private final TrpgWeaponStashMapper weaponStashMapper;
     private final TrpgCombatMapper combatMapper;
     private final GroupTurnCheckpointMapper checkpointMapper;
     private final GroupChatTurnMapper turnMapper;
@@ -155,6 +158,12 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                                 new LambdaQueryWrapper<CocCharacterWeapon>()
                                         .in(CocCharacterWeapon::getCharacterId, characterIds)
                                         .orderByAsc(CocCharacterWeapon::getId)))
+                .setWeaponStash(weaponStashMapper.selectList(
+                        new LambdaQueryWrapper<TrpgWeaponStash>()
+                                .eq(TrpgWeaponStash::getRunId,
+                                        conversationId)
+                                .orderByAsc(
+                                        TrpgWeaponStash::getWeaponId)))
                 .setCombats(combatMapper.selectList(
                         new LambdaQueryWrapper<TrpgCombat>()
                                 .eq(TrpgCombat::getConversationId, conversationId)
@@ -205,6 +214,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
         restoreRestorableTurns(snapshot.getRestorableTurns());
         restorePlans(conversationId, snapshot);
         restoreCharacters(conversationId, snapshot);
+        restoreWeaponStash(conversationId, snapshot.getWeaponStash());
         restoreCombats(conversationId, snapshot.getCombats());
         restoreCheckpoint(conversationId, snapshot.getCheckpoint());
         restoreConversation(conversation, snapshot.getConversationState());
@@ -310,6 +320,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
             }
         }
         validateCharacterChildren(snapshot, characterIds);
+        validateWeaponStash(snapshot, characterIds);
         if (!characterIds.containsAll(
                 safeMap(snapshot.getCharacterQuickNotes()).keySet())) {
             throw new UserRequestException("跑团人物卡速记存档不合法");
@@ -455,6 +466,41 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
         }
     }
 
+    private void validateWeaponStash(
+            TrpgSaveSnapshotDTO snapshot, Set<Long> characterIds) {
+        Set<Long> activeWeaponIds = safe(snapshot.getCharacterWeapons())
+                .stream()
+                .map(CocCharacterWeapon::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<Long> stashIds = new HashSet<>();
+        for (TrpgWeaponStash stash : safe(snapshot.getWeaponStash())) {
+            if (stash == null || stash.getWeaponId() == null
+                    || stash.getWeaponId() <= 0
+                    || !Objects.equals(stash.getRunId(),
+                    snapshot.getConversationId())
+                    || !StringUtils.hasText(
+                    stash.getSourceCharacterName())
+                    || !StringUtils.hasText(stash.getLocationName())
+                    || !StringUtils.hasText(stash.getStashReason())
+                    || stash.getWeaponSnapshot() == null
+                    || !StringUtils.hasText(
+                    stash.getWeaponSnapshot().getName())
+                    || !stashIds.add(stash.getWeaponId())
+                    || activeWeaponIds.contains(stash.getWeaponId())) {
+                throw new UserRequestException(
+                        "跑团武器暂存库存档不合法");
+            }
+            try {
+                com.me.galchat.domain.dto.KpEquipmentDTOs.StashReason
+                        .valueOf(stash.getStashReason());
+            } catch (IllegalArgumentException ex) {
+                throw new UserRequestException(
+                        "跑团武器暂存原因不合法", ex);
+            }
+        }
+    }
+
     private void validateCursors(TrpgSaveSnapshotDTO.CursorSnapshot cursors) {
         if (cursors == null) {
             throw new UserRequestException("跑团存档游标不合法");
@@ -576,6 +622,14 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
         combatMapper.delete(new LambdaQueryWrapper<TrpgCombat>()
                 .eq(TrpgCombat::getConversationId, conversationId));
         safe(combats).forEach(combatMapper::insert);
+    }
+
+    private void restoreWeaponStash(
+            Long conversationId, List<TrpgWeaponStash> weaponStash) {
+        weaponStashMapper.delete(
+                new LambdaQueryWrapper<TrpgWeaponStash>()
+                        .eq(TrpgWeaponStash::getRunId, conversationId));
+        safe(weaponStash).forEach(weaponStashMapper::insert);
     }
 
     private void restoreCheckpoint(

@@ -770,6 +770,19 @@ CREATE TABLE coc_character_weapon (
 CREATE INDEX idx_coc_character_weapon_character
     ON coc_character_weapon (character_id);
 
+CREATE TABLE trpg_weapon_stash (
+    weapon_id BIGINT PRIMARY KEY,
+    run_id BIGINT NOT NULL,
+    source_character_name VARCHAR(255) NOT NULL,
+    location_name VARCHAR(500) NOT NULL,
+    stash_reason VARCHAR(30) NOT NULL,
+    weapon_snapshot JSONB NOT NULL,
+    stashed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_trpg_weapon_stash_run
+    ON trpg_weapon_stash (run_id, weapon_id);
+
 CREATE TABLE coc_character_profile (
     id BIGSERIAL PRIMARY KEY,
     character_id BIGINT NOT NULL UNIQUE,

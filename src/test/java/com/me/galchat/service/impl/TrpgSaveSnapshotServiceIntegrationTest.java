@@ -20,6 +20,7 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.GroupTurnCheckpointMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
 import com.me.galchat.mapper.TrpgSaveRestoreMapper;
+import com.me.galchat.mapper.TrpgWeaponStashMapper;
 import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.service.ITrpgRedisStateService;
@@ -100,6 +101,7 @@ class TrpgSaveSnapshotServiceIntegrationTest {
                 mock(CocCharacterProfileMapper.class),
                 mock(CocCharacterSkillMapper.class),
                 mock(CocCharacterWeaponMapper.class),
+                mock(TrpgWeaponStashMapper.class),
                 mock(TrpgCombatMapper.class),
                 mock(GroupTurnCheckpointMapper.class),
                 mock(GroupChatTurnMapper.class),

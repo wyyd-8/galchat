@@ -9,6 +9,7 @@ import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.CocModuleMaterial;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
+import com.me.galchat.domain.po.TrpgWeaponStash;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocModuleClueMapper;
 import com.me.galchat.mapper.CocModuleContextMapper;
@@ -16,8 +17,10 @@ import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.CocModuleMapper;
 import com.me.galchat.mapper.CocModuleMaterialMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
+import com.me.galchat.mapper.TrpgWeaponStashMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -27,6 +30,69 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class TrpgModuleContextAssemblerTest {
+
+    @Test
+    void kpContextDependsOnPersistentWeaponStash() {
+        assertThat(Arrays.stream(
+                        TrpgModuleContextAssembler.class
+                                .getDeclaredConstructors())
+                .flatMap(constructor -> Arrays.stream(
+                        constructor.getParameterTypes())))
+                .contains(com.me.galchat.mapper
+                        .TrpgWeaponStashMapper.class);
+    }
+
+    @Test
+    void kpContextDisplaysStashedWeaponIdLocationAndSnapshotState() {
+        CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
+        CocModuleContextMapper contextMapper =
+                mock(CocModuleContextMapper.class);
+        CocModuleLocationMapper locationMapper =
+                mock(CocModuleLocationMapper.class);
+        TrpgWeaponStashMapper stashMapper =
+                mock(TrpgWeaponStashMapper.class);
+        TrpgModuleContextAssembler assembler =
+                new TrpgModuleContextAssembler(
+                        moduleMapper, contextMapper, locationMapper,
+                        mock(CocModuleClueMapper.class),
+                        mock(CocModuleMaterialMapper.class),
+                        mock(GroupReplyPlanMapper.class),
+                        mock(CocCharacterMapper.class),
+                        mock(TrpgMaterialStateStore.class),
+                        stashMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setModuleId(3L);
+        when(moduleMapper.selectById(3L)).thenReturn(new CocModule()
+                .setId(3L).setName("古树林中"));
+        when(contextMapper.selectOne(any())).thenReturn(null);
+        when(locationMapper.selectList(any())).thenReturn(List.of());
+        when(stashMapper.selectList(any())).thenReturn(List.of(
+                new TrpgWeaponStash()
+                        .setWeaponId(901L)
+                        .setRunId(7L)
+                        .setSourceCharacterName("林恩")
+                        .setLocationName("圣玛丽医院 - 阁楼")
+                        .setStashReason("DISARMED")
+                        .setWeaponSnapshot(
+                                new TrpgWeaponStash.WeaponSnapshot()
+                                        .setName(".38/9mm自动手枪")
+                                        .setAmmoCapacity(8)
+                                        .setRemainingAmmo(3)
+                                        .setIsBroken(true))));
+
+        String result = assembler.formatKpContext(conversation);
+
+        assertThat(result)
+                .contains("<weapon-stash>")
+                .contains("ID=901")
+                .contains(".38/9mm自动手枪")
+                .contains("原持有者=林恩")
+                .contains("位置=圣玛丽医院 - 阁楼")
+                .contains("原因=DISARMED")
+                .contains("弹药=3/8")
+                .contains("状态=损坏")
+                .contains("</weapon-stash>");
+    }
 
     @Test
     void kpContextTreatsFutureModuleSectionsAsReferenceOnly() {

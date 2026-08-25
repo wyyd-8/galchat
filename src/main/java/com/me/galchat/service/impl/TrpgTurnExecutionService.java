@@ -16,6 +16,7 @@ import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GroupCurrentTurnVO;
 import com.me.galchat.domain.vo.GroupCurrentTurnStepVO;
+import com.me.galchat.domain.vo.GroupRouteContextVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
@@ -610,6 +611,7 @@ public class TrpgTurnExecutionService {
                 step == null ? null : step.getInteractionSeq(),
                 waiting,
                 options,
+                routeContext(step, allSteps),
                 allSteps.stream()
                         .map(item -> new GroupCurrentTurnStepVO(
                                 item.getId(), item.getItemOrder(),
@@ -630,6 +632,61 @@ public class TrpgTurnExecutionService {
                 step.getStatus())
                 || GroupChatConstant.STATUS_FAILED.equals(step.getStatus())
                 || GroupChatConstant.STATUS_BLOCKED.equals(step.getStatus());
+    }
+
+    private GroupRouteContextVO routeContext(
+            GroupChatReplyStep step,
+            List<GroupChatReplyStep> knownSteps) {
+        if (step == null || step.getSubjectCharacterId() == null
+                || !(GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
+                step.getActionType()))) {
+            return null;
+        }
+        List<GroupChatReplyStep> steps = knownSteps;
+        if (steps == null) {
+            steps = stepMapper.selectList(
+                    new LambdaQueryWrapper<GroupChatReplyStep>()
+                            .eq(GroupChatReplyStep::getTurnId,
+                                    step.getTurnId())
+                            .orderByAsc(GroupChatReplyStep::getStepNo));
+        }
+        List<GroupChatReplyStep> available = steps == null
+                ? List.of() : steps;
+        Long rootId = step.getRootStepId() != null
+                ? step.getRootStepId() : step.getParentStepId();
+        GroupChatReplyStep root = rootId == null ? null
+                : available.stream()
+                .filter(item -> rootId.equals(item.getId()))
+                .findFirst()
+                .orElseGet(() -> stepMapper.selectById(rootId));
+        Long ownerCharacterId = root == null
+                ? null : root.getSubjectCharacterId();
+        if (ownerCharacterId == null
+                && GroupChatConstant.ACTION_COMBAT_DEFENSE.equals(
+                step.getActionType())) {
+            ownerCharacterId = available.stream()
+                    .filter(item -> item.getStepNo() != null
+                            && step.getStepNo() != null
+                            && item.getStepNo() < step.getStepNo())
+                    .filter(item -> GroupChatConstant
+                            .ACTION_COMBAT_REACTION_ROUTE.equals(
+                                    item.getActionType())
+                            || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
+                                    item.getActionType()))
+                    .filter(item -> item.getSubjectCharacterId() != null)
+                    .max(java.util.Comparator.comparing(
+                            GroupChatReplyStep::getStepNo))
+                    .map(GroupChatReplyStep::getSubjectCharacterId)
+                    .orElse(null);
+        }
+        if (ownerCharacterId == null
+                || ownerCharacterId.equals(step.getSubjectCharacterId())) {
+            return null;
+        }
+        return new GroupRouteContextVO(
+                ownerCharacterId, step.getSubjectCharacterId());
     }
 
     public Flux<GroupChatEvent> submitMessage(
@@ -1342,6 +1399,7 @@ public class TrpgTurnExecutionService {
                 .promptMessageId(step.getPromptMessageId())
                 .interactionType(step.getInteractionType())
                 .interactionSeq(step.getInteractionSeq())
+                .routeContext(routeContext(step, null))
                 .speaker(GroupChatEvent.Speaker.builder()
                         .type(step.getSpeakerType())
                         .id(step.getSpeakerId())

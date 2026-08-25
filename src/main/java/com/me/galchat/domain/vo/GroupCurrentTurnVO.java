@@ -19,5 +19,6 @@ public record GroupCurrentTurnVO(
         Integer interactionSeq,
         boolean waitingForUser,
         Map<String, String> sceneOptions,
+        GroupRouteContextVO routeContext,
         List<GroupCurrentTurnStepVO> steps) {
 }

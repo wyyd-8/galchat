@@ -100,6 +100,51 @@ test('renders an explicit event label for every active-turn actor', async (conte
   assert.match(html, /class="trpg-actor-row waiting_dice"[^>]*>[\s\S]*?class="trpg-active-label">待掷骰<\/small>/)
 })
 
+test('highlights an indented routed actor instead of its owner', async (context) => {
+  const vite = await createServer({
+    appType: 'custom',
+    configFile: false,
+    root: fileURLToPath(new URL('../..', import.meta.url)),
+    plugins: [vue()],
+    resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  })
+  context.after(() => vite.close())
+  const { default: TrpgActorRoster } = await vite.ssrLoadModule('/src/components/TrpgActorRoster.vue')
+  const routedActor = {
+    item: { order: 2, actorType: 'user', actorId: 48, subjectCharacterId: 48 },
+    name: '本',
+    status: 'waiting_input',
+    statusLabel: '等待防守',
+    genericKp: false,
+  }
+  const scene: TrpgExecutionScene = {
+    plan: { id: 40, source: 'COMBAT', displayName: '战斗第1轮', items: [] },
+    kind: 'combat', status: 'current', statusLabel: '当前战斗',
+    activeActors: [{
+      item: { order: 1, actorType: 'kp', subjectCharacterId: 44 },
+      name: '近战测试员·阿尔法',
+      status: 'waiting_interaction',
+      statusLabel: '等待防守',
+      genericKp: false,
+      routedActor,
+    }],
+    waitingActors: [], readyActors: [], childScenes: [],
+  }
+
+  const html = await renderToString(createSSRApp({
+    render: () => h(TrpgActorRoster, { scene, combatOverview: [] }),
+  }))
+
+  assert.match(html, /class="trpg-actor-stack"[^>]*>[\s\S]*?近战测试员·阿尔法[\s\S]*?class="trpg-routed-actor"[\s\S]*?本/)
+  assert.match(html, /class="trpg-actor-row waiting_interaction"[^>]*aria-label="近战测试员·阿尔法，等待防守"/)
+  assert.match(html, /class="trpg-routed-actor"[^>]*>[\s\S]*?class="trpg-actor-row waiting_input"[^>]*aria-label="本，等待防守"[\s\S]*?class="trpg-active-label">待输入<\/small>/)
+
+  const css = await readFile(new URL('../styles/index.css', import.meta.url), 'utf8')
+  const nestedRule = styleRule(css, '.trpg-routed-actor')
+  assert.match(nestedRule, /margin-left:\s*[1-9][0-9]*px/)
+})
+
 test('makes exploration investigator rows keyboard-focusable for their overview card', async (context) => {
   const vite = await createServer({
     appType: 'custom',

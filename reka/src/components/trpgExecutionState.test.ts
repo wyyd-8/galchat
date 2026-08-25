@@ -168,6 +168,46 @@ test('aggregates every combat step related to the same character', () => {
   )
 })
 
+test('highlights a routed defender instead of the action owner', () => {
+  const combat: ReplyPlan = {
+    id: 40, source: 'COMBAT', displayName: '战斗第1轮',
+    items: [
+      actor(1, 44, '近战测试员·阿尔法', 'ACTIVE', 'kp'),
+      actor(2, 48, '本', 'ACTIVE', 'user'),
+    ],
+  }
+  const turn: CurrentTurn = {
+    turnId: 115, planId: 40, planSource: 'COMBAT', status: 'waiting_input',
+    stepId: 404, actionType: 'combat_defense', itemOrder: 2,
+    waitingForUser: true, sceneOptions: {},
+    routeContext: { ownerCharacterId: 44, targetCharacterId: 48 },
+    steps: [
+      { stepId: 401, itemOrder: 1, actorType: 'kp', subjectCharacterId: 44, status: 'completed' },
+      { stepId: 402, itemOrder: 2, actorType: 'kp', subjectCharacterId: 44, status: 'waiting_interaction' },
+      { stepId: 403, itemOrder: 2, actorType: 'kp', subjectCharacterId: 44, status: 'completed' },
+      { stepId: 404, itemOrder: 2, actorType: 'user', actorId: 48, subjectCharacterId: 48, status: 'waiting_input' },
+      { stepId: 405, itemOrder: 3, actorType: 'user', actorId: 48, subjectCharacterId: 48, status: 'pending' },
+      { stepId: 406, itemOrder: 4, actorType: 'kp', subjectCharacterId: 48, status: 'pending' },
+    ],
+  }
+
+  const actors = buildTrpgExecutionState([combat], turn).scenes[0].activeActors
+
+  assert.deepEqual(
+    actors.map((entry) => [
+      entry.name,
+      entry.status,
+      entry.routedActor?.name,
+      entry.routedActor?.status,
+    ]),
+    [
+      ['近战测试员·阿尔法', 'waiting_interaction', '本', 'waiting_input'],
+      ['本', 'pending', undefined, undefined],
+    ],
+  )
+  assert.equal(actors[0].routedActor?.statusLabel, '等待防守')
+})
+
 test('uses a next-round state when the active scene has no turn yet', () => {
   const scene: ReplyPlan = {
     id: 50, source: 'SCENE', displayName: '阁楼', items: [actor(1, 501, '玛格丽特')],
@@ -225,8 +265,13 @@ test('uses a dedicated clarification input state for interaction children', () =
     actionType: 'trpg_interaction_response',
     groupName: '密道',
     speaker: { type: 'user', id: 22 },
+    routeContext: { ownerCharacterId: 501, targetCharacterId: 502 },
   }, activePlan)
 
   assert.equal(turn?.inputType, 'clarification')
   assert.equal(turn?.waitingForUser, true)
+  assert.deepEqual(turn?.routeContext, {
+    ownerCharacterId: 501,
+    targetCharacterId: 502,
+  })
 })

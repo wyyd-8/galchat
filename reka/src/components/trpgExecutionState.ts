@@ -6,6 +6,7 @@ export interface TrpgExecutionActor {
   status: string
   statusLabel: string
   genericKp: boolean
+  routedActor?: TrpgExecutionActor
 }
 
 export interface TrpgExecutionScene {
@@ -58,7 +59,9 @@ function matchingSteps(
   if (!turn || turn.planId !== plan.id) return []
   if (item.subjectCharacterId != null) {
     const subjectSteps = turn.steps.filter((step) =>
-      step.subjectCharacterId === item.subjectCharacterId)
+      step.subjectCharacterId === item.subjectCharacterId
+        && !(turn.routeContext?.targetCharacterId === item.subjectCharacterId
+          && turn.stepId === step.stepId))
     if (subjectSteps.length) return subjectSteps
   }
   return turn.steps.filter((step) =>
@@ -78,7 +81,8 @@ function updateEventStep(
     itemOrder: event.itemOrder ?? existing!.itemOrder,
     actorType: event.speaker?.type ?? existing?.actorType ?? 'character',
     actorId: event.speaker?.id ?? existing?.actorId,
-    subjectCharacterId: existing?.subjectCharacterId,
+    subjectCharacterId: event.routeContext?.targetCharacterId
+      ?? existing?.subjectCharacterId,
     status,
     error: event.error,
   }
@@ -140,6 +144,7 @@ export function applyCurrentTurnEvent(
       interactionSeq: event.interactionSeq,
       waitingForUser: true,
       sceneOptions: event.sceneOptions ?? {},
+      routeContext: event.routeContext,
       steps: updateEventStep(current.steps, event, 'waiting_input'),
     }
   }
@@ -229,12 +234,35 @@ function buildScene(
     .filter((item) => (item.participantStatus ?? 'ACTIVE') === 'ACTIVE')
     .filter((item) => !isGenericKp(item) || (!combat && status === 'current'))
     .sort((a, b) => a.order - b.order)
-  const activeActors = activeItems.map((item) => ({
+  const activeActors: TrpgExecutionActor[] = activeItems.map((item) => ({
       item,
       name: actorName(item),
       ...actorStatus(item, plan, status, turn),
       genericKp: isGenericKp(item),
     }))
+  const route = status === 'current' ? turn?.routeContext : undefined
+  if (route) {
+    const owner = activeActors.find((actor) =>
+      actor.item.subjectCharacterId === route.ownerCharacterId)
+    const targetItem = plan.items.find((item) =>
+      item.subjectCharacterId === route.targetCharacterId)
+    if (owner && targetItem && owner.item !== targetItem) {
+      const routeLabel = turn?.actionType === 'combat_defense'
+        ? '等待防守'
+        : turn?.actionType === 'trpg_interaction_response'
+          ? '等待回复'
+          : '等待响应'
+      owner.status = 'waiting_interaction'
+      owner.statusLabel = routeLabel
+      owner.routedActor = {
+        item: targetItem,
+        name: actorName(targetItem),
+        status: 'waiting_input',
+        statusLabel: routeLabel,
+        genericKp: isGenericKp(targetItem),
+      }
+    }
+  }
   const bucket = (participantStatus: 'WAITING' | 'READY') => plan.items
     .filter((item) => item.subjectCharacterId == null || !excludedCharacterIds.has(item.subjectCharacterId))
     .filter((item) => item.participantStatus === participantStatus && !isGenericKp(item))

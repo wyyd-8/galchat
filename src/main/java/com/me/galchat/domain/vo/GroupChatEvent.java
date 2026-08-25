@@ -37,6 +37,7 @@ public class GroupChatEvent {
     private TrpgGameTimeVO gameTime;
     private Map<String, String> sceneOptions;
     private SceneChoice sceneChoice;
+    private GroupRouteContextVO routeContext;
     private Boolean autoSelected;
     private String error;
 

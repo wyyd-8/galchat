@@ -1578,7 +1578,7 @@ class TrpgTurnExecutionServiceTest {
     }
 
     @Test
-    void currentTurnPrioritizesHumanInteractionChild() {
+    void currentTurnProjectsCombatDefenderUnderAttacker() throws Exception {
         GroupConversationService conversations =
                 mock(GroupConversationService.class);
         GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
@@ -1588,19 +1588,18 @@ class TrpgTurnExecutionServiceTest {
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(101L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
                 .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
         GroupChatReplyStep parent = new GroupChatReplyStep()
                 .setId(201L).setTurnId(101L).setStepNo(4)
-                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
                 .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setSubjectCharacterId(44L)
                 .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
         GroupChatReplyStep child = new GroupChatReplyStep()
                 .setId(301L).setTurnId(101L).setStepNo(8)
                 .setParentStepId(201L).setRootStepId(201L)
-                .setInteractionType("TEAM_RISK_CONFIRMATION")
-                .setInteractionSeq(2).setPromptMessageId(401L)
-                .setActionType(
-                        GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_DEFENSE)
                 .setSpeakerType(GroupChatConstant.ACTOR_USER)
                 .setSpeakerId(31L).setSubjectCharacterId(31L)
                 .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
@@ -1633,16 +1632,18 @@ class TrpgTurnExecutionServiceTest {
         GroupCurrentTurnVO current = service.current(7L);
 
         assertThat(current.stepId()).isEqualTo(301L);
-        assertThat(current.inputType()).isEqualTo("clarification");
-        assertThat(current.promptMessageId()).isEqualTo(401L);
-        assertThat(current.interactionType())
-                .isEqualTo("TEAM_RISK_CONFIRMATION");
-        assertThat(current.interactionSeq()).isEqualTo(2);
+        assertThat(current.actionType())
+                .isEqualTo(GroupChatConstant.ACTION_COMBAT_DEFENSE);
+        assertThat(current.inputType()).isEqualTo("message");
         assertThat(current.waitingForUser()).isTrue();
+        assertThat(toJson(current)).contains(
+                "\"routeContext\":{\"ownerCharacterId\":44,"
+                        + "\"targetCharacterId\":31}");
     }
 
     @Test
-    void kpClarificationPausesAtHumanChildInsteadOfCompletingTurn() {
+    void kpClarificationPausesAtHumanChildInsteadOfCompletingTurn()
+            throws Exception {
         GroupConversationService conversations =
                 mock(GroupConversationService.class);
         GroupConversationLockService locks =
@@ -1661,6 +1662,7 @@ class TrpgTurnExecutionServiceTest {
                 .setId(201L).setTurnId(101L).setStepNo(4)
                 .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
                 .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setSubjectCharacterId(44L)
                 .setStatus(GroupChatConstant.STATUS_PENDING);
         GroupChatReplyStep child = new GroupChatReplyStep()
                 .setId(301L).setTurnId(101L).setStepNo(8)
@@ -1670,7 +1672,8 @@ class TrpgTurnExecutionServiceTest {
                 .setActionType(
                         GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
                 .setSpeakerType(GroupChatConstant.ACTOR_USER)
-                .setSpeakerId(31L).setStatus(GroupChatConstant.STATUS_PENDING);
+                .setSpeakerId(31L).setSubjectCharacterId(31L)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
         when(conversations.requireAuthorized(7L))
                 .thenReturn(conversation);
         when(conversations.requireActive(7L))
@@ -1718,10 +1721,18 @@ class TrpgTurnExecutionServiceTest {
                         GroupChatConstant.EVENT_TURN_ACCEPTED,
                         GroupChatConstant.EVENT_TURN_WAITING_INPUT);
         assertThat(events.getLast().getReplyStepId()).isEqualTo(301L);
+        assertThat(toJson(events.getLast())).contains(
+                "\"routeContext\":{\"ownerCharacterId\":44,"
+                        + "\"targetCharacterId\":31}");
         assertThat(child.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
         assertThat(turn.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
+    }
+
+    private String toJson(Object value) throws Exception {
+        return tools.jackson.databind.json.JsonMapper.builder()
+                .build().writeValueAsString(value);
     }
 
     @Test

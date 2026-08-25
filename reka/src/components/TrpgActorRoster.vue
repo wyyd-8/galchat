@@ -22,14 +22,22 @@ function actorKey(actor: TrpgExecutionActor): string {
 <template>
   <TooltipProvider :delay-duration="220">
     <div v-if="scene.activeActors.length" class="trpg-actor-roster">
-      <TrpgActorRow
-        v-for="actor in scene.activeActors"
-        :key="actorKey(actor)"
-        :actor="actor"
-        :scene-kind="scene.kind"
-        :combat-overview="combatOverview"
-        :investigator-cards="investigatorCards"
-      />
+      <div v-for="actor in scene.activeActors" :key="actorKey(actor)" class="trpg-actor-stack">
+        <TrpgActorRow
+          :actor="actor"
+          :scene-kind="scene.kind"
+          :combat-overview="combatOverview"
+          :investigator-cards="investigatorCards"
+        />
+        <div v-if="actor.routedActor" class="trpg-routed-actor">
+          <TrpgActorRow
+            :actor="actor.routedActor"
+            :scene-kind="scene.kind"
+            :combat-overview="combatOverview"
+            :investigator-cards="investigatorCards"
+          />
+        </div>
+      </div>
     </div>
     <section v-if="scene.waitingActors.length" class="trpg-participant-group waiting">
       <header class="trpg-participant-label">

@@ -2,6 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { CircleAlert, Dices, FastForward, LoaderCircle, RotateCcw, Swords } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import diceCriticalSuccessUrl from '@/dice/assets/audio/dice_superwin.mp3'
+import diceFailureUrl from '@/dice/assets/audio/dice_lose.mp3'
+import diceRollEndUrl from '@/dice/assets/audio/dice_full.mp3'
+import diceRollStartUrl from '@/dice/assets/audio/ui_dice.mp3'
+import diceSuccessUrl from '@/dice/assets/audio/dice_win.mp3'
+import diceFumbleUrl from '@/dice/assets/audio/dice_superlose.mp3'
+import {
+  DiceOutcomeAudioController,
+  DiceRollAudioController,
+  createSingleCheckOutcomeCuePlan,
+} from '@/dice/audio/diceAudio'
 import {
   createDicePlayerWindowClass,
   createDicePlayerInitialState,
@@ -39,6 +50,7 @@ import type {
   DiceRollResult,
   ThreeDiceBoard,
 } from '@/dice/renderer/ThreeDice'
+import { createDicePhysicalSettleDelay } from '@/dice/renderer/rollRotation'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean }>()
@@ -60,6 +72,19 @@ let valueMergeTimers: number[] = []
 let groupOutcomeTimers: number[] = []
 let outcomeVfxTimers: number[] = []
 let rowScrollPlayback: AbortController | undefined
+const diceAudio = new DiceRollAudioController({
+  startUrl: diceRollStartUrl,
+  endUrl: diceRollEndUrl,
+  endCueDurationMs: 1_384.49,
+})
+const diceOutcomeAudio = new DiceOutcomeAudioController({
+  urls: {
+    'critical-success': diceCriticalSuccessUrl,
+    success: diceSuccessUrl,
+    failure: diceFailureUrl,
+    fumble: diceFumbleUrl,
+  },
+})
 
 type SpecialOutcomeTone = Extract<DiceOutcomeTone, 'critical-success' | 'fumble'>
 interface OutcomeVfxParticle {
@@ -275,6 +300,8 @@ function clearDiceValueMergeTimers() {
 }
 
 function retireBoard() {
+  diceAudio.stop()
+  diceOutcomeAudio.stop()
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
   clearOutcomeVfx()
@@ -390,6 +417,12 @@ function prepareDiceValueMerges(request: DicePlaybackRequest, playGeneration: nu
       revealDiceResultGroup(result.resultGroupIndex, playGeneration)
     }, result.revealDelayMs))
   })
+  const outcomeCuePlan = createSingleCheckOutcomeCuePlan(request.presentation, sequence.groups)
+  if (outcomeCuePlan) {
+    valueMergeTimers.push(window.setTimeout(() => {
+      if (generation === playGeneration) diceOutcomeAudio.play(outcomeCuePlan.tone)
+    }, outcomeCuePlan.delayMs))
+  }
   return Math.max(
     sequence.completionDelayMs,
     ...revealPlan.map((result) => result.revealDelayMs),
@@ -398,6 +431,8 @@ function prepareDiceValueMerges(request: DicePlaybackRequest, playGeneration: nu
 
 async function prepare(request: DicePlaybackRequest) {
   const currentGeneration = ++generation
+  diceAudio.stop()
+  diceOutcomeAudio.stop()
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
   clearOutcomeVfx()
@@ -467,6 +502,7 @@ async function roll() {
   if (!request || !board || (status.value !== 'ready' && status.value !== 'complete')) return
   const currentGeneration = ++generation
   const needsPreparation = status.value === 'complete'
+  diceOutcomeAudio.stop()
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
   clearOutcomeVfx()
@@ -483,9 +519,16 @@ async function roll() {
       if (currentGeneration !== generation) return
       arrangeDiceModuleRows()
     }
+    const animationGroups = resolveDiceAnimationGroups(request, needsPreparation)
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    diceAudio.play(createDicePhysicalSettleDelay(
+      playableResult.modules.map((module) => module.dice.length),
+      animationGroups,
+      reducedMotion,
+    ))
     await board.playResult(
       playableResult,
-      resolveDiceAnimationGroups(request, needsPreparation),
+      animationGroups,
     )
     if (currentGeneration !== generation) return
     applyDiceModuleOutcomeTones(request)
@@ -496,6 +539,8 @@ async function roll() {
     emit('complete')
   } catch (cause) {
     if (currentGeneration !== generation) return
+    diceAudio.stop()
+    diceOutcomeAudio.stop()
     status.value = 'error'
     clearGroupOutcomeTimers()
     clearOutcomeVfx()
@@ -527,6 +572,8 @@ watch(open, (visible) => {
 
 onBeforeUnmount(() => {
   generation += 1
+  diceAudio.stop()
+  diceOutcomeAudio.stop()
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
   clearOutcomeVfx()

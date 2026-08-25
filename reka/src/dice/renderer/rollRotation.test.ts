@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { continuousRotationTarget, interpolateRotation } from './rollRotation.ts'
+import {
+  continuousRotationTarget,
+  createDicePhysicalSettleDelay,
+  interpolateRotation,
+} from './rollRotation.ts'
 import * as rollRotation from './rollRotation.ts'
 
 const FULL_TURN = Math.PI * 2
@@ -51,4 +55,13 @@ test('keeps the original global stagger when no first-play timing is supplied', 
 
   assert.equal(typeof createStartDelays, 'function')
   assert.deepEqual(createStartDelays?.([2, 1, 3]), [0, 90, 180, 270, 360, 450])
+})
+
+test('reports when the last staggered physical die will settle', () => {
+  assert.equal(createDicePhysicalSettleDelay([2, 1, 3]), 4_050)
+  assert.equal(createDicePhysicalSettleDelay([2, 1, 3], [
+    { moduleStart: 0, moduleCount: 2, startDelayMs: 0 },
+    { moduleStart: 2, moduleCount: 1, startDelayMs: 220 },
+  ]), 4_000)
+  assert.equal(createDicePhysicalSettleDelay([2, 1], undefined, true), 360)
 })

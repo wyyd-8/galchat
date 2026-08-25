@@ -13,6 +13,8 @@ export interface DiceAnimationGroupTiming {
 }
 
 const DIE_STAGGER_MS = 90
+export const DICE_ROLL_DURATION_MS = 3_600
+export const REDUCED_MOTION_DICE_ROLL_DURATION_MS = 180
 
 function unwrapFrom(start: number, target: number, turns: number): number {
   const positiveDelta = ((target - start) % FULL_TURN + FULL_TURN) % FULL_TURN
@@ -69,4 +71,16 @@ export function createDiceStartDelays(
     }
   }
   return delays
+}
+
+export function createDicePhysicalSettleDelay(
+  moduleDiceCounts: number[],
+  groups?: DiceAnimationGroupTiming[],
+  reducedMotion = false,
+): number {
+  const startDelays = createDiceStartDelays(moduleDiceCounts, groups)
+  const finalStartDelay = startDelays.length ? Math.max(...startDelays) : 0
+  return finalStartDelay + (reducedMotion
+    ? REDUCED_MOTION_DICE_ROLL_DURATION_MS
+    : DICE_ROLL_DURATION_MS)
 }

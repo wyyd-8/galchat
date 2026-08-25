@@ -11,7 +11,9 @@ import { resolveNormalDiePresentation } from './normalDiePresentation'
 import {
   continuousRotationTarget,
   createDiceStartDelays,
+  DICE_ROLL_DURATION_MS,
   interpolateRotation,
+  REDUCED_MOTION_DICE_ROLL_DURATION_MS,
   type DiceAnimationGroupTiming,
 } from './rollRotation'
 import { applyDiscardedDieAppearance } from './discardedDieAppearance'
@@ -524,7 +526,9 @@ async function animateDice(
   startDelays?: number[],
 ): Promise<void> {
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const duration = reduceMotion ? 180 : 3_600
+  const duration = reduceMotion
+    ? REDUCED_MOTION_DICE_ROLL_DURATION_MS
+    : DICE_ROLL_DURATION_MS
   const rollEnd = 0.84
   const pauseEnd = 0.875
   const sequenceStartedAt = performance.now()

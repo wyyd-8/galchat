@@ -1,13 +1,20 @@
 package com.me.galchat.service.impl;
 
+import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.groupchat.dice.GroupDiceMessageFormatter;
+import com.me.galchat.groupchat.material.MaterialMessageCodec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
+import com.me.galchat.groupchat.tool.GroupToolHistoryAssembler;
+import com.me.galchat.mapper.GroupChatMessageMapper;
+import com.me.galchat.mapper.UserCharacterInfoMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,14 +48,15 @@ class TrpgExplorationContextAssemblerTest {
                         TrpgExplorationRecordService.Part.messages(
                                 List.of(after))));
         when(groupAssembler.assembleMessages(
-                any(), any(), any())).thenAnswer(invocation -> {
+                any(), any(), any(), any())).thenAnswer(invocation -> {
             List<GroupChatMessage> messages = invocation.getArgument(2);
             return List.of(new UserMessage(
                     messages.getFirst().getContent()));
         });
         TrpgExplorationContextAssembler assembler =
                 new TrpgExplorationContextAssembler(
-                        recordService, groupAssembler);
+                        recordService, groupAssembler,
+                        mock(TrpgParticipantService.class));
 
         assertThat(assembler.assemble(conversation, actor))
                 .extracting(message -> message.getText())
@@ -64,5 +72,85 @@ class TrpgExplorationContextAssemblerTest {
                                 + "4. 生成下一条回复时，必须以 <current-scene-runtime> 指定的场景和参与者为准。\n\n"
                                 + "阁楼摘要\n</context-summary>",
                         "after");
+    }
+
+    @Test
+    void rendersTrpgControllerMessagesWithCanonicalInvestigatorSpeakers() {
+        TrpgExplorationRecordService recordService =
+                mock(TrpgExplorationRecordService.class);
+        TrpgParticipantService participantService =
+                mock(TrpgParticipantService.class);
+        GroupToolHistoryAssembler toolHistoryAssembler =
+                mock(GroupToolHistoryAssembler.class);
+        UserCharacterInfoMapper userCharacterInfoMapper =
+                mock(UserCharacterInfoMapper.class);
+        GroupContextAssembler groupAssembler = new GroupContextAssembler(
+                mock(GroupChatMessageMapper.class),
+                mock(GroupConversationService.class),
+                mock(ChatServiceImpl.class),
+                userCharacterInfoMapper,
+                toolHistoryAssembler,
+                mock(GroupDiceMessageFormatter.class),
+                new MaterialMessageCodec(
+                        tools.jackson.databind.json.JsonMapper.builder()
+                                .build()));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        GroupActorRef kp = new GroupActorRef(
+                GroupChatConstant.ACTOR_KP, null);
+        GroupChatMessage currentUserAction = message(
+                GroupChatConstant.ACTOR_USER, 71L,
+                "我也跟上去。");
+        GroupChatMessage agentAction = message(
+                GroupChatConstant.ACTOR_CHARACTER, 9L,
+                "我留在岔口。");
+        GroupChatMessage legacyUserAction = message(
+                GroupChatConstant.ACTOR_USER, null,
+                "我检查门锁。");
+        when(recordService.assemble(7L, 1L, Long.MAX_VALUE))
+                .thenReturn(List.of(
+                        TrpgExplorationRecordService.Part.messages(
+                                List.of(currentUserAction, agentAction,
+                                        legacyUserAction))));
+        when(participantService.listInvestigators(conversation))
+                .thenReturn(List.of(
+                        new TrpgParticipantService.Participant(
+                                new GroupActorRef(
+                                        GroupChatConstant.ACTOR_USER, 71L),
+                                71L, "林恩", "用户"),
+                        new TrpgParticipantService.Participant(
+                                new GroupActorRef(
+                                        GroupChatConstant.ACTOR_CHARACTER,
+                                        9L),
+                                72L, "艾琳", "Agent艾琳")));
+        when(userCharacterInfoMapper.selectList(any()))
+                .thenReturn(List.of());
+        when(toolHistoryAssembler.beforeMessages(any(), any()))
+                .thenReturn(Map.of());
+        TrpgExplorationContextAssembler assembler =
+                new TrpgExplorationContextAssembler(
+                        recordService, groupAssembler,
+                        participantService);
+
+        assertThat(assembler.assemble(conversation, kp))
+                .extracting(message -> message.getText())
+                .containsExactly(
+                        "<message speaker=\"林恩\" actor=\"user:71\">\n"
+                                + "我也跟上去。\n</message>",
+                        "<message speaker=\"艾琳\" actor=\"character:9\">\n"
+                                + "我留在岔口。\n</message>",
+                        "<message speaker=\"林恩\" actor=\"user\">\n"
+                                + "我检查门锁。\n</message>");
+    }
+
+    private GroupChatMessage message(
+            String speakerType, Long speakerId, String content) {
+        return new GroupChatMessage()
+                .setSpeakerType(speakerType)
+                .setSpeakerId(speakerId)
+                .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                .setContent(content);
     }
 }

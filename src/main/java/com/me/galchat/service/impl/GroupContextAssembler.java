@@ -80,6 +80,15 @@ public class GroupContextAssembler {
             GroupConversation conversation,
             GroupActorRef currentActor,
             List<GroupChatMessage> messages) {
+        return assembleMessages(
+                conversation, currentActor, messages, Map.of());
+    }
+
+    public List<Message> assembleMessages(
+            GroupConversation conversation,
+            GroupActorRef currentActor,
+            List<GroupChatMessage> messages,
+            Map<GroupActorRef, String> investigatorNames) {
         if (messages == null || messages.isEmpty()) {
             return List.of();
         }
@@ -107,7 +116,8 @@ public class GroupContextAssembler {
             if (currentActor.matches(message.getSpeakerType(), message.getSpeakerId())) {
                 prompt.add(new AssistantMessage(message.getContent()));
             } else {
-                prompt.add(new UserMessage(formatOtherSpeakerMessage(message, characterById)));
+                prompt.add(new UserMessage(formatOtherSpeakerMessage(
+                        message, characterById, investigatorNames)));
             }
         }
         return prompt;
@@ -146,10 +156,18 @@ public class GroupContextAssembler {
         return "旁白";
     }
 
-    private String formatOtherSpeakerMessage(GroupChatMessage message,
-                                             Map<Long, UserCharacterInfo> characterById) {
+    private String formatOtherSpeakerMessage(
+            GroupChatMessage message,
+            Map<Long, UserCharacterInfo> characterById,
+            Map<GroupActorRef, String> investigatorNames) {
+        String mappedName = investigatorNames == null ? null
+                : investigatorNames.get(new GroupActorRef(
+                message.getSpeakerType(), message.getSpeakerId()));
         String name;
-        if (GroupChatConstant.ACTOR_USER.equals(message.getSpeakerType())) {
+        if (StringUtils.hasText(mappedName)) {
+            name = mappedName.trim();
+        } else if (GroupChatConstant.ACTOR_USER.equals(
+                message.getSpeakerType())) {
             name = "用户";
         } else if (GroupChatConstant.ACTOR_KP.equals(message.getSpeakerType())) {
             name = "KP";

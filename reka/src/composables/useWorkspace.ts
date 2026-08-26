@@ -414,6 +414,26 @@ export function useWorkspace() {
         diceRoundNos: [...new Set(aggregate.results.map((detail) => detail.roundNo || 1))],
       })
     }
+    if (event.eventType === 'material.created' && event.content) {
+      const materialMessage = event.messageId == null
+        ? undefined
+        : messages.value.find((item) => item.id === event.messageId)
+      const value: GroupMessage = {
+        id: event.messageId || tempMessageId--,
+        conversationId: selectedConversationId.value!,
+        turnId: event.turnId,
+        replyStepId: step,
+        speakerType: eventSpeakerType(event),
+        speakerId: event.speaker?.id,
+        speakerName: event.speaker?.name,
+        messageKind: 'material',
+        content: event.content,
+        sequenceNo: event.sequence || Date.now(),
+        status: 'completed',
+      }
+      if (materialMessage) Object.assign(materialMessage, value)
+      else messages.value.push(value)
+    }
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
       const existing = findReplyStartMessage(event)

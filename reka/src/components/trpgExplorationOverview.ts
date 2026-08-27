@@ -15,6 +15,15 @@ export interface TrpgExplorationHoverCard {
   specialtyChecks: TrpgExplorationMetric[]
 }
 
+export function explorationInvestigatorCardId(
+  actor: TrpgExecutionActor,
+  cards: InvestigatorCardSummary[],
+): number | null {
+  const characterId = actor.item.subjectCharacterId
+  if (characterId == null) return null
+  return cards.some((item) => item.cardId === characterId) ? characterId : null
+}
+
 const COMMON_CHECKS = [
   { name: '侦查', label: '侦查' },
   { name: '聆听', label: '聆听' },
@@ -92,7 +101,7 @@ export function buildExplorationHoverCard(
   actor: TrpgExecutionActor,
   cards: InvestigatorCardSummary[],
 ): TrpgExplorationHoverCard | null {
-  const characterId = actor.item.subjectCharacterId
+  const characterId = explorationInvestigatorCardId(actor, cards)
   if (characterId == null) return null
   const card = cards.find((item) => item.cardId === characterId)
   if (!card) return null

@@ -75,6 +75,22 @@ test('excludes AI investigators that do not belong to the current TRPG run', () 
   ])
 })
 
+test('selects the tools character target that owns a requested card id', () => {
+  const preferredTargetKey = (trpgToolsState as typeof trpgToolsState & {
+    preferredToolCharacterTargetKey?: (
+      targets: ReturnType<typeof buildToolCharacterTargets>,
+      cardId: number | null,
+      fallbackKey: string,
+    ) => string
+  }).preferredToolCharacterTargetKey
+  assert.ok(preferredTargetKey, 'TRPG tools should resolve a requested card to its character target')
+
+  const targets = buildToolCharacterTargets(characters, cards, [11, 22], '旅人甲')
+  assert.equal(preferredTargetKey(targets, 102, 'player'), 'character:22')
+  assert.equal(preferredTargetKey(targets, 999, 'player'), 'player')
+  assert.equal(preferredTargetKey(targets, null, 'character:11'), 'character:11')
+})
+
 test('uses the third-stage dialog width only while the character-card tab is selected', () => {
   assert.equal(toolDialogContentClass('card'), 'trpg-binding-dialog trpg-tools-character-dialog')
   assert.equal(toolDialogContentClass('status'), '')

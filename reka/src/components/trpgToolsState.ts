@@ -201,3 +201,17 @@ export function buildToolCharacterTargets(
     }),
   ]
 }
+
+export function preferredToolCharacterTargetKey(
+  targets: ToolCharacterTarget[],
+  cardId: number | null,
+  fallbackKey: string,
+): string {
+  const requestedTarget = cardId == null
+    ? undefined
+    : targets.find((target) => target.cardId === cardId)
+  if (requestedTarget) return requestedTarget.key
+  return targets.some((target) => target.key === fallbackKey)
+    ? fallbackKey
+    : targets[0]?.key ?? fallbackKey
+}

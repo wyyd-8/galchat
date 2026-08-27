@@ -7,8 +7,8 @@ import {
   TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
 import type { InvestigatorCardSummary, TrpgCombatParticipantOverview } from '../api/types'
-import { buildCombatHoverCard, type TrpgCombatHoverCard } from './trpgCombatOverview'
-import { buildExplorationHoverCard, type TrpgExplorationHoverCard, type TrpgExplorationMetric } from './trpgExplorationOverview'
+import { buildCombatHoverCard, combatInvestigatorCardId, type TrpgCombatHoverCard } from './trpgCombatOverview'
+import { buildExplorationHoverCard, explorationInvestigatorCardId, type TrpgExplorationHoverCard, type TrpgExplorationMetric } from './trpgExplorationOverview'
 import type { TrpgExecutionActor, TrpgExecutionScene } from './trpgExecutionState'
 
 const props = withDefaults(defineProps<{
@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<{
   investigatorCards: () => [],
   displayState: 'active',
 })
+const emit = defineEmits<{ openCard: [cardId: number] }>()
 
 const statusIcons: Partial<Record<string, Component>> = {
   blocked: X,
@@ -56,7 +57,7 @@ function rowAriaLabel(): string {
   const status = props.displayState === 'waiting'
     ? '暂不参与'
     : props.displayState === 'ready' ? '已完成本场景探索' : props.actor.statusLabel
-  return `${props.actor.name}，${status}`
+  return `${props.actor.name}，${status}${investigatorCardId() == null ? '' : '，打开人物卡'}`
 }
 
 function actorIcon(): Component | undefined {
@@ -74,6 +75,17 @@ function actorCombatCard(): TrpgCombatHoverCard {
 
 function actorExplorationCard(): TrpgExplorationHoverCard | null {
   return buildExplorationHoverCard(props.actor, props.investigatorCards)
+}
+
+function investigatorCardId(): number | null {
+  return props.sceneKind === 'combat'
+    ? combatInvestigatorCardId(props.actor, props.combatOverview)
+    : explorationInvestigatorCardId(props.actor, props.investigatorCards)
+}
+
+function openCard() {
+  const cardId = investigatorCardId()
+  if (cardId != null) emit('openCard', cardId)
 }
 
 function hasOverview(): boolean {
@@ -108,13 +120,21 @@ function explorationMetrics(
 <template>
   <TooltipRoot v-if="hasOverview()">
     <TooltipTrigger as-child>
-      <div class="trpg-actor-row" :class="rowStatus()" :aria-label="rowAriaLabel()" tabindex="0">
+      <component
+        :is="investigatorCardId() == null ? 'div' : 'button'"
+        class="trpg-actor-row"
+        :class="[rowStatus(), { 'card-link': investigatorCardId() != null }]"
+        :type="investigatorCardId() == null ? undefined : 'button'"
+        :aria-label="rowAriaLabel()"
+        tabindex="0"
+        @click="openCard"
+      >
         <span class="trpg-actor-name">{{ actor.name }}</span>
         <span class="trpg-status-icon" aria-hidden="true">
           <small v-if="rowStatusLabel()" :class="displayState === 'active' ? 'trpg-active-label' : 'trpg-row-state-label'">{{ rowStatusLabel() }}</small>
           <component :is="actorIcon()" v-if="actorIcon()" :size="13" :stroke-width="1.8" />
         </span>
-      </div>
+      </component>
     </TooltipTrigger>
     <TooltipPortal>
       <TooltipContent class="trpg-combat-overview-tooltip" side="left" :side-offset="10">

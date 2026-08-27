@@ -13,6 +13,17 @@ export interface TrpgCombatHoverCard {
   metrics: TrpgCombatHoverMetric[]
 }
 
+export function combatInvestigatorCardId(
+  actor: TrpgExecutionActor,
+  overviews: TrpgCombatParticipantOverview[],
+): number | null {
+  const characterId = actor.item.subjectCharacterId
+  if (characterId == null) return null
+  return overviews.some((item) => item.characterId === characterId && item.investigator)
+    ? characterId
+    : null
+}
+
 function shown(value: number | string | undefined): string {
   return value == null || value === '' ? '—' : String(value)
 }

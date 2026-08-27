@@ -137,3 +137,21 @@ test('treats non-combat action and knowledge skills as exploration specialties',
     { label: '克苏鲁神话', value: '60' },
   ])
 })
+
+test('resolves exploration investigators with established cards to navigation targets', () => {
+  const investigatorCardId = (explorationOverview as typeof explorationOverview & {
+    explorationInvestigatorCardId?: (
+      actor: TrpgExecutionActor,
+      cards: InvestigatorCardSummary[],
+    ) => number | null
+  }).explorationInvestigatorCardId
+  assert.ok(investigatorCardId, 'exploration execution should expose investigator card navigation targets')
+
+  assert.equal(investigatorCardId(actor, [{
+    cardId: 501,
+    actorType: 'PLAYER',
+    name: '林恩',
+    checkValues: {},
+  }]), 501)
+  assert.equal(investigatorCardId(actor, []), null)
+})

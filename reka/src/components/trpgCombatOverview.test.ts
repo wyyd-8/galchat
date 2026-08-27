@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { TrpgCombatParticipantOverview } from '../api/types.ts'
 import type { TrpgExecutionActor } from './trpgExecutionState.ts'
-import { buildCombatHoverCard } from './trpgCombatOverview.ts'
+import * as combatOverview from './trpgCombatOverview.ts'
+
+const { buildCombatHoverCard } = combatOverview
 
 const actor = (subjectCharacterId: number, actorId: number): TrpgExecutionActor => ({
   item: {
@@ -73,4 +75,27 @@ test('never renders basic combat values for an npc', () => {
     statuses: ['眩晕（剩余2回合）'],
     metrics: [],
   })
+})
+
+test('only resolves investigator combatants to character-card navigation targets', () => {
+  const investigatorCardId = (combatOverview as typeof combatOverview & {
+    combatInvestigatorCardId?: (
+      actor: TrpgExecutionActor,
+      overviews: TrpgCombatParticipantOverview[],
+    ) => number | null
+  }).combatInvestigatorCardId
+  assert.ok(investigatorCardId, 'combat execution should expose investigator card navigation targets')
+
+  assert.equal(investigatorCardId(actor(501, 9999), [{
+    characterId: 501,
+    name: '林恩',
+    investigator: true,
+    statuses: [],
+  }]), 501)
+  assert.equal(investigatorCardId(actor(601, 42), [{
+    characterId: 601,
+    name: '食尸鬼',
+    investigator: false,
+    statuses: [],
+  }]), null)
 })

@@ -25,7 +25,7 @@ const props = withDefaults(defineProps<{ conversation: Conversation; username: s
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
@@ -278,10 +278,10 @@ function handleReasoningScroll(event: Event) {
                     <strong>{{ child.plan.displayName }}</strong>
                     <span class="trpg-scene-status-icon" :title="child.statusLabel" role="img" :aria-label="child.statusLabel"><component :is="sceneIcon(child)" :size="13" :stroke-width="1.8" /></span>
                   </header>
-                  <TrpgActorRoster :scene="child" :combat-overview="combatOverview" :investigator-cards="investigatorCards" />
+                  <TrpgActorRoster :scene="child" :combat-overview="combatOverview" :investigator-cards="investigatorCards" @open-card="emit('openCharacterCard', $event)" />
                 </section>
               </div>
-              <TrpgActorRoster :scene="scene" :combat-overview="combatOverview" :investigator-cards="investigatorCards" />
+              <TrpgActorRoster :scene="scene" :combat-overview="combatOverview" :investigator-cards="investigatorCards" @open-card="emit('openCharacterCard', $event)" />
             </section>
             <div v-if="!trpgExecution.scenes.length" class="plan-empty">暂无场景计划</div>
           </template>

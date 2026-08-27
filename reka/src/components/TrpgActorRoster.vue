@@ -12,6 +12,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   investigatorCards: () => [],
 })
+const emit = defineEmits<{ openCard: [cardId: number] }>()
 
 function actorKey(actor: TrpgExecutionActor): string {
   const item = actor.item
@@ -28,6 +29,7 @@ function actorKey(actor: TrpgExecutionActor): string {
           :scene-kind="scene.kind"
           :combat-overview="combatOverview"
           :investigator-cards="investigatorCards"
+          @open-card="emit('openCard', $event)"
         />
         <div v-if="actor.routedActor" class="trpg-routed-actor">
           <TrpgActorRow
@@ -35,6 +37,7 @@ function actorKey(actor: TrpgExecutionActor): string {
             :scene-kind="scene.kind"
             :combat-overview="combatOverview"
             :investigator-cards="investigatorCards"
+            @open-card="emit('openCard', $event)"
           />
         </div>
       </div>
@@ -52,6 +55,7 @@ function actorKey(actor: TrpgExecutionActor): string {
           :combat-overview="combatOverview"
           :investigator-cards="investigatorCards"
           display-state="waiting"
+          @open-card="emit('openCard', $event)"
         />
       </div>
     </section>
@@ -68,6 +72,7 @@ function actorKey(actor: TrpgExecutionActor): string {
           :combat-overview="combatOverview"
           :investigator-cards="investigatorCards"
           display-state="ready"
+          @open-card="emit('openCard', $event)"
         />
       </div>
     </section>

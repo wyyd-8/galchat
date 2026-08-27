@@ -14,7 +14,7 @@ import type {
 import { errorMessage, notify } from '@/composables/useNotice'
 import { listDiceHistoryEntriesNewestFirst } from '@/dice/domain/dicePlayback'
 import {
-  buildSkillDisplayItems, buildToolCharacterTargets, formatCheckRate, formatKpPromptUpdatedAt, nextSkillGroup, resolveWeaponCheckValue, shouldShowWeaponRisk, toolDialogContentClass,
+  buildSkillDisplayItems, buildToolCharacterTargets, formatCheckRate, formatKpPromptUpdatedAt, nextSkillGroup, preferredToolCharacterTargetKey, resolveWeaponCheckValue, shouldShowWeaponRisk, toolDialogContentClass,
   useToolConfirmations,
 } from '@/components/trpgToolsState'
 
@@ -26,6 +26,7 @@ const props = defineProps<{
   characters: Character[]
   participantIds: number[]
   messages: GroupMessage[]
+  requestedCardId?: number | null
 }>()
 const emit = defineEmits<{
   restored: []
@@ -122,16 +123,21 @@ async function loadCard() {
     ? await api.characterCardById(selectedTarget.value.cardId)
     : null
 }
-async function refreshCards() {
+async function refreshCards(requestedCardId: number | null = null) {
   cards.value = await api.investigatorCards(props.conversation.id)
+  selectedKey.value = preferredToolCharacterTargetKey(
+    characterTargets.value,
+    requestedCardId,
+    selectedKey.value,
+  )
   await loadCard()
 }
-async function refreshOverview() {
+async function refreshOverview(requestedCardId: number | null = null) {
   const [usageResult, saveResult] = await Promise.all([
     api.contextWindow(props.conversation.id), api.trpgSave(props.conversation.id),
   ])
   contextUsage.value = usageResult; save.value = saveResult; saveRemark.value = saveResult?.remark || ''
-  await refreshCards()
+  await refreshCards(requestedCardId)
 }
 async function createCard() {
   if (!cardText.value.trim()) throw new Error('请先粘贴人物卡文本')
@@ -168,7 +174,11 @@ async function selectTarget(key: string) {
 function toggleSkillGroup(group: string) {
   selectedSkillGroup.value = nextSkillGroup(selectedSkillGroup.value, group)
 }
-watch(open, (visible) => { if (visible) void execute(refreshOverview) })
+watch(open, (visible) => {
+  if (!visible) return
+  if (props.requestedCardId != null) selectedToolTab.value = 'card'
+  void execute(() => refreshOverview(props.requestedCardId ?? null))
+})
 watch(() => props.conversation.id, () => {
   selectedKey.value = 'player'
   selectedSheetTab.value = 'skills'

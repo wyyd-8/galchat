@@ -186,7 +186,44 @@ test('makes exploration investigator rows keyboard-focusable for their overview 
     }),
   }))
 
-  assert.match(html, /class="trpg-actor-row running"[^>]*tabindex="0"/)
+  assert.match(html, /class="trpg-actor-row running[^\"]*"[^>]*tabindex="0"/)
+})
+
+test('renders an investigator execution row as an explicit character-card action', async (context) => {
+  const vite = await createServer({
+    appType: 'custom',
+    configFile: false,
+    root: fileURLToPath(new URL('../..', import.meta.url)),
+    plugins: [vue()],
+    resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  })
+  context.after(() => vite.close())
+  const { default: TrpgActorRoster } = await vite.ssrLoadModule('/src/components/TrpgActorRoster.vue')
+  const scene: TrpgExecutionScene = {
+    plan: { id: 23, source: 'SCENE', displayName: '报社', items: [] },
+    kind: 'main', status: 'current', statusLabel: '当前场景',
+    activeActors: [{
+      item: { order: 1, actorType: 'character', actorId: 101, subjectCharacterId: 501 },
+      name: '沃尔顿', status: 'running', statusLabel: '行动中', genericKp: false,
+    }],
+    waitingActors: [], readyActors: [], childScenes: [],
+  }
+
+  const html = await renderToString(createSSRApp({
+    render: () => h(TrpgActorRoster, {
+      scene,
+      combatOverview: [],
+      investigatorCards: [{
+        cardId: 501,
+        actorType: 'PLAYER',
+        name: '沃尔顿',
+        checkValues: {},
+      }],
+    }),
+  }))
+
+  assert.match(html, /<button[^>]*class="trpg-actor-row running[^\"]*"[^>]*aria-label="沃尔顿，行动中，打开人物卡"/)
 })
 
 test('renders waiting and finished investigators as labeled overview rows', async (context) => {

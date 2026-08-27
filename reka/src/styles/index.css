@@ -354,6 +354,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .trpg-execution-scene.combat .trpg-actor-row { cursor: default; }
 .trpg-execution-scene .trpg-actor-row[tabindex] { cursor: default; }
 .trpg-execution-scene .trpg-actor-row[tabindex]:hover { border-color: color-mix(in srgb, var(--scene-accent) 42%, var(--line)); background: rgba(255,252,247,.88); box-shadow: 0 3px 9px rgba(66,58,48,.07); }
+.trpg-execution-scene .trpg-actor-row.card-link { width: 100%; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .trpg-execution-scene .trpg-actor-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--scene-accent) 62%, white); outline-offset: 2px; }
 .trpg-combat-overview-tooltip { z-index: 70; width: min(286px, calc(100vw - 24px)); padding: 12px; border: 1px solid #c9b8b2; border-radius: 11px; color: var(--ink); background: rgba(252,250,246,.98); box-shadow: 0 14px 38px rgba(48,38,35,.18); }
 .trpg-combat-overview-tooltip > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

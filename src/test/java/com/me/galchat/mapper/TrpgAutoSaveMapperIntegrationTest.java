@@ -9,7 +9,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -24,7 +28,73 @@ class TrpgAutoSaveMapperIntegrationTest {
     private TrpgAutoSaveMapper autoSaveMapper;
 
     @Test
-    void upsertReplacesTheConversationCheckpointAndDeserializesJsonb() {
+    void upsertReplacesOnlyTheSameCheckpointTypeAndDeserializesJsonb() {
+        jdbcTemplate.execute("""
+                CREATE TEMP TABLE trpg_auto_save (
+                    conversation_id BIGINT NOT NULL,
+                    checkpoint_type VARCHAR(16) NOT NULL,
+                    saved_at TIMESTAMP NOT NULL,
+                    format_version INT NOT NULL,
+                    snapshot JSONB NOT NULL,
+                    PRIMARY KEY (conversation_id, checkpoint_type)
+                ) ON COMMIT DROP
+                """);
+        TrpgAutoSave firstTurn = autoSave(-9003L, "TURN", -9010L);
+        TrpgAutoSave replacementTurn = autoSave(-9003L, "TURN", -9020L);
+        TrpgAutoSave scene = autoSave(-9003L, "SCENE", -9030L);
+
+        autoSaveMapper.upsert(firstTurn);
+        autoSaveMapper.upsert(replacementTurn);
+        autoSaveMapper.upsert(scene);
+
+        TrpgAutoSave selected = autoSaveMapper.selectByConversationAndType(
+                -9003L, "TURN");
+        List<TrpgAutoSave> checkpoints =
+                autoSaveMapper.selectByConversationId(-9003L);
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM trpg_auto_save WHERE conversation_id = ?",
+                Integer.class, -9003L);
+        assertThat(count).isEqualTo(2);
+        assertThat(checkpoints)
+                .extracting(TrpgAutoSave::getCheckpointType)
+                .containsExactlyInAnyOrder("TURN", "SCENE");
+        assertThat(selected.getSnapshot()).isNotNull();
+        assertThat(selected.getSnapshot().getConversationId())
+                .isEqualTo(-9003L);
+        assertThat(selected.getSnapshot().getUserWorldId())
+                .isEqualTo(-9020L);
+    }
+
+    @Test
+    void deleteAfterKeepsCheckpointsAtTheExactBoundary() {
+        jdbcTemplate.execute("""
+                CREATE TEMP TABLE trpg_auto_save (
+                    conversation_id BIGINT NOT NULL,
+                    checkpoint_type VARCHAR(16) NOT NULL,
+                    saved_at TIMESTAMP NOT NULL,
+                    format_version INT NOT NULL,
+                    snapshot JSONB NOT NULL,
+                    PRIMARY KEY (conversation_id, checkpoint_type)
+                ) ON COMMIT DROP
+                """);
+        LocalDateTime boundary = LocalDateTime.of(2026, 8, 20, 12, 0);
+        autoSaveMapper.upsert(autoSave(
+                -9004L, "INITIAL", -9010L).setSavedAt(boundary.minusHours(1)));
+        autoSaveMapper.upsert(autoSave(
+                -9004L, "SCENE", -9020L).setSavedAt(boundary));
+        autoSaveMapper.upsert(autoSave(
+                -9004L, "TURN", -9030L).setSavedAt(boundary.plusMinutes(1)));
+
+        autoSaveMapper.deleteAfter(-9004L, boundary);
+
+        assertThat(autoSaveMapper.selectByConversationId(-9004L))
+                .extracting(TrpgAutoSave::getCheckpointType)
+                .containsExactlyInAnyOrder("INITIAL", "SCENE");
+    }
+
+    @Test
+    void migrationKeepsLegacyTurnCheckpointAndEnablesAdditionalTypes()
+            throws IOException {
         jdbcTemplate.execute("""
                 CREATE TEMP TABLE trpg_auto_save (
                     conversation_id BIGINT PRIMARY KEY,
@@ -33,27 +103,28 @@ class TrpgAutoSaveMapperIntegrationTest {
                     snapshot JSONB NOT NULL
                 ) ON COMMIT DROP
                 """);
-        TrpgAutoSave first = autoSave(-9003L, -9010L);
-        TrpgAutoSave replacement = autoSave(-9003L, -9020L);
+        jdbcTemplate.update("""
+                INSERT INTO trpg_auto_save (
+                    conversation_id, saved_at, format_version, snapshot
+                ) VALUES (?, ?, ?, ?::jsonb)
+                """, -9005L, LocalDateTime.of(2026, 8, 20, 12, 0),
+                TrpgSaveServiceImpl.FORMAT_VERSION,
+                "{\"formatVersion\":2,\"conversationId\":-9005}");
 
-        autoSaveMapper.upsert(first);
-        autoSaveMapper.upsert(replacement);
+        jdbcTemplate.execute(Files.readString(Path.of(
+                "docs/sql/V20260828__trpg_auto_save_checkpoints.sql")));
+        autoSaveMapper.upsert(autoSave(-9005L, "SCENE", -9020L));
 
-        TrpgAutoSave selected = autoSaveMapper.selectById(-9003L);
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM trpg_auto_save WHERE conversation_id = ?",
-                Integer.class, -9003L);
-        assertThat(count).isEqualTo(1);
-        assertThat(selected.getSnapshot()).isNotNull();
-        assertThat(selected.getSnapshot().getConversationId())
-                .isEqualTo(-9003L);
-        assertThat(selected.getSnapshot().getUserWorldId())
-                .isEqualTo(-9020L);
+        assertThat(autoSaveMapper.selectByConversationId(-9005L))
+                .extracting(TrpgAutoSave::getCheckpointType)
+                .containsExactlyInAnyOrder("TURN", "SCENE");
     }
 
-    private TrpgAutoSave autoSave(Long conversationId, Long userWorldId) {
+    private TrpgAutoSave autoSave(
+            Long conversationId, String checkpointType, Long userWorldId) {
         return new TrpgAutoSave()
                 .setConversationId(conversationId)
+                .setCheckpointType(checkpointType)
                 .setSavedAt(LocalDateTime.now())
                 .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setSnapshot(new TrpgSaveSnapshotDTO()

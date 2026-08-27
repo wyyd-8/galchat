@@ -3,6 +3,8 @@ package com.me.galchat.service;
 import com.me.galchat.domain.dto.TrpgSaveCreateDTO;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.TrpgSaveOverviewVO;
+import com.me.galchat.domain.vo.TrpgRollbackOverviewVO;
+import com.me.galchat.domain.vo.TrpgRollbackResultVO;
 
 public interface ITrpgSaveService {
 
@@ -14,5 +16,12 @@ public interface ITrpgSaveService {
 
     void saveBeforeTurn(GroupConversation conversation);
 
-    void rollbackTurn(Long userId, Long conversationId);
+    TrpgRollbackOverviewVO getRollbackOverview(
+            Long userId, Long conversationId);
+
+    TrpgRollbackResultVO rollbackTurn(Long userId, Long conversationId);
+
+    TrpgRollbackResultVO rollbackScene(Long userId, Long conversationId);
+
+    TrpgRollbackResultVO rollbackInitial(Long userId, Long conversationId);
 }

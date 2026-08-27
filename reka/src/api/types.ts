@@ -218,5 +218,16 @@ export interface TrpgSaveInvestigator {
 }
 export interface TrpgSave {
   id: number; conversationId: number; conversationTitle?: string; remark?: string; savedAt?: string; formatVersion?: number
-  activePlanSource?: string; activeSceneId?: number; investigators: TrpgSaveInvestigator[]
+  messageBoundaryId?: number; activePlanSource?: string; activeSceneId?: number; investigators: TrpgSaveInvestigator[]
+}
+
+export interface TrpgRollbackPoint {
+  available: boolean; savedAt?: string; messageBoundaryId?: number; willDeleteManualSave: boolean
+  investigators: TrpgSaveInvestigator[]
+}
+export interface TrpgRollbackOverview {
+  turn: TrpgRollbackPoint; scene: TrpgRollbackPoint; initial: TrpgRollbackPoint
+}
+export interface TrpgRollbackResult {
+  checkpointType: 'TURN' | 'SCENE' | 'INITIAL'; savedAt?: string; manualSaveDeleted: boolean
 }

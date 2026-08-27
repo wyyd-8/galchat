@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, BookUser, Check, Dices, FlaskConical, LoaderCircle, LocateFixed, RefreshCw, RotateCcw, Save, UserRound } from '@lucide/vue'
+import { Activity, BookUser, Check, Dices, FlaskConical, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, UserRound } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
@@ -9,14 +9,15 @@ import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import { api } from '@/api/client'
 import type {
   Character, CharacterCard, CocModule, ContextWindowUsage, Conversation, DiceRollAggregate, GroupMessage,
-  InvestigatorCardSummary, TrpgSave,
+  InvestigatorCardSummary, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave,
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
-import { listDiceHistoryEntriesNewestFirst } from '@/dice/domain/dicePlayback'
+import { hydrateDiceMessage, listDiceHistoryEntriesNewestFirst } from '@/dice/domain/dicePlayback'
 import {
-  buildSkillDisplayItems, buildToolCharacterTargets, formatCheckRate, formatKpPromptUpdatedAt, nextSkillGroup, preferredToolCharacterTargetKey, resolveWeaponCheckValue, shouldShowWeaponRisk, toolDialogContentClass,
-  useToolConfirmations,
+  buildFetchedRollbackMessagePreview, buildSkillDisplayItems, buildToolCharacterTargets, buildToolRecoveryTimeline, buildToolRollbackActions, formatCheckRate, formatKpPromptUpdatedAt, formatRollbackPreviewMessage, nextSkillGroup, preferredToolCharacterTargetKey, resolveRollbackMessagePreview, resolveToolRestoreInvestigators, resolveWeaponCheckValue, restoreInvestigatorCondition, shouldShowWeaponRisk, toolDialogContentClass,
+  useToolRestoreConfirmation,
 } from '@/components/trpgToolsState'
+import type { ToolRecoveryTimelineItem, ToolRestoreAction, ToolRollbackMessagePreview } from '@/components/trpgToolsState'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{
@@ -38,6 +39,7 @@ const emit = defineEmits<{
 const busy = ref(false)
 const contextUsage = ref<ContextWindowUsage | null>(null)
 const save = ref<TrpgSave | null>(null)
+const rollbackOverview = ref<TrpgRollbackOverview | null>(null)
 const saveRemark = ref('')
 const cards = ref<InvestigatorCardSummary[]>([])
 const selectedKey = ref('player')
@@ -45,9 +47,14 @@ const selectedToolTab = ref('status')
 const selectedSheetTab = ref('skills')
 const selectedProfileTab = ref('background')
 const selectedSkillGroup = ref<string | null>(null)
-const { confirmLoad, confirmRollback } = useToolConfirmations(open, selectedToolTab)
+const restoreConfirmation = useToolRestoreConfirmation(open, selectedToolTab)
+const rollbackMessagePreview = ref<ToolRollbackMessagePreview | null>(null)
+const rollbackPreviewLoading = ref(false)
+const rollbackPreviewFailed = ref(false)
+const saveEditorOpen = ref(false)
 const card = ref<CharacterCard | null>(null)
 const cardText = ref('')
+let rollbackPreviewRequestId = 0
 
 const characterTargets = computed(() => buildToolCharacterTargets(
   props.characters,
@@ -64,6 +71,31 @@ const selectedActorName = computed(() => selectedTarget.value?.name || props.use
 const completedCardCount = computed(() => characterTargets.value.filter((target) => target.cardId !== undefined).length)
 const dialogContentClass = computed(() => toolDialogContentClass(selectedToolTab.value))
 const diceHistoryEntries = computed(() => listDiceHistoryEntriesNewestFirst(props.messages))
+const rollbackActions = computed(() => buildToolRollbackActions(rollbackOverview.value))
+const recoveryTimeline = computed(() => buildToolRecoveryTimeline(save.value, rollbackOverview.value))
+const pendingRollback = computed(() => rollbackActions.value.find(
+  (action) => action.key === restoreConfirmation.action.value,
+))
+const pendingRestoreInvestigators = computed(() => resolveToolRestoreInvestigators(
+  restoreConfirmation.action.value,
+  save.value,
+  rollbackActions.value,
+))
+const confirmationOpen = computed({
+  get: () => restoreConfirmation.action.value !== null,
+  set: (visible: boolean) => { if (!visible) restoreConfirmation.clear() },
+})
+const confirmationTitle = computed(() => {
+  if (restoreConfirmation.stage.value === 'delete-manual-save') return '确认删除当前存档'
+  if (restoreConfirmation.action.value === 'load') return '确认读取跑团存档'
+  return `确认${pendingRollback.value?.title || '自动回退'}`
+})
+const confirmationContentClass = computed(() => restoreConfirmation.stage.value === 'primary'
+  ? 'rollback-confirmation-dialog'
+  : '')
+const confirmationTargetTime = computed(() => restoreConfirmation.action.value === 'load'
+  ? save.value?.savedAt
+  : pendingRollback.value?.point.savedAt)
 const characterAttributes = computed(() => card.value ? [
   { code: 'STR', label: '力量', value: card.value.character.str },
   { code: 'CON', label: '体质', value: card.value.character.con },
@@ -110,6 +142,12 @@ function ammo(remaining?: number, capacity?: number) {
   if (remaining != null && capacity != null) return `${remaining} / ${capacity}`
   return shown(remaining ?? capacity)
 }
+function previewSpeaker(message: GroupMessage) {
+  if (message.speakerType === 'user') return '你'
+  if (message.speakerType === 'narrator') return '叙事'
+  if (message.speakerType === 'kp') return message.speakerName || 'KP'
+  return message.speakerName || '角色'
+}
 async function execute(action: () => Promise<void>) {
   if (busy.value) return
   busy.value = true
@@ -133,10 +171,15 @@ async function refreshCards(requestedCardId: number | null = null) {
   await loadCard()
 }
 async function refreshOverview(requestedCardId: number | null = null) {
-  const [usageResult, saveResult] = await Promise.all([
-    api.contextWindow(props.conversation.id), api.trpgSave(props.conversation.id),
+  const [usageResult, saveResult, rollbackResult] = await Promise.all([
+    api.contextWindow(props.conversation.id),
+    api.trpgSave(props.conversation.id),
+    api.trpgRollbackStatus(props.conversation.id),
   ])
-  contextUsage.value = usageResult; save.value = saveResult; saveRemark.value = saveResult?.remark || ''
+  contextUsage.value = usageResult
+  save.value = saveResult
+  rollbackOverview.value = rollbackResult
+  saveRemark.value = saveResult?.remark || ''
   await refreshCards(requestedCardId)
 }
 async function createCard() {
@@ -146,21 +189,103 @@ async function createCard() {
 }
 async function saveSnapshot() {
   save.value = await api.saveTrpg(props.conversation.id, saveRemark.value)
-  confirmLoad.value = false; confirmRollback.value = false
+  rollbackOverview.value = await api.trpgRollbackStatus(props.conversation.id)
+  saveEditorOpen.value = false
+  restoreConfirmation.clear()
   notify('跑团存档已保存', '', 'success')
 }
-async function loadSnapshot() {
-  if (!confirmLoad.value) { confirmLoad.value = true; confirmRollback.value = false; return }
-  await api.loadTrpg(props.conversation.id); confirmLoad.value = false; await refreshOverview(); emit('restored')
-  notify('跑团存档已读取', '存档点之后的进度已回滚', 'success')
+function requestLoad() {
+  if (!save.value) return
+  restoreConfirmation.request('load')
+  void prepareRestorePreview('load', save.value.messageBoundaryId)
 }
-async function rollbackTurn() {
-  if (!confirmRollback.value) { confirmRollback.value = true; confirmLoad.value = false; return }
-  await api.rollbackTrpgTurn(props.conversation.id)
-  confirmRollback.value = false
+function requestRollback(action: ToolRestoreAction) {
+  const requested = rollbackActions.value.find((item) => item.key === action)
+  if (!requested?.point.available) return
+  restoreConfirmation.request(action, requested.point.willDeleteManualSave)
+  void prepareRestorePreview(requested.key, requested.point.messageBoundaryId)
+}
+function requestRecovery(recovery: ToolRecoveryTimelineItem) {
+  if (!recovery.available) return
+  if (recovery.key === 'load') requestLoad()
+  else requestRollback(recovery.key)
+}
+async function prepareRestorePreview(action: ToolRestoreAction, boundaryId?: number) {
+  const requestId = ++rollbackPreviewRequestId
+  rollbackMessagePreview.value = null
+  rollbackPreviewFailed.value = false
+  if (boundaryId == null) {
+    rollbackPreviewFailed.value = true
+    return
+  }
+  rollbackPreviewLoading.value = true
+  try {
+    const preview = await resolveRollbackMessagePreview(
+      props.messages,
+      boundaryId,
+      async (beforeId, size) => {
+        const history = await api.groupMessages(
+          props.conversation.id,
+          beforeId,
+          size,
+        )
+        return Promise.all(history.map(async (message) => {
+          try {
+            return await hydrateDiceMessage(message, async (summaryId) => {
+              const [summary, results] = await Promise.all([
+                api.diceSummary(summaryId),
+                api.diceResults(summaryId),
+              ])
+              return { summary, results, semanticResult: summary.totalResult }
+            })
+          } catch {
+            return message
+          }
+        }))
+      },
+    )
+    if (requestId === rollbackPreviewRequestId
+      && restoreConfirmation.action.value === action) {
+      rollbackMessagePreview.value = preview
+    }
+  } catch {
+    if (requestId === rollbackPreviewRequestId
+      && restoreConfirmation.action.value === action) {
+      rollbackMessagePreview.value = buildFetchedRollbackMessagePreview(
+        [],
+        boundaryId,
+      )
+      rollbackPreviewFailed.value = true
+    }
+  } finally {
+    if (requestId === rollbackPreviewRequestId) {
+      rollbackPreviewLoading.value = false
+    }
+  }
+}
+async function executeRollback(action: Exclude<ToolRestoreAction, 'load'>): Promise<TrpgRollbackResult> {
+  if (action === 'turn') return api.rollbackTrpgTurn(props.conversation.id)
+  if (action === 'scene') return api.rollbackTrpgScene(props.conversation.id)
+  return api.rollbackTrpgInitial(props.conversation.id)
+}
+async function confirmRestore() {
+  if (!restoreConfirmation.advance()) return
+  const action = restoreConfirmation.action.value
+  if (!action) return
+  if (action === 'load') {
+    await api.loadTrpg(props.conversation.id)
+    restoreConfirmation.clear()
+    await refreshOverview()
+    emit('restored')
+    notify('跑团存档已读取', '存档点之后的进度已回滚', 'success')
+    return
+  }
+  const result = await executeRollback(action)
+  const restoredTitle = pendingRollback.value?.title || '自动回退'
+  restoreConfirmation.clear()
   await refreshOverview()
   emit('restored')
-  notify('最近一轮已回滚', '可以从该行动轮开始前重新继续跑团', 'success')
+  notify(`${restoredTitle}完成`, result.manualSaveDeleted ? '当前手动存档已同时删除' : '可以从回退点重新继续跑团', 'success')
 }
 async function selectTarget(key: string) {
   if (busy.value || selectedKey.value === key) return
@@ -186,8 +311,16 @@ watch(() => props.conversation.id, () => {
   selectedSkillGroup.value = null
   cards.value = []
   card.value = null
-  confirmLoad.value = false
-  confirmRollback.value = false
+  rollbackOverview.value = null
+  saveEditorOpen.value = false
+  restoreConfirmation.clear()
+})
+watch(() => restoreConfirmation.action.value, (action) => {
+  if (action !== null) return
+  rollbackPreviewRequestId += 1
+  rollbackMessagePreview.value = null
+  rollbackPreviewLoading.value = false
+  rollbackPreviewFailed.value = false
 })
 </script>
 
@@ -207,24 +340,58 @@ watch(() => props.conversation.id, () => {
           <div class="tool-card-heading"><span><strong>最近一次 KP 提示词长度</strong><small>{{ contextUsage ? `${contextUsage.characterCount.toLocaleString()} / ${contextUsage.softLimit.toLocaleString()} 字符` : '尚无记录' }}</small></span><button class="icon-button bordered" :disabled="busy" title="刷新" @click="execute(refreshOverview)"><RefreshCw :size="15" /></button></div>
           <div class="context-meter" :class="contextTone"><i :style="{ width: `${Math.min(contextPercent, 100)}%` }" /></div><small>{{ contextPercent }}% · {{ contextUsage ? `更新于 ${formatKpPromptUpdatedAt(contextUsage.updatedAt)}` : '模型执行一次跑团行动后显示' }}</small>
         </section>
-        <section class="tool-card">
-          <div class="tool-card-heading"><span><strong>行动轮自动存档</strong><small>每次开始新行动轮前自动覆盖</small></span><button class="button danger" :disabled="busy" @click="execute(rollbackTurn)"><RotateCcw :size="16" />{{ confirmRollback ? '再次点击确认回滚' : '回滚最近一轮' }}</button></div>
-          <p v-if="confirmRollback" class="destructive-note">将删除自动存档点之后的行动轮、消息、骰子和人物状态；如跑团已误结束，也会恢复到结束前状态。</p>
-        </section>
       </TabsContent>
 
       <TabsContent value="save" class="tabs-content tool-section">
-        <section class="tool-card">
-          <div class="tool-card-heading"><span><strong>保存跑团存档</strong><small>记录当前跑团进度</small></span><Save :size="18" /></div>
-          <label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="3" maxlength="200" placeholder="记录当前场景、线索或风险…" /></label>
-          <div class="tool-actions"><button class="button secondary" :disabled="busy" @click="execute(saveSnapshot)"><Save :size="16" />{{ save ? '覆盖存档' : '创建存档' }}</button></div>
-        </section>
-        <section class="tool-card">
-          <div class="tool-card-heading"><span><strong>读取存档</strong><small>{{ save ? `${time(save.savedAt)} · 格式 v${save.formatVersion || 1}` : '尚未创建存档' }}</small></span><RotateCcw :size="18" /></div>
-          <div v-if="save" class="save-remark"><small>存档备注</small><p>{{ save.remark || '无备注' }}</p></div>
-          <div v-if="save?.investigators?.length" class="investigator-grid"><span v-for="item in save.investigators" :key="item.characterId"><strong>{{ item.name }}</strong><small>HP {{ item.hpCurrent }}/{{ item.hpMax }} · SAN {{ item.sanCurrent }}/{{ item.sanMax }} · MP {{ item.mpCurrent }}/{{ item.mpMax }}</small><em v-if="item.dead">死亡</em><em v-else-if="item.dying">濒死</em><em v-else-if="item.unconscious">昏迷</em></span></div>
-          <div class="tool-actions"><button class="button" :class="confirmLoad ? 'danger' : 'ghost'" :disabled="!save || busy" @click="execute(loadSnapshot)"><RotateCcw :size="16" />{{ confirmLoad ? '再次点击确认读档' : '读取存档' }}</button></div>
-          <p v-if="confirmLoad" class="destructive-note">读档会删除存档点之后的行动轮、消息、骰子和人物状态，此操作不可撤销。</p>
+        <section class="progress-archive">
+          <header class="progress-archive-heading">
+            <span class="progress-archive-emblem"><Save :size="18" /></span>
+            <div>
+              <small>跑团进度档案</small>
+              <h3>选择一个恢复点</h3>
+              <p>手动存档与自动回退点会按时间排列。</p>
+            </div>
+            <button
+              v-if="save"
+              class="button secondary archive-save-toggle"
+              :disabled="busy"
+              @click="saveEditorOpen = !saveEditorOpen"
+            ><Save :size="15" />{{ saveEditorOpen ? '收起编辑' : '覆盖存档' }}</button>
+          </header>
+
+          <div v-if="!save || saveEditorOpen" class="archive-save-editor">
+            <span><strong>{{ save ? '覆盖手动存档' : '创建手动存档' }}</strong><small>记录当前进度，方便稍后回到此刻。</small></span>
+            <label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="2" maxlength="200" placeholder="记录当前场景、线索或风险…" /></label>
+            <button class="button secondary" :disabled="busy" @click="execute(saveSnapshot)"><Save :size="15" />{{ save ? '确认覆盖' : '创建存档' }}</button>
+          </div>
+
+          <div class="recovery-timeline">
+            <article class="recovery-timeline-current">
+              <i class="recovery-timeline-node"><span /></i>
+              <div><small>此刻</small><strong>当前进度</strong><p>你正在这里继续跑团</p></div>
+            </article>
+            <article
+              v-for="recovery in recoveryTimeline"
+              :key="recovery.key"
+              class="recovery-timeline-entry"
+              :class="[recovery.kind, { unavailable: !recovery.available }]"
+            >
+              <i class="recovery-timeline-node"><Save v-if="recovery.kind === 'manual'" :size="11" /><RotateCcw v-else :size="11" /></i>
+              <div class="recovery-record-card">
+                <header>
+                  <span><em>{{ recovery.kind === 'manual' ? '手动记录' : '自动回退' }}</em><small>{{ recovery.available ? time(recovery.savedAt) : '尚未形成' }}</small></span>
+                  <button
+                    class="button ghost recovery-action"
+                    :disabled="busy || !recovery.available"
+                    @click="requestRecovery(recovery)"
+                  >{{ recovery.available ? recovery.key === 'load' ? '预览并读档' : '预览并回退' : '不可用' }}</button>
+                </header>
+                <strong>{{ recovery.title }}</strong>
+                <p>{{ recovery.remark || recovery.description }}</p>
+                <small v-if="recovery.willDeleteManualSave" class="recovery-delete-warning">回退到此处将同时删除当前手动存档</small>
+              </div>
+            </article>
+          </div>
         </section>
       </TabsContent>
 
@@ -455,5 +622,100 @@ watch(() => props.conversation.id, () => {
 
     </TabsRoot>
     <div v-if="busy" class="dialog-busy"><LoaderCircle class="spin" :size="17" />正在处理…</div>
+  </BaseDialog>
+
+  <BaseDialog v-model="confirmationOpen" :title="confirmationTitle" :description="`目标时间：${time(confirmationTargetTime)}`" size="sm" :layer="'foreground'" :content-class="confirmationContentClass">
+    <div v-if="restoreConfirmation.stage.value === 'delete-manual-save'" class="restore-confirmation-copy">
+      <strong>确认删除当前存档</strong>
+      <p>该自动回退点早于当前手动存档。继续回退将同时删除当前跑团存档，且不可恢复。</p>
+    </div>
+    <div v-else class="rollback-confirmation-layout">
+      <section
+        class="rollback-chat-preview"
+        aria-label="恢复位置聊天预览"
+      >
+        <header class="rollback-preview-header">
+          <span><MessageSquareText :size="14" /><strong>聊天记录预览</strong></span>
+          <small>仅显示恢复点附近</small>
+        </header>
+        <div v-if="rollbackPreviewLoading" class="rollback-preview-loading">
+          <LoaderCircle class="spin" :size="16" />正在读取恢复位置…
+        </div>
+        <template v-else-if="rollbackMessagePreview">
+          <div class="rollback-preview-viewport">
+            <div class="rollback-chat-zone retained">
+              <div class="rollback-zone-caption"><i />{{ restoreConfirmation.action.value === 'load' ? '读档后保留' : '回退后保留' }}</div>
+              <article
+                v-for="message in rollbackMessagePreview.retained"
+                :key="`retained-${message.id}`"
+                class="rollback-preview-message"
+                :class="message.speakerType"
+              >
+                <span v-if="message.speakerType !== 'user'" class="rollback-preview-avatar">{{ previewSpeaker(message).slice(0, 1) }}</span>
+                <div>
+                  <strong>{{ previewSpeaker(message) }}</strong>
+                  <p><span>{{ formatRollbackPreviewMessage(message) }}</span></p>
+                </div>
+              </article>
+              <p v-if="!rollbackMessagePreview.retained.length" class="rollback-preview-empty">此前没有聊天消息</p>
+            </div>
+            <div class="rollback-chat-boundary"><span><RotateCcw :size="10" />{{ restoreConfirmation.action.value === 'load' ? '将读取到这里' : '将回退到这里' }}</span></div>
+            <div class="rollback-chat-zone deleted">
+              <div class="rollback-zone-caption"><i />此后内容将删除</div>
+              <article
+                v-for="message in rollbackMessagePreview.deleted"
+                :key="`deleted-${message.id}`"
+                class="rollback-preview-message"
+                :class="message.speakerType"
+              >
+                <span v-if="message.speakerType !== 'user'" class="rollback-preview-avatar">{{ previewSpeaker(message).slice(0, 1) }}</span>
+                <div>
+                  <strong>{{ previewSpeaker(message) }}</strong>
+                  <p><span>{{ formatRollbackPreviewMessage(message) }}</span></p>
+                </div>
+              </article>
+              <div v-if="rollbackMessagePreview.deletedMessagesOmitted" class="rollback-preview-omitted" aria-label="后续删除消息已省略">...</div>
+              <p v-else-if="!rollbackMessagePreview.deleted.length" class="rollback-preview-empty">当前没有聊天消息会被删除</p>
+            </div>
+          </div>
+          <p v-if="rollbackPreviewFailed" class="rollback-preview-warning">未能读取边界附近的消息，仅显示恢复范围。</p>
+        </template>
+        <p v-else class="rollback-preview-warning">当前恢复点没有可用的聊天边界。</p>
+      </section>
+      <aside class="rollback-confirmation-sidebar">
+        <section class="restore-confirmation-copy rollback-confirmation-summary">
+          <span><RotateCcw :size="16" /></span>
+          <div>
+            <strong>{{ restoreConfirmation.action.value === 'load' ? '读取跑团存档' : pendingRollback?.title }}</strong>
+            <p v-if="restoreConfirmation.action.value === 'load'">请确认聊天记录中的读档位置。存档点之后的行动轮、消息、骰子、人物状态以及更晚的自动回退点将被删除。</p>
+            <p v-else>请确认聊天记录中的回退位置。该位置之后的行动轮、消息、骰子和人物状态将被删除。</p>
+          </div>
+        </section>
+        <section class="rollback-investigator-panel">
+          <header><span><UserRound :size="14" /><strong>调查员状态</strong></span><small>恢复后</small></header>
+          <div v-if="pendingRestoreInvestigators.length" class="rollback-investigator-list">
+            <article v-for="item in pendingRestoreInvestigators" :key="item.characterId">
+              <span class="rollback-investigator-avatar">{{ item.name.slice(0, 1) }}</span>
+              <div>
+                <header><strong>{{ item.name }}</strong><em v-if="restoreInvestigatorCondition(item)">{{ restoreInvestigatorCondition(item) }}</em></header>
+                <dl>
+                  <div><dt>HP</dt><dd>{{ shown(item.hpCurrent) }}/{{ shown(item.hpMax) }}</dd></div>
+                  <div><dt>SAN</dt><dd>{{ shown(item.sanCurrent) }}/{{ shown(item.sanMax) }}</dd></div>
+                  <div><dt>MP</dt><dd>{{ shown(item.mpCurrent) }}/{{ shown(item.mpMax) }}</dd></div>
+                </dl>
+              </div>
+            </article>
+          </div>
+          <p v-else class="rollback-investigator-empty">该恢复点没有调查员状态记录</p>
+        </section>
+      </aside>
+    </div>
+    <template #footer>
+      <button class="button ghost" :disabled="busy" @click="restoreConfirmation.clear()">取消</button>
+      <button class="button danger" :disabled="busy" @click="execute(confirmRestore)">
+        <LoaderCircle v-if="busy" class="spin" :size="16" />
+        {{ restoreConfirmation.stage.value === 'delete-manual-save' ? '删除存档并回退' : restoreConfirmation.action.value === 'load' ? '确认读取存档' : '确认回退' }}
+      </button>
+    </template>
   </BaseDialog>
 </template>

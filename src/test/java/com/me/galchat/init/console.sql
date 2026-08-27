@@ -891,8 +891,11 @@ CREATE INDEX idx_trpg_save_user
     ON trpg_save (user_id, saved_at DESC);
 
 CREATE TABLE trpg_auto_save (
-    conversation_id BIGINT PRIMARY KEY,
+    conversation_id BIGINT NOT NULL,
+    checkpoint_type VARCHAR(16) NOT NULL
+        CHECK (checkpoint_type IN ('TURN', 'SCENE', 'INITIAL')),
     saved_at TIMESTAMP NOT NULL,
     format_version INT NOT NULL,
-    snapshot JSONB NOT NULL
+    snapshot JSONB NOT NULL,
+    PRIMARY KEY (conversation_id, checkpoint_type)
 );

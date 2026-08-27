@@ -1,6 +1,6 @@
 import type {
   ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
-  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgSave, UserInfo, UserToken,
+  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
 } from './types'
@@ -154,7 +154,10 @@ export const api = {
   trpgSave: (id: number) => request<TrpgSave | null>(`/trpg-saves/${id}`),
   saveTrpg: (id: number, remark: string) => request<TrpgSave>(`/trpg-saves/${id}`, { method: 'POST', body: body({ remark }) }),
   loadTrpg: (id: number) => request<void>(`/trpg-saves/${id}/load`, { method: 'POST' }),
-  rollbackTrpgTurn: (id: number) => request<void>(`/trpg-saves/${id}/rollback-turn`, { method: 'POST' }),
+  trpgRollbackStatus: (id: number) => request<TrpgRollbackOverview>(`/trpg-saves/${id}/rollback-status`),
+  rollbackTrpgTurn: (id: number) => request<TrpgRollbackResult>(`/trpg-saves/${id}/rollback-turn`, { method: 'POST' }),
+  rollbackTrpgScene: (id: number) => request<TrpgRollbackResult>(`/trpg-saves/${id}/rollback-scene`, { method: 'POST' }),
+  rollbackTrpgInitial: (id: number) => request<TrpgRollbackResult>(`/trpg-saves/${id}/rollback-initial`, { method: 'POST' }),
 }
 
 export async function streamChat(payload: ChatMessagePayload, onMessage: (message: ChatFlux) => void) {

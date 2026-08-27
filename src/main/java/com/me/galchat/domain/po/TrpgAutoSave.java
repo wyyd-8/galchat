@@ -1,8 +1,6 @@
 package com.me.galchat.domain.po;
 
-import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
 import com.me.galchat.typehandler.JsonbTypeHandler;
@@ -17,8 +15,8 @@ import java.time.LocalDateTime;
 @TableName(value = "trpg_auto_save", autoResultMap = true)
 public class TrpgAutoSave implements Serializable {
 
-    @TableId(value = "conversation_id", type = IdType.INPUT)
     private Long conversationId;
+    private String checkpointType;
     private LocalDateTime savedAt;
     private Integer formatVersion;
     @TableField(typeHandler = JsonbTypeHandler.class)

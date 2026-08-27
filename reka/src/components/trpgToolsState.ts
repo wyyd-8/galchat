@@ -1,5 +1,6 @@
 import { ref, watch, type Ref } from 'vue'
-import type { Character, CocSkill, CocWeapon, InvestigatorCardSummary } from '../api/types.ts'
+import type { Character, CocSkill, CocWeapon, GroupMessage, InvestigatorCardSummary, TrpgRollbackOverview, TrpgRollbackPoint, TrpgSave, TrpgSaveInvestigator } from '../api/types.ts'
+import { createDiceMessagePresentation } from '../dice/domain/dicePlayback.ts'
 
 export interface ToolCharacterTarget {
   key: string
@@ -159,16 +160,198 @@ export function toolDialogContentClass(tab: string): string {
   return tab === 'card' ? 'trpg-binding-dialog trpg-tools-character-dialog' : ''
 }
 
-export function useToolConfirmations(open: Ref<boolean>, selectedTab: Ref<string>) {
-  const confirmLoad = ref(false)
-  const confirmRollback = ref(false)
+export interface ToolRollbackAction {
+  key: Exclude<ToolRestoreAction, 'load'>
+  title: string
+  description: string
+  point: TrpgRollbackPoint
+}
+
+export interface ToolRecoveryTimelineItem {
+  key: ToolRestoreAction
+  kind: 'manual' | 'automatic'
+  title: string
+  description: string
+  available: boolean
+  savedAt?: string
+  remark?: string
+  willDeleteManualSave: boolean
+}
+
+export interface ToolRollbackMessagePreview {
+  retained: GroupMessage[]
+  deleted: GroupMessage[]
+  deletedMessagesOmitted: boolean
+}
+
+export function formatRollbackPreviewMessage(message: GroupMessage): string {
+  if (message.messageKind === 'dice_roll') {
+    const title = message.diceRoll
+      ? createDiceMessagePresentation(message.diceRoll).title
+      : '掷骰判定'
+    return `掷骰：${title}`
+  }
+  return message.content?.trim() || '无文本内容'
+}
+
+function messagesById(messages: GroupMessage[]): GroupMessage[] {
+  return messages.filter((message) => message.id > 0)
+    .sort((left, right) => left.id - right.id)
+}
+
+export function buildLoadedRollbackMessagePreview(
+  messages: GroupMessage[],
+  messageBoundaryId: number,
+): ToolRollbackMessagePreview | null {
+  const ordered = messagesById(messages)
+  if (!ordered.length || messageBoundaryId < ordered[0]!.id) return null
+  return {
+    retained: ordered.filter((message) => message.id <= messageBoundaryId).slice(-2),
+    deleted: ordered.filter((message) => message.id > messageBoundaryId).slice(0, 2),
+    deletedMessagesOmitted: false,
+  }
+}
+
+export function buildFetchedRollbackMessagePreview(
+  messages: GroupMessage[],
+  messageBoundaryId: number,
+): ToolRollbackMessagePreview {
+  return {
+    retained: messagesById(messages)
+      .filter((message) => message.id <= messageBoundaryId)
+      .slice(-3),
+    deleted: [],
+    deletedMessagesOmitted: true,
+  }
+}
+
+export async function resolveRollbackMessagePreview(
+  loadedMessages: GroupMessage[],
+  messageBoundaryId: number,
+  loadBeforeBoundary: (beforeId: number, size: number) => Promise<GroupMessage[]>,
+): Promise<ToolRollbackMessagePreview> {
+  if (messageBoundaryId <= 0) {
+    return buildFetchedRollbackMessagePreview([], messageBoundaryId)
+  }
+  const loadedPreview = buildLoadedRollbackMessagePreview(
+    loadedMessages,
+    messageBoundaryId,
+  )
+  if (loadedPreview) return loadedPreview
+  const boundaryHistory = await loadBeforeBoundary(messageBoundaryId + 1, 3)
+  return buildFetchedRollbackMessagePreview(
+    boundaryHistory,
+    messageBoundaryId,
+  )
+}
+
+export function buildToolRollbackActions(
+  overview?: TrpgRollbackOverview | null,
+): ToolRollbackAction[] {
+  const unavailable = (): TrpgRollbackPoint => ({
+    available: false,
+    willDeleteManualSave: false,
+    investigators: [],
+  })
+  return [
+    { key: 'turn', title: '回退至行动轮开始', description: '每次开始新行动轮前自动覆盖', point: overview?.turn || unavailable() },
+    { key: 'scene', title: '回退至场景开始', description: '最近一个主场景的首个行动轮创建前', point: overview?.scene || unavailable() },
+    { key: 'initial', title: '回退至初始状态', description: '第一次行动轮创建前，仅记录一次', point: overview?.initial || unavailable() },
+  ]
+}
+
+export function buildToolRecoveryTimeline(
+  save?: TrpgSave | null,
+  overview?: TrpgRollbackOverview | null,
+): ToolRecoveryTimelineItem[] {
+  const automaticTitles: Record<Exclude<ToolRestoreAction, 'load'>, string> = {
+    turn: '行动轮开始',
+    scene: '主场景开始',
+    initial: '初始状态',
+  }
+  const items: ToolRecoveryTimelineItem[] = buildToolRollbackActions(overview).map((action) => ({
+    key: action.key,
+    kind: 'automatic',
+    title: automaticTitles[action.key],
+    description: action.description,
+    available: action.point.available,
+    ...(action.point.savedAt ? { savedAt: action.point.savedAt } : {}),
+    willDeleteManualSave: action.point.willDeleteManualSave,
+  }))
+  if (save) {
+    items.push({
+      key: 'load',
+      kind: 'manual',
+      title: '手动存档',
+      description: '由你记录的跑团进度',
+      available: true,
+      ...(save.savedAt ? { savedAt: save.savedAt } : {}),
+      ...(save.remark ? { remark: save.remark } : {}),
+      willDeleteManualSave: false,
+    })
+  }
+  return items.sort((left, right) => {
+    if (left.available !== right.available) return left.available ? -1 : 1
+    if (!left.available) return 0
+    return Date.parse(right.savedAt || '') - Date.parse(left.savedAt || '')
+  })
+}
+
+export function resolveToolRestoreInvestigators(
+  action: ToolRestoreAction | null,
+  save: TrpgSave | null,
+  rollbackActions: ToolRollbackAction[],
+): TrpgSaveInvestigator[] {
+  if (action === 'load') return save?.investigators || []
+  if (!action) return []
+  return rollbackActions.find((item) => item.key === action)?.point.investigators || []
+}
+
+export function restoreInvestigatorCondition(
+  investigator: Pick<TrpgSaveInvestigator, 'dead' | 'dying' | 'unconscious'>,
+): string | null {
+  if (investigator.dead) return '死亡'
+  if (investigator.dying) return '濒死'
+  if (investigator.unconscious) return '昏迷'
+  return null
+}
+
+export type ToolRestoreAction = 'load' | 'turn' | 'scene' | 'initial'
+export type ToolRestoreConfirmationStage = 'primary' | 'delete-manual-save'
+
+export function useToolRestoreConfirmation(open: Ref<boolean>, selectedTab: Ref<string>) {
+  const action = ref<ToolRestoreAction | null>(null)
+  const stage = ref<ToolRestoreConfirmationStage>('primary')
+  const willDeleteManualSave = ref(false)
+
+  function clear() {
+    action.value = null
+    stage.value = 'primary'
+    willDeleteManualSave.value = false
+  }
+
+  function request(requestedAction: ToolRestoreAction, deletesManualSave = false) {
+    action.value = requestedAction
+    stage.value = 'primary'
+    willDeleteManualSave.value = requestedAction !== 'load' && deletesManualSave
+  }
+
+  function advance(): boolean {
+    if (!action.value) return false
+    if (action.value !== 'load'
+      && willDeleteManualSave.value
+      && stage.value === 'primary') {
+      stage.value = 'delete-manual-save'
+      return false
+    }
+    return true
+  }
 
   watch([open, selectedTab], () => {
-    confirmLoad.value = false
-    confirmRollback.value = false
+    clear()
   })
 
-  return { confirmLoad, confirmRollback }
+  return { action, stage, willDeleteManualSave, request, advance, clear }
 }
 
 export function buildToolCharacterTargets(

@@ -1,16 +1,21 @@
 package com.me.galchat.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.TrpgSaveCreateDTO;
 import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
 import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.TrpgAutoSave;
 import com.me.galchat.domain.po.TrpgSave;
 import com.me.galchat.domain.vo.TrpgSaveOverviewVO;
+import com.me.galchat.domain.vo.TrpgRollbackOverviewVO;
+import com.me.galchat.domain.vo.TrpgRollbackResultVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.TrpgAutoSaveMapper;
 import com.me.galchat.mapper.TrpgSaveMapper;
 import com.me.galchat.service.ITrpgSaveService;
@@ -23,16 +28,23 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class TrpgSaveServiceImpl implements ITrpgSaveService {
 
     public static final int FORMAT_VERSION = 2;
+    public static final String CHECKPOINT_TURN = "TURN";
+    public static final String CHECKPOINT_SCENE = "SCENE";
+    public static final String CHECKPOINT_INITIAL = "INITIAL";
 
     private final IUserWorldPrefixService userWorldPrefixService;
     private final GroupConversationMapper conversationMapper;
+    private final GroupChatTurnMapper turnMapper;
     private final TrpgSaveMapper saveMapper;
     private final TrpgAutoSaveMapper autoSaveMapper;
     private final ITrpgSaveSnapshotService snapshotService;
@@ -81,8 +93,10 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
         try {
             recoveryService.assertConversationHasNoNonTerminalTurns(
                     conversationId);
-            transactionTemplate.executeWithoutResult(status ->
-                    snapshotService.restoreDatabase(conversation, snapshot));
+            transactionTemplate.executeWithoutResult(status -> {
+                snapshotService.restoreDatabase(conversation, snapshot);
+                autoSaveMapper.deleteAfter(conversationId, save.getSavedAt());
+            });
             snapshotService.restoreDerivedState(conversation, snapshot);
         } finally {
             lockService.unlock(lock);
@@ -96,20 +110,77 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
                 || !Objects.equals(snapshot.getFormatVersion(), FORMAT_VERSION)) {
             throw new IllegalStateException("跑团自动存档快照格式不正确");
         }
-        autoSaveMapper.upsert(new TrpgAutoSave()
-                .setConversationId(conversation.getId())
-                .setSavedAt(LocalDateTime.now())
-                .setFormatVersion(FORMAT_VERSION)
-                .setSnapshot(snapshot));
+        LocalDateTime savedAt = LocalDateTime.now();
+        upsertCheckpoint(conversation.getId(), CHECKPOINT_TURN,
+                savedAt, snapshot);
+        Long totalTurnCount = turnMapper.selectCount(
+                new LambdaQueryWrapper<GroupChatTurn>()
+                        .eq(GroupChatTurn::getConversationId,
+                                conversation.getId()));
+        if ((totalTurnCount == null || totalTurnCount == 0)
+                && autoSaveMapper.selectByConversationAndType(
+                conversation.getId(), CHECKPOINT_INITIAL) == null) {
+            upsertCheckpoint(conversation.getId(), CHECKPOINT_INITIAL,
+                    savedAt, snapshot);
+        }
+        Long mainScenePlanId = mainScenePlanId(snapshot);
+        if (mainScenePlanId != null
+                && noTurnsForPlan(conversation.getId(), mainScenePlanId)) {
+            upsertCheckpoint(conversation.getId(), CHECKPOINT_SCENE,
+                    savedAt, snapshot);
+        }
     }
 
     @Override
-    public void rollbackTurn(Long userId, Long conversationId) {
+    public TrpgRollbackOverviewVO getRollbackOverview(
+            Long userId, Long conversationId) {
+        GroupConversation conversation = requireTrpgConversation(
+                userId, conversationId, false);
+        Map<String, TrpgAutoSave> checkpoints =
+                autoSaveMapper.selectByConversationId(conversationId).stream()
+                        .collect(Collectors.toMap(
+                                TrpgAutoSave::getCheckpointType,
+                                Function.identity(),
+                                (first, ignored) -> first));
+        TrpgSave manualSave = saveMapper.selectByConversationId(conversationId);
+        return new TrpgRollbackOverviewVO()
+                .setTurn(rollbackPoint(conversation,
+                        checkpoints.get(CHECKPOINT_TURN), manualSave))
+                .setScene(rollbackPoint(conversation,
+                        checkpoints.get(CHECKPOINT_SCENE), manualSave))
+                .setInitial(rollbackPoint(conversation,
+                        checkpoints.get(CHECKPOINT_INITIAL), manualSave));
+    }
+
+    @Override
+    public TrpgRollbackResultVO rollbackTurn(
+            Long userId, Long conversationId) {
+        return rollback(userId, conversationId, CHECKPOINT_TURN);
+    }
+
+    @Override
+    public TrpgRollbackResultVO rollbackScene(
+            Long userId, Long conversationId) {
+        return rollback(userId, conversationId, CHECKPOINT_SCENE);
+    }
+
+    @Override
+    public TrpgRollbackResultVO rollbackInitial(
+            Long userId, Long conversationId) {
+        return rollback(userId, conversationId, CHECKPOINT_INITIAL);
+    }
+
+    private TrpgRollbackResultVO rollback(
+            Long userId, Long conversationId, String checkpointType) {
         GroupConversation conversation = requireTrpgConversation(
                 userId, conversationId, true);
-        TrpgAutoSave autoSave = autoSaveMapper.selectById(conversationId);
+        TrpgAutoSave autoSave = autoSaveMapper.selectByConversationAndType(
+                conversationId, checkpointType);
         if (autoSave == null) {
-            throw new UserRequestException("当前跑团没有可回滚的行动轮存档");
+            throw new UserRequestException("当前跑团没有可回滚的自动存档点");
+        }
+        if (!Objects.equals(autoSave.getFormatVersion(), FORMAT_VERSION)) {
+            throw new UserRequestException("不支持的跑团自动存档格式");
         }
         TrpgSaveSnapshotDTO snapshot = autoSave.getSnapshot();
         validateSnapshot(conversation, snapshot);
@@ -117,12 +188,113 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
         try {
             recoveryService.assertConversationHasNoNonTerminalTurns(
                     conversationId);
-            transactionTemplate.executeWithoutResult(status ->
-                    snapshotService.restoreDatabase(conversation, snapshot));
+            Boolean manualSaveDeleted = transactionTemplate.execute(status -> {
+                TrpgSave manualSave = saveMapper.selectByConversationId(
+                        conversationId);
+                boolean deleteManualSave = isAfter(
+                        manualSave == null ? null : manualSave.getSavedAt(),
+                        autoSave.getSavedAt());
+                snapshotService.restoreDatabase(conversation, snapshot);
+                if (deleteManualSave) {
+                    saveMapper.deleteById(manualSave.getId());
+                }
+                autoSaveMapper.deleteAfter(
+                        conversationId, autoSave.getSavedAt());
+                return deleteManualSave;
+            });
             snapshotService.restoreDerivedState(conversation, snapshot);
+            return new TrpgRollbackResultVO()
+                    .setCheckpointType(checkpointType)
+                    .setSavedAt(autoSave.getSavedAt())
+                    .setManualSaveDeleted(Boolean.TRUE.equals(
+                            manualSaveDeleted));
         } finally {
             lockService.unlock(lock);
         }
+    }
+
+    private void upsertCheckpoint(
+            Long conversationId,
+            String checkpointType,
+            LocalDateTime savedAt,
+            TrpgSaveSnapshotDTO snapshot) {
+        autoSaveMapper.upsert(new TrpgAutoSave()
+                .setConversationId(conversationId)
+                .setCheckpointType(checkpointType)
+                .setSavedAt(savedAt)
+                .setFormatVersion(FORMAT_VERSION)
+                .setSnapshot(snapshot));
+    }
+
+    private Long mainScenePlanId(TrpgSaveSnapshotDTO snapshot) {
+        if (snapshot.getConversationState() == null
+                || snapshot.getReplyPlans() == null) {
+            return null;
+        }
+        Long activePlanId = snapshot.getConversationState()
+                .getActiveReplyPlanId();
+        GroupReplyPlan activePlan = snapshot.getReplyPlans().stream()
+                .filter(plan -> Objects.equals(plan.getId(), activePlanId))
+                .findFirst().orElse(null);
+        if (activePlan == null
+                || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                activePlan.getSource())
+                || activePlan.getParentPlanId() != null) {
+            return null;
+        }
+        return activePlanId;
+    }
+
+    private boolean noTurnsForPlan(Long conversationId, Long planId) {
+        Long count = turnMapper.selectCount(
+                new LambdaQueryWrapper<GroupChatTurn>()
+                        .eq(GroupChatTurn::getConversationId, conversationId)
+                        .eq(GroupChatTurn::getPlanId, planId));
+        return count == null || count == 0;
+    }
+
+    private TrpgRollbackOverviewVO.RollbackPointVO rollbackPoint(
+            GroupConversation conversation,
+            TrpgAutoSave checkpoint,
+            TrpgSave manualSave) {
+        boolean available = checkpoint != null
+                && validSnapshot(conversation, checkpoint);
+        return new TrpgRollbackOverviewVO.RollbackPointVO()
+                .setAvailable(available)
+                .setSavedAt(available ? checkpoint.getSavedAt() : null)
+                .setMessageBoundaryId(available
+                        && checkpoint.getSnapshot().getCursors() != null
+                        ? checkpoint.getSnapshot().getCursors()
+                                .getMaxMessageId()
+                        : null)
+                .setWillDeleteManualSave(available && isAfter(
+                        manualSave == null ? null : manualSave.getSavedAt(),
+                        checkpoint.getSavedAt()))
+                .setInvestigators(available
+                        ? investigatorStates(checkpoint.getSnapshot())
+                        : List.of());
+    }
+
+    private boolean validSnapshot(
+            GroupConversation conversation, TrpgAutoSave checkpoint) {
+        TrpgSaveSnapshotDTO snapshot = checkpoint.getSnapshot();
+        return Objects.equals(checkpoint.getFormatVersion(), FORMAT_VERSION)
+                && snapshot != null
+                && Objects.equals(snapshot.getFormatVersion(), FORMAT_VERSION)
+                && Objects.equals(snapshot.getConversationId(),
+                conversation.getId())
+                && Objects.equals(snapshot.getUserWorldId(),
+                conversation.getUserWorldId())
+                && Objects.equals(snapshot.getWorldId(),
+                conversation.getWorldId())
+                && Objects.equals(snapshot.getModuleId(),
+                conversation.getModuleId());
+    }
+
+    private boolean isAfter(
+            LocalDateTime candidate, LocalDateTime boundary) {
+        return candidate != null && boundary != null
+                && candidate.isAfter(boundary);
     }
 
     private TrpgSave doSave(
@@ -214,8 +386,6 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
         GroupReplyPlan activePlan = plans.stream()
                 .filter(plan -> Objects.equals(plan.getId(), activePlanId))
                 .findFirst().orElse(null);
-        List<CocCharacter> characters = snapshot == null || snapshot.getCharacters() == null
-                ? List.of() : snapshot.getCharacters();
         return new TrpgSaveOverviewVO()
                 .setId(save.getId())
                 .setConversationId(save.getConversationId())
@@ -227,15 +397,27 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
                 .setRemark(save.getRemark())
                 .setSavedAt(save.getSavedAt())
                 .setFormatVersion(save.getFormatVersion())
+                .setMessageBoundaryId(snapshot != null
+                        && snapshot.getCursors() != null
+                        ? snapshot.getCursors().getMaxMessageId()
+                        : null)
                 .setActivePlanSource(activePlan == null ? null : activePlan.getSource())
                 .setActiveSceneId(activePlan == null ? null : activePlan.getContextId())
-                .setInvestigators(characters.stream()
+                .setInvestigators(investigatorStates(snapshot));
+    }
+
+    private List<TrpgSaveOverviewVO.InvestigatorStateVO> investigatorStates(
+            TrpgSaveSnapshotDTO snapshot) {
+        List<CocCharacter> characters = snapshot == null
+                || snapshot.getCharacters() == null
+                ? List.of() : snapshot.getCharacters();
+        return characters.stream()
                         .filter(character -> "PLAYER".equals(
                                 character.getActorType())
                                 || "BOT".equals(
                                 character.getActorType()))
                         .map(this::investigatorState)
-                        .toList());
+                        .toList();
     }
 
     private TrpgSaveOverviewVO.InvestigatorStateVO investigatorState(

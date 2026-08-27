@@ -46,8 +46,29 @@ public class TrpgSaveController {
     @PostMapping("/{conversationId}/rollback-turn")
     public Result rollbackTurn(@PathVariable Long conversationId) {
         checkConversationId(conversationId);
-        trpgSaveService.rollbackTurn(currentUserId(), conversationId);
-        return Result.success();
+        return Result.success(trpgSaveService.rollbackTurn(
+                currentUserId(), conversationId));
+    }
+
+    @GetMapping("/{conversationId}/rollback-status")
+    public Result rollbackStatus(@PathVariable Long conversationId) {
+        checkConversationId(conversationId);
+        return Result.success(trpgSaveService.getRollbackOverview(
+                currentUserId(), conversationId));
+    }
+
+    @PostMapping("/{conversationId}/rollback-scene")
+    public Result rollbackScene(@PathVariable Long conversationId) {
+        checkConversationId(conversationId);
+        return Result.success(trpgSaveService.rollbackScene(
+                currentUserId(), conversationId));
+    }
+
+    @PostMapping("/{conversationId}/rollback-initial")
+    public Result rollbackInitial(@PathVariable Long conversationId) {
+        checkConversationId(conversationId);
+        return Result.success(trpgSaveService.rollbackInitial(
+                currentUserId(), conversationId));
     }
 
     private void checkConversationId(Long conversationId) {

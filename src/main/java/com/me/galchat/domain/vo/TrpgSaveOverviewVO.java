@@ -16,6 +16,7 @@ public class TrpgSaveOverviewVO {
     private String remark;
     private LocalDateTime savedAt;
     private Integer formatVersion;
+    private Long messageBoundaryId;
     private String activePlanSource;
     private Long activeSceneId;
     private List<InvestigatorStateVO> investigators;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { nextTick, ref } from 'vue'
-import type { Character, CocSkill, InvestigatorCardSummary } from '../api/types.ts'
+import type { Character, CocSkill, GroupMessage, InvestigatorCardSummary, TrpgSave } from '../api/types.ts'
 import * as trpgToolsState from './trpgToolsState.ts'
 
 const { buildToolCharacterTargets, toolDialogContentClass } = trpgToolsState
@@ -24,6 +24,19 @@ const cards: InvestigatorCardSummary[] = [
   { cardId: 101, actorType: 'PLAYER', name: '玩家卡', checkValues: {} },
   { cardId: 102, actorType: 'BOT', participantId: 22, name: '罗伯特', checkValues: {} },
 ]
+
+function groupMessage(id: number, content = `消息 ${id}`): GroupMessage {
+  return {
+    id,
+    conversationId: 51,
+    speakerType: 'character',
+    speakerName: '艾琳',
+    messageKind: 'dialogue',
+    content,
+    sequenceNo: id,
+    status: 'completed',
+  }
+}
 
 test('builds the character-card selector with the player first and each matching card state', () => {
   assert.deepEqual(buildToolCharacterTargets(characters, cards, [11, 22], '旅人甲'), [
@@ -97,6 +110,208 @@ test('uses the third-stage dialog width only while the character-card tab is sel
   assert.equal(toolDialogContentClass('dice'), '')
 })
 
+test('builds all three rollback actions and keeps unavailable points disabled', () => {
+  const actions = trpgToolsState.buildToolRollbackActions({
+    turn: { available: true, savedAt: '2026-08-20T12:00:00', willDeleteManualSave: false, investigators: [] },
+    scene: { available: false, willDeleteManualSave: false, investigators: [] },
+    initial: { available: false, willDeleteManualSave: false, investigators: [] },
+  })
+
+  assert.deepEqual(actions.map(({ key, title, point }) => ({ key, title, available: point.available })), [
+    { key: 'turn', title: '回退至行动轮开始', available: true },
+    { key: 'scene', title: '回退至场景开始', available: false },
+    { key: 'initial', title: '回退至初始状态', available: false },
+  ])
+})
+
+test('orders manual and automatic restore points on one recovery timeline', () => {
+  const save: TrpgSave = {
+    id: 9,
+    conversationId: 51,
+    savedAt: '2026-08-20T12:05:00',
+    remark: '书房门前',
+    investigators: [],
+  }
+  const timeline = trpgToolsState.buildToolRecoveryTimeline(save, {
+    turn: {
+      available: true,
+      savedAt: '2026-08-20T12:10:00',
+      willDeleteManualSave: true,
+      investigators: [],
+    },
+    scene: {
+      available: true,
+      savedAt: '2026-08-20T11:00:00',
+      willDeleteManualSave: false,
+      investigators: [],
+    },
+    initial: {
+      available: false,
+      willDeleteManualSave: false,
+      investigators: [],
+    },
+  })
+
+  assert.deepEqual(timeline.map(({ key, kind, title, available }) => ({
+    key, kind, title, available,
+  })), [
+    { key: 'turn', kind: 'automatic', title: '行动轮开始', available: true },
+    { key: 'load', kind: 'manual', title: '手动存档', available: true },
+    { key: 'scene', kind: 'automatic', title: '主场景开始', available: true },
+    { key: 'initial', kind: 'automatic', title: '初始状态', available: false },
+  ])
+  assert.equal(timeline[1]?.remark, '书房门前')
+  assert.equal(timeline[0]?.willDeleteManualSave, true)
+})
+
+test('resolves investigator state from either a manual save or an automatic point', () => {
+  const manualInvestigator = {
+    characterId: 1,
+    name: '林恩',
+    hpCurrent: 8,
+    hpMax: 12,
+  }
+  const automaticInvestigator = {
+    characterId: 2,
+    name: '米娅',
+    sanCurrent: 42,
+    sanMax: 60,
+  }
+  const save: TrpgSave = {
+    id: 9,
+    conversationId: 51,
+    investigators: [manualInvestigator],
+  }
+  const actions = trpgToolsState.buildToolRollbackActions({
+    turn: {
+      available: true,
+      willDeleteManualSave: false,
+      investigators: [automaticInvestigator],
+    },
+    scene: { available: false, willDeleteManualSave: false, investigators: [] },
+    initial: { available: false, willDeleteManualSave: false, investigators: [] },
+  })
+
+  assert.deepEqual(
+    trpgToolsState.resolveToolRestoreInvestigators('load', save, actions),
+    [manualInvestigator],
+  )
+  assert.deepEqual(
+    trpgToolsState.resolveToolRestoreInvestigators('turn', save, actions),
+    [automaticInvestigator],
+  )
+})
+
+test('prioritizes terminal investigator conditions in restore previews', () => {
+  assert.equal(trpgToolsState.restoreInvestigatorCondition({ dead: true, dying: true, unconscious: true }), '死亡')
+  assert.equal(trpgToolsState.restoreInvestigatorCondition({ dying: true, unconscious: true }), '濒死')
+  assert.equal(trpgToolsState.restoreInvestigatorCondition({ unconscious: true }), '昏迷')
+  assert.equal(trpgToolsState.restoreInvestigatorCondition({}), null)
+})
+
+test('uses two retained and two deleted messages when loaded history covers the rollback boundary', () => {
+  const preview = trpgToolsState.buildLoadedRollbackMessagePreview(
+    [groupMessage(50), groupMessage(20), groupMessage(40), groupMessage(30), groupMessage(10)],
+    30,
+  )
+
+  assert.deepEqual(preview, {
+    retained: [groupMessage(20), groupMessage(30)],
+    deleted: [groupMessage(40), groupMessage(50)],
+    deletedMessagesOmitted: false,
+  })
+})
+
+test('requires a boundary fetch when loaded history starts after the rollback boundary', () => {
+  assert.equal(trpgToolsState.buildLoadedRollbackMessagePreview(
+    [groupMessage(40), groupMessage(50)],
+    30,
+  ), null)
+})
+
+test('shows three fetched retained messages and omits deleted messages when history does not cover the boundary', () => {
+  const preview = trpgToolsState.buildFetchedRollbackMessagePreview(
+    [groupMessage(10), groupMessage(40), groupMessage(30), groupMessage(20)],
+    30,
+  )
+
+  assert.deepEqual(preview, {
+    retained: [groupMessage(10), groupMessage(20), groupMessage(30)],
+    deleted: [],
+    deletedMessagesOmitted: true,
+  })
+})
+
+test('formats a hydrated dice message as dice plus its title', () => {
+  const message: GroupMessage = {
+    ...groupMessage(60),
+    messageKind: 'dice_roll',
+    content: '',
+    diceRoll: {
+      summary: {
+        id: 9,
+        conversationId: 51,
+        reason: '侦查门锁',
+        status: 'completed',
+      },
+      results: [],
+    },
+  }
+
+  assert.equal(
+    trpgToolsState.formatRollbackPreviewMessage(message),
+    '掷骰：侦查门锁',
+  )
+})
+
+test('does not fetch history when loaded messages already cover the rollback boundary', async () => {
+  let fetchCount = 0
+  const preview = await trpgToolsState.resolveRollbackMessagePreview(
+    [groupMessage(20), groupMessage(30), groupMessage(40)],
+    30,
+    async () => {
+      fetchCount += 1
+      return []
+    },
+  )
+
+  assert.equal(fetchCount, 0)
+  assert.deepEqual(preview.retained.map((message) => message.id), [20, 30])
+  assert.deepEqual(preview.deleted.map((message) => message.id), [40])
+})
+
+test('fetches exactly three messages ending at an uncovered rollback boundary', async () => {
+  const requests: Array<{ beforeId: number, size: number }> = []
+  const preview = await trpgToolsState.resolveRollbackMessagePreview(
+    [groupMessage(40), groupMessage(50)],
+    30,
+    async (beforeId, size) => {
+      requests.push({ beforeId, size })
+      return [groupMessage(10), groupMessage(20), groupMessage(30)]
+    },
+  )
+
+  assert.deepEqual(requests, [{ beforeId: 31, size: 3 }])
+  assert.deepEqual(preview.retained.map((message) => message.id), [10, 20, 30])
+  assert.equal(preview.deletedMessagesOmitted, true)
+})
+
+test('does not request history for the initial-state boundary', async () => {
+  let fetchCount = 0
+  const preview = await trpgToolsState.resolveRollbackMessagePreview(
+    [groupMessage(10)],
+    0,
+    async () => {
+      fetchCount += 1
+      return []
+    },
+  )
+
+  assert.equal(fetchCount, 0)
+  assert.deepEqual(preview.retained, [])
+  assert.equal(preview.deletedMessagesOmitted, true)
+})
+
 test('formats a UTC KP prompt timestamp in the selected local time zone', () => {
   const formatKpPromptUpdatedAt = (trpgToolsState as typeof trpgToolsState & {
     formatKpPromptUpdatedAt?: (value?: string, timeZone?: string) => string
@@ -109,30 +324,36 @@ test('formats a UTC KP prompt timestamp in the selected local time zone', () => 
   )
 })
 
-test('clears pending destructive confirmations when the tools dialog closes', async () => {
+test('requires a second dialog only when rollback will delete the manual save', async () => {
   const open = ref(true)
   const selectedTab = ref('status')
-  const confirmations = trpgToolsState.useToolConfirmations(open, selectedTab)
-  confirmations.confirmRollback.value = true
+  const confirmations = trpgToolsState.useToolRestoreConfirmation(open, selectedTab)
 
-  open.value = false
-  await nextTick()
+  confirmations.request('scene', true)
+  assert.equal(confirmations.stage.value, 'primary')
+  assert.equal(confirmations.advance(), false)
+  assert.equal(confirmations.stage.value, 'delete-manual-save')
+  assert.equal(confirmations.advance(), true)
 
-  assert.equal(confirmations.confirmRollback.value, false)
+  confirmations.clear()
+  confirmations.request('load', true)
+  assert.equal(confirmations.advance(), true)
 })
 
-test('clears pending destructive confirmations when switching tools', async () => {
+test('clears the restore dialog when closing or switching tools', async () => {
   const open = ref(true)
   const selectedTab = ref('status')
-  const confirmations = trpgToolsState.useToolConfirmations(open, selectedTab)
-  confirmations.confirmRollback.value = true
-  confirmations.confirmLoad.value = true
+  const confirmations = trpgToolsState.useToolRestoreConfirmation(open, selectedTab)
+  confirmations.request('turn', false)
 
   selectedTab.value = 'dice'
   await nextTick()
+  assert.equal(confirmations.action.value, null)
 
-  assert.equal(confirmations.confirmRollback.value, false)
-  assert.equal(confirmations.confirmLoad.value, false)
+  confirmations.request('initial', true)
+  open.value = false
+  await nextTick()
+  assert.equal(confirmations.action.value, null)
 })
 
 test('formats a CoC check rate as full, half, and fifth values', () => {

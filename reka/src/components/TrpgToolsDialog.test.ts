@@ -164,7 +164,7 @@ test('groups each attribute name and code above its value', async () => {
     .map((child) => child.tag), ['small', 'b'])
 })
 
-test('keeps manual saves separate while showing turn rollback in status', async () => {
+test('moves manual and automatic restore points into one recovery timeline', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
@@ -180,51 +180,90 @@ test('keeps manual saves separate while showing turn rollback in status', async 
   assert.ok(saveTab, 'the tools dialog should expose a dedicated save tab')
   assert.match(textContent(saveTab), /存档/)
   assert.ok(statusPanel, 'the tools dialog should keep a status tab')
-  assert.doesNotMatch(textContent(statusPanel), /跑团存档/)
-  assert.match(textContent(statusPanel), /行动轮自动存档/)
-  assert.match(textContent(statusPanel), /回滚最近一轮/)
-  assert.doesNotMatch(textContent(statusPanel), /如果某一轮出现异常/)
-  const autoSaveCard = findElement(statusPanel as unknown as RootNode, (element) => element.tag === 'section'
-    && textContent(element).includes('行动轮自动存档'))
-  assert.ok(autoSaveCard, 'status should contain the automatic turn save card')
-  const autoSaveHeading = findElement(autoSaveCard as unknown as RootNode, (element) => hasClass(element, 'tool-card-heading'))
-  assert.ok(autoSaveHeading, 'the automatic save card should contain a heading')
-  const rollbackButton = findElement(autoSaveHeading as unknown as RootNode, (element) => element.tag === 'button')
-  assert.ok(rollbackButton, 'the rollback action should sit in the card heading')
-  assert.equal(hasClass(rollbackButton, 'danger'), true)
-  assert.deepEqual(autoSaveHeading.children
-    .filter((child): child is ElementNode => child.type === NodeTypes.ELEMENT)
-    .map((child) => child.tag), ['span', 'button'])
+  assert.doesNotMatch(textContent(statusPanel), /自动回退点|action\.title|暂无可用回退点/)
   assert.ok(savePanel, 'the save controls should render in their own tab panel')
-  assert.match(textContent(savePanel), /跑团存档/)
-  assert.doesNotMatch(textContent(savePanel), /行动轮自动存档|回滚最近一轮/)
+  const timeline = findElement(savePanel as unknown as RootNode, (element) => hasClass(element, 'recovery-timeline'))
+  assert.ok(timeline, 'manual and automatic points should share one recovery timeline')
+  assert.match(textContent(timeline), /当前进度/)
+  assert.match(textContent(timeline), /recovery\.title/)
+  assert.match(textContent(timeline), /预览并读档|预览并回退/)
+  assert.equal(findElement(savePanel as unknown as RootNode,
+    (element) => hasClass(element, 'investigator-grid')), undefined,
+  'investigator state should not be shown on the recovery timeline')
 })
 
-test('renders save and load actions in separate cards', async () => {
+test('uses foreground dialogs for load, rollback, and manual-save deletion confirmation', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
-  const savePanel = findElement(baseParse(template), (element) => element.tag === 'TabsContent'
-    && hasAttribute(element, 'value', 'save'))
-  assert.ok(savePanel, 'the tools dialog should contain the save panel')
+  const root = baseParse(template)
+  const confirmation = findElement(root, (element) => element.tag === 'BaseDialog'
+    && hasDirectiveExpression(element, 'bind', 'confirmationTitle'))
 
-  const cards = savePanel.children.filter((child): child is ElementNode => child.type === NodeTypes.ELEMENT
-    && child.tag === 'section'
-    && hasClass(child, 'tool-card'))
-  const saveButton = cards[0] && findElement(cards[0] as unknown as RootNode, (element) => element.tag === 'button')
-  const loadButton = cards[1] && findElement(cards[1] as unknown as RootNode, (element) => element.tag === 'button')
-  const savedRemark = cards[1] && findElement(cards[1] as unknown as RootNode, (element) => hasClass(element, 'save-remark'))
+  assert.ok(confirmation, 'restore actions should open a dedicated confirmation dialog')
+  assert.equal(hasDirectiveExpression(confirmation, 'bind', "'foreground'"), true)
+  assert.match(textContent(confirmation), /确认删除当前存档/)
+  assert.match(textContent(confirmation), /删除存档并回退/)
+})
 
-  assert.equal(cards.length, 2)
-  assert.ok(saveButton, 'the save card should contain its own action')
-  assert.ok(loadButton, 'the load card should contain its own action')
-  assert.match(textContent(saveButton), /创建存档|覆盖存档/)
-  assert.doesNotMatch(textContent(saveButton), /读取存档|确认读档/)
-  assert.match(textContent(loadButton), /读取存档/)
-  assert.doesNotMatch(textContent(loadButton), /创建存档|覆盖存档/)
-  assert.ok(savedRemark, 'the load card should display the remark stored in the save')
-  assert.match(textContent(savedRemark), /存档备注/)
-  assert.match(textContent(savedRemark), /save\.remark/)
+test('uses the same chat preview for the first load and rollback confirmation', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const root = baseParse(template)
+  const confirmation = findElement(root, (element) => element.tag === 'BaseDialog'
+    && hasDirectiveExpression(element, 'bind', 'confirmationTitle'))
+  assert.ok(confirmation, 'restore actions should open a dedicated confirmation dialog')
+
+  const preview = findElement(confirmation as unknown as RootNode, (element) => hasClass(element, 'rollback-chat-preview'))
+  assert.ok(preview, 'the first rollback confirmation should contain a compact chat preview')
+  assert.ok(findElement(preview as unknown as RootNode, (element) => hasClass(element, 'retained')))
+  assert.ok(findElement(preview as unknown as RootNode, (element) => hasClass(element, 'deleted')))
+  assert.ok(findElement(preview as unknown as RootNode, (element) => hasClass(element, 'rollback-chat-boundary')))
+  assert.match(textContent(preview), /将读取到这里/)
+  assert.match(textContent(preview), /将回退到这里/)
+  assert.match(textContent(preview), /\.\.\./)
+
+  const standaloneLoadCopy = findElement(
+    confirmation as unknown as RootNode,
+    (element) => hasClass(element, 'restore-confirmation-copy')
+      && hasIfExpression(element, "restoreConfirmation.action.value === 'load'"),
+  )
+  assert.equal(standaloneLoadCopy, undefined,
+    'load should not bypass the shared chat preview with a text-only confirmation')
+
+  assert.match(source, /prepareRestorePreview\('load', save\.value\.messageBoundaryId\)/,
+    'requesting a load should prepare the preview from the manual save boundary')
+})
+
+test('places the rollback explanation beside the chat preview on wide dialogs', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const layout = findElement(baseParse(template), (element) => hasClass(element, 'rollback-confirmation-layout'))
+  assert.ok(layout, 'the primary rollback confirmation should use a side-by-side layout')
+
+  const children = layout.children.filter((child): child is ElementNode => child.type === NodeTypes.ELEMENT)
+  assert.equal(hasClass(children[0]!, 'rollback-chat-preview'), true)
+  assert.equal(hasClass(children[1]!, 'rollback-confirmation-sidebar'), true)
+})
+
+test('shows target investigator state below the restore explanation', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const sidebar = findElement(baseParse(template), (element) => hasClass(element, 'rollback-confirmation-sidebar'))
+  assert.ok(sidebar, 'restore confirmation should reserve a sidebar')
+  const investigatorList = findElement(sidebar as unknown as RootNode,
+    (element) => hasClass(element, 'rollback-investigator-list'))
+  assert.ok(investigatorList, 'the sidebar should show investigator state at the target point')
+  assert.ok(findElement(investigatorList as unknown as RootNode,
+    (element) => element.tag === 'article'
+      && hasDirectiveExpression(element, 'for', 'item in pendingRestoreInvestigators')))
+  assert.match(textContent(investigatorList), /HP/)
+  assert.match(textContent(investigatorList), /SAN/)
+  assert.match(textContent(investigatorList), /MP/)
+  assert.match(textContent(investigatorList), /restoreInvestigatorCondition/)
 })
 
 test('exposes backend-shaped dice debugging in a dedicated tools tab', async () => {

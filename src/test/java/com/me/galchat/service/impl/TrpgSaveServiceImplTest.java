@@ -4,11 +4,15 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.TrpgSaveCreateDTO;
 import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
 import com.me.galchat.domain.po.CocCharacter;
+import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.TrpgAutoSave;
 import com.me.galchat.domain.po.TrpgSave;
+import com.me.galchat.domain.vo.TrpgRollbackResultVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.TrpgAutoSaveMapper;
 import com.me.galchat.mapper.TrpgSaveMapper;
 import com.me.galchat.service.ITrpgSaveSnapshotService;
@@ -47,6 +51,8 @@ class TrpgSaveServiceImplTest {
     @Mock
     private GroupConversationMapper conversationMapper;
     @Mock
+    private GroupChatTurnMapper turnMapper;
+    @Mock
     private TrpgSaveMapper saveMapper;
     @Mock
     private TrpgAutoSaveMapper autoSaveMapper;
@@ -66,6 +72,7 @@ class TrpgSaveServiceImplTest {
         service = new TrpgSaveServiceImpl(
                 userWorldPrefixService,
                 conversationMapper,
+                turnMapper,
                 saveMapper,
                 autoSaveMapper,
                 snapshotService,
@@ -151,6 +158,26 @@ class TrpgSaveServiceImplTest {
     }
 
     @Test
+    void saveOverviewExposesTheSnapshotMessageBoundaryForLoadPreview() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        TrpgSaveSnapshotDTO snapshot = new TrpgSaveSnapshotDTO()
+                .setCursors(new TrpgSaveSnapshotDTO.CursorSnapshot()
+                        .setMaxMessageId(321L));
+        TrpgSave save = new TrpgSave()
+                .setId(9L)
+                .setUserId(7L)
+                .setConversationId(51L)
+                .setSnapshot(snapshot);
+        when(conversationMapper.selectById(51L)).thenReturn(conversation);
+        when(saveMapper.selectByConversationId(51L)).thenReturn(save);
+
+        var overview = service.getSave(7L, 51L);
+
+        assertThat(overview.getMessageBoundaryId()).isEqualTo(321L);
+    }
+
+    @Test
     void loadRejectsSnapshotFromAnotherConversationBeforeMutation() {
         GroupConversation conversation = conversation(51L, GroupChatConstant.MODE_TRPG);
         TrpgSave save = new TrpgSave()
@@ -175,7 +202,7 @@ class TrpgSaveServiceImplTest {
     }
 
     @Test
-    void loadRestoresDatabaseThenRunScopedDerivedState() {
+    void loadRestoresDatabaseAndDeletesOnlyNewerAutoCheckpoints() {
         GroupConversation conversation = conversation(51L, GroupChatConstant.MODE_TRPG);
         TrpgSaveSnapshotDTO snapshot = new TrpgSaveSnapshotDTO()
                 .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
@@ -187,6 +214,7 @@ class TrpgSaveServiceImplTest {
                 .setUserId(7L)
                 .setConversationId(51L)
                 .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
+                .setSavedAt(LocalDateTime.of(2026, 8, 20, 12, 0))
                 .setSnapshot(snapshot);
         when(conversationMapper.selectById(51L)).thenReturn(conversation);
         when(saveMapper.selectByConversationId(51L)).thenReturn(save);
@@ -198,56 +226,190 @@ class TrpgSaveServiceImplTest {
         var order = inOrder(snapshotService);
         order.verify(snapshotService).restoreDatabase(conversation, snapshot);
         order.verify(snapshotService).restoreDerivedState(conversation, snapshot);
+        verify(autoSaveMapper).deleteAfter(
+                51L, LocalDateTime.of(2026, 8, 20, 12, 0));
         verify(recoveryService).assertConversationHasNoNonTerminalTurns(51L);
     }
 
     @Test
-    void saveBeforeTurnOverwritesTheConversationAutoCheckpoint() {
+    void saveBeforeFirstTurnCreatesTurnAndInitialCheckpointsFromOneSnapshot() {
         GroupConversation conversation = conversation(
                 51L, GroupChatConstant.MODE_TRPG);
-        TrpgSaveSnapshotDTO snapshot = snapshot(51L);
+        TrpgSaveSnapshotDTO snapshot = snapshot(51L)
+                .setRestorableTurns(List.of())
+                .setReplyPlans(List.of())
+                .setConversationState(
+                        new TrpgSaveSnapshotDTO.ConversationStateSnapshot());
         when(snapshotService.capture(conversation)).thenReturn(snapshot);
+        when(turnMapper.selectCount(any())).thenReturn(0L);
+
+        service.saveBeforeTurn(conversation);
+
+        ArgumentCaptor<TrpgAutoSave> captor =
+                ArgumentCaptor.forClass(TrpgAutoSave.class);
+        verify(autoSaveMapper, times(2)).upsert(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(TrpgAutoSave::getCheckpointType)
+                .containsExactlyInAnyOrder("TURN", "INITIAL");
+        assertThat(captor.getAllValues())
+                .allSatisfy(checkpoint -> {
+                    assertThat(checkpoint.getConversationId()).isEqualTo(51L);
+                    assertThat(checkpoint.getFormatVersion())
+                            .isEqualTo(TrpgSaveServiceImpl.FORMAT_VERSION);
+                    assertThat(checkpoint.getSnapshot()).isSameAs(snapshot);
+                    assertThat(checkpoint.getSavedAt()).isNotNull();
+                });
+        assertThat(captor.getAllValues())
+                .extracting(TrpgAutoSave::getSavedAt)
+                .containsOnly(captor.getAllValues().getFirst().getSavedAt());
+        verify(snapshotService).capture(conversation);
+    }
+
+    @Test
+    void saveBeforeFirstMainSceneTurnCreatesSceneButNotInitialCheckpoint() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        GroupReplyPlan scene = new GroupReplyPlan()
+                .setId(301L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setParentPlanId(null);
+        TrpgSaveSnapshotDTO snapshot = snapshot(51L)
+                .setReplyPlans(List.of(scene))
+                .setConversationState(
+                        new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
+                                .setActiveReplyPlanId(301L))
+                .setRestorableTurns(List.of(restorableTurn(200L, null)));
+        when(snapshotService.capture(conversation)).thenReturn(snapshot);
+        when(turnMapper.selectCount(any())).thenReturn(1L, 0L);
+
+        service.saveBeforeTurn(conversation);
+
+        ArgumentCaptor<TrpgAutoSave> captor =
+                ArgumentCaptor.forClass(TrpgAutoSave.class);
+        verify(autoSaveMapper, times(2)).upsert(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(TrpgAutoSave::getCheckpointType)
+                .containsExactlyInAnyOrder("TURN", "SCENE");
+    }
+
+    @Test
+    void saveBeforeChildSceneTurnDoesNotOverwriteMainSceneCheckpoint() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        GroupReplyPlan childScene = new GroupReplyPlan()
+                .setId(302L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setParentPlanId(301L);
+        TrpgSaveSnapshotDTO snapshot = snapshot(51L)
+                .setReplyPlans(List.of(childScene))
+                .setConversationState(
+                        new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
+                                .setActiveReplyPlanId(302L))
+                .setRestorableTurns(List.of(restorableTurn(200L, 301L)));
+        when(snapshotService.capture(conversation)).thenReturn(snapshot);
+        when(turnMapper.selectCount(any())).thenReturn(1L);
 
         service.saveBeforeTurn(conversation);
 
         ArgumentCaptor<TrpgAutoSave> captor =
                 ArgumentCaptor.forClass(TrpgAutoSave.class);
         verify(autoSaveMapper).upsert(captor.capture());
-        assertThat(captor.getValue().getConversationId()).isEqualTo(51L);
-        assertThat(captor.getValue().getFormatVersion())
-                .isEqualTo(TrpgSaveServiceImpl.FORMAT_VERSION);
-        assertThat(captor.getValue().getSnapshot()).isSameAs(snapshot);
-        assertThat(captor.getValue().getSavedAt()).isNotNull();
+        assertThat(captor.getValue().getCheckpointType()).isEqualTo("TURN");
     }
 
     @Test
-    void rollbackTurnRestoresClosedRunAndKeepsTheAutoCheckpoint() {
+    void completedTurnsDoNotRecreateInitialOrOverwriteCurrentMainScene() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        GroupReplyPlan scene = new GroupReplyPlan()
+                .setId(301L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setParentPlanId(null);
+        TrpgSaveSnapshotDTO snapshot = snapshot(51L)
+                .setReplyPlans(List.of(scene))
+                .setConversationState(
+                        new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
+                                .setActiveReplyPlanId(301L))
+                .setRestorableTurns(List.of());
+        when(snapshotService.capture(conversation)).thenReturn(snapshot);
+        when(turnMapper.selectCount(any())).thenReturn(5L, 2L);
+
+        service.saveBeforeTurn(conversation);
+
+        ArgumentCaptor<TrpgAutoSave> captor =
+                ArgumentCaptor.forClass(TrpgAutoSave.class);
+        verify(autoSaveMapper).upsert(captor.capture());
+        assertThat(captor.getValue().getCheckpointType()).isEqualTo("TURN");
+        verify(autoSaveMapper, never()).selectByConversationAndType(
+                51L, "INITIAL");
+    }
+
+    @Test
+    void rollbackTurnDeletesNewerManualSaveAndFutureAutoCheckpoints() {
         GroupConversation conversation = conversation(
                 51L, GroupChatConstant.MODE_TRPG)
                 .setStatus(GroupChatConstant.STATUS_CLOSED);
         TrpgSaveSnapshotDTO snapshot = snapshot(51L);
+        LocalDateTime checkpointTime = LocalDateTime.of(
+                2026, 8, 20, 12, 0);
         TrpgAutoSave autoSave = new TrpgAutoSave()
                 .setConversationId(51L)
+                .setCheckpointType("TURN")
+                .setSavedAt(checkpointTime)
                 .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setSnapshot(snapshot);
+        TrpgSave manualSave = new TrpgSave()
+                .setId(91L)
+                .setUserId(7L)
+                .setConversationId(51L)
+                .setSavedAt(checkpointTime.plusMinutes(1));
         when(conversationMapper.selectById(51L)).thenReturn(conversation);
-        when(autoSaveMapper.selectById(51L)).thenReturn(autoSave);
+        when(autoSaveMapper.selectByConversationAndType(51L, "TURN"))
+                .thenReturn(autoSave);
+        when(saveMapper.selectByConversationId(51L)).thenReturn(manualSave);
         when(lockService.tryLock(51L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
 
-        service.rollbackTurn(7L, 51L);
-        service.rollbackTurn(7L, 51L);
+        TrpgRollbackResultVO result = service.rollbackTurn(7L, 51L);
 
         var order = inOrder(snapshotService);
         order.verify(snapshotService).restoreDatabase(conversation, snapshot);
         order.verify(snapshotService).restoreDerivedState(conversation, snapshot);
-        order.verify(snapshotService).restoreDatabase(conversation, snapshot);
-        order.verify(snapshotService).restoreDerivedState(conversation, snapshot);
-        verify(autoSaveMapper, times(2)).selectById(51L);
-        verify(autoSaveMapper, never()).deleteById(51L);
-        verify(recoveryService, times(2))
+        assertThat(result.getManualSaveDeleted()).isTrue();
+        assertThat(result.getCheckpointType()).isEqualTo("TURN");
+        verify(saveMapper).deleteById(91L);
+        verify(autoSaveMapper).deleteAfter(51L, checkpointTime);
+        verify(recoveryService)
                 .assertConversationHasNoNonTerminalTurns(51L);
+    }
+
+    @Test
+    void rollbackKeepsManualSaveAtTheSameTimestamp() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        LocalDateTime checkpointTime = LocalDateTime.of(
+                2026, 8, 20, 12, 0);
+        TrpgAutoSave autoSave = new TrpgAutoSave()
+                .setConversationId(51L)
+                .setCheckpointType("SCENE")
+                .setSavedAt(checkpointTime)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
+                .setSnapshot(snapshot(51L));
+        when(conversationMapper.selectById(51L)).thenReturn(conversation);
+        when(autoSaveMapper.selectByConversationAndType(51L, "SCENE"))
+                .thenReturn(autoSave);
+        when(saveMapper.selectByConversationId(51L)).thenReturn(
+                new TrpgSave().setId(91L).setSavedAt(checkpointTime));
+        when(lockService.tryLock(51L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+
+        TrpgRollbackResultVO result = service.rollbackScene(7L, 51L);
+
+        assertThat(result.getManualSaveDeleted()).isFalse();
+        verify(saveMapper, never()).deleteById(any());
+        verify(autoSaveMapper).deleteAfter(51L, checkpointTime);
     }
 
     @Test
@@ -255,7 +417,8 @@ class TrpgSaveServiceImplTest {
         GroupConversation conversation = conversation(
                 51L, GroupChatConstant.MODE_TRPG);
         when(conversationMapper.selectById(51L)).thenReturn(conversation);
-        when(autoSaveMapper.selectById(51L)).thenReturn(null);
+        when(autoSaveMapper.selectByConversationAndType(51L, "TURN"))
+                .thenReturn(null);
 
         assertThatThrownBy(() -> service.rollbackTurn(7L, 51L))
                 .isInstanceOf(UserRequestException.class)
@@ -263,6 +426,79 @@ class TrpgSaveServiceImplTest {
 
         verify(lockService, never()).tryLock(any());
         verify(snapshotService, never()).restoreDatabase(any(), any());
+    }
+
+    @Test
+    void rollbackRejectsUnsupportedCheckpointRowBeforeLocking() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        TrpgAutoSave unsupported = new TrpgAutoSave()
+                .setConversationId(51L)
+                .setCheckpointType("INITIAL")
+                .setSavedAt(LocalDateTime.now())
+                .setFormatVersion(1)
+                .setSnapshot(snapshot(51L));
+        when(conversationMapper.selectById(51L)).thenReturn(conversation);
+        when(autoSaveMapper.selectByConversationAndType(51L, "INITIAL"))
+                .thenReturn(unsupported);
+
+        assertThatThrownBy(() -> service.rollbackInitial(7L, 51L))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("不支持");
+
+        verify(lockService, never()).tryLock(any());
+        verify(snapshotService, never()).restoreDatabase(any(), any());
+    }
+
+    @Test
+    void rollbackOverviewDisablesMissingAndInvalidCheckpoints() {
+        GroupConversation conversation = conversation(
+                51L, GroupChatConstant.MODE_TRPG);
+        LocalDateTime turnTime = LocalDateTime.of(2026, 8, 20, 12, 0);
+        TrpgAutoSave turn = new TrpgAutoSave()
+                .setConversationId(51L)
+                .setCheckpointType("TURN")
+                .setSavedAt(turnTime)
+                .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
+                .setSnapshot(snapshot(51L)
+                        .setCursors(new TrpgSaveSnapshotDTO.CursorSnapshot()
+                                .setMaxMessageId(314L))
+                        .setCharacters(List.of(
+                                character(1L, "PLAYER", "林恩"),
+                                character(2L, "BOT", "米娅"),
+                                character(3L, "NPC", "守门人"))));
+        TrpgAutoSave invalidScene = new TrpgAutoSave()
+                .setConversationId(51L)
+                .setCheckpointType("SCENE")
+                .setSavedAt(turnTime.minusMinutes(1))
+                .setFormatVersion(1)
+                .setSnapshot(snapshot(51L).setFormatVersion(1));
+        when(conversationMapper.selectById(51L)).thenReturn(conversation);
+        when(autoSaveMapper.selectByConversationId(51L))
+                .thenReturn(List.of(turn, invalidScene));
+        when(saveMapper.selectByConversationId(51L)).thenReturn(
+                new TrpgSave().setUserId(7L)
+                        .setSavedAt(turnTime.plusMinutes(1)));
+
+        var overview = service.getRollbackOverview(7L, 51L);
+
+        assertThat(overview.getTurn().getAvailable()).isTrue();
+        assertThat(overview.getTurn().getSavedAt()).isEqualTo(turnTime);
+        assertThat(overview.getTurn().getMessageBoundaryId()).isEqualTo(314L);
+        assertThat(overview.getTurn().getWillDeleteManualSave()).isTrue();
+        assertThat(overview.getTurn().getInvestigators())
+                .extracting(state -> state.getName())
+                .containsExactly("林恩", "米娅");
+        assertThat(overview.getScene().getAvailable()).isFalse();
+        assertThat(overview.getScene().getMessageBoundaryId()).isNull();
+        assertThat(overview.getScene().getInvestigators()).isEmpty();
+        assertThat(overview.getInitial().getAvailable()).isFalse();
+    }
+
+    private TrpgSaveSnapshotDTO.RestorableTurnSnapshot restorableTurn(
+            Long turnId, Long planId) {
+        return new TrpgSaveSnapshotDTO.RestorableTurnSnapshot()
+                .setTurn(new GroupChatTurn().setId(turnId).setPlanId(planId));
     }
 
     private GroupConversation conversation(Long id, String mode) {

@@ -634,15 +634,20 @@ AI 调查员还可以按快速开始规则生成服务端草稿。开始生成�
 | `GET /trpg-saves/{conversationId}` | 路径 ID | `TrpgSaveOverviewVO` 或 `null` | 获取 TRPG 存档概览 |
 | `POST /trpg-saves/{conversationId}` | 可省略请求体；`{ "remark": string }` | `TrpgSaveOverviewVO` | 覆盖/创建当前 TRPG 存档 |
 | `POST /trpg-saves/{conversationId}/load` | 无 | 无 | 恢复会话、人物卡、行动轮、骰子和 Redis 运行状态 |
-| `POST /trpg-saves/{conversationId}/rollback-turn` | 无 | 无 | 回滚到最近一次行动轮开始前的自动存档 |
+| `GET /trpg-saves/{conversationId}/rollback-status` | 路径 ID | `TrpgRollbackOverviewVO` | 获取三类自动回退点的可用状态 |
+| `POST /trpg-saves/{conversationId}/rollback-turn` | 无 | `TrpgRollbackResultVO` | 回退至最近一次行动轮开始 |
+| `POST /trpg-saves/{conversationId}/rollback-scene` | 无 | `TrpgRollbackResultVO` | 回退至最近一个主场景开始 |
+| `POST /trpg-saves/{conversationId}/rollback-initial` | 无 | `TrpgRollbackResultVO` | 回退至第一次行动轮创建前 |
 
-`TrpgSaveOverviewVO` 字段：`id/conversationId/conversationTitle/remark/savedAt/formatVersion/activePlanSource/activeSceneId/investigators`。每个 `investigators` 项含 `characterId/name/hpCurrent/hpMax/sanCurrent/sanMax/mpCurrent/mpMax/unconscious/dying/dead`。
+`TrpgSaveOverviewVO` 字段：`id/conversationId/conversationTitle/remark/savedAt/formatVersion/messageBoundaryId/activePlanSource/activeSceneId/investigators`。`messageBoundaryId` 是读档后保留的最大消息 ID，可用于在确认界面区分保留和删除的消息；存档时没有消息则为 `null`。每个 `investigators` 项含 `characterId/name/hpCurrent/hpMax/sanCurrent/sanMax/mpCurrent/mpMax/unconscious/dying/dead`。
 
-当前 TRPG 存档格式版本为 1；备注会去除首尾空格并最多保留前 200 个字符。
+当前 TRPG 存档格式版本为 2；备注会去除首尾空格并最多保留前 200 个字符。
 
-TRPG 读档同样会删除存档点之后产生的数据并恢复快照；执行前应停止当前流式行动轮并由用户确认。
+`TrpgRollbackOverviewVO` 含 `turn/scene/initial` 三项，每项字段为 `available/savedAt/messageBoundaryId/willDeleteManualSave/investigators`。`messageBoundaryId` 是回退后保留的最大消息 ID，可用于在确认界面区分保留和删除的消息；没有可用消息边界时为 `null`。`investigators` 与手动存档概览使用相同的调查员状态结构，表示恢复到该点后的数值；不可用的回退点返回空列表。缺失、格式不受支持或不属于当前跑团的回退点均返回 `available=false`，前端应禁用对应按钮。`TrpgRollbackResultVO` 字段为 `checkpointType/savedAt/manualSaveDeleted`。
 
-系统在每次新建 TRPG 行动轮前覆盖该会话的自动存档，覆盖场景选择、探索、战斗等行动轮来源。`rollback-turn` 只恢复、不自动创建或重跑行动轮，也不消费自动存档，因此可以重复恢复到同一存档点；下一次新建行动轮时才会覆盖该存档。该接口也可恢复已经误结束的跑团会话，但有未完成行动轮或正在生成回复时会拒绝执行。
+TRPG 读档会删除手动存档点之后产生的数据，并直接清除时间晚于该存档的自动回退点，不需要额外确认。自动回退会删除目标点之后的其他自动回退点；若当前手动存档时间严格晚于目标点，也会删除该手动存档，前端必须在普通回退确认后再显示一次“删除存档并回退”确认。时间相同的存档或回退点会保留。
+
+系统在每次新建 TRPG 行动轮前覆盖 `TURN` 回退点；第一次行动轮创建前仅创建一次 `INITIAL` 回退点；主场景的第一个行动轮创建前覆盖 `SCENE` 回退点。子场景、战斗切换、战斗结束以及返回父场景都不会覆盖 `SCENE`。旧跑团升级后只保留原有 `TURN` 点，不推测或补造 `SCENE/INITIAL` 点。三个回退接口都只恢复、不自动创建或重跑行动轮，目标回退点本身会保留，因此可以重复恢复；下一次新建行动轮时再按上述规则更新。接口也可恢复已经误结束的跑团会话，但有未完成行动轮或正在生成回复时会拒绝执行。
 
 ## 11. 图片上传（1 个）
 

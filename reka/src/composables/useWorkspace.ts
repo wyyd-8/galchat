@@ -441,18 +441,22 @@ export function useWorkspace() {
     if (event.eventType === 'reply.started' && step) {
       const character = characterById(event.speaker?.id)
       const existing = findReplyStartMessage(event)
+      const messageId = event.messageId || tempMessageId--
       if (existing) {
-        Object.assign(existing, { id: event.messageId || tempMessageId--, turnId: event.turnId,
+        const previousMessageId = existing.id
+        Object.assign(existing, { id: messageId, turnId: event.turnId,
           speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
           messageKind: eventMessageKind(event), content: '', decisionContent: '', sequenceNo: event.sequence || Date.now(), status: 'streaming' })
+        if (previousMessageId !== messageId) delete reasoning[previousMessageId]
       } else {
-        messages.value.push({ id: event.messageId || tempMessageId--, conversationId: selectedConversationId.value!, turnId: event.turnId, replyStepId: step,
+        messages.value.push({ id: messageId, conversationId: selectedConversationId.value!, turnId: event.turnId, replyStepId: step,
           speakerType: eventSpeakerType(event), speakerId: event.speaker?.id, speakerName: event.speaker?.name || character?.characterName,
           messageKind: eventMessageKind(event), content: '', decisionContent: '', sequenceNo: event.sequence || Date.now(), status: 'streaming' })
       }
-      reasoning[step] = ''
+      reasoning[messageId] = ''
     } else if (event.eventType === 'reasoning.delta' && step) {
-      reasoning[step] = (reasoning[step] || '') + (event.delta || '')
+      const message = findEventMessage(event)
+      if (message) reasoning[message.id] = (reasoning[message.id] || '') + (event.delta || '')
     } else if (event.eventType === 'decision.delta' && step) {
       const message = findEventMessage(event)
       if (message) message.decisionContent = (message.decisionContent || '') + (event.delta || '')

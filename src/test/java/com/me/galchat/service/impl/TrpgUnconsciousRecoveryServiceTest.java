@@ -229,10 +229,218 @@ class TrpgUnconsciousRecoveryServiceTest {
         verify(dice, never()).requestUnconsciousRecovery(any(), any(), any());
     }
 
+    @Test
+    void sceneRecoveryCreatesDiceWithoutCancellingLaterInvestigators() {
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        ICocDiceOrchestrationService dice =
+                mock(ICocDiceOrchestrationService.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        DiceRollMessageCodec codec = new DiceRollMessageCodec(
+                JsonMapper.builder().build());
+        TrpgUnconsciousRecoveryService service =
+                new TrpgUnconsciousRecoveryService(
+                        characterMapper, dice, stepMapper, turnMapper,
+                        messageMapper, mock(DiceRollSummaryMapper.class),
+                        conversations, codec,
+                        mock(GroupToolCallStore.class),
+                        mock(GroupTurnCheckpointService.class),
+                        mock(TrpgCombatLifecycleService.class));
+        GroupConversation conversation = new GroupConversation().setId(7L);
+        GroupChatTurn turn = sceneTurn();
+        GroupChatReplyStep current = sceneStep(51L, 1, 71L);
+        GroupChatReplyStep later = sceneStep(52L, 2, 72L);
+        CocCharacter card = new CocCharacter()
+                .setId(71L).setRunId(7L).setName("林恩")
+                .setActorType("PLAYER").setCon(55)
+                .setUnconscious(true).setDying(false).setDead(false);
+        when(characterMapper.selectById(71L)).thenReturn(card);
+        when(stepMapper.selectList(any()))
+                .thenReturn(List.of(current, later));
+        when(conversations.nextSequence(7L)).thenReturn(20L);
+        when(messageMapper.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0).setId(90L);
+                    return 1;
+                });
+        when(dice.requestUnconsciousRecovery(7L, 7L, 71L))
+                .thenReturn(roll(DiceRollConstant.STATUS_PENDING));
+
+        var execution = service.handle(conversation, turn, current);
+
+        assertThat(execution.outcome())
+                .isEqualTo(TrpgUnconsciousRecoveryService.Outcome.PAUSED);
+        assertThat(current.getActionType())
+                .isEqualTo(
+                        GroupChatConstant.ACTION_TRPG_UNCONSCIOUS_RECOVERY);
+        assertThat(current.getGroupName()).isEqualTo("旧宅探索");
+        assertThat(current.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_DICE);
+        assertThat(turn.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_DICE);
+        assertThat(later.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_PENDING);
+    }
+
+    @Test
+    void successfulSceneRecoveryRestoresOriginalActionForSameTurn() {
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        DiceRollSummaryMapper summaries = mock(DiceRollSummaryMapper.class);
+        DiceRollMessageCodec codec = new DiceRollMessageCodec(
+                JsonMapper.builder().build());
+        TrpgUnconsciousRecoveryService service =
+                new TrpgUnconsciousRecoveryService(
+                        characterMapper,
+                        mock(ICocDiceOrchestrationService.class),
+                        stepMapper, mock(GroupChatTurnMapper.class),
+                        messageMapper, summaries,
+                        mock(GroupConversationService.class), codec,
+                        mock(GroupToolCallStore.class),
+                        mock(GroupTurnCheckpointService.class),
+                        mock(TrpgCombatLifecycleService.class));
+        GroupChatTurn turn = sceneTurn();
+        GroupChatReplyStep recovery = sceneStep(51L, 1, 71L)
+                .setActionType(
+                        GroupChatConstant.ACTION_TRPG_UNCONSCIOUS_RECOVERY);
+        when(messageMapper.selectList(any())).thenReturn(List.of(
+                new GroupChatMessage()
+                        .setReplyStepId(recovery.getId())
+                        .setMessageKind(GroupChatConstant.MESSAGE_DICE_ROLL)
+                        .setContent(codec.encode(101L, List.of(1)))));
+        when(summaries.selectById(101L)).thenReturn(
+                new DiceRollSummary().setId(101L)
+                        .setStatus(DiceRollConstant.STATUS_COMPLETED));
+        when(characterMapper.selectById(71L)).thenReturn(
+                new CocCharacter().setId(71L)
+                        .setUnconscious(false).setDying(false).setDead(false));
+
+        var execution = service.handle(
+                new GroupConversation().setId(7L), turn, recovery);
+
+        assertThat(execution.outcome().name()).isEqualTo("PROCEED");
+        assertThat(recovery.getActionType())
+                .isEqualTo(GroupChatConstant.ACTION_TRPG_SCENE);
+        assertThat(recovery.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_PENDING);
+        assertThat(recovery.getGroupName()).isEqualTo("旧宅探索");
+        verify(stepMapper).updateById(recovery);
+    }
+
+    @Test
+    void failedSceneRecoveryCompletesRecoveryAndSkipsOriginalAction() {
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        DiceRollSummaryMapper summaries = mock(DiceRollSummaryMapper.class);
+        GroupTurnCheckpointService checkpoints =
+                mock(GroupTurnCheckpointService.class);
+        DiceRollMessageCodec codec = new DiceRollMessageCodec(
+                JsonMapper.builder().build());
+        TrpgUnconsciousRecoveryService service =
+                new TrpgUnconsciousRecoveryService(
+                        characterMapper,
+                        mock(ICocDiceOrchestrationService.class),
+                        stepMapper, mock(GroupChatTurnMapper.class),
+                        messageMapper, summaries,
+                        mock(GroupConversationService.class), codec,
+                        mock(GroupToolCallStore.class), checkpoints,
+                        mock(TrpgCombatLifecycleService.class));
+        GroupChatTurn turn = sceneTurn();
+        GroupChatReplyStep recovery = sceneStep(51L, 1, 71L)
+                .setActionType(
+                        GroupChatConstant.ACTION_TRPG_UNCONSCIOUS_RECOVERY);
+        when(messageMapper.selectList(any())).thenReturn(List.of(
+                new GroupChatMessage()
+                        .setReplyStepId(recovery.getId())
+                        .setMessageKind(GroupChatConstant.MESSAGE_DICE_ROLL)
+                        .setContent(codec.encode(101L, List.of(1)))));
+        when(summaries.selectById(101L)).thenReturn(
+                new DiceRollSummary().setId(101L)
+                        .setStatus(DiceRollConstant.STATUS_COMPLETED));
+        when(characterMapper.selectById(71L)).thenReturn(
+                new CocCharacter().setId(71L)
+                        .setUnconscious(true).setDying(false).setDead(false));
+
+        var execution = service.handle(
+                new GroupConversation().setId(7L), turn, recovery);
+
+        assertThat(execution.outcome())
+                .isEqualTo(TrpgUnconsciousRecoveryService.Outcome.COMPLETED);
+        assertThat(recovery.getActionType())
+                .isEqualTo(
+                        GroupChatConstant.ACTION_TRPG_UNCONSCIOUS_RECOVERY);
+        assertThat(recovery.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_COMPLETED);
+        verify(checkpoints).recordBoundary(
+                turn, recovery, GroupTurnCheckpointService.COMPLETED);
+    }
+
+    @Test
+    void dyingSceneInvestigatorSkipsWithoutRecoveryRoll() {
+        CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
+        ICocDiceOrchestrationService dice =
+                mock(ICocDiceOrchestrationService.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        TrpgUnconsciousRecoveryService service =
+                new TrpgUnconsciousRecoveryService(
+                        characterMapper, dice, stepMapper,
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatMessageMapper.class),
+                        mock(DiceRollSummaryMapper.class),
+                        mock(GroupConversationService.class),
+                        new DiceRollMessageCodec(
+                                JsonMapper.builder().build()),
+                        mock(GroupToolCallStore.class),
+                        mock(GroupTurnCheckpointService.class),
+                        mock(TrpgCombatLifecycleService.class));
+        GroupChatReplyStep scene = sceneStep(51L, 1, 71L);
+        when(characterMapper.selectById(71L)).thenReturn(
+                new CocCharacter().setId(71L)
+                        .setUnconscious(true).setDying(true).setDead(false));
+
+        var execution = service.handle(
+                new GroupConversation().setId(7L), sceneTurn(), scene);
+
+        assertThat(execution.outcome())
+                .isEqualTo(TrpgUnconsciousRecoveryService.Outcome.SKIPPED);
+        assertThat(scene.getActionType())
+                .isEqualTo(
+                        GroupChatConstant.ACTION_TRPG_UNCONSCIOUS_RECOVERY);
+        assertThat(scene.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_COMPLETED);
+        verify(stepMapper).updateById(scene);
+        verify(dice, never()).requestUnconsciousRecovery(any(), any(), any());
+    }
+
     private GroupChatTurn combatTurn() {
         return new GroupChatTurn().setId(30L).setConversationId(7L)
                 .setPlanSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
                 .setStatus(GroupChatConstant.STATUS_RUNNING);
+    }
+
+    private GroupChatTurn sceneTurn() {
+        return new GroupChatTurn().setId(30L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+    }
+
+    private GroupChatReplyStep sceneStep(
+            Long id, int order, Long cardId) {
+        return step(id, order, GroupChatConstant.ACTION_TRPG_SCENE, cardId)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setGroupName("旧宅探索");
     }
 
     private List<GroupChatReplyStep> combatSlot() {

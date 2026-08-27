@@ -51,16 +51,17 @@ public class TrpgUnconsciousRecoveryService {
             GroupChatTurn turn,
             GroupChatReplyStep step) {
         if (conversation == null || turn == null || step == null
-                || !GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
-                turn.getPlanSource())) {
+                || (!isCombatTurn(turn) && !isSceneTurn(turn))) {
             return Execution.notApplicable();
         }
-        if (GroupChatConstant.ACTION_COMBAT_UNCONSCIOUS_RECOVERY.equals(
-                step.getActionType())) {
+        if (isRecoveryAction(step)) {
             return completeCreatedRecovery(turn, step);
         }
-        if (!GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
-                step.getActionType())
+        boolean combat = isCombatTurn(turn);
+        String activeAction = combat
+                ? GroupChatConstant.ACTION_COMBAT_ATTACK
+                : GroupChatConstant.ACTION_TRPG_SCENE;
+        if (!activeAction.equals(step.getActionType())
                 || step.getSubjectCharacterId() == null) {
             return Execution.notApplicable();
         }
@@ -71,25 +72,31 @@ public class TrpgUnconsciousRecoveryService {
         }
         if (Boolean.TRUE.equals(card.getDead())
                 || Boolean.TRUE.equals(card.getDying())) {
-            combatLifecycleService.forfeitCurrentRoundSlot(
-                    conversation.getId(), card.getId());
+            if (combat) {
+                combatLifecycleService.forfeitCurrentRoundSlot(
+                        conversation.getId(), card.getId());
+            } else {
+                completeSkippedSceneRecovery(turn, step);
+            }
             return new Execution(Outcome.SKIPPED, List.of());
         }
-        boolean coverForfeit = Boolean.TRUE.equals(
-                card.getCoverActionForfeitPending());
-        int stunnedRemaining = Objects.requireNonNullElse(
-                card.getStunnedRemainingRounds(), 0);
-        if (coverForfeit || stunnedRemaining > 0) {
-            card.setCoverActionForfeitPending(false)
-                    .setStunnedRemainingRounds(
-                            Math.max(0, stunnedRemaining - 1))
-                    .setUpdatedAt(LocalDateTime.now());
-            if (characterMapper.updateById(card) == 0) {
-                throw new UserRequestException("战斗行动位状态消费失败");
+        if (combat) {
+            boolean coverForfeit = Boolean.TRUE.equals(
+                    card.getCoverActionForfeitPending());
+            int stunnedRemaining = Objects.requireNonNullElse(
+                    card.getStunnedRemainingRounds(), 0);
+            if (coverForfeit || stunnedRemaining > 0) {
+                card.setCoverActionForfeitPending(false)
+                        .setStunnedRemainingRounds(
+                                Math.max(0, stunnedRemaining - 1))
+                        .setUpdatedAt(LocalDateTime.now());
+                if (characterMapper.updateById(card) == 0) {
+                    throw new UserRequestException("战斗行动位状态消费失败");
+                }
+                combatLifecycleService.forfeitCurrentRoundSlot(
+                        conversation.getId(), card.getId());
+                return new Execution(Outcome.SKIPPED, List.of());
             }
-            combatLifecycleService.forfeitCurrentRoundSlot(
-                    conversation.getId(), card.getId());
-            return new Execution(Outcome.SKIPPED, List.of());
         }
         if (!Boolean.TRUE.equals(card.getUnconscious())) {
             return Execution.notApplicable();
@@ -127,14 +134,21 @@ public class TrpgUnconsciousRecoveryService {
                 .setStatus(GroupChatConstant.STATUS_COMPLETED)
                 .setCreatedAt(now).setUpdatedAt(now);
         messageMapper.insert(message);
-        step.setActionType(
-                        GroupChatConstant.ACTION_COMBAT_UNCONSCIOUS_RECOVERY)
-                .setGroupName("昏迷恢复CON检定")
+        step.setActionType(combat
+                        ? GroupChatConstant
+                                .ACTION_COMBAT_UNCONSCIOUS_RECOVERY
+                        : GroupChatConstant
+                                .ACTION_TRPG_UNCONSCIOUS_RECOVERY)
                 .setOutputMessageId(message.getId())
                 .setStatus(boundaryStatus)
                 .setUpdatedAt(now);
+        if (combat) {
+            step.setGroupName("昏迷恢复CON检定");
+        }
         stepMapper.updateById(step);
-        cancelSlotTail(step, now);
+        if (combat) {
+            cancelSlotTail(step, now);
+        }
         turn.setStatus(boundaryStatus).setUpdatedAt(now);
         turnMapper.updateById(turn);
         toolCallStore.saveSystemDice(step.getId(), roll);
@@ -171,12 +185,56 @@ public class TrpgUnconsciousRecoveryService {
                 summary.getStatus())) {
             return new Execution(Outcome.PAUSED, List.of());
         }
+        if (isSceneTurn(turn)) {
+            CocCharacter card = characterMapper.selectById(
+                    step.getSubjectCharacterId());
+            if (card == null) {
+                throw new IllegalStateException("昏迷恢复步骤缺少人物卡");
+            }
+            if (!Boolean.TRUE.equals(card.getUnconscious())
+                    && !Boolean.TRUE.equals(card.getDying())
+                    && !Boolean.TRUE.equals(card.getDead())) {
+                step.setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                        .setStatus(GroupChatConstant.STATUS_PENDING)
+                        .setUpdatedAt(LocalDateTime.now());
+                stepMapper.updateById(step);
+                return new Execution(Outcome.PROCEED, List.of());
+            }
+        }
         step.setStatus(GroupChatConstant.STATUS_COMPLETED)
                 .setUpdatedAt(LocalDateTime.now());
         stepMapper.updateById(step);
         checkpointService.recordBoundary(
                 turn, step, GroupTurnCheckpointService.COMPLETED);
         return new Execution(Outcome.COMPLETED, List.of());
+    }
+
+    private void completeSkippedSceneRecovery(
+            GroupChatTurn turn, GroupChatReplyStep step) {
+        step.setActionType(
+                        GroupChatConstant.ACTION_TRPG_UNCONSCIOUS_RECOVERY)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                .setUpdatedAt(LocalDateTime.now());
+        stepMapper.updateById(step);
+        checkpointService.recordBoundary(
+                turn, step, GroupTurnCheckpointService.COMPLETED);
+    }
+
+    private boolean isCombatTurn(GroupChatTurn turn) {
+        return GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
+                turn.getPlanSource());
+    }
+
+    private boolean isSceneTurn(GroupChatTurn turn) {
+        return GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                turn.getPlanSource());
+    }
+
+    private boolean isRecoveryAction(GroupChatReplyStep step) {
+        return GroupChatConstant.ACTION_COMBAT_UNCONSCIOUS_RECOVERY.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_UNCONSCIOUS_RECOVERY.equals(
+                step.getActionType());
     }
 
     private GroupChatMessage latestDiceMessage(Long replyStepId) {
@@ -233,7 +291,8 @@ public class TrpgUnconsciousRecoveryService {
         NOT_APPLICABLE,
         SKIPPED,
         PAUSED,
-        COMPLETED
+        COMPLETED,
+        PROCEED
     }
 
     public record Execution(Outcome outcome, List<GroupChatEvent> events) {

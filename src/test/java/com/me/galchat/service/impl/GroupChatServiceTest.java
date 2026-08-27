@@ -1263,6 +1263,8 @@ class GroupChatServiceTest {
                 mock(GroupConversationService.class);
         GroupChatMessageMapper messageMapper =
                 mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
         GroupAgentDecisionStore decisionStore =
                 mock(GroupAgentDecisionStore.class);
         GroupRuntimeRegistry runtimeRegistry =
@@ -1276,7 +1278,7 @@ class GroupChatServiceTest {
                 runtimeRegistry,
                 messageMapper,
                 mock(GroupChatTurnMapper.class),
-                mock(GroupChatReplyStepMapper.class),
+                stepMapper,
                 mock(GroupTurnRecoveryService.class),
                 new GroupToolContextFactory(),
                 mock(IUserWorldPrefixService.class),
@@ -1335,6 +1337,9 @@ class GroupChatServiceTest {
         when(decisionStore.contentByReplyStepIds(List.of(41L)))
                 .thenReturn(java.util.Map.of(
                         41L, "先回应用户的问候。"));
+        when(stepMapper.selectBatchIds(List.of(41L)))
+                .thenReturn(List.of(new GroupChatReplyStep()
+                        .setId(41L).setOutputMessageId(91L)));
 
         List<GroupChatMessageVO> history =
                 service.listHistory(7L, null, 50);
@@ -1350,6 +1355,8 @@ class GroupChatServiceTest {
                 mock(GroupConversationService.class);
         GroupChatMessageMapper messageMapper =
                 mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
         GroupAgentDecisionStore decisionStore =
                 mock(GroupAgentDecisionStore.class);
         GroupRuntimeRegistry runtimeRegistry =
@@ -1363,7 +1370,7 @@ class GroupChatServiceTest {
                 runtimeRegistry,
                 messageMapper,
                 mock(GroupChatTurnMapper.class),
-                mock(GroupChatReplyStepMapper.class),
+                stepMapper,
                 mock(GroupTurnRecoveryService.class),
                 new GroupToolContextFactory(),
                 mock(IUserWorldPrefixService.class),
@@ -1406,12 +1413,109 @@ class GroupChatServiceTest {
         when(decisionStore.contentByReplyStepIds(List.of(41L)))
                 .thenReturn(java.util.Map.of(
                         41L, "窗边泥点可能来自外面。"));
+        when(stepMapper.selectBatchIds(List.of(41L)))
+                .thenReturn(List.of(new GroupChatReplyStep()
+                        .setId(41L).setOutputMessageId(91L)));
 
         GroupChatMessageVO message =
                 service.listHistory(7L, null, 50).getFirst();
 
         assertThat(message.getDecisionContent())
                 .isEqualTo("窗边泥点可能来自外面。");
+    }
+
+    @Test
+    void historyAttachesDecisionOnlyToFinalOutputOfRepeatedStep() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupAgentDecisionStore decisionStore =
+                mock(GroupAgentDecisionStore.class);
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatService service = new GroupChatService(
+                conversationService,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                runtimeRegistry,
+                messageMapper,
+                mock(GroupChatTurnMapper.class),
+                stepMapper,
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                mock(TransactionTemplate.class),
+                diceMessageCodec(),
+                JsonMapper.builder().build(),
+                emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                decisionStore,
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
+                .thenReturn(runtime);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(agentPolicy.actorName(
+                null,
+                new GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L)))
+                .thenReturn("爱丽丝");
+        when(messageMapper.selectList(any())).thenReturn(
+                new java.util.ArrayList<>(List.of(
+                        new GroupChatMessage()
+                                .setId(92L)
+                                .setConversationId(7L)
+                                .setTurnId(31L)
+                                .setReplyStepId(41L)
+                                .setSpeakerType(
+                                        GroupChatConstant.ACTOR_CHARACTER)
+                                .setSpeakerId(9L)
+                                .setMessageKind(
+                                        GroupChatConstant.MESSAGE_DIALOGUE)
+                                .setContent("我检查窗框。")
+                                .setSequenceNo(5L)
+                                .setStatus(
+                                        GroupChatConstant.STATUS_COMPLETED)
+                                .setCreatedAt(LocalDateTime.of(
+                                        2026, 7, 30, 12, 1)),
+                        new GroupChatMessage()
+                                .setId(91L)
+                                .setConversationId(7L)
+                                .setTurnId(31L)
+                                .setReplyStepId(41L)
+                                .setSpeakerType(
+                                        GroupChatConstant.ACTOR_CHARACTER)
+                                .setSpeakerId(9L)
+                                .setMessageKind(
+                                        GroupChatConstant.MESSAGE_DIALOGUE)
+                                .setContent("窗户现在开着吗？")
+                                .setSequenceNo(4L)
+                                .setStatus(
+                                        GroupChatConstant.STATUS_COMPLETED)
+                                .setCreatedAt(LocalDateTime.of(
+                                        2026, 7, 30, 12, 0)))));
+        when(stepMapper.selectBatchIds(List.of(41L)))
+                .thenReturn(List.of(new GroupChatReplyStep()
+                        .setId(41L).setOutputMessageId(92L)));
+        when(decisionStore.contentByReplyStepIds(List.of(41L)))
+                .thenReturn(java.util.Map.of(
+                        41L, "窗边泥点可能来自外面。"));
+
+        List<GroupChatMessageVO> history =
+                service.listHistory(7L, null, 50);
+
+        assertThat(history).extracting(
+                        GroupChatMessageVO::getDecisionContent)
+                .containsExactly(null, "窗边泥点可能来自外面。");
     }
 
     private TransactionTemplate immediateTransactionTemplate() {

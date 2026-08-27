@@ -166,9 +166,11 @@ const PARTICIPANT_CHECK_TYPES = new Set([
   'FIREARM_ATTACK',
   'MELEE_ATTACK',
   'MAJOR_WOUND_CON',
+  'UNCONSCIOUS_RECOVERY_CON',
 ])
 const CHECK_TYPE_NAMES: Record<string, string> = {
   MAJOR_WOUND_CON: 'CON',
+  UNCONSCIOUS_RECOVERY_CON: 'CON',
 }
 const CHECK_DIFFICULTY_LABELS: Record<DiceCheckDifficulty, string> = {
   REGULAR: '普通',

@@ -93,7 +93,7 @@ const composerPlaceholder = computed(() => {
 })
 let latestScrollFrame = 0
 
-watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(message.replyStepId && props.reasoning[message.replyStepId])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
+watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(props.reasoning[message.id])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
 watch(() => props.replyPlan, (plan) => { loadedPlanSignature.value = replyPlanSignature(plan.items) }, { immediate: true, flush: 'sync' })
 watch(() => props.conversation.id, () => {
   lastScrollTop.value = 0
@@ -104,7 +104,7 @@ watch(() => props.conversation.id, () => {
 watch(() => props.loading, (loading) => {
   if (!loading && initialScrollPending.value) { initialScrollPending.value = false; scrollToLatest() }
 }, { immediate: true, flush: 'post' })
-watch(() => `${props.sending}:${props.messages.map((message) => `${message.id}:${message.content.length}:${message.decisionContent?.length || 0}:${message.replyStepId ? props.reasoning[message.replyStepId]?.length || 0 : 0}`).join('|')}`, () => {
+watch(() => `${props.sending}:${props.messages.map((message) => `${message.id}:${message.content.length}:${message.decisionContent?.length || 0}:${props.reasoning[message.id]?.length || 0}`).join('|')}`, () => {
   if (props.sending) scrollToLatest()
 }, { flush: 'post' })
 watch(() => props.sending, (sending, wasSending) => { if (!sending && wasSending) scrollToLatest() }, { flush: 'post' })
@@ -112,10 +112,10 @@ onBeforeUnmount(() => cancelAnimationFrame(latestScrollFrame))
 
 function syncReasoningState() {
   props.messages.forEach((message) => {
-    const step = message.replyStepId
-    if (!step || !props.reasoning[step]) return
+    const messageId = message.id
+    if (!props.reasoning[messageId]) return
     const phase = message.status === 'streaming' && !message.content.trim() ? 'thinking' : message.content.trim() ? 'main' : 'idle'
-    syncReasoningDisclosure(reasoningOpen, reasoningPhase, step, phase)
+    syncReasoningDisclosure(reasoningOpen, reasoningPhase, messageId, phase)
   })
 }
 
@@ -195,9 +195,9 @@ function handleReasoningScroll(event: Event) {
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>
             <div class="message-content">
               <div class="message-meta"><strong>{{ message.speakerType === 'user' ? '你' : message.speakerType === 'narrator' ? '叙事' : message.speakerType === 'kp' ? (message.speakerName || 'KP') : message.speakerName || character(message.speakerId)?.characterName || '角色' }}</strong><span v-if="message.status === 'streaming'" class="typing-dot">正在回应</span><span v-if="message.status === 'failed'" class="failed-label">生成失败</span></div>
-              <CollapsibleRoot v-if="message.replyStepId && reasoning[message.replyStepId]" v-model:open="reasoningOpen[message.replyStepId]" class="reasoning-block">
+              <CollapsibleRoot v-if="reasoning[message.id]" v-model:open="reasoningOpen[message.id]" class="reasoning-block">
                 <CollapsibleTrigger class="reasoning-trigger">思考过程 <ChevronDown :size="14" /></CollapsibleTrigger>
-                <CollapsibleContent class="reasoning-content" :data-reasoning-streaming="reasoningPhase.get(message.replyStepId) === 'thinking' ? 'true' : undefined" @scroll="handleReasoningScroll">{{ reasoning[message.replyStepId] }}</CollapsibleContent>
+                <CollapsibleContent class="reasoning-content" :data-reasoning-streaming="reasoningPhase.get(message.id) === 'thinking' ? 'true' : undefined" @scroll="handleReasoningScroll">{{ reasoning[message.id] }}</CollapsibleContent>
               </CollapsibleRoot>
               <div v-if="message.decisionContent" class="decision-block"><span>角色决策</span><p>{{ message.decisionContent }}</p></div>
               <p>{{ message.content }}<span v-if="message.status === 'streaming'" class="stream-caret" /></p>

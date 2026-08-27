@@ -912,6 +912,40 @@ test('uses the single-participant check interface for a major-wound CON roll', (
   assert.equal(diceState.resolveDicePlayerMode({ ...request, mode: 'pending' }), 'pending')
 })
 
+test('uses the single-participant check interface for an unconscious-recovery CON roll', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  aggregate.summary.reason = '林恩尝试脱离昏迷'
+  aggregate.summary.status = 'PENDING'
+  aggregate.summary.toolName = 'systemUnconsciousRecoveryCon'
+  aggregate.results = [{
+    ...aggregate.results[0]!,
+    displayType: 'UNCONSCIOUS_RECOVERY_CON',
+    reason: '林恩尝试脱离昏迷',
+    resolvedAt: undefined,
+    resultData: createDiceDebugPreset('normal-percentile'),
+    resolution: {
+      type: 'UNCONSCIOUS_RECOVERY_CON',
+      characterName: '林恩',
+    },
+  }]
+  aggregate.results[0]!.resultData!.result = undefined
+  aggregate.results[0]!.resultData!.modules.forEach((module) => {
+    module.result = undefined
+    module.dice.forEach((die) => { die.value = undefined })
+  })
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.equal(request.presentation?.kind, 'multiplayer-check')
+  assert.equal(request.presentation?.groups[0]?.checkName, 'CON')
+  assert.deepEqual(summary.groups, [
+    { label: '林恩', expression: 'CON', result: '— · 已结算', diceCount: 2 },
+  ])
+  assert.equal(summary.modifierLabel, '单人检定')
+  assert.equal(diceState.resolveDicePlayerMode({ ...request, mode: 'pending' }), 'pending')
+})
+
 test('uses pending participant display fields instead of the roll title', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
   aggregate.summary.reason = '追踪受伤足迹并观察周围环境'

@@ -48,6 +48,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -209,12 +210,25 @@ public class GroupChatService {
                 .toList();
         Map<Long, String> decisions =
                 decisionStore.contentByReplyStepIds(replyStepIds);
+        Map<Long, Long> outputMessageIdsByStep = new HashMap<>();
+        List<GroupChatReplyStep> replySteps =
+                stepMapper.selectBatchIds(replyStepIds);
+        if (replySteps != null) {
+            for (GroupChatReplyStep replyStep : replySteps) {
+                outputMessageIdsByStep.put(
+                        replyStep.getId(),
+                        replyStep.getOutputMessageId());
+            }
+        }
 
         return messages.stream().map(message -> new GroupChatMessageVO(
                 message.getId(), message.getConversationId(), message.getTurnId(), message.getReplyStepId(),
                 message.getSpeakerType(), message.getSpeakerId(), speakerName(conversation, message),
                 message.getMessageKind(), message.getContent(),
                 message.getReplyStepId() == null
+                        || !message.getId().equals(
+                        outputMessageIdsByStep.get(
+                                message.getReplyStepId()))
                         ? null : decisions.get(message.getReplyStepId()),
                 message.getSequenceNo(), message.getStatus(), message.getCreatedAt())).toList();
     }

@@ -38,6 +38,8 @@ public final class GroupChatConstant {
     public static final String ACTION_COMBAT_ADJUDICATE = "combat_adjudicate";
     public static final String ACTION_COMBAT_UNCONSCIOUS_RECOVERY =
             "combat_unconscious_recovery";
+    public static final String ACTION_TRPG_UNCONSCIOUS_RECOVERY =
+            "trpg_unconscious_recovery";
     public static final String ACTION_TRPG_POST_COMBAT_TRANSITION =
             "trpg_post_combat_transition";
     public static final String ACTION_TRPG_INTERACTION_RESPONSE =

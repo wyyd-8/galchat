@@ -1334,6 +1334,13 @@ public class TrpgTurnExecutionService {
                 return executeNextChild(
                         conversation, turn, next);
             }
+            if (shouldSkipEmptySceneAdjudication(turn, next)) {
+                next.setStatus(GroupChatConstant.STATUS_CANCELLED)
+                        .setUpdatedAt(LocalDateTime.now());
+                stepMapper.updateById(next);
+                return executeScheduledSteps(
+                        conversation, turn, scheduled, index + 1);
+            }
             TrpgUnconsciousRecoveryService.Execution recovery =
                     unconsciousRecoveryService.handle(
                             conversation, turn, next);
@@ -1363,6 +1370,43 @@ public class TrpgTurnExecutionService {
                                     conversation, turn, next,
                                     scheduled, index)));
         });
+    }
+
+    private boolean shouldSkipEmptySceneAdjudication(
+            GroupChatTurn turn, GroupChatReplyStep step) {
+        if (!GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                turn.getPlanSource())
+                || !GroupChatConstant.ACTION_TRPG_SCENE.equals(
+                step.getActionType())
+                || !GroupChatConstant.ACTOR_KP.equals(
+                step.getSpeakerType())) {
+            return false;
+        }
+        Long skippedRecoveryCount = stepMapper.selectCount(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turn.getId())
+                        .eq(GroupChatReplyStep::getActionType,
+                                GroupChatConstant
+                                        .ACTION_TRPG_UNCONSCIOUS_RECOVERY)
+                        .in(GroupChatReplyStep::getSpeakerType,
+                                GroupChatConstant.ACTOR_USER,
+                                GroupChatConstant.ACTOR_CHARACTER)
+                        .eq(GroupChatReplyStep::getStatus,
+                                GroupChatConstant.STATUS_COMPLETED));
+        if (skippedRecoveryCount == null || skippedRecoveryCount == 0) {
+            return false;
+        }
+        Long completedActionCount = stepMapper.selectCount(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turn.getId())
+                        .eq(GroupChatReplyStep::getActionType,
+                                GroupChatConstant.ACTION_TRPG_SCENE)
+                        .in(GroupChatReplyStep::getSpeakerType,
+                                GroupChatConstant.ACTOR_USER,
+                                GroupChatConstant.ACTOR_CHARACTER)
+                        .eq(GroupChatReplyStep::getStatus,
+                                GroupChatConstant.STATUS_COMPLETED));
+        return completedActionCount == null || completedActionCount == 0;
     }
 
     private Flux<GroupChatEvent> continueAfterModelStep(

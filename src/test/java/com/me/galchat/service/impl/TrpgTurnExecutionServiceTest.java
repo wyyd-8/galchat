@@ -347,6 +347,79 @@ class TrpgTurnExecutionServiceTest {
     }
 
     @Test
+    void sceneWithoutCompletedInvestigatorActionCancelsKpAdjudication()
+            throws Exception {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupTurnPlanResolver planResolver =
+                mock(GroupTurnPlanResolver.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatService groupChatService = mock(GroupChatService.class);
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversationService, lockService, planResolver,
+                mock(GroupRuntimeRegistry.class), turnMapper, stepMapper,
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class), groupChatService,
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        GroupChatReplyStep kp = new GroupChatReplyStep()
+                .setId(103L).setTurnId(101L).setStepNo(3)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turnMapper.selectList(any())).thenReturn(List.of(turn));
+        when(turnMapper.selectById(101L)).thenReturn(turn);
+        when(stepMapper.selectCount(any())).thenReturn(0L, 1L, 0L);
+        when(stepMapper.selectList(any())).thenReturn(List.of(kp));
+        when(stepMapper.selectById(103L)).thenReturn(kp);
+        when(groupChatService.streamPersistedStep(conversation, turn, kp))
+                .thenReturn(Flux.empty());
+
+        List<GroupChatEvent> events = service.continueTurn(
+                7L, new GroupTurnContinueDTO()).collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_TURN_ACCEPTED,
+                        GroupChatConstant.EVENT_TURN_COMPLETED);
+        assertThat(kp.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_CANCELLED);
+        verify(stepMapper).updateById(kp);
+        verifyNoInteractions(groupChatService);
+        verify(planResolver).onTurnCompleted(conversation, turn);
+    }
+
+    @Test
     void retryRerunsFailedCharacterStepAndRestoredBlockedTailOnly() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);

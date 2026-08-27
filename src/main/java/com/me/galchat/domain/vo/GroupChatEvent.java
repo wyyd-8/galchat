@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import java.util.Map;
 
 @Data
-@Builder
+@Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -40,6 +40,7 @@ public class GroupChatEvent {
     private GroupRouteContextVO routeContext;
     private Boolean autoSelected;
     private String error;
+    private GenerationErrorDetailVO errorDetail;
 
     @Data
     @Builder

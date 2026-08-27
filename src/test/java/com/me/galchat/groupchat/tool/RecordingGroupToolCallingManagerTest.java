@@ -126,7 +126,7 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @Test
-    void clarificationExecutionAndRecordingUseOneTransaction() {
+    void investigatorInquiryExecutionAndRecordingUseOneTransaction() {
         ToolCallingManager delegate = mock(ToolCallingManager.class);
         GroupToolCallStore store = mock(GroupToolCallStore.class);
         TransactionTemplate transactionTemplate =
@@ -137,7 +137,7 @@ class RecordingGroupToolCallingManagerTest {
         Prompt prompt = prompt(Map.of(
                 ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L));
         ChatResponse response = responseWithCalls(
-                "askForClarification");
+                "askKp");
         ToolExecutionResult result = mock(ToolExecutionResult.class);
         when(delegate.executeToolCalls(prompt, response))
                 .thenReturn(result);
@@ -182,7 +182,7 @@ class RecordingGroupToolCallingManagerTest {
 
         assertThatThrownBy(() -> manager.executeToolCalls(
                 prompt(Map.of()), responseWithCalls(
-                        "askForClarification", "searchInfo")))
+                        "askKp", "searchInfo")))
                 .hasMessageContaining("追问工具必须单独调用");
 
         verifyNoInteractions(delegate);

@@ -352,7 +352,10 @@ public class GroupChatService {
                     .flatMapIterable(response -> toEvents(response, conversation, turn, step, outputMessage,
                             speaker, accumulator));
             Flux<GroupChatEvent> finished = Flux.defer(() -> {
-                accumulator.finishDecisionAction();
+                if (accumulator.interaction == null) {
+                    accumulator.finishDecisionAction();
+                }
+                accumulator.assertValidOutput();
                 finalizeCompletedStep(
                         conversation, turn, step, outputMessage,
                         accumulator, finalizationGuard);
@@ -672,7 +675,8 @@ public class GroupChatService {
                 step.getGroupKey(),
                 step.getGroupName(),
                 step.getGroupOrder(),
-                step.getItemOrder());
+                step.getItemOrder(),
+                step.getInteractionType());
         GroupModeRuntime runtime =
                 runtimeRegistry.require(conversation.getMode());
         return executeStep(
@@ -769,7 +773,7 @@ public class GroupChatService {
                         .build());
                 continue;
             }
-            if (isDirectTool(generation, "askForClarification")) {
+            if (isDirectInteraction(generation)) {
                 if (accumulator.interaction != null) {
                     throw new IllegalStateException(
                             "同一回复步骤不能发起多个追问");
@@ -900,6 +904,11 @@ public class GroupChatService {
         }
         return toolName.equals(generation.getMetadata().get(
                 ToolExecutionResult.METADATA_TOOL_NAME));
+    }
+
+    private boolean isDirectInteraction(Generation generation) {
+        return isDirectTool(generation, "askForClarification")
+                || isDirectTool(generation, "askKp");
     }
 
     private TrpgSceneSelectionService.SceneOptionsResult
@@ -1265,6 +1274,17 @@ public class GroupChatService {
             if (decisionActionParser != null) {
                 decisionActionParser.finish();
             }
+        }
+
+        private void assertValidOutput() {
+            if (StringUtils.hasText(content)
+                    || diceRoll != null
+                    || interaction != null
+                    || sceneOptions != null
+                    || lastMaterialMessageId != null) {
+                return;
+            }
+            throw new IllegalStateException("模型未返回有效内容");
         }
     }
 

@@ -28,7 +28,9 @@ export function updateReplyTurn(current: ReplyTurnState | null, event: GroupChat
   if (event.eventType === 'turn.completed' && (event.turnId || current)) {
     return { turnId: event.turnId ?? current?.turnId, phase: 'completed' }
   }
-  if (event.eventType === 'reply.failed' && (event.turnId || current)) {
+  if ((event.eventType === 'reply.failed'
+    || event.eventType === 'generation.failed')
+    && (event.turnId || current)) {
     return {
       turnId: event.turnId ?? current?.turnId,
       phase: 'failed',

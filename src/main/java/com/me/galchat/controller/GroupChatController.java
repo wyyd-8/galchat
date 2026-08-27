@@ -8,9 +8,11 @@ import com.me.galchat.domain.dto.GroupEndExplorationDTO;
 import com.me.galchat.domain.dto.GroupTurnContinueDTO;
 import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.dto.TrpgGameTimeUpdateDTO;
+import com.me.galchat.domain.dto.TrpgInvestigatorInquiryDTO;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.service.impl.GroupChatService;
 import com.me.galchat.service.impl.GroupGenerationStreamRegistry;
+import com.me.galchat.service.impl.GenerationRequestContext;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
@@ -32,6 +34,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/group-chat")
@@ -95,6 +100,14 @@ public class GroupChatController {
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
+                requestContext(
+                        "send-group-message",
+                        "/group-chat/conversations/" + conversationId
+                                + "/messages",
+                        request == null ? null
+                                : request.getClientRequestId(),
+                        "content", request == null ? null
+                                : request.getContent()),
                 groupChatService.chat(conversationId, request));
     }
 
@@ -119,6 +132,13 @@ public class GroupChatController {
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
+                requestContext(
+                        "continue-trpg-turn",
+                        "/group-chat/conversations/" + conversationId
+                                + "/turns/continue",
+                        request == null ? null
+                                : request.getClientRequestId(),
+                        null, null),
                 turnExecutionService.continueTurn(
                         conversationId, request));
     }
@@ -135,6 +155,13 @@ public class GroupChatController {
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
+                requestContext(
+                        "retry-trpg-step",
+                        stepPath(conversationId, turnId, stepId)
+                                + "/retry",
+                        request == null ? null
+                                : request.getClientRequestId(),
+                        null, null),
                 turnExecutionService.retry(
                         conversationId, turnId, stepId));
     }
@@ -157,7 +184,39 @@ public class GroupChatController {
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
+                requestContext(
+                        "submit-trpg-action",
+                        stepPath(conversationId, turnId, stepId)
+                                + "/message",
+                        request == null ? null
+                                : request.getClientRequestId(),
+                        "content", request == null ? null
+                                : request.getContent()),
                 turnExecutionService.submitMessage(
+                        conversationId, turnId, stepId, request));
+    }
+
+    @PostMapping(
+            value = "/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/inquiry",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> submitInquiry(
+            @PathVariable Long conversationId,
+            @PathVariable Long turnId,
+            @PathVariable Long stepId,
+            @RequestBody TrpgInvestigatorInquiryDTO request) {
+        conversationService.requireAuthorized(conversationId);
+        return generationStreamRegistry.start(
+                conversationId,
+                request == null ? null : request.getClientRequestId(),
+                requestContext(
+                        "ask-trpg-kp",
+                        stepPath(conversationId, turnId, stepId)
+                                + "/inquiry",
+                        request == null ? null
+                                : request.getClientRequestId(),
+                        "question", request == null ? null
+                                : request.getQuestion()),
+                turnExecutionService.submitInquiry(
                         conversationId, turnId, stepId, request));
     }
 
@@ -173,6 +232,14 @@ public class GroupChatController {
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
+                requestContext(
+                        "select-trpg-scene",
+                        stepPath(conversationId, turnId, stepId)
+                                + "/selection",
+                        request == null ? null
+                                : request.getClientRequestId(),
+                        "optionNo", request == null ? null
+                                : request.getOptionNo()),
                 turnExecutionService.submitSelection(
                         conversationId, turnId, stepId, request));
     }
@@ -189,6 +256,13 @@ public class GroupChatController {
         return generationStreamRegistry.start(
                 conversationId,
                 request == null ? null : request.getClientRequestId(),
+                requestContext(
+                        "end-trpg-exploration",
+                        stepPath(conversationId, turnId, stepId)
+                                + "/end-exploration",
+                        request == null ? null
+                                : request.getClientRequestId(),
+                        null, null),
                 turnExecutionService.endExploration(
                         conversationId, turnId, stepId, request));
     }
@@ -221,6 +295,29 @@ public class GroupChatController {
     @DeleteMapping("/conversations/{conversationId}/reply-plan")
     public Result finishReplyPlan(@PathVariable Long conversationId) {
         return Result.success(replyPlanService.finishActive(conversationId));
+    }
+
+    private static GenerationRequestContext requestContext(
+            String operation,
+            String path,
+            String clientRequestId,
+            String valueKey,
+            String value) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        if (clientRequestId != null) {
+            body.put("clientRequestId", clientRequestId);
+        }
+        if (valueKey != null && value != null) {
+            body.put(valueKey, value);
+        }
+        return new GenerationRequestContext(
+                operation, "POST", path, body);
+    }
+
+    private static String stepPath(
+            Long conversationId, Long turnId, Long stepId) {
+        return "/group-chat/conversations/" + conversationId
+                + "/turns/" + turnId + "/steps/" + stepId;
     }
 
 }

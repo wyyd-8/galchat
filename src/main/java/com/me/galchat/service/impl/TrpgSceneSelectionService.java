@@ -15,6 +15,7 @@ import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -39,6 +40,13 @@ public class TrpgSceneSelectionService {
     private final TrpgSceneSelectionStore store;
     private final TrpgParticipantService participantService;
     private final TrpgSelectionRandomizer randomizer;
+    private TrpgInvestigatorSuspensionService suspensionService;
+
+    @Autowired(required = false)
+    void setSuspensionService(
+            TrpgInvestigatorSuspensionService suspensionService) {
+        this.suspensionService = suspensionService;
+    }
 
     public List<GroupActionSpec> selectionActions(GroupConversation conversation) {
         List<GroupActionSpec> actions = new ArrayList<>();
@@ -46,7 +54,7 @@ public class TrpgSceneSelectionService {
                 GroupChatConstant.ACTOR_KP, null, 1));
         int itemOrder = 2;
         for (TrpgParticipantService.Participant participant :
-                participantService.listInvestigators(conversation)) {
+                activeInvestigators(conversation)) {
             actions.add(selectionAction(
                     participant.actor().type(),
                     participant.actor().id(),
@@ -195,7 +203,7 @@ public class TrpgSceneSelectionService {
             Long locationId =
                     options.values().iterator().next().locationId();
             for (TrpgParticipantService.Participant participant :
-                    participantService.listInvestigators(conversation)) {
+                    activeInvestigators(conversation)) {
                 store.put(conversationId, turnId,
                         participant.actor(), locationId);
             }
@@ -299,7 +307,7 @@ public class TrpgSceneSelectionService {
         GroupConversation conversation =
                 requireSelectionConversation(conversationId);
         TrpgParticipantService.Participant participant =
-                participantService.listInvestigators(conversation)
+                activeInvestigators(conversation)
                         .stream()
                         .filter(candidate ->
                                 candidate.actor().equals(actor))
@@ -350,7 +358,7 @@ public class TrpgSceneSelectionService {
             return false;
         }
         List<TrpgParticipantService.Participant> participants =
-                participantService.listInvestigators(conversation);
+                activeInvestigators(conversation);
         if (participants.isEmpty()) {
             return false;
         }
@@ -427,6 +435,16 @@ public class TrpgSceneSelectionService {
     private GroupActionSpec selectionAction(
             String actorType, Long actorId, int itemOrder) {
         return selectionAction(actorType, actorId, null, itemOrder);
+    }
+
+    private List<TrpgParticipantService.Participant> activeInvestigators(
+            GroupConversation conversation) {
+        return participantService.listInvestigators(conversation).stream()
+                .filter(participant -> suspensionService == null
+                        || !suspensionService.isUnavailable(
+                                conversation.getId(),
+                                participant.cardId(), null))
+                .toList();
     }
 
     private GroupActionSpec selectionAction(

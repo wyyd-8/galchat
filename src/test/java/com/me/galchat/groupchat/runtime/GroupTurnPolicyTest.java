@@ -76,6 +76,27 @@ class GroupTurnPolicyTest {
                 .containsExactly(11L);
     }
 
+    @Test
+    void trpgPostCombatPlanRunsOnlyTheKpTransitionAction() {
+        GroupReplyPlanItem kp = new GroupReplyPlanItem()
+                .setActorType(GroupChatConstant.ACTOR_KP)
+                .setItemOrder(1);
+        GroupReplyPlanSelection selection = new GroupReplyPlanSelection(
+                GroupChatConstant.PLAN_SOURCE_POST_COMBAT,
+                77L, "post-combat:77", "战斗结束后的叙事过渡",
+                List.of(kp));
+
+        List<GroupActionSpec> actions = new TrpgGroupTurnPolicy()
+                .plan(new GroupConversation(), selection);
+
+        assertThat(actions).singleElement().satisfies(action -> {
+            assertThat(action.actionType()).isEqualTo(
+                    GroupChatConstant.ACTION_TRPG_POST_COMBAT_TRANSITION);
+            assertThat(action.actorType()).isEqualTo(
+                    GroupChatConstant.ACTOR_KP);
+        });
+    }
+
     private GroupReplyPlanSelection selection(String source, List<GroupReplyPlanItem> items) {
         return new GroupReplyPlanSelection(
                 source, 100L, "default", "群聊", items);

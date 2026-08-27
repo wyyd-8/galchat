@@ -8,8 +8,22 @@ public record GroupActionSpec(
         String groupKey,
         String groupName,
         Integer groupOrder,
-        Integer itemOrder
+        Integer itemOrder,
+        String interactionType
 ) {
+    public GroupActionSpec(
+            String actionType,
+            String actorType,
+            Long actorId,
+            Long subjectCharacterId,
+            String groupKey,
+            String groupName,
+            Integer groupOrder,
+            Integer itemOrder) {
+        this(actionType, actorType, actorId, subjectCharacterId,
+                groupKey, groupName, groupOrder, itemOrder, null);
+    }
+
     public GroupActionSpec(
             String actionType,
             String actorType,
@@ -19,7 +33,7 @@ public record GroupActionSpec(
             Integer groupOrder,
             Integer itemOrder) {
         this(actionType, actorType, actorId, null, groupKey, groupName,
-                groupOrder, itemOrder);
+                groupOrder, itemOrder, null);
     }
 
     public GroupActorRef actor() {

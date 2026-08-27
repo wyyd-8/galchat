@@ -16,6 +16,20 @@ public class TrpgGroupTurnPolicy implements GroupTurnPolicy {
 
     @Override
     public List<GroupActionSpec> plan(GroupConversation conversation, GroupReplyPlanSelection selection) {
+        if (GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(
+                selection.source())) {
+            GroupReplyPlanItem kp = selection.items().stream()
+                    .filter(item -> GroupChatConstant.ACTOR_KP.equals(
+                            item.getActorType()))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "战斗结束后的叙事过渡缺少KP"));
+            return List.of(new GroupActionSpec(
+                    GroupChatConstant.ACTION_TRPG_POST_COMBAT_TRANSITION,
+                    GroupChatConstant.ACTOR_KP, null, null,
+                    selection.executionKey(), selection.displayName(),
+                    1, kp.getItemOrder()));
+        }
         boolean combat = GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
                 selection.source());
         if (!combat) {

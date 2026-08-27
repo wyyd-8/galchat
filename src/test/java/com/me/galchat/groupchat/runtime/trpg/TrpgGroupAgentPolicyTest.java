@@ -15,6 +15,12 @@ import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.CharacterCardContextFormatter;
 import com.me.galchat.service.impl.GroupContextAssembler;
+import com.me.galchat.service.impl.TrpgStepInteractionService;
+import com.me.galchat.service.impl.TrpgChildSceneCommandService;
+import com.me.galchat.service.impl.TrpgCombatLifecycleService;
+import com.me.galchat.service.impl.TrpgContextWindowService;
+import com.me.galchat.service.impl.TrpgInvestigatorContextAssembler;
+import com.me.galchat.service.impl.TrpgInvestigatorSuspensionService;
 import com.me.galchat.tool.KpDiceTools;
 import com.me.galchat.tool.KpPushedCheckTools;
 import org.junit.jupiter.api.Test;
@@ -66,7 +72,18 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.service.impl
                         .TrpgChildSceneCommandService.class));
         GroupConversation conversation = new GroupConversation()
-                .setId(7L).setWorldId(2L).setUserWorldId(5L);
+                .setId(7L).setWorldId(2L).setUserWorldId(5L)
+                .setActiveReplyPlanId(41L);
+        TrpgInvestigatorSuspensionService suspensions =
+                mock(TrpgInvestigatorSuspensionService.class);
+        when(suspensions.sceneReentryPrompt(7L, 41L))
+                .thenReturn("<kp-storyline-reentry>KP恢复桥接</kp-storyline-reentry>");
+        policy.setInvestigatorSuspensionTools(
+                mock(com.me.galchat.tool
+                        .KpInvestigatorSuspensionTools.class),
+                mock(com.me.galchat.tool
+                        .KpSuspendedInvestigatorRecoveryTools.class),
+                suspensions);
 
         var invocation = policy.prepare(
                 conversation,
@@ -97,9 +114,121 @@ class TrpgGroupAgentPolicyTest {
                 .contains("<context-summary status=\"completed\">")
                 .contains("不得继续或重新引入其中已经结束的场景")
                 .contains("不要使用其中的参与者代替当前参与者")
+                .contains("<kp-storyline-reentry>")
+                .contains("KP恢复桥接")
                 .contains("不得附加括号式或其他场外行动提示")
                 .contains("不要建议调查员换一种查法")
                 .contains("完成当前叙述后立即结束回复");
+    }
+
+    @Test
+    void postCombatTransitionOffersOnlyNarrativeSuspensionManagement() {
+        ICharacterCardService cardService = mock(ICharacterCardService.class);
+        when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
+        var suspendTools = mock(com.me.galchat.tool
+                .KpInvestigatorSuspensionTools.class);
+        var recoveryTools = mock(com.me.galchat.tool
+                .KpSuspendedInvestigatorRecoveryTools.class);
+        TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
+                mock(ChatClient.class), mock(GroupContextAssembler.class),
+                cardService, new CharacterCardContextFormatter(),
+                mock(KpDiceTools.class), mock(KpPushedCheckTools.class),
+                mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
+                mock(com.me.galchat.tool.InvestigatorSceneTools.class),
+                mock(com.me.galchat.tool.KpSceneTools.class),
+                mock(com.me.galchat.tool.KpRunTools.class),
+                mock(TrpgContextWindowService.class),
+                mock(TrpgInvestigatorContextAssembler.class),
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool.KpWaitingInvestigatorTools.class),
+                mock(TrpgChildSceneCommandService.class));
+        policy.setInvestigatorSuspensionTools(
+                suspendTools, recoveryTools,
+                mock(TrpgInvestigatorSuspensionService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setWorldId(2L).setUserWorldId(5L);
+
+        var invocation = policy.prepare(conversation,
+                new GroupActionSpec(
+                        GroupChatConstant
+                                .ACTION_TRPG_POST_COMBAT_TRANSITION,
+                        GroupChatConstant.ACTOR_KP, null,
+                        "post-combat:77", "战斗结束后的叙事过渡",
+                        1, 1),
+                new GroupContextMaterial(List.of()));
+
+        assertThat(invocation.tools())
+                .containsExactly(suspendTools)
+                .doesNotContain(recoveryTools);
+        assertThat(invocation.prompt().getInstructions().getLast().getText())
+                .contains("战斗结束后的叙事过渡")
+                .contains("所有调查员的下一次行动之前")
+                .contains("不要仅因昏迷、受伤、受控或暂时无法行动")
+                .contains("适合继续主持")
+                .contains("切换镜头");
+    }
+
+    @Test
+    void firstRestoredInvestigatorActionReceivesCompressionSafeBridge() {
+        ICharacterCardService cardService = mock(ICharacterCardService.class);
+        CocDiceCharacterVO elaine = card(109L, "艾琳", 9L);
+        when(cardService.listDiceCharacters(7L))
+                .thenReturn(List.of(elaine));
+        GroupContextAssembler contextAssembler =
+                mock(GroupContextAssembler.class);
+        TrpgInvestigatorContextAssembler investigatorAssembler =
+                mock(TrpgInvestigatorContextAssembler.class);
+        TrpgInvestigatorSuspensionService suspensions =
+                mock(TrpgInvestigatorSuspensionService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setWorldId(2L).setUserWorldId(5L)
+                .setActiveReplyPlanId(31L);
+        GroupActionSpec action = new GroupActionSpec(
+                GroupChatConstant.ACTION_TRPG_SCENE,
+                GroupChatConstant.ACTOR_CHARACTER, 9L, 109L,
+                "scene:31", "营地", 1, 1);
+        when(contextAssembler.actorName(5L, action.actor()))
+                .thenReturn("调查员Agent");
+        when(investigatorAssembler.format(conversation, action))
+                .thenReturn("调查员卡");
+        when(suspensions.reentryPrompt(7L, 109L, 31L))
+                .thenReturn("<investigator-storyline-reentry>桥接内容</investigator-storyline-reentry>");
+        TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
+                mock(ChatClient.class), contextAssembler, cardService,
+                new CharacterCardContextFormatter(),
+                mock(KpDiceTools.class), mock(KpPushedCheckTools.class),
+                mock(com.me.galchat.tool.TrpgSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpSceneSelectionTools.class),
+                mock(com.me.galchat.tool.KpModuleTools.class),
+                mock(com.me.galchat.tool.KpSkillRuleTools.class),
+                mock(com.me.galchat.tool.InvestigatorSceneTools.class),
+                mock(com.me.galchat.tool.KpSceneTools.class),
+                mock(com.me.galchat.tool.KpRunTools.class),
+                mock(TrpgContextWindowService.class), investigatorAssembler,
+                mock(com.me.galchat.tool.KpCombatTools.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.tool.KpChildSceneTools.class),
+                mock(com.me.galchat.tool.KpWaitingInvestigatorTools.class),
+                mock(TrpgChildSceneCommandService.class));
+        policy.setInvestigatorSuspensionTools(
+                mock(com.me.galchat.tool
+                        .KpInvestigatorSuspensionTools.class),
+                mock(com.me.galchat.tool
+                        .KpSuspendedInvestigatorRecoveryTools.class),
+                suspensions);
+
+        var invocation = policy.prepare(
+                conversation, action,
+                new GroupContextMaterial(List.of()));
+
+        assertThat(invocation.prompt().getInstructions().getLast().getText())
+                .contains("<investigator-storyline-reentry>")
+                .contains("桥接内容");
     }
 
     @Test
@@ -197,6 +326,13 @@ class TrpgGroupAgentPolicyTest {
         policy.setKpFirearmTools(firearmTools);
         var meleeTools = mock(com.me.galchat.tool.KpMeleeTools.class);
         policy.setKpMeleeTools(meleeTools);
+        var inquiryLuckTools = mock(
+                com.me.galchat.tool.KpInquiryLuckTools.class);
+        policy.setKpInquiryLuckTools(inquiryLuckTools);
+        var investigatorInquiryTools = mock(
+                com.me.galchat.tool.InvestigatorKpInquiryTools.class);
+        policy.setInvestigatorKpInquiryTools(
+                investigatorInquiryTools);
         var invocation = policy.prepare(
                 conversation,
                 new GroupActionSpec(
@@ -326,6 +462,36 @@ class TrpgGroupAgentPolicyTest {
                 .getLast().getText())
                 .contains("无法唯一确定时调用askForClarification")
                 .contains("不确定是否需要追问时不要调用");
+
+        var inquiryInvocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant
+                                .ACTION_TRPG_INTERACTION_RESPONSE,
+                        GroupChatConstant.ACTOR_KP,
+                        null,
+                        71L,
+                        "scene:1",
+                        "地下室",
+                        1,
+                        1,
+                        com.me.galchat.service.impl
+                                .TrpgStepInteractionService
+                                .INVESTIGATOR_KP_INQUIRY),
+                new GroupContextMaterial(List.of()));
+        assertThat(inquiryInvocation.tools())
+                .containsExactly(inquiryLuckTools);
+        assertThat(inquiryInvocation.prompt().getInstructions()
+                .getLast().getText())
+                .contains("只回答调查员最新提出的一个问题")
+                .contains("不是行动裁定")
+                .contains("requestInquiryLuck")
+                .contains("外部偶然事件")
+                .contains("空载出租车")
+                .contains("从抽屉外部看不见里面")
+                .contains("不能决定出租车司机停车")
+                .contains("工具结果已经出现")
+                .contains("不得再次调用");
         String assembledRoutePrompt = routeInvocation.prompt()
                 .getInstructions().stream()
                 .map(message -> message.getText())
@@ -420,6 +586,8 @@ class TrpgGroupAgentPolicyTest {
                 .contains("当前步骤只负责行动声明")
                 .doesNotContain("每次响应最多调用一个会改变状态的掷骰工具");
         assertThat(npcAttack.tools()).isEmpty();
+        assertThat(npcAttack.tools())
+                .doesNotContain(investigatorInquiryTools);
         org.mockito.Mockito.verify(contextWindowService)
                 .recordPrompt(
                         org.mockito.ArgumentMatchers.eq(7L),
@@ -703,6 +871,9 @@ class TrpgGroupAgentPolicyTest {
                 .thenReturn("<controlled-investigator>艾琳</controlled-investigator>");
         com.me.galchat.tool.InvestigatorSceneTools sceneTools =
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class);
+        com.me.galchat.tool.InvestigatorKpInquiryTools inquiryTools =
+                mock(com.me.galchat.tool
+                        .InvestigatorKpInquiryTools.class);
         TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
                 mock(ChatClient.class),
                 contextAssembler,
@@ -727,6 +898,7 @@ class TrpgGroupAgentPolicyTest {
                         .KpWaitingInvestigatorTools.class),
                 mock(com.me.galchat.service.impl
                         .TrpgChildSceneCommandService.class));
+        policy.setInvestigatorKpInquiryTools(inquiryTools);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
 
@@ -742,7 +914,8 @@ class TrpgGroupAgentPolicyTest {
                         1),
                 new GroupContextMaterial(List.of()));
 
-        assertThat(invocation.tools()).containsExactly(sceneTools);
+        assertThat(invocation.tools())
+                .containsExactly(sceneTools, inquiryTools);
         String investigatorSystem = invocation.prompt().getInstructions()
                 .getFirst().getText();
         assertThat(investigatorSystem)
@@ -810,7 +983,35 @@ class TrpgGroupAgentPolicyTest {
                 .contains("不要展开行动方法、检查项目、步骤、站位或风险预案")
                 .contains("不能替其他调查员决定")
                 .contains("确定不再执行当前场景行动时可调用endSceneExploration")
+                .contains("【向KP询问：askKp】")
+                .contains("询问本身不算正式行动")
+                .contains("不得要求KP掷幸运")
+                .contains("从我现在的位置，能看见正在经过或停靠的空载出租车吗")
+                .contains("不要询问关闭的抽屉里面有什么")
+                .contains("倒下的书柜是否完全挡住了食尸鬼")
+                .contains("工具是returnDirect")
                 .doesNotContain("调用后的action只能说明“XXX决定离开了XX”");
+
+        var resumed = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_TRPG_SCENE,
+                        GroupChatConstant.ACTOR_CHARACTER,
+                        9L,
+                        72L,
+                        "scene:1",
+                        "场景",
+                        1,
+                        1,
+                        com.me.galchat.service.impl
+                                .TrpgStepInteractionService
+                                .INVESTIGATOR_KP_INQUIRY),
+                new GroupContextMaterial(List.of()));
+        assertThat(resumed.prompt().getInstructions().getLast().getText())
+                .contains("刚刚从向KP询问中恢复")
+                .contains("问题不算正式行动")
+                .contains("现在必须据此完成")
+                .contains("不得重复询问已经回答的事实");
 
         var contributor = policy.prepare(
                 conversation,
@@ -830,6 +1031,27 @@ class TrpgGroupAgentPolicyTest {
                 .contains("只有行动需要KP分别处理")
                 .contains("才算不同的行动")
                 .contains("不得假设尚未经过KP裁定的行动已经成功");
+
+        var clarificationResponse = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant
+                                .ACTION_TRPG_INTERACTION_RESPONSE,
+                        GroupChatConstant.ACTOR_CHARACTER,
+                        9L,
+                        72L,
+                        "scene:1",
+                        "场景",
+                        1,
+                        1,
+                        TrpgStepInteractionService.KP_CLARIFICATION),
+                new GroupContextMaterial(List.of()));
+        assertThat(clarificationResponse.tools()).isEmpty();
+        assertThat(clarificationResponse.prompt().getInstructions()
+                .getLast().getText())
+                .contains("回答KP刚刚公开提出的追问")
+                .contains("最新回答将替代与之冲突的旧行动")
+                .contains("不受普通行动50字限制");
     }
 
     @Test
@@ -945,6 +1167,9 @@ class TrpgGroupAgentPolicyTest {
                         .KpWaitingInvestigatorTools.class),
                 mock(com.me.galchat.service.impl
                         .TrpgChildSceneCommandService.class));
+        var inquiryTools = mock(
+                com.me.galchat.tool.InvestigatorKpInquiryTools.class);
+        policy.setInvestigatorKpInquiryTools(inquiryTools);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
 
@@ -988,6 +1213,42 @@ class TrpgGroupAgentPolicyTest {
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("<decision>")
                 .contains("<action>");
+
+        var attackInvocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_COMBAT_ATTACK,
+                        GroupChatConstant.ACTOR_CHARACTER,
+                        9L,
+                        72L,
+                        "combat:1",
+                        "战斗",
+                        1,
+                        1,
+                        null),
+                new GroupContextMaterial(List.of()));
+        assertThat(attackInvocation.tools())
+                .containsExactly(inquiryTools);
+        assertThat(attackInvocation.prompt().getInstructions()
+                .getLast().getText())
+                .contains("【向KP询问：askKp】")
+                .contains("距离、掩体、出口、位置关系")
+                .contains("倒下的书柜是否完全挡住了食尸鬼");
+
+        var defenseInvocation = policy.prepare(
+                conversation,
+                new GroupActionSpec(
+                        GroupChatConstant.ACTION_COMBAT_DEFENSE,
+                        GroupChatConstant.ACTOR_CHARACTER,
+                        9L,
+                        72L,
+                        "combat:1",
+                        "战斗",
+                        1,
+                        1,
+                        null),
+                new GroupContextMaterial(List.of()));
+        assertThat(defenseInvocation.tools()).isEmpty();
     }
 
     private CocDiceCharacterVO combatNpcCard(Long id, String name) {

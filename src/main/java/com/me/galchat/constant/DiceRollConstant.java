@@ -31,6 +31,8 @@ public final class DiceRollConstant {
             "requestFirearmAttack";
     public static final String TOOL_REQUEST_MELEE_ATTACK =
             "requestMeleeAttack";
+    public static final String TOOL_REQUEST_INQUIRY_LUCK =
+            "requestInquiryLuck";
 
     public static final Set<String> KP_STATE_TOOL_NAMES = Set.of(
             TOOL_REQUEST_CHECK,
@@ -40,6 +42,7 @@ public final class DiceRollConstant {
             TOOL_REQUEST_SAN_CHECK,
             TOOL_REQUEST_FIREARM_ATTACK,
             TOOL_REQUEST_MELEE_ATTACK,
+            TOOL_REQUEST_INQUIRY_LUCK,
             "rollSanLoss",
             "rollDamage",
             "rollHealing");

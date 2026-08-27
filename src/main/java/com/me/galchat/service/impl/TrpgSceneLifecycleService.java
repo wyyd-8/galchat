@@ -17,6 +17,7 @@ import com.me.galchat.mapper.GroupReplyPlanItemMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 import java.util.Objects;
@@ -38,6 +39,13 @@ public class TrpgSceneLifecycleService {
     private final GroupReplyPlanService replyPlanService;
     private final TrpgChildScenePlanService childScenePlanService;
     private final TrpgTemporaryInsanityService temporaryInsanityService;
+    private TrpgInvestigatorSuspensionService suspensionService;
+
+    @Autowired(required = false)
+    void setSuspensionService(
+            TrpgInvestigatorSuspensionService suspensionService) {
+        this.suspensionService = suspensionService;
+    }
 
     public GroupReplyPlanSelection applyReadyStatuses(
             GroupReplyPlanSelection selection,
@@ -107,6 +115,11 @@ public class TrpgSceneLifecycleService {
                                         GroupChatConstant.ACTOR_CHARACTER))
                 .stream()
                 .filter(item -> item.getSubjectCharacterId() != null)
+                .filter(item -> suspensionService == null
+                        || !suspensionService.isUnavailable(
+                                conversationId,
+                                item.getSubjectCharacterId(),
+                                execution.plan().getId()))
                 .map(item -> TrpgSceneProgressStore.actorKey(
                         item.getSubjectCharacterId()))
                 .collect(Collectors.toSet());

@@ -6,6 +6,7 @@ import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
 import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -23,6 +24,13 @@ public class GroupTurnPlanResolver {
     private final TrpgChildSceneCommandService
             childSceneCommandService;
     private final TrpgProposalOrderService proposalOrderService;
+    private TrpgInvestigatorSuspensionService suspensionService;
+
+    @Autowired(required = false)
+    void setSuspensionService(
+            TrpgInvestigatorSuspensionService suspensionService) {
+        this.suspensionService = suspensionService;
+    }
 
     public ResolvedTurnPlan resolve(
             GroupConversation conversation, GroupModeRuntime runtime) {
@@ -45,6 +53,7 @@ public class GroupTurnPlanResolver {
                     selection, readyActors);
             actions = runtime.turnPolicy().plan(
                     conversation, selection);
+            actions = filterSuspended(conversation, actions);
             actions = proposalOrderService.orderForTurn(
                     conversation, actions);
             selection = replyPlanService
@@ -52,9 +61,11 @@ public class GroupTurnPlanResolver {
                             conversation, actions, readyActors);
             actions = runtime.turnPolicy().plan(
                     conversation, selection);
+            actions = filterSuspended(conversation, actions);
         } else {
             actions = runtime.turnPolicy().plan(
                     conversation, selection);
+            actions = filterSuspended(conversation, actions);
         }
         return new ResolvedTurnPlan(
                 selection.source(),
@@ -65,6 +76,10 @@ public class GroupTurnPlanResolver {
     public void onTurnCompleted(
             GroupConversation conversation, String turnSource) {
         if (GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
+            replyPlanService.finishActiveUnderLock(conversation);
+            return;
+        }
+        if (GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(turnSource)) {
             replyPlanService.finishActiveUnderLock(conversation);
             return;
         }
@@ -83,6 +98,9 @@ public class GroupTurnPlanResolver {
             com.me.galchat.domain.po.GroupChatTurn turn) {
         proposalOrderService.onTurnCompleted(
                 conversation, turn);
+        if (suspensionService != null) {
+            suspensionService.completeReentriesAfterTurn(turn);
+        }
         if (combatLifecycleService.finalizeStartAfterTurn(
                 conversation, turn)) {
             return;
@@ -98,5 +116,20 @@ public class GroupTurnPlanResolver {
             String source,
             Long contextId,
             List<GroupActionSpec> actions) {
+    }
+
+    private List<GroupActionSpec> filterSuspended(
+            GroupConversation conversation,
+            List<GroupActionSpec> actions) {
+        if (suspensionService == null || actions == null) {
+            return actions == null ? List.of() : actions;
+        }
+        Long planId = conversation.getActiveReplyPlanId();
+        return actions.stream()
+                .filter(action -> action.subjectCharacterId() == null
+                        || !suspensionService.isUnavailable(
+                                conversation.getId(),
+                                action.subjectCharacterId(), planId))
+                .toList();
     }
 }

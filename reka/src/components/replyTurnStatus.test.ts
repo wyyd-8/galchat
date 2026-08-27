@@ -51,3 +51,13 @@ test('marks the active actor failed when the turn fails', () => {
   assert.equal(state.error, '模型调用失败')
   assert.equal(replyActorPhase(state, item(22), [message(22, 'streaming')]), 'failed')
 })
+
+test('marks a normal group turn failed from the operation failure event', () => {
+  const state = updateReplyTurn(
+    { turnId: 42, phase: 'running' as const, activeActorId: 22 },
+    event('generation.failed', { turnId: 42, error: '模型调用失败' }),
+  )
+
+  assert.equal(state.phase, 'failed')
+  assert.equal(state.error, '模型调用失败')
+})

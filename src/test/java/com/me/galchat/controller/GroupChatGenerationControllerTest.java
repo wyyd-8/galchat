@@ -4,6 +4,7 @@ import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.dto.GroupEndExplorationDTO;
 import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.dto.GroupTurnContinueDTO;
+import com.me.galchat.domain.dto.TrpgInvestigatorInquiryDTO;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.service.impl.GroupChatService;
@@ -103,7 +104,81 @@ class GroupChatGenerationControllerTest {
         assertThatThrownBy(() -> controller.endExploration(
                 7L, 8L, 9L, new GroupEndExplorationDTO()))
                 .isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.submitInquiry(
+                7L, 8L, 9L, new TrpgInvestigatorInquiryDTO()))
+                .isSameAs(unauthorized);
 
         verifyNoInteractions(groupChatService, turnExecutionService);
+    }
+
+    @Test
+    void userInquiryUsesTheGenerationRegistry() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        TrpgTurnExecutionService turns =
+                mock(TrpgTurnExecutionService.class);
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry();
+        GroupChatController controller = new GroupChatController(
+                conversations,
+                mock(GroupConversationLifecycleService.class),
+                mock(GroupChatService.class), registry,
+                mock(GroupChatWithdrawalService.class),
+                mock(GroupReplyPlanService.class),
+                mock(TrpgContextWindowService.class), turns,
+                mock(TrpgGameTimeService.class));
+        TrpgInvestigatorInquiryDTO request =
+                new TrpgInvestigatorInquiryDTO();
+        request.setClientRequestId("ask-1");
+        request.setQuestion("门还开着吗？");
+        GroupChatEvent answer = GroupChatEvent.builder()
+                .eventType("message.completed")
+                .conversationId(7L).turnId(8L).replyStepId(10L)
+                .content("门仍然开着。").build();
+        when(turns.submitInquiry(7L, 8L, 9L, request))
+                .thenReturn(Flux.just(answer));
+
+        controller.submitInquiry(7L, 8L, 9L, request)
+                .collectList().block();
+        List<GroupChatEvent> resumed = controller.resumeGeneration(
+                7L, "ask-1").collectList().block();
+
+        assertThat(resumed).extracting(GroupChatEvent::getContent)
+                .containsExactly("门仍然开着。", null);
+    }
+
+    @Test
+    void generationFailureShowsTheSanitizedHttpRequestContext() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        TrpgTurnExecutionService turns =
+                mock(TrpgTurnExecutionService.class);
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry();
+        GroupChatController controller = new GroupChatController(
+                conversations,
+                mock(GroupConversationLifecycleService.class),
+                mock(GroupChatService.class), registry,
+                mock(GroupChatWithdrawalService.class),
+                mock(GroupReplyPlanService.class),
+                mock(TrpgContextWindowService.class), turns,
+                mock(TrpgGameTimeService.class));
+        GroupTurnContinueDTO request = new GroupTurnContinueDTO();
+        request.setClientRequestId("continue-7");
+        when(turns.continueTurn(7L, request)).thenReturn(
+                Flux.error(new IllegalStateException("model failed")));
+
+        GroupChatEvent failure = controller.continueTurn(7L, request)
+                .filter(event -> "generation.failed".equals(
+                        event.getEventType()))
+                .blockFirst();
+
+        assertThat(failure).isNotNull();
+        assertThat(failure.getErrorDetail().getOperation())
+                .isEqualTo("continue-trpg-turn");
+        assertThat(failure.getErrorDetail().getRequest().toString())
+                .contains("POST")
+                .contains("/group-chat/conversations/7/turns/continue")
+                .contains("continue-7");
     }
 }

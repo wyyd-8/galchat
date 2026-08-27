@@ -127,6 +127,102 @@ class GroupTurnPlanResolverTest {
     }
 
     @Test
+    void completedPostCombatTransitionResumesTheExplorationScene() {
+        GroupReplyPlanService replyPlanService =
+                mock(GroupReplyPlanService.class);
+        GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
+                replyPlanService,
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgRunLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(TrpgChildSceneCommandService.class),
+                mock(TrpgProposalOrderService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
+
+        resolver.onTurnCompleted(
+                conversation, GroupChatConstant.PLAN_SOURCE_POST_COMBAT);
+
+        verify(replyPlanService).finishActiveUnderLock(conversation);
+    }
+
+    @Test
+    void completedTurnConsumesAnyFirstActionReentryBridge() {
+        TrpgInvestigatorSuspensionService suspensions =
+                mock(TrpgInvestigatorSuspensionService.class);
+        GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
+                mock(GroupReplyPlanService.class),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgRunLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(TrpgChildSceneCommandService.class),
+                mock(TrpgProposalOrderService.class));
+        resolver.setSuspensionService(suspensions);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(61L).setConversationId(7L)
+                .setPlanId(31L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE);
+
+        resolver.onTurnCompleted(conversation, turn);
+
+        verify(suspensions).completeReentriesAfterTurn(turn);
+    }
+
+    @Test
+    void sceneResolverOmitsGloballySuspendedInvestigators() {
+        GroupReplyPlanService replyPlanService =
+                mock(GroupReplyPlanService.class);
+        TrpgSceneLifecycleService lifecycle =
+                mock(TrpgSceneLifecycleService.class);
+        TrpgProposalOrderService proposalOrder =
+                mock(TrpgProposalOrderService.class);
+        TrpgInvestigatorSuspensionService suspensions =
+                mock(TrpgInvestigatorSuspensionService.class);
+        GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
+                replyPlanService,
+                mock(TrpgSceneSelectionService.class), lifecycle,
+                mock(TrpgRunLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(TrpgChildSceneCommandService.class), proposalOrder);
+        resolver.setSuspensionService(suspensions);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setActiveReplyPlanId(10L);
+        GroupReplyPlanItem investigator = sceneItem(
+                11L, 1, GroupChatConstant.ACTOR_CHARACTER, 8L,
+                GroupChatConstant.PARTICIPANT_ACTIVE)
+                .setSubjectCharacterId(108L);
+        GroupReplyPlanItem kp = sceneItem(
+                12L, 2, GroupChatConstant.ACTOR_KP, null,
+                GroupChatConstant.PARTICIPANT_ACTIVE);
+        GroupReplyPlanSelection selection = new GroupReplyPlanSelection(
+                GroupChatConstant.PLAN_SOURCE_SCENE, 100L,
+                "scene:10", "地下室", List.of(investigator, kp));
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupTurnPolicy policy = new TrpgGroupTurnPolicy();
+        when(runtime.turnPolicy()).thenReturn(policy);
+        when(replyPlanService.currentPlanForExecution(conversation))
+                .thenReturn(selection);
+        when(lifecycle.readyActors(7L, 10L)).thenReturn(Set.of());
+        when(lifecycle.applyReadyStatuses(selection, Set.of()))
+                .thenReturn(selection);
+        when(proposalOrder.orderForTurn(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(replyPlanService.replaceSceneExecutionOrderUnderLock(
+                any(), any(), any())).thenReturn(selection);
+        when(suspensions.isUnavailable(7L, 108L, 10L))
+                .thenReturn(true);
+
+        assertThat(resolver.resolve(conversation, runtime).actions())
+                .extracting(GroupActionSpec::actorType)
+                .containsExactly(GroupChatConstant.ACTOR_KP);
+    }
+
+    @Test
     void completedChatTurnFinishesTheActivePlanWhileTheCallerHoldsTheLock() {
         GroupReplyPlanService replyPlanService =
                 mock(GroupReplyPlanService.class);

@@ -8,6 +8,7 @@ import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
 import com.me.galchat.domain.dto.GroupEndExplorationDTO;
 import com.me.galchat.domain.dto.GroupTurnContinueDTO;
+import com.me.galchat.domain.dto.TrpgInvestigatorInquiryDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
@@ -67,6 +68,7 @@ public class TrpgTurnExecutionService {
     private final TrpgUnconsciousRecoveryService
             unconsciousRecoveryService;
     private final ITrpgSaveService trpgSaveService;
+    private TrpgStepInteractionService stepInteractionService;
 
     public Flux<GroupChatEvent> continueTurn(
             Long conversationId,
@@ -610,6 +612,7 @@ public class TrpgTurnExecutionService {
                 step == null ? null : step.getInteractionType(),
                 step == null ? null : step.getInteractionSeq(),
                 waiting,
+                canAskKp(step, waiting, allSteps),
                 options,
                 routeContext(step, allSteps),
                 allSteps.stream()
@@ -619,6 +622,28 @@ public class TrpgTurnExecutionService {
                                 item.getSubjectCharacterId(),
                                 item.getStatus(), item.getErrorMessage()))
                         .toList());
+    }
+
+    private boolean canAskKp(
+            GroupChatReplyStep step,
+            boolean waitingForUser,
+            List<GroupChatReplyStep> allSteps) {
+        if (!waitingForUser || step == null
+                || step.getParentStepId() != null
+                || !(GroupChatConstant.ACTION_TRPG_SCENE.equals(
+                step.getActionType())
+                || GroupChatConstant.ACTION_COMBAT_ATTACK.equals(
+                step.getActionType()))) {
+            return false;
+        }
+        long inquiryCount = allSteps.stream()
+                .filter(item -> step.getId().equals(
+                        item.getParentStepId()))
+                .filter(item -> TrpgStepInteractionService
+                        .INVESTIGATOR_KP_INQUIRY.equals(
+                                item.getInteractionType()))
+                .count();
+        return inquiryCount < 6;
     }
 
     private boolean isCurrentStep(GroupChatReplyStep step) {
@@ -727,6 +752,149 @@ public class TrpgTurnExecutionService {
                 return Flux.error(exception);
             }
         });
+    }
+
+    @Autowired
+    void setStepInteractionService(
+            TrpgStepInteractionService stepInteractionService) {
+        this.stepInteractionService = stepInteractionService;
+    }
+
+    public Flux<GroupChatEvent> submitInquiry(
+            Long conversationId,
+            Long turnId,
+            Long stepId,
+            TrpgInvestigatorInquiryDTO request) {
+        return Flux.defer(() -> {
+            validateInquiryRequest(request);
+            conversationService.requireAuthorized(conversationId);
+            GroupConversationLockService.OwnedLock lock =
+                    lockService.tryLock(conversationId);
+            if (lock == null) {
+                return Flux.error(new UserRequestException(
+                        "当前群聊正在执行行动轮，请稍后再试"));
+            }
+            try {
+                assertClientRequestIdAvailable(
+                        conversationId,
+                        request.getClientRequestId());
+                GroupConversation conversation =
+                        conversationService.requireActive(conversationId);
+                requireTrpg(conversation);
+                GroupChatTurn turn =
+                        requireWaitingTurn(conversationId, turnId);
+                GroupChatReplyStep userStep =
+                        requireWaitingUserStep(turnId, stepId);
+                PreparedInquiry prepared = transactionTemplate.execute(
+                        status -> prepareUserInquiry(
+                                conversation, turn, userStep, request));
+                if (prepared == null) {
+                    throw new UserRequestException("保存用户询问失败");
+                }
+                Flux<GroupChatEvent> accepted = Flux.just(
+                        GroupChatEvent.builder()
+                                .eventType(GroupChatConstant
+                                        .EVENT_TURN_ACCEPTED)
+                                .conversationId(conversationId)
+                                .turnId(turnId)
+                                .replyStepId(userStep.getId())
+                                .messageId(prepared.message().getId())
+                                .sequence(prepared.message()
+                                        .getSequenceNo())
+                                .build(),
+                        userInquiryCompletedEvent(
+                                conversation, turn, userStep,
+                                prepared.message()));
+                return Flux.concat(
+                                accepted,
+                                executePendingSteps(conversation, turn))
+                        .doOnError(error ->
+                                recoveryService.recoverInterrupted(
+                                        conversationId))
+                        .doFinally(signal -> lockService.unlock(lock));
+            } catch (RuntimeException exception) {
+                lockService.unlock(lock);
+                return Flux.error(exception);
+            }
+        });
+    }
+
+    private PreparedInquiry prepareUserInquiry(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep userStep,
+            TrpgInvestigatorInquiryDTO request) {
+        if (stepInteractionService == null) {
+            throw new IllegalStateException("调查员询问服务尚未初始化");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        String question = request.getQuestion().trim();
+        GroupChatMessage message = new GroupChatMessage()
+                .setConversationId(conversation.getId())
+                .setSceneId(GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                        turn.getPlanSource())
+                        ? turn.getPlanContextId() : null)
+                .setTurnId(turn.getId())
+                .setReplyStepId(userStep.getId())
+                .setClientRequestId(normalizeClientRequestId(
+                        request.getClientRequestId()))
+                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setSpeakerId(userStep.getSpeakerId())
+                .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
+                .setVisibility("public")
+                .setContent(question)
+                .setSequenceNo(conversationService.nextSequence(
+                        conversation.getId()))
+                .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                .setCreatedAt(now)
+                .setUpdatedAt(now);
+        messageMapper.insert(message);
+        TrpgStepInteractionService.InteractionRequest interaction =
+                stepInteractionService.askKp(
+                        conversation, turn.getId(), userStep.getId(),
+                        new GroupActorRef(
+                                GroupChatConstant.ACTOR_USER,
+                                userStep.getSpeakerId()),
+                        "DESCRIBE_VISIBLE_INFORMATION", question);
+        GroupChatReplyStep child = stepMapper.selectById(
+                interaction.childStepId());
+        if (child == null) {
+            throw new UserRequestException("KP询问回答步骤不存在");
+        }
+        child.setPromptMessageId(message.getId())
+                .setUpdatedAt(now);
+        stepMapper.updateById(child);
+        turn.setStatus(GroupChatConstant.STATUS_RUNNING)
+                .setUpdatedAt(now);
+        turnMapper.updateById(turn);
+        return new PreparedInquiry(message);
+    }
+
+    private GroupChatEvent userInquiryCompletedEvent(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step,
+            GroupChatMessage message) {
+        return GroupChatEvent.builder()
+                .eventType(GroupChatConstant.EVENT_MESSAGE_COMPLETED)
+                .conversationId(conversation.getId())
+                .turnId(turn.getId())
+                .replyStepId(step.getId())
+                .actionType(step.getActionType())
+                .groupKey(step.getGroupKey())
+                .groupName(step.getGroupName())
+                .groupOrder(step.getGroupOrder())
+                .itemOrder(step.getItemOrder())
+                .messageId(message.getId())
+                .sequence(message.getSequenceNo())
+                .messageKind(message.getMessageKind())
+                .speaker(GroupChatEvent.Speaker.builder()
+                        .type(GroupChatConstant.ACTOR_USER)
+                        .id(step.getSpeakerId())
+                        .name("用户")
+                        .build())
+                .content(message.getContent())
+                .build();
     }
 
     public Flux<GroupChatEvent> submitSelection(
@@ -1475,6 +1643,18 @@ public class TrpgTurnExecutionService {
         validateClientRequestId(request.getClientRequestId());
     }
 
+    private void validateInquiryRequest(
+            TrpgInvestigatorInquiryDTO request) {
+        if (request == null
+                || !StringUtils.hasText(request.getQuestion())) {
+            throw new UserRequestException("询问内容不能为空");
+        }
+        if (request.getQuestion().length() > 200) {
+            throw new UserRequestException("单次询问不能超过200个字符");
+        }
+        validateClientRequestId(request.getClientRequestId());
+    }
+
     private String normalizeClientRequestId(String clientRequestId) {
         return StringUtils.hasText(clientRequestId)
                 ? clientRequestId.trim() : null;
@@ -1517,6 +1697,9 @@ public class TrpgTurnExecutionService {
     private record PreparedTurn(
             GroupChatTurn turn,
             List<GroupChatReplyStep> steps) {
+    }
+
+    private record PreparedInquiry(GroupChatMessage message) {
     }
 
 }

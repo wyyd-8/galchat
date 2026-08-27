@@ -14,6 +14,7 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -29,6 +30,13 @@ public class TrpgSceneParticipantService {
     private final GroupReplyPlanItemMapper itemMapper;
     private final CocModuleLocationMapper locationMapper;
     private final TrpgRuntimeChildSceneMapper runtimeSceneMapper;
+    private TrpgInvestigatorSuspensionService suspensionService;
+
+    @Autowired(required = false)
+    void setSuspensionService(
+            TrpgInvestigatorSuspensionService suspensionService) {
+        this.suspensionService = suspensionService;
+    }
 
     public SceneState state(GroupConversation conversation) {
         GroupReplyPlan scene = requireActiveScene(conversation);
@@ -38,6 +46,12 @@ public class TrpgSceneParticipantService {
         List<String> waiting = new ArrayList<>();
         for (GroupReplyPlanItem item : items) {
             if (!isInvestigator(item)) {
+                continue;
+            }
+            if (suspensionService != null
+                    && suspensionService.isUnavailable(
+                            conversation.getId(),
+                            item.getSubjectCharacterId(), scene.getId())) {
                 continue;
             }
             String name = item.getSubjectCharacterName();
@@ -60,7 +74,8 @@ public class TrpgSceneParticipantService {
         }
         return new SceneState(
                 scene.getId(),
-                scenePath(conversation.getModuleId(), scene),
+                scenePath(conversation.getId(),
+                        conversation.getModuleId(), scene),
                 List.copyOf(active),
                 List.copyOf(activeCharacterIds),
                 List.copyOf(waiting));
@@ -86,7 +101,13 @@ public class TrpgSceneParticipantService {
                 conversation.getActiveReplyPlanId());
         if (active != null
                 && GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
-                active.getSource())
+                        active.getSource())
+                && active.getResumePlanId() != null) {
+            active = planMapper.selectById(active.getResumePlanId());
+        }
+        if (active != null
+                && GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(
+                        active.getSource())
                 && active.getResumePlanId() != null) {
             active = planMapper.selectById(active.getResumePlanId());
         }
@@ -126,12 +147,15 @@ public class TrpgSceneParticipantService {
             investigators.add(item.getSubjectCharacterName());
         }
         return new SceneSummaryState(
-                scenePath(conversation.getModuleId(), scene),
+                scenePath(conversation.getId(),
+                        conversation.getModuleId(), scene),
                 List.copyOf(investigators));
     }
 
     private String scenePath(
-            Long moduleId, GroupReplyPlan activeScene) {
+            Long conversationId,
+            Long moduleId,
+            GroupReplyPlan activeScene) {
         List<GroupReplyPlan> chain = new ArrayList<>();
         Set<Long> visited = new HashSet<>();
         GroupReplyPlan current = activeScene;
@@ -146,7 +170,10 @@ public class TrpgSceneParticipantService {
         }
         GroupReplyPlan root = chain.getFirst();
         StringBuilder result = new StringBuilder(
-                moduleLocationName(moduleId, root.getContextId()));
+                StringUtils.hasText(root.getDisplayName())
+                        ? root.getDisplayName()
+                        : moduleLocationName(
+                                moduleId, root.getContextId()));
         for (int index = 1; index < chain.size(); index++) {
             GroupReplyPlan child = chain.get(index);
             TrpgRuntimeChildScene runtime =

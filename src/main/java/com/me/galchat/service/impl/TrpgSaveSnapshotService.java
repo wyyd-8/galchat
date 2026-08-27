@@ -21,6 +21,7 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.po.TrpgCombat;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
+import com.me.galchat.domain.po.TrpgInvestigatorSuspension;
 import com.me.galchat.domain.po.TrpgWeaponStash;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
@@ -40,6 +41,7 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.GroupTurnCheckpointMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
 import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
+import com.me.galchat.mapper.TrpgInvestigatorSuspensionMapper;
 import com.me.galchat.mapper.TrpgSaveRestoreMapper;
 import com.me.galchat.mapper.TrpgWeaponStashMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
@@ -47,6 +49,7 @@ import com.me.galchat.service.ITrpgRedisStateService;
 import com.me.galchat.service.ITrpgSaveSnapshotService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -91,6 +94,13 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
     private final DiceRollResultMapper diceResultMapper;
     private final ITrpgRedisStateService redisStateService;
     private final VectorStoreCleanupMapper vectorCleanupMapper;
+    private TrpgInvestigatorSuspensionMapper suspensionMapper;
+
+    @Autowired(required = false)
+    void setSuspensionMapper(
+            TrpgInvestigatorSuspensionMapper suspensionMapper) {
+        this.suspensionMapper = suspensionMapper;
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -141,6 +151,17 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                                         .orderByAsc(
                                                 TrpgRuntimeChildScene::
                                                         getPlanId)))
+                .setInvestigatorSuspensions(suspensionMapper == null
+                        ? List.of()
+                        : suspensionMapper.selectList(
+                                new LambdaQueryWrapper<
+                                        TrpgInvestigatorSuspension>()
+                                        .eq(TrpgInvestigatorSuspension::
+                                                        getConversationId,
+                                                conversationId)
+                                        .orderByAsc(
+                                                TrpgInvestigatorSuspension::
+                                                        getId)))
                 .setCharacters(characters)
                 .setCharacterQuickNotes(characterQuickNotes(characters))
                 .setCharacterProfiles(characterIds.isEmpty() ? List.of()
@@ -214,6 +235,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
         restoreRestorableTurns(snapshot.getRestorableTurns());
         restorePlans(conversationId, snapshot);
         restoreCharacters(conversationId, snapshot);
+        restoreSuspensions(conversationId, snapshot);
         restoreWeaponStash(conversationId, snapshot.getWeaponStash());
         restoreCombats(conversationId, snapshot.getCombats());
         restoreCheckpoint(conversationId, snapshot.getCheckpoint());
@@ -317,6 +339,31 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                     && item.getSubjectCharacterId() == null) {
                 throw new UserRequestException(
                         "跑团场景计划项目缺少人物卡");
+            }
+        }
+        Set<String> suspensionStates = Set.of(
+                TrpgInvestigatorSuspension.STATE_SUSPENDED,
+                TrpgInvestigatorSuspension.STATE_RECOVERY_QUEUED,
+                TrpgInvestigatorSuspension.STATE_REENTRY_PENDING);
+        Set<Long> suspendedCharacters = new HashSet<>();
+        for (TrpgInvestigatorSuspension suspension :
+                safe(snapshot.getInvestigatorSuspensions())) {
+            if (suspension == null || suspension.getId() == null
+                    || !Objects.equals(suspension.getConversationId(),
+                            conversation.getId())
+                    || !characterIds.contains(
+                            suspension.getSubjectCharacterId())
+                    || !suspendedCharacters.add(
+                            suspension.getSubjectCharacterId())
+                    || !suspensionStates.contains(suspension.getState())
+                    || !StringUtils.hasText(
+                            suspension.getSuspensionContext())
+                    || suspension.getOriginContextId() == null
+                    || suspension.getRecoveryPlanId() != null
+                    && !planIds.contains(
+                            suspension.getRecoveryPlanId())) {
+                throw new UserRequestException(
+                        "跑团调查员剧情悬置存档不合法");
             }
         }
         validateCharacterChildren(snapshot, characterIds);
@@ -622,6 +669,19 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
         combatMapper.delete(new LambdaQueryWrapper<TrpgCombat>()
                 .eq(TrpgCombat::getConversationId, conversationId));
         safe(combats).forEach(combatMapper::insert);
+    }
+
+    private void restoreSuspensions(
+            Long conversationId, TrpgSaveSnapshotDTO snapshot) {
+        if (suspensionMapper == null) {
+            return;
+        }
+        suspensionMapper.delete(
+                new LambdaQueryWrapper<TrpgInvestigatorSuspension>()
+                        .eq(TrpgInvestigatorSuspension::getConversationId,
+                                conversationId));
+        safe(snapshot.getInvestigatorSuspensions())
+                .forEach(suspensionMapper::insert);
     }
 
     private void restoreWeaponStash(

@@ -391,6 +391,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `GET /group-chat/conversations/{conversationId}/turns/current` | 无 | `Result<GroupCurrentTurnVO|null>` | 查询当前未终结行动轮和客户端需要的下一种输入 |
 | `POST /group-chat/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/retry` | 无请求体 | SSE | 仅重试失败的行动轮/步骤 |
 | `POST /group-chat/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/message` | `GroupChatRequest` | SSE | 为等待用户文本输入的步骤提交行动 |
+| `POST /group-chat/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/inquiry` | `{ "clientRequestId": string, "question": string }` | SSE | 在允许询问的用户行动步骤上先向 KP 询问公开事实或当前可见信息；不完成原行动步骤 |
 | `POST /group-chat/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/selection` | `SceneSelectionRequest` | SSE | 为选景步骤提交选项编号 |
 | `POST /group-chat/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/end-exploration` | `{ "clientRequestId": string }` | SSE | 当前用户调查员声明结束本场景探索 |
 
@@ -402,6 +403,8 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
   "optionNo": "2"
 }
 ```
+
+用户询问请求中的 `question` 必须非空且不超过 200 个字符。客户端仅在当前行动轮返回 `canAskKp = true` 时显示询问入口。问题会作为用户调查员的公开消息保存，KP 回答后服务端再次发送同一根步骤的 `turn.waiting_input`，用户随后仍通过 `/message` 提交正式行动。若 KP 为尚未确定的外部偶然事件发起幸运检定，则沿用既有投骰暂停与恢复流程。
 
 调用步骤接口前应先读取 `turns/current`，严格使用其 `turnId` 和 `stepId`。`GroupCurrentTurnVO`：
 
@@ -418,6 +421,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `inputType` | string/null | `message/selection/continue/dice` |
 | `sceneName` | string/null | 当前分组/场景名 |
 | `waitingForUser` | boolean | 是否在等待用户调查员输入 |
+| `canAskKp` | boolean | 当前用户行动步骤是否允许先向 KP 询问；仅场景行动和当前战斗攻击者为 `true` |
 | `sceneOptions` | object<string,string> | 选景编号到地点名的映射 |
 | `steps` | array | 本轮全部步骤，按 `stepNo` 升序返回 |
 

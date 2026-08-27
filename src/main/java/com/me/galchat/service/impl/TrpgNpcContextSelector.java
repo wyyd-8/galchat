@@ -95,8 +95,10 @@ public class TrpgNpcContextSelector {
     private GroupReplyPlan scenePlan(GroupReplyPlan activePlan) {
         GroupReplyPlan current = activePlan;
         if (current != null
-                && GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
-                current.getSource())) {
+                && (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
+                        current.getSource())
+                || GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(
+                        current.getSource()))) {
             current = current.getResumePlanId() == null
                     ? null : planMapper.selectById(
                     current.getResumePlanId());

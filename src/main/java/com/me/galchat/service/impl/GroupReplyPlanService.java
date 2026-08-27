@@ -188,6 +188,41 @@ public class GroupReplyPlanService {
     }
 
     /** Trusted combat lifecycle entry point. Caller must hold the lock. */
+    public GroupReplyPlanVO startPostCombatTransitionUnderLock(
+            GroupConversation conversation,
+            Long combatId) {
+        if (conversation == null || conversation.getId() == null
+                || combatId == null) {
+            throw new UserRequestException("战斗结束后的叙事过渡参数不完整");
+        }
+        GroupReplyPlan scene = activePlan(conversation);
+        if (scene == null || !GroupChatConstant.PLAN_SOURCE_SCENE.equals(
+                scene.getSource())) {
+            throw new UserRequestException(
+                    "战斗结束后的叙事过渡缺少恢复场景");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        GroupReplyPlan transition = new GroupReplyPlan()
+                .setConversationId(conversation.getId())
+                .setSource(GroupChatConstant.PLAN_SOURCE_POST_COMBAT)
+                .setContextId(combatId)
+                .setExecutionKey("post-combat:" + combatId)
+                .setDisplayName("战斗结束后的叙事过渡")
+                .setResumePlanId(scene.getId())
+                .setCreatedAt(now).setUpdatedAt(now);
+        planMapper.insert(transition);
+        itemMapper.insert(new GroupReplyPlanItem()
+                .setPlanId(transition.getId()).setItemOrder(1)
+                .setActorType(GroupChatConstant.ACTOR_KP)
+                .setParticipantStatus(GroupChatConstant.PARTICIPANT_ACTIVE)
+                .setCreatedAt(now).setUpdatedAt(now));
+        conversation.setActiveReplyPlanId(transition.getId())
+                .setUpdatedAt(now);
+        conversationMapper.updateById(conversation);
+        return toVO(transition);
+    }
+
+    /** Trusted combat lifecycle entry point. Caller must hold the lock. */
     public GroupReplyPlanVO replaceCombatRoundUnderLock(
             GroupConversation conversation,
             int round,
@@ -366,8 +401,10 @@ public class GroupReplyPlanService {
     private GroupReplyPlanVO finishLocked(GroupConversation conversation, GroupReplyPlan active) {
         GroupReplyPlan resumePlan = null;
         GroupReplyPlan nextPlan = null;
-        if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
+        if ((GroupChatConstant.PLAN_SOURCE_COMBAT.equals(
                 active.getSource())
+                || GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(
+                        active.getSource()))
                 && active.getResumePlanId() != null) {
             resumePlan = planMapper.selectById(
                     active.getResumePlanId());
@@ -399,7 +436,9 @@ public class GroupReplyPlanService {
         itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>()
                 .eq(GroupReplyPlanItem::getPlanId, active.getId()));
         planMapper.deleteById(active.getId());
-        if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())) {
+        if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())
+                || GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(
+                        active.getSource())) {
             Long resumePlanId = resumePlan == null
                     ? null : resumePlan.getId();
             conversation.setActiveReplyPlanId(resumePlanId).setUpdatedAt(LocalDateTime.now());

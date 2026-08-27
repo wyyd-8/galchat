@@ -5,6 +5,7 @@ import com.me.galchat.domain.dto.GroupEndExplorationDTO;
 import com.me.galchat.domain.dto.GroupTurnContinueDTO;
 import com.me.galchat.domain.dto.GroupChatRequestDTO;
 import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
+import com.me.galchat.domain.dto.TrpgInvestigatorInquiryDTO;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
@@ -48,6 +49,119 @@ class TrpgTurnExecutionServiceTest {
     static void initMybatisPlusTableInfo() {
         com.me.galchat.support.MybatisPlusTestSupport.initialize(
                 GroupChatReplyStep.class);
+    }
+
+    @Test
+    void humanInquiryPublishesQuestionAndCreatesKpChildWithoutCompletingAction() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupConversationLockService locks =
+                mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messages =
+                mock(GroupChatMessageMapper.class);
+        TrpgParticipantService participants =
+                mock(TrpgParticipantService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        GroupChatReplyStep root = new GroupChatReplyStep()
+                .setId(201L).setTurnId(101L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setSpeakerId(31L).setSubjectCharacterId(31L)
+                .setGroupKey("scene:1").setGroupName("深夜街道")
+                .setGroupOrder(1).setItemOrder(1)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        java.util.concurrent.atomic.AtomicReference<GroupChatReplyStep>
+                childRef = new java.util.concurrent.atomic.AtomicReference<>();
+        when(conversations.requireAuthorized(7L))
+                .thenReturn(conversation);
+        when(conversations.requireActive(7L))
+                .thenReturn(conversation);
+        when(locks.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turns.selectById(101L)).thenReturn(turn);
+        when(turns.selectCount(any())).thenReturn(0L);
+        when(messages.selectCount(any())).thenReturn(0L);
+        when(steps.selectById(201L)).thenReturn(root);
+        when(steps.selectById(301L))
+                .thenAnswer(invocation -> childRef.get());
+        when(steps.selectList(any()))
+                .thenReturn(List.of(), List.of(root));
+        when(participants.listInvestigators(any()))
+                .thenReturn(List.of(
+                        new TrpgParticipantService.Participant(
+                                new com.me.galchat.groupchat.runtime
+                                        .GroupActorRef(
+                                        GroupChatConstant.ACTOR_USER,
+                                        31L),
+                                31L, "林恩", "用户")));
+        when(steps.insert(any(GroupChatReplyStep.class)))
+                .thenAnswer(invocation -> {
+                    GroupChatReplyStep child = invocation.getArgument(0);
+                    child.setId(301L);
+                    childRef.set(child);
+                    return 1;
+                });
+        when(messages.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0)
+                            .setId(401L).setSequenceNo(5L);
+                    return 1;
+                });
+        TransactionTemplate transactions = immediateTransactionTemplate();
+        TrpgStepInteractionService interactions =
+                new TrpgStepInteractionService(
+                        steps, turns, participants, transactions);
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversations, locks, mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class), turns, steps, messages,
+                mock(GroupTurnRecoveryService.class),
+                mock(GroupChatService.class), transactions,
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class), participants,
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+        service.setStepInteractionService(interactions);
+        TrpgInvestigatorInquiryDTO request =
+                new TrpgInvestigatorInquiryDTO();
+        request.setClientRequestId("ask-1");
+        request.setQuestion("现在能看见街上有空载出租车吗？");
+
+        List<GroupChatEvent> events = service.submitInquiry(
+                7L, 101L, 201L, request).take(2).collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_TURN_ACCEPTED,
+                        GroupChatConstant.EVENT_MESSAGE_COMPLETED);
+        assertThat(events.get(1).getContent())
+                .isEqualTo("现在能看见街上有空载出租车吗？");
+        assertThat(root.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        assertThat(childRef.get().getPromptMessageId()).isEqualTo(401L);
+        verify(messages).insert(org.mockito.ArgumentMatchers.argThat(
+                (GroupChatMessage message) ->
+                        GroupChatConstant.ACTOR_USER.equals(
+                        message.getSpeakerType())
+                        && "public".equals(message.getVisibility())
+                        && "ask-1".equals(message.getClientRequestId())));
     }
 
     @Test
@@ -1337,6 +1451,7 @@ class TrpgTurnExecutionServiceTest {
         assertThat(current.stepId()).isEqualTo(302L);
         assertThat(current.itemOrder()).isEqualTo(2);
         assertThat(current.waitingForUser()).isTrue();
+        assertThat(current.canAskKp()).isTrue();
         assertThat(current.steps()).containsExactly(
                 new com.me.galchat.domain.vo.GroupCurrentTurnStepVO(
                         301L, 1, GroupChatConstant.ACTOR_CHARACTER,
@@ -1636,6 +1751,7 @@ class TrpgTurnExecutionServiceTest {
                 .isEqualTo(GroupChatConstant.ACTION_COMBAT_DEFENSE);
         assertThat(current.inputType()).isEqualTo("message");
         assertThat(current.waitingForUser()).isTrue();
+        assertThat(current.canAskKp()).isFalse();
         assertThat(toJson(current)).contains(
                 "\"routeContext\":{\"ownerCharacterId\":44,"
                         + "\"targetCharacterId\":31}");

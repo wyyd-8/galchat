@@ -108,6 +108,36 @@ class GroupReplyPlanServiceTest {
     }
 
     @Test
+    void postCombatTransitionTemporarilyWrapsTheResumedSceneWithOnlyKp() {
+        Fixture fixture = new Fixture();
+        GroupConversation conversation = activeConversation(
+                GroupChatConstant.MODE_TRPG, 10L);
+        GroupReplyPlan scene = plan(
+                10L, GroupChatConstant.PLAN_SOURCE_SCENE, null);
+        when(fixture.planMapper.selectById(10L)).thenReturn(scene);
+        when(fixture.planMapper.insert(any(GroupReplyPlan.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupReplyPlan>getArgument(0).setId(20L);
+                    return 1;
+                });
+
+        GroupReplyPlanVO result = fixture.service
+                .startPostCombatTransitionUnderLock(
+                        conversation, 77L);
+
+        assertThat(result.getSource()).isEqualTo(
+                GroupChatConstant.PLAN_SOURCE_POST_COMBAT);
+        assertThat(result.getResumePlanId()).isEqualTo(10L);
+        assertThat(conversation.getActiveReplyPlanId()).isEqualTo(20L);
+        org.mockito.ArgumentCaptor<GroupReplyPlanItem> item =
+                org.mockito.ArgumentCaptor.forClass(
+                        GroupReplyPlanItem.class);
+        verify(fixture.itemMapper).insert(item.capture());
+        assertThat(item.getValue().getActorType()).isEqualTo(
+                GroupChatConstant.ACTOR_KP);
+    }
+
+    @Test
     void replyPlanQueryRejectsMissingActivePlan() {
         Fixture fixture = new Fixture();
         when(fixture.conversationService.requireAuthorized(7L))

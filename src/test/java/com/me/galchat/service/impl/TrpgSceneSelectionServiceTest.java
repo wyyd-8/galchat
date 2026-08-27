@@ -6,6 +6,7 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.CocModuleLocation;
 import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
+import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
@@ -343,6 +344,41 @@ class TrpgSceneSelectionServiceTest {
                         org.assertj.core.groups.Tuple.tuple(
                                 GroupChatConstant.ACTOR_CHARACTER, 7L,
                                 GroupChatConstant.ACTION_TRPG_SCENE_SELECTION));
+    }
+
+    @Test
+    void selectionStageOmitsSuspendedInvestigators() {
+        TrpgParticipantService participantService =
+                mock(TrpgParticipantService.class);
+        TrpgInvestigatorSuspensionService suspensionService =
+                mock(TrpgInvestigatorSuspensionService.class);
+        TrpgSceneSelectionService service = new TrpgSceneSelectionService(
+                mock(GroupConversationService.class),
+                mock(CocModuleLocationMapper.class),
+                mock(GroupConversationMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class),
+                mock(TrpgSceneSelectionStore.class),
+                participantService,
+                mock(TrpgSelectionRandomizer.class));
+        service.setSuspensionService(suspensionService);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setModuleId(3L)
+                .setMode(GroupChatConstant.MODE_TRPG);
+        when(participantService.listInvestigators(conversation))
+                .thenReturn(List.of(
+                        participant(GroupChatConstant.ACTOR_USER,
+                                101L, 101L, "林登", "用户"),
+                        participant(GroupChatConstant.ACTOR_CHARACTER,
+                                9L, 201L, "玛格丽特", "爱丽丝")));
+        when(suspensionService.isUnavailable(7L, 101L, null))
+                .thenReturn(false);
+        when(suspensionService.isUnavailable(7L, 201L, null))
+                .thenReturn(true);
+
+        assertThat(service.selectionActions(conversation))
+                .extracting(GroupActionSpec::subjectCharacterId)
+                .containsExactly(null, 101L);
     }
 
     @Test

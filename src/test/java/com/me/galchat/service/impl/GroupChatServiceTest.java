@@ -701,7 +701,7 @@ class GroupChatServiceTest {
     }
 
     @Test
-    void directClarificationPublishesQuestionAndSuspendsParentStep() {
+    void directInvestigatorInquiryPublishesQuestionAndSuspendsParentStep() {
         DeepSeekChatModel model = mock(DeepSeekChatModel.class);
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimeRegistry =
@@ -738,13 +738,16 @@ class GroupChatServiceTest {
         GroupChatReplyStep parent = new GroupChatReplyStep()
                 .setId(31L).setTurnId(30L).setStepNo(4)
                 .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
-                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(9L)
+                .setSubjectCharacterId(32L)
                 .setGroupKey("scene:1").setGroupName("书房")
                 .setGroupOrder(1).setItemOrder(4)
                 .setStatus(GroupChatConstant.STATUS_PENDING);
         GroupActionSpec action = new GroupActionSpec(
-                parent.getActionType(), parent.getSpeakerType(), null,
-                parent.getGroupKey(), parent.getGroupName(), 1, 4);
+                parent.getActionType(), parent.getSpeakerType(), 9L,
+                32L, parent.getGroupKey(), parent.getGroupName(),
+                1, 4, null);
         when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
                 .thenReturn(runtime);
         when(runtime.contextPolicy()).thenReturn(contextPolicy);
@@ -756,7 +759,7 @@ class GroupChatServiceTest {
                         chatClient,
                         new Prompt(List.of(new UserMessage("裁定"))),
                         List.of()));
-        when(agentPolicy.actorName(any(), any())).thenReturn("KP");
+        when(agentPolicy.actorName(any(), any())).thenReturn("Agent甲");
         when(conversations.nextSequence(7L)).thenReturn(8L);
         when(messages.insert(any(GroupChatMessage.class)))
                 .thenAnswer(invocation -> {
@@ -766,12 +769,12 @@ class GroupChatServiceTest {
                 });
         String directJson = """
                 {"childStepId":301,"rootStepId":31,
-                 "interactionType":"KP_CLARIFICATION",
+                 "interactionType":"INVESTIGATOR_KP_INQUIRY",
                  "interactionSeq":1,
-                 "targetActor":{"type":"character","id":9},
-                 "targetCharacterId":32,
-                 "question":"你要检查抽屉还是桌面？",
-                 "reasonType":"METHOD"}
+                 "targetActor":{"type":"kp","id":null},
+                 "targetCharacterId":null,
+                 "question":"门是否仍然开着？",
+                 "reasonType":"CONFIRM_PUBLIC_FACT"}
                 """;
         Generation direct = new Generation(
                 new org.springframework.ai.chat.messages.AssistantMessage(
@@ -779,7 +782,7 @@ class GroupChatServiceTest {
                 ChatGenerationMetadata.builder()
                         .finishReason(ToolExecutionResult.FINISH_REASON)
                         .metadata(ToolExecutionResult.METADATA_TOOL_NAME,
-                                "askForClarification")
+                                "askKp")
                         .build());
         when(model.stream(any(Prompt.class))).thenReturn(
                 reactor.core.publisher.Flux.just(
@@ -792,16 +795,94 @@ class GroupChatServiceTest {
                 .filteredOn(event -> GroupChatConstant.EVENT_MESSAGE_DELTA
                         .equals(event.getEventType()))
                 .extracting(GroupChatEvent::getDelta)
-                .containsExactly("你要检查抽屉还是桌面？");
+                .containsExactly("门是否仍然开着？");
         verify(messages).updateById(
                 org.mockito.ArgumentMatchers.<GroupChatMessage>argThat(message ->
-                        "你要检查抽屉还是桌面？".equals(
+                        "门是否仍然开着？".equals(
                                 message.getContent())));
         assertThat(parent.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
         verify(steps, org.mockito.Mockito.times(2)).update(
                 org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void emptyModelStreamFailsTheStepAtTheOrchestrationBoundary() {
+        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        ChatClient chatClient = ChatClient.builder(model).build();
+        GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupContextPolicy contexts = mock(GroupContextPolicy.class);
+        GroupAgentPolicy agents = mock(GroupAgentPolicy.class);
+        GroupChatMessageMapper messages =
+                mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupTurnRecoveryService recovery =
+                mock(GroupTurnRecoveryService.class);
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupChatService service = new GroupChatService(
+                conversations,
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class), runtimes,
+                messages, mock(GroupChatTurnMapper.class), steps,
+                recovery, new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                immediateTransactionTemplate(), diceMessageCodec(),
+                JsonMapper.builder().build(), emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L).setWorldId(2L)
+                .setMode(GroupChatConstant.MODE_CHAT);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_USER)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(31L).setTurnId(30L).setStepNo(1)
+                .setActionType("reply")
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(9L)
+                .setGroupKey("default").setGroupName("群聊")
+                .setGroupOrder(1).setItemOrder(1)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(runtimes.require(GroupChatConstant.MODE_CHAT))
+                .thenReturn(runtime);
+        when(runtime.contextPolicy()).thenReturn(contexts);
+        when(runtime.agentPolicy()).thenReturn(agents);
+        when(contexts.load(any(), any()))
+                .thenReturn(new GroupContextMaterial(List.of()));
+        when(agents.prepare(any(), any(), any()))
+                .thenReturn(new GroupModelInvocation(
+                        chatClient,
+                        new Prompt(List.of(new UserMessage("回复"))),
+                        List.of()));
+        when(agents.actorName(any(), any())).thenReturn("Agent甲");
+        when(conversations.nextSequence(7L)).thenReturn(8L);
+        when(messages.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0)
+                            .setId(40L);
+                    return 1;
+                });
+        when(model.stream(any(Prompt.class))).thenReturn(Flux.empty());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service.streamPersistedStep(
+                                conversation, turn, step)
+                                .collectList().block())
+                .hasMessageContaining("模型未返回有效内容");
+        verify(messages).updateById(
+                org.mockito.ArgumentMatchers.<GroupChatMessage>argThat(
+                        message -> GroupChatConstant.STATUS_FAILED.equals(
+                                message.getStatus())));
+        verify(recovery).cancelPendingSteps(
+                30L, "模型未返回有效内容");
     }
 
     @Test

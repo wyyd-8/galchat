@@ -189,6 +189,14 @@ test('opens melee attack and defense rolls as an opposed combat check', () => {
     ],
   )
   assert.equal(summary.resultValue, '阿尔法近战攻击获胜')
+
+  const resolveWindowClass = Reflect.get(diceState, 'createDicePlayerWindowClass') as
+    | ((request: DicePlaybackRequest) => string)
+    | undefined
+  assert.equal(
+    resolveWindowClass?.(request),
+    'dice-player-window dice-player-window--opposed',
+  )
 })
 
 test('keeps the completed attack visible before offering its newly-created damage roll', () => {
@@ -1005,6 +1013,24 @@ test('creates a single constant damage result with a negative placeholder card',
   ])
 })
 
+test('uses the damage window for a damage round created by a weapon tool', () => {
+  const aggregate = valueRollAggregate('rollDamage', 'DAMAGE', [{
+    name: '林恩',
+    result: { formula: '1D4', modules: [], result: 3 },
+  }])
+  aggregate.summary.toolName = 'requestMeleeAttack'
+
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const resolveWindowClass = Reflect.get(diceState, 'createDicePlayerWindowClass') as
+    | ((request: DicePlaybackRequest) => string)
+    | undefined
+
+  assert.equal(
+    resolveWindowClass?.(request),
+    'dice-player-window dice-player-window--damage',
+  )
+})
+
 test('keeps mixed value results aligned when one participant has no physical dice', () => {
   const aggregate = valueRollAggregate('rollSanLoss', 'SAN_LOSS', [
     { name: '林恩', result: { formula: '4', modules: [], result: 4 } },
@@ -1096,6 +1122,19 @@ test('opens single and multiplayer constant values as settled results', () => {
     diceState.createDicePlayerPreparedResult({ ...multiple, mode: 'pending' }),
     multiple.result,
   )
+})
+
+test('offers continue immediately for the first live result without physical dice', () => {
+  const aggregate = valueRollAggregate('rollDamage', 'DAMAGE', [{
+    name: '林恩',
+    result: { formula: '4', modules: [], result: 4 },
+  }])
+  const request = diceState.createIncomingDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const shouldOfferOnOpen = Reflect.get(diceState, 'shouldOfferDiceContinueOnOpen') as
+    | ((request: DicePlaybackRequest, status: string, pending: boolean, queued?: boolean) => boolean)
+    | undefined
+
+  assert.equal(shouldOfferOnOpen?.(request, 'COMPLETED', false), true)
 })
 
 test('keeps mixed constant and physical dice values in their requested playback mode', () => {
@@ -1291,7 +1330,47 @@ test('creates an opposed check playback that reveals the winner after both rolls
   assert.equal(summary.modifierLabel, '对抗检定')
   assert.equal(summary.resultLabel, '对抗结果')
   assert.equal(summary.resultValue, '林恩获胜')
+  assert.equal(summary.resultHeadline, '林恩胜出')
+  assert.equal(summary.resultDetail, '格斗 · 成功')
+  assert.equal(summary.resultTone, 'winner')
   assert.equal(summary.formulaValue, '林恩（格斗） vs 陈默（闪避）')
+})
+
+test('summarizes an opposed check with only failed rolls as having no winner', () => {
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  aggregate.summary.totalResult = '林恩失败；陈默失败'
+  aggregate.semanticResult = '林恩失败；陈默失败'
+  for (const detail of aggregate.results) {
+    Object.assign(detail.resolution?.outcome || {}, {
+      category: 'FAILURE',
+      rank: 'FAILURE',
+      winner: false,
+    })
+  }
+
+  const request = createDiceAggregatePlaybackRequest(2, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.equal(summary.resultValue, '林恩失败；陈默失败')
+  assert.equal(summary.resultHeadline, '无人胜出')
+  assert.equal(summary.resultDetail, '双方检定均失败')
+  assert.equal(summary.resultTone, 'no-winner')
+})
+
+test('keeps a drawn opposed check distinct from a no-winner failure', () => {
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  aggregate.summary.totalResult = '平局'
+  aggregate.semanticResult = '平局'
+  for (const detail of aggregate.results) {
+    Object.assign(detail.resolution?.outcome || {}, { winner: false })
+  }
+
+  const request = createDiceAggregatePlaybackRequest(2, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+
+  assert.equal(summary.resultHeadline, '平局')
+  assert.equal(summary.resultDetail, '对抗未分出胜负')
+  assert.equal(summary.resultTone, 'draw')
 })
 
 test('creates a new immutable playback request when the same result is replayed', () => {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { CurrentTurn, GroupChatEvent, ReplyPlan, ReplyPlanItem } from '../api/types.ts'
 import { applyCurrentTurnEvent, buildTrpgExecutionState } from './trpgExecutionState.ts'
+import * as trpgExecutionState from './trpgExecutionState.ts'
 
 const actor = (
   order: number,
@@ -168,7 +169,7 @@ test('aggregates every combat step related to the same character', () => {
   )
 })
 
-test('highlights a routed defender instead of the action owner', () => {
+test('highlights only the nested defender while live combat steps are partial', () => {
   const combat: ReplyPlan = {
     id: 40, source: 'COMBAT', displayName: '战斗第1轮',
     items: [
@@ -186,8 +187,6 @@ test('highlights a routed defender instead of the action owner', () => {
       { stepId: 402, itemOrder: 2, actorType: 'kp', subjectCharacterId: 44, status: 'waiting_interaction' },
       { stepId: 403, itemOrder: 2, actorType: 'kp', subjectCharacterId: 44, status: 'completed' },
       { stepId: 404, itemOrder: 2, actorType: 'user', actorId: 48, subjectCharacterId: 48, status: 'waiting_input' },
-      { stepId: 405, itemOrder: 3, actorType: 'user', actorId: 48, subjectCharacterId: 48, status: 'pending' },
-      { stepId: 406, itemOrder: 4, actorType: 'kp', subjectCharacterId: 48, status: 'pending' },
     ],
   }
 
@@ -274,4 +273,40 @@ test('uses a dedicated clarification input state for interaction children', () =
     ownerCharacterId: 501,
     targetCharacterId: 502,
   })
+})
+
+test('marks the current turn failed from an operation failure without a step id', () => {
+  const activePlan: ReplyPlan = {
+    id: 20, source: 'SCENE', displayName: '密道', items: [],
+  }
+  const running: CurrentTurn = {
+    turnId: 100, planId: 20, planSource: 'SCENE', status: 'running',
+    waitingForUser: false, sceneOptions: {},
+    steps: [
+      { stepId: 301, itemOrder: 1, actorType: 'kp', status: 'running' },
+    ],
+  }
+
+  const failed = applyCurrentTurnEvent(running, {
+    eventType: 'generation.failed',
+    turnId: 100,
+    error: '模型调用失败',
+  } as unknown as GroupChatEvent, activePlan)
+
+  assert.equal(failed?.status, 'failed')
+})
+
+test('uses the bottom action as the only retry entry for a failed turn', () => {
+  const label = (trpgExecutionState as Record<string, unknown>)
+    .trpgTurnActionLabel
+
+  assert.equal(typeof label, 'function')
+  assert.equal((label as (turn: CurrentTurn | null) => string)({
+    turnId: 100, status: 'failed', waitingForUser: false,
+    sceneOptions: {}, steps: [],
+  }), '重试此行动轮')
+  assert.equal((label as (turn: CurrentTurn | null) => string)({
+    turnId: 101, status: 'blocked', waitingForUser: false,
+    sceneOptions: {}, steps: [],
+  }), '重试此行动轮')
 })

@@ -130,6 +130,60 @@ class TrpgSceneLifecycleServiceTest {
     }
 
     @Test
+    void suspendedStorylineDoesNotBlockRemainingInvestigatorsFromEndingScene() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        TrpgSceneProgressStore progressStore =
+                mock(TrpgSceneProgressStore.class);
+        TrpgInvestigatorSuspensionService suspensions =
+                mock(TrpgInvestigatorSuspensionService.class);
+        TrpgSceneLifecycleService service =
+                new TrpgSceneLifecycleService(
+                        conversationService, stepMapper, turnMapper,
+                        planMapper, itemMapper,
+                        mock(GroupTurnRecoveryService.class), progressStore,
+                        mock(TrpgSceneSummaryService.class),
+                        mock(GroupReplyPlanService.class),
+                        mock(TrpgChildScenePlanService.class),
+                        mock(TrpgTemporaryInsanityService.class));
+        service.setSuspensionService(suspensions);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setActiveReplyPlanId(10L);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(stepMapper.selectById(41L)).thenReturn(
+                new GroupChatReplyStep().setId(41L).setTurnId(51L)
+                        .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                        .setSpeakerId(9L).setSubjectCharacterId(109L));
+        when(turnMapper.selectById(51L)).thenReturn(
+                new GroupChatTurn().setId(51L).setConversationId(7L)
+                        .setPlanId(10L)
+                        .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setPlanContextId(21L));
+        when(planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L).setConversationId(7L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setContextId(21L));
+        when(itemMapper.selectList(any())).thenReturn(List.of(
+                item(9L, 109L), item(8L, 108L)));
+        when(suspensions.isUnavailable(7L, 108L, 10L))
+                .thenReturn(true);
+        when(progressStore.readyActors(7L, 10L))
+                .thenReturn(Set.of("character-card:109"));
+
+        assertThat(service.requestInvestigatorFinish(
+                7L, 41L, 9L)).isTrue();
+
+        verify(progressStore).requestFinish(7L, 10L);
+    }
+
+    @Test
     void completedMarkedTurnSummarizesBeforeAdvancingScenePlan() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);

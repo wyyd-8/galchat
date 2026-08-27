@@ -16,6 +16,7 @@ import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.service.impl.TrpgContextWindowService;
 import com.me.galchat.service.impl.TrpgChildSceneCommandService;
 import com.me.galchat.service.impl.TrpgInvestigatorContextAssembler;
+import com.me.galchat.service.impl.TrpgInvestigatorSuspensionService;
 import com.me.galchat.tool.KpChildSceneTools;
 import com.me.galchat.tool.KpClarificationTools;
 import com.me.galchat.tool.KpDiceTools;
@@ -23,9 +24,13 @@ import com.me.galchat.tool.KpFirearmTools;
 import com.me.galchat.tool.KpMeleeTools;
 import com.me.galchat.tool.KpPushedCheckTools;
 import com.me.galchat.tool.InvestigatorSceneTools;
+import com.me.galchat.tool.InvestigatorKpInquiryTools;
+import com.me.galchat.tool.KpInquiryLuckTools;
 import com.me.galchat.tool.KpSceneTools;
 import com.me.galchat.tool.KpRunTools;
 import com.me.galchat.tool.KpWaitingInvestigatorTools;
+import com.me.galchat.tool.KpInvestigatorSuspensionTools;
+import com.me.galchat.tool.KpSuspendedInvestigatorRecoveryTools;
 import com.me.galchat.tool.TrpgSceneSelectionTools;
 import com.me.galchat.tool.KpSceneSelectionTools;
 import com.me.galchat.tool.KpModuleTools;
@@ -47,11 +52,65 @@ import java.util.Set;
 @Component
 public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
 
+    private static final String INVESTIGATOR_KP_INQUIRY_RULES = """
+
+            【向KP询问：askKp】
+            当前步骤可能提供askKp。只有缺少一个会实质影响当前行动选择的必要事实时才调用；上下文已经足够时不要调用。
+            可以询问：已经公开但有歧义的事实；调查员不移动、不搜索、不接触物体、不检定即可直接看见、听见或已知的信息。战斗主动攻击者还可询问直接可观察的距离、掩体、出口、位置关系和静态环境。
+            不得询问：应采取什么策略或攻击谁；行动能否成功、命中率或NPC会如何反应；隐藏线索、关闭容器内部或必须通过移动、搜索、接触、交谈、检定才能获知的信息；与当前行动无关的背景知识。
+            KP决定是否需要幸运检定。调查员不得要求KP掷幸运，也不得用询问制造武器、贵重资源或关键线索。
+            调用时只提出一个具体问题，不得同时输出decision、action或其他工具调用。工具是returnDirect；询问本身不算正式行动，也不消耗本行动位。
+            KP回答后系统会恢复同一个步骤。把最新问题与KP回答视为补充上下文，再完成本步骤的decision和action；不得把问题当成已完成的行动，不得重复或改写已经回答的事实。只有出现另一个独立且必要的阻碍时才可再次询问。
+
+            示例：
+            - 深夜街道且是否有车会改变行动时，可以调用askKp：{"inquiryType":"DESCRIBE_VISIBLE_INFORMATION","question":"从我现在的位置，能看见正在经过或停靠的空载出租车吗？"}。如果KP回答没有，再据此声明正式行动。
+            - 不要询问关闭的抽屉里面有什么；那需要搜索或打开，应直接声明行动。
+            - 不要询问酒保是否愿意回答；与NPC交谈及其反应属于行动。
+            - 战斗主动攻击者可以问：{"inquiryType":"DESCRIBE_VISIBLE_INFORMATION","question":"倒下的书柜是否完全挡住了食尸鬼？"}
+            - 不要问“我该攻击谁”“这一枪会成功吗”或“请掷幸运让我脚边有一把霰弹枪”。
+            """;
+
+    private static final String KP_INVESTIGATOR_INQUIRY_RESPONSE_RULES = """
+
+            当前步骤只回答调查员最新提出的一个问题，使其能够返回原步骤声明行动；这是公开回答，但不是行动裁定、场景推进或战斗推进。
+            询问者可能由用户直接操控，也可能由调查员Agent操控；两者适用完全相同的回答与幸运检定规则。
+            按以下顺序处理：
+            1. 已由模组、公开上下文或当前场景固定的事实，直接回答。
+            2. 调查员原地即可直接感知的信息，直接描述；只给可见、可听或已知边界，不泄露隐藏信息。
+            3. 显然存在、显然不存在或不可能的事物，直接回答，不掷骰。
+            4. 必须通过移动、搜索、打开、接触、交谈或检定才能获知时，只说明当前无法直接确认，不替调查员执行行动。例如：“从抽屉外部看不见里面是否放着钥匙。”不得擅自替其打开抽屉或要求侦查检定。
+            5. 只有尚未确定、成功与失败都合理的外部偶然事件，才调用requestInquiryLuck。例如深夜街道是否恰好有空载出租车经过。
+            6. 对策略、行动成败、隐藏线索或NPC新反应的提问，只回答可确认的事实边界，不提供建议，不裁定尚未声明的行动。
+
+            幸运工具限制：
+            - requestInquiryLuck是本步骤唯一可用工具，一次回答最多调用一次，必须单独调用并立即结束本次响应。
+            - favorableEvent必须写成检定成功时成立的具体、肯定、可观察事实。公共环境使用CURRENT_INVESTIGATOR_GROUP；仅询问者个人的偶然事件使用REQUESTER。
+            - 不得用于固定/可见事实、隐藏线索、容器内部、行动或攻击成败、社交结果、NPC选择、武器、贵重资源或关键线索，也不得重掷同一事实。
+            - 成功只确认有利事件存在，不保证后续利用成功；例如只确认空载出租车正在经过，不能决定出租车司机停车或同意请求。
+            - 如果工具结果已经出现在上下文中，说明当前步骤由骰点恢复：不得再次调用。成功时确认favorableEvent，失败时说明该事物在当前场景或当前短时间窗口内不存在，不追加额外效果。
+
+            示例：
+            - 问“先前描述的侧门还开着吗？”：按公开事实直接回答，不掷骰。
+            - 问“深夜街道现在有空载出租车吗？”且上下文未确定：调用requestInquiryLuck({"favorableEvent":"当前街道在短时间内有一辆可见的空载出租车经过","scope":"CURRENT_INVESTIGATOR_GROUP"})。成功只描述出租车驶近；失败描述当前街道没有空载出租车。
+            - 问“关闭的抽屉里有钥匙吗？”：回答从抽屉外部看不见里面，不掷骰。
+            - 问“我脚边恰好有霰弹枪吗？”：不合理且会生成高价值武器，直接否定，不掷骰。
+            - 战斗中问书柜是否遮挡目标：直接描述静态视线与掩体，不判断命中率。
+            - 问出租车司机会不会停车：这是NPC反应，不能决定出租车司机停车；最多只能确认车辆是否经过。
+
+            只输出一个直接、简洁的自然语言答案，不向调查员反问，不附带后续行动建议。
+            """;
+
     private static final String KP_EXPLORATION_OUTPUT_RULES = """
 
             公开回复只输出当前步骤允许的场景叙述或裁定结果。
             不得附加括号式或其他场外行动提示；不要建议调查员换一种查法、询问NPC、再次检索或检定、收手或离开，也不要用提问或备选项催促下一步。这些后续行动由调查员在下一轮自行决定。
             完成当前叙述后立即结束回复。
+            """;
+
+    private static final String KP_SUSPENSION_RULES = """
+
+            suspendInvestigators是低频叙事镜头调度工具。先判断这组调查员眼下是否还有适合立即主持的遭遇、选择或反馈：有则继续主持，物理分离且立即有独立内容则使用子场景；只有其剧情线暂时不适合继续展开、应切换镜头到其他调查员时才悬置。
+            不要仅因昏迷、受伤、受控或暂时无法行动而悬置；若其仍在当前现场并影响剧情，就继续保留在当前叙事中。
             """;
 
     private final ChatClient chatClient;
@@ -76,8 +135,14 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final KpWaitingInvestigatorTools kpWaitingInvestigatorTools;
     private final TrpgChildSceneCommandService childSceneCommandService;
     private KpClarificationTools kpClarificationTools;
+    private InvestigatorKpInquiryTools investigatorKpInquiryTools;
+    private KpInquiryLuckTools kpInquiryLuckTools;
     private KpFirearmTools kpFirearmTools;
     private KpMeleeTools kpMeleeTools;
+    private KpInvestigatorSuspensionTools investigatorSuspensionTools;
+    private KpSuspendedInvestigatorRecoveryTools
+            suspendedInvestigatorRecoveryTools;
+    private TrpgInvestigatorSuspensionService suspensionService;
 
     @Autowired
     public TrpgGroupAgentPolicy(@Qualifier("trpgGroupChatClient") ChatClient chatClient,
@@ -139,6 +204,18 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     }
 
     @Autowired
+    void setInvestigatorKpInquiryTools(
+            InvestigatorKpInquiryTools investigatorKpInquiryTools) {
+        this.investigatorKpInquiryTools = investigatorKpInquiryTools;
+    }
+
+    @Autowired
+    void setKpInquiryLuckTools(
+            KpInquiryLuckTools kpInquiryLuckTools) {
+        this.kpInquiryLuckTools = kpInquiryLuckTools;
+    }
+
+    @Autowired
     void setKpFirearmTools(KpFirearmTools kpFirearmTools) {
         this.kpFirearmTools = kpFirearmTools;
     }
@@ -146,6 +223,18 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     @Autowired
     void setKpMeleeTools(KpMeleeTools kpMeleeTools) {
         this.kpMeleeTools = kpMeleeTools;
+    }
+
+    @Autowired
+    void setInvestigatorSuspensionTools(
+            KpInvestigatorSuspensionTools investigatorSuspensionTools,
+            KpSuspendedInvestigatorRecoveryTools
+                    suspendedInvestigatorRecoveryTools,
+            TrpgInvestigatorSuspensionService suspensionService) {
+        this.investigatorSuspensionTools = investigatorSuspensionTools;
+        this.suspendedInvestigatorRecoveryTools =
+                suspendedInvestigatorRecoveryTools;
+        this.suspensionService = suspensionService;
     }
 
     @Override
@@ -160,6 +249,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         boolean sceneIntro = GroupChatConstant.ACTION_TRPG_SCENE_INTRO
                 .equals(action.actionType());
         boolean combatIntro = GroupChatConstant.ACTION_COMBAT_INTRO
+                .equals(action.actionType());
+        boolean postCombatTransition = GroupChatConstant
+                .ACTION_TRPG_POST_COMBAT_TRANSITION
                 .equals(action.actionType());
         boolean activeChildScene = scenePhase
                 && GroupChatConstant.ACTOR_KP.equals(actor.type())
@@ -181,6 +273,17 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         boolean interactionResponse = GroupChatConstant
                 .ACTION_TRPG_INTERACTION_RESPONSE
                 .equals(action.actionType());
+        boolean investigatorKpInquiry = interactionResponse
+                && GroupChatConstant.ACTOR_KP.equals(actor.type())
+                && com.me.galchat.service.impl.TrpgStepInteractionService
+                .INVESTIGATOR_KP_INQUIRY.equals(
+                        action.interactionType());
+        boolean canAskKp = GroupChatConstant.ACTOR_CHARACTER.equals(
+                actor.type()) && (scenePhase || combatAttack);
+        boolean resumedFromKpInquiry = canAskKp
+                && com.me.galchat.service.impl.TrpgStepInteractionService
+                .INVESTIGATOR_KP_INQUIRY.equals(
+                        action.interactionType());
         boolean combatPhase = combatIntro || combatAttack || combatDefense
                 || combatAdjudicate || combatRoute
                 || GroupChatConstant.ACTION_TRPG_COMBAT
@@ -192,6 +295,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 : combatDefense ? "战斗防守"
                 : combatRoute ? "战斗反应路由"
                 : combatAdjudicate ? "战斗裁定"
+                : postCombatTransition ? "战斗结束后的叙事过渡"
                 : interactionResponse ? "追问回答"
                 : GroupChatConstant.ACTION_TRPG_COMBAT.equals(action.actionType())
                 ? "战斗" : "场景探索";
@@ -199,11 +303,20 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 ? "当前步骤只描述战斗环境，不进行战斗裁定，也不掷骰。"
                 + "当前步骤没有可调用的工具；不得替任何参战者决定行动。"
                 + "每个回复只能完成当前阶段指定的工作，不得预演、顺带执行或描述后续阶段。"
+                : postCombatTransition
+                ? "当前步骤发生在战斗结果确认之后、所有调查员的下一次行动之前。"
+                + "只处理战斗后各调查员所在位置和叙事焦点，不执行调查员行动，也不掷骰。"
+                + "先判断各调查员的剧情现在适合继续主持，还是应切换镜头到其他调查员；"
+                + "不要仅因昏迷、受伤、受控或暂时无法行动而悬置仍处于当前剧情中的角色。"
                 : combatAttack || combatDefense
                 ? "当前步骤只负责行动声明，不进行战斗裁定，也不掷骰。"
                 + "当前步骤没有可调用的工具；不得调用或模拟任何工具调用协议。"
                 + "战斗工具只由后续战斗裁定步骤使用；不得替用户决定调查员行动。"
                 + "只有当前行动绑定的人物卡可以产生新行动；其他调查员、NPC和旁观者保持上一条公开消息中的状态。"
+                : investigatorKpInquiry
+                ? "当前步骤只回答调查员的公开询问，不裁定行动或推进场景。"
+                + "只有确需判断外部偶然事件时才能调用requestInquiryLuck；不得调用其他工具。"
+                + "工具返回后本次响应会暂停；恢复同一步骤时根据骰点结果直接回答，不得再次调用。"
                 : combatRoute
                 ? "当前步骤只进行战斗反应路由，不裁定成败，也不掷骰。"
                 + "除缺少关键信息时使用公开追问工具外，不调用其他工具。"
@@ -219,6 +332,12 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
         String investigatorName = GroupChatConstant.ACTOR_KP.equals(
                 actor.type()) ? agentName
                 : controlledInvestigatorName(investigatorCards, action);
+        String reentryBridge = !scenePhase || suspensionService == null
+                || action.subjectCharacterId() == null
+                ? "" : suspensionService.reentryPrompt(
+                        conversation.getId(),
+                        action.subjectCharacterId(),
+                        conversation.getActiveReplyPlanId());
         List<Message> messages = new ArrayList<>();
         if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
             List<CocDiceCharacterVO> weaponOwnerCards = scenePhase
@@ -319,6 +438,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         如果模组已经完整结束，可调用finishRun并继续输出最终公开收束消息。
                         """));
             } else if (sceneIntro) {
+                String kpReentry = suspensionService == null ? ""
+                        : suspensionService.sceneReentryPrompt(
+                                conversation.getId(),
+                                conversation.getActiveReplyPlanId());
                 messages.add(new UserMessage("""
                         这是当前SCENE Plan第一次进入行动轮。
                         当前SCENE计划名称：“%s”。
@@ -326,6 +449,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         <context-summary status="completed"> 只提供过去已经公开的事实和获得的线索；不得继续或重新引入其中已经结束的场景，也不要使用其中的参与者代替当前参与者。
                         先公开引入当前地点：只描述调查员刚进入时能够观察到的事实，不替调查员决定行动，不泄露未公开真相。
                         """.formatted(action.groupName())
+                        + kpReentry
                         + KP_EXPLORATION_OUTPUT_RULES));
             } else if (combatIntro) {
                 messages.add(new UserMessage("""
@@ -335,6 +459,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         其他调查员、NPC和旁观者保持上一条公开消息中的状态；除非其位置已经公开且与战场观察直接相关，否则不要提及，更不得替其决定退开、旁观、逃跑或协助。
                         不得描述先攻顺序、战斗轮开始、攻击或防守选择，不得询问闪避、反击或下一步行动，也不得裁定攻击、伤害或状态。
                         完成静态快照后立即结束回复。系统会在下一独立步骤处理首位角色的行动。
+                        """));
+            } else if (postCombatTransition) {
+                messages.add(new UserMessage("""
+                        现在进行战斗结束后的叙事过渡。这一步位于战斗结果确认之后、所有调查员的下一次行动之前。
+                        根据已经公开的战斗结局，简洁交代现场余波和各调查员此刻的位置。重点判断每组调查员的剧情现在是否适合继续主持，还是应切换镜头到其他调查员。
+                        只有战斗结局使某些调查员在叙事上离开当前剧情线时才调用suspendInvestigators；不要仅因昏迷、受伤、受控或暂时无法行动而调用。
+                        调用工具后，在同一公开回复中自然交代停镜位置并完成镜头切换。不得替调查员选择后续行动，不掷骰，不调用其他工具。
                         """));
             } else if (combatRoute) {
                 messages.add(new UserMessage("""
@@ -353,12 +484,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         工具是returnDirect，调用后立即结束响应。仅在确有必要时追问；不确定是否需要追问时不要调用。
                         """));
             } else if (interactionResponse) {
-                messages.add(new UserMessage("现在回答KP刚刚公开提出的追问。"
-                        + "你可以补足细节、重新判断、改变行动或放弃原行动；"
-                        + "最新回答将替代与之冲突的旧行动。"
-                        + "严格使用以下格式，标签外不得输出正文：\n"
-                        + "<decision>说明你如何根据追问重新判断；如果无需改变，也说明理由</decision>\n"
-                        + "<action>用调查员口吻直接回答KP，信息足够完整，不受普通行动50字限制</action>"));
+                if (investigatorKpInquiry) {
+                    messages.add(new UserMessage(
+                            KP_INVESTIGATOR_INQUIRY_RESPONSE_RULES));
+                } else {
+                    messages.add(new UserMessage(
+                            "当前KP交互回答类型不受支持。只说明无法回答，不调用工具。"));
+                }
             } else {
                 String subjectName = action.subjectCharacterId() == null
                         ? null : cards.stream()
@@ -426,7 +558,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + " 在没有剩余检定或掷骰需求、且应结束战斗时调用markCombatFinished；调用后继续输出完整公开裁定和收束。"
                         : "")
                         + (scenePhase
-                        ? KP_EXPLORATION_OUTPUT_RULES
+                        ? KP_SUSPENSION_RULES
+                        + KP_EXPLORATION_OUTPUT_RULES
                         : "")));
             }
         } else {
@@ -436,6 +569,14 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "在仍有地点未被选择时，推荐优先选择不同地点，但可按角色性格作出不同决定。"
                         + "调用selectExplorationScene并且只传地点编号；工具是returnDirect，"
                         + "调用后立即结束响应，不要再输出自然语言、地点名或JSON。"));
+            } else if (interactionResponse) {
+                messages.add(new UserMessage(
+                        "现在回答KP刚刚公开提出的追问。"
+                        + "你可以补足细节、重新判断、改变行动或放弃原行动；"
+                        + "最新回答将替代与之冲突的旧行动。"
+                        + "严格使用以下格式，标签外不得输出正文：\n"
+                        + "<decision>说明你如何根据追问重新判断；如果无需改变，也说明理由</decision>\n"
+                        + "<action>用调查员口吻直接回答KP，信息足够完整，不受普通行动50字限制</action>"));
             } else {
                 String sceneParticipation = !scenePhase ? ""
                         : proposalLead
@@ -460,7 +601,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         错误：查理已经声明沿血迹追踪后，威尔又声明“沿血迹一侧往北走，留意手印和新折枝”；这只是换一种说法重复同一行动。
                         """;
                 messages.add(new UserMessage("现在轮到" + investigatorName + "执行当前" + phase
-                        + "行动。" + sceneParticipation
+                        + "行动。" + reentryBridge + sceneParticipation
                         + "决策必须先于行动，并严格使用以下格式，标签外不得输出正文：\n"
                         + "<decision>一个完整自然语言段落，说明重要观察、线索联系、判断和本轮行动意图</decision>\n"
                         + "<action>像群聊里的简短口语行动，不写成小说段落或规则说明。action通常只写一句，最多50个汉字，"
@@ -485,6 +626,17 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + (combatAttack
                         ? "装填是合法的完整主动位行动；明确说出要装填的武器。"
                         : "")
+                        + (canAskKp
+                        ? INVESTIGATOR_KP_INQUIRY_RULES
+                        : "")
+                        + (resumedFromKpInquiry
+                        ? """
+
+                        当前步骤刚刚从向KP询问中恢复。你提出的问题不算正式行动。
+                        读取最新KP回答，现在必须据此完成当前调查员的<decision>和<action>。
+                        不得重复询问已经回答的事实；不得把KP回答直接复述成action。
+                        """
+                        : "")
                         + (scenePhase
                         ? "确定不再执行当前场景行动时可调用endSceneExploration；"
                         + "如需调用，必须先完成工具调用，再一次性输出上述decision和action。"
@@ -500,6 +652,15 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     kpClarificationTools);
             if (scenePhase) {
                 List<Object> dynamicTools = new ArrayList<>(sceneTools);
+                if (investigatorSuspensionTools != null) {
+                    dynamicTools.add(investigatorSuspensionTools);
+                }
+                if (suspensionService != null
+                        && suspendedInvestigatorRecoveryTools != null
+                        && suspensionService.hasSuspendedInvestigators(
+                                conversation.getId())) {
+                    dynamicTools.add(suspendedInvestigatorRecoveryTools);
+                }
                 if (childSceneCommandService.canStartChildScene(
                         conversation)) {
                     dynamicTools.add(kpChildSceneTools);
@@ -514,6 +675,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     ? List.of(
                             kpSceneSelectionTools,
                             kpModuleTools, kpRunTools)
+                    : postCombatTransition
+                    ? tools(investigatorSuspensionTools)
                     : scenePhase
                     ? sceneTools
                     : combatAdjudicate
@@ -522,6 +685,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                             kpRunTools, kpCombatTools)
                     : combatRoute
                     ? tools(kpClarificationTools)
+                    : investigatorKpInquiry
+                    ? tools(kpInquiryLuckTools)
                     : combatIntro || combatAttack || combatDefense
                     ? List.of()
                     : tools(kpDiceTools, kpModuleTools, kpSkillRuleTools,
@@ -530,7 +695,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             tools = selectionPhase
                     ? List.of(sceneSelectionTools)
                     : scenePhase
-                    ? List.of(investigatorSceneTools)
+                    ? tools(investigatorSceneTools,
+                            investigatorKpInquiryTools)
+                    : combatAttack
+                    ? tools(investigatorKpInquiryTools)
                     : List.of();
         }
         Prompt prompt = new Prompt(messages);

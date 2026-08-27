@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { CircleAlert, Dices, FastForward, LoaderCircle, RotateCcw, Swords } from '@lucide/vue'
+import { ArrowRight, CircleAlert, Dices, LoaderCircle, RotateCcw, Swords } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import diceCriticalSuccessUrl from '@/dice/assets/audio/dice_superwin.mp3'
 import diceFailureUrl from '@/dice/assets/audio/dice_lose.mp3'
@@ -117,7 +117,7 @@ const summary = computed(() => props.request
 const presentation = computed(() => createDicePlayerStatus(status.value))
 const playerLayout = computed(() => createDicePlayerLayout(props.request?.result.modules.length || 0))
 const dialogContentStyle = computed(() => ({ width: `${dialogWidthPx.value}px` }))
-const dialogContentClass = computed(() => createDicePlayerWindowClass(props.request?.toolName))
+const dialogContentClass = computed(() => createDicePlayerWindowClass(props.request || undefined))
 const stageStyle = computed(() => ({ minHeight: `${playerLayout.value.stageMinHeightPx}px` }))
 const dialogDescription = computed(() => summary.value
   ? `${summary.value.modifierLabel} · ${summary.value.diceLabel}`
@@ -718,15 +718,20 @@ onBeforeUnmount(() => {
             class="dice-group-merge-arrow"
             aria-label="汇总为最终结果"
           >
-            <FastForward :size="21" :stroke-width="1.7" aria-hidden="true" />
+            <ArrowRight :size="21" :stroke-width="1.7" aria-hidden="true" />
           </div>
           <div
             v-if="groupOutcomeVisibility.showFinal"
             class="dice-group-final-box"
-            :class="isOpposedCheck ? 'is-opposed' : summary.resultValue === '成功' ? 'is-success' : 'is-failure'"
+            :class="isOpposedCheck
+              ? `is-${summary.resultTone || 'no-winner'}`
+              : summary.resultValue === '成功' ? 'is-success' : 'is-failure'"
           >
             <span>{{ summary.resultLabel }}</span>
-            <strong>{{ summary.resultValue }}</strong>
+            <strong>{{ summary.resultHeadline || summary.resultValue }}</strong>
+            <small v-if="summary.resultDetail" class="dice-group-final-detail">
+              {{ summary.resultDetail }}
+            </small>
           </div>
         </div>
         <div v-else class="dice-group-result-placeholder">

@@ -60,6 +60,7 @@ export interface DirectMessage {
 
 export type ConversationMode = 'chat' | 'trpg'
 export type ConversationStatus = 'active' | 'closed'
+export type TrpgComposerIntent = 'action' | 'inquiry'
 export type TrpgGameTimePeriod = 'DAWN' | 'MORNING' | 'NOON' | 'AFTERNOON' | 'EVENING' | 'LATE_NIGHT'
 export interface TrpgGameTime {
   dayNo: number; period: TrpgGameTimePeriod; periodLabel: string; displayText: string; revision: number; updatedAt?: string
@@ -84,8 +85,20 @@ export interface GroupRouteContext {
   ownerCharacterId: number
   targetCharacterId: number
 }
+export interface GenerationErrorDetail {
+  errorId: string
+  code: string
+  category: string
+  message: string
+  retryable: boolean
+  occurredAt: string
+  operation: string
+  request: Record<string, unknown>
+  response: Record<string, unknown>
+  stack: string
+}
 export interface GroupChatEvent {
-  eventType: 'stream.caught_up' | 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
+  eventType: 'stream.caught_up' | 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'generation.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
   conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
   actionType?: string; groupName?: string; itemOrder?: number; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string; toolName?: string
   promptMessageId?: number; interactionType?: string; interactionSeq?: number
@@ -94,12 +107,21 @@ export interface GroupChatEvent {
   routeContext?: GroupRouteContext
   sceneOptions?: Record<string, string>; autoSelected?: boolean
   sceneChoice?: { optionNo?: string; controllerName?: string; investigatorName?: string; locationName?: string; randomized?: boolean }
+  errorDetail?: GenerationErrorDetail
+}
+export interface GenerationFailureState {
+  conversationId: number
+  turnId?: number
+  replyStepId?: number
+  messageId?: number
+  message: string
+  detail: GenerationErrorDetail
 }
 export interface CurrentTurn {
   turnId: number; planId?: number; planSource?: string; planContextId?: number; status: string
   stepId?: number; actionType?: string; itemOrder?: number; inputType?: 'message' | 'selection' | 'clarification' | 'continue' | 'dice'; sceneName?: string
   promptMessageId?: number; interactionType?: string; interactionSeq?: number
-  waitingForUser: boolean; sceneOptions: Record<string, string>; routeContext?: GroupRouteContext | null; steps: CurrentTurnStep[]
+  waitingForUser: boolean; canAskKp?: boolean; sceneOptions: Record<string, string>; routeContext?: GroupRouteContext | null; steps: CurrentTurnStep[]
 }
 export interface CurrentTurnStep {
   stepId: number; itemOrder: number; actorType: string; actorId?: number; subjectCharacterId?: number

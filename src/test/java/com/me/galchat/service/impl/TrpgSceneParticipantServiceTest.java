@@ -137,6 +137,45 @@ class TrpgSceneParticipantServiceTest {
                 .containsExactly("亨利", "艾琳", "威廉");
     }
 
+    @Test
+    void runtimeStateOmitsSuspendedStorylinesAndUsesRecoverySceneName() {
+        GroupReplyPlanMapper planMapper =
+                mock(GroupReplyPlanMapper.class);
+        GroupReplyPlanItemMapper itemMapper =
+                mock(GroupReplyPlanItemMapper.class);
+        TrpgInvestigatorSuspensionService suspensions =
+                mock(TrpgInvestigatorSuspensionService.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setModuleId(5L)
+                .setActiveReplyPlanId(31L);
+        when(planMapper.selectById(31L)).thenReturn(
+                new GroupReplyPlan().setId(31L)
+                        .setConversationId(7L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setContextId(21L)
+                        .setDisplayName("陌生地窖"));
+        when(itemMapper.selectList(any())).thenReturn(List.of(
+                item(GroupChatConstant.ACTOR_USER, 101L,
+                        GroupChatConstant.PARTICIPANT_ACTIVE),
+                item(GroupChatConstant.ACTOR_CHARACTER, 9L,
+                        GroupChatConstant.PARTICIPANT_ACTIVE)));
+        when(suspensions.isUnavailable(7L, 109L, 31L))
+                .thenReturn(true);
+        TrpgSceneParticipantService service =
+                new TrpgSceneParticipantService(
+                        planMapper, itemMapper,
+                        mock(CocModuleLocationMapper.class),
+                        mock(TrpgRuntimeChildSceneMapper.class));
+        service.setSuspensionService(suspensions);
+
+        TrpgSceneParticipantService.SceneState state =
+                service.state(conversation);
+
+        assertThat(state.scenePath()).isEqualTo("陌生地窖");
+        assertThat(state.activeInvestigatorNames())
+                .containsExactly("亨利");
+    }
+
     private GroupReplyPlanItem item(
             String actorType, Long actorId, String status) {
         return new GroupReplyPlanItem()

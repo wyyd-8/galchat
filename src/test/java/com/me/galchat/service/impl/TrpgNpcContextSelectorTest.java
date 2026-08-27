@@ -84,6 +84,35 @@ class TrpgNpcContextSelectorTest {
     }
 
     @Test
+    void postCombatTransitionKeepsUsingTheResumedSceneContext() {
+        Fixture fixture = new Fixture();
+        GroupConversation conversation = fixture.sceneConversation()
+                .setActiveReplyPlanId(30L);
+        when(fixture.characterMapper.selectList(any())).thenReturn(List.of(
+                npc(81L, "乔瑟夫·特纳")));
+        when(fixture.planMapper.selectById(30L)).thenReturn(
+                new GroupReplyPlan().setId(30L)
+                        .setSource(
+                                GroupChatConstant.PLAN_SOURCE_POST_COMBAT)
+                        .setContextId(40L).setResumePlanId(10L));
+        when(fixture.planMapper.selectById(10L)).thenReturn(
+                new GroupReplyPlan().setId(10L)
+                        .setSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                        .setContextId(21L));
+        when(fixture.locationMapper.selectById(21L)).thenReturn(
+                new CocModuleLocation().setId(21L).setModuleId(3L)
+                        .setContent("乔瑟夫·特纳守在战场出口。"));
+        when(fixture.turnMapper.selectList(any())).thenReturn(List.of());
+        GroupActionSpec transition = new GroupActionSpec(
+                GroupChatConstant.ACTION_TRPG_POST_COMBAT_TRANSITION,
+                GroupChatConstant.ACTOR_KP, null,
+                "post-combat:40", "战斗结束后的叙事过渡", 1, 1);
+
+        assertThat(fixture.selector.select(conversation, transition))
+                .containsExactly(81L);
+    }
+
+    @Test
     void sceneSelectionDoesNotLoadActiveNpcDetails() {
         Fixture fixture = new Fixture();
         GroupConversation conversation = fixture.sceneConversation();

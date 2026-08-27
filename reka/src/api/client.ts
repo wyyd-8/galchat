@@ -226,6 +226,8 @@ export const streamTrpgTurn = {
     streamGroupTurn(`/group-chat/conversations/${id}/turns/continue`, { clientRequestId }, onEvent),
   message: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) =>
     streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/message`, payload, onEvent),
+  inquiry: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; question: string }, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/inquiry`, payload, onEvent),
   selection: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; optionNo: string }, onEvent: (event: GroupChatEvent) => void) =>
     streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/selection`, payload, onEvent),
   endExploration: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>

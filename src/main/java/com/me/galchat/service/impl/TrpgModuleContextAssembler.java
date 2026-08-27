@@ -201,7 +201,9 @@ public class TrpgModuleContextAssembler {
         if (active == null) {
             return null;
         }
-        if (GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())
+        if ((GroupChatConstant.PLAN_SOURCE_COMBAT.equals(active.getSource())
+                || GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(
+                        active.getSource()))
                 && active.getResumePlanId() != null) {
             active = planMapper.selectById(
                     active.getResumePlanId());

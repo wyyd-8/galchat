@@ -9,7 +9,8 @@ registerHooks({
     if (specifier.startsWith('@/')) {
       return { url: new URL(`${specifier.slice(2)}.ts`, sourceRoot).href, shortCircuit: true }
     }
-    if (/^\.\.?\//.test(specifier) && !/\.[a-z]+$/i.test(specifier)) {
+    if (context.parentURL?.startsWith(sourceRoot.href)
+      && /^\.\.?\//.test(specifier) && !/\.[a-z]+$/i.test(specifier)) {
       return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true }
     }
     return nextResolve(specifier, context)
@@ -93,6 +94,10 @@ test('rebuilds the current generation from the replay stream after refresh', asy
         replyStepId: 2, messageId: 11, delta: '流中的B',
       })
       onEvent({
+        eventType: 'message.completed', conversationId: 7, turnId: 42,
+        replyStepId: 2, messageId: 11, content: '流中的B',
+      })
+      onEvent({
         eventType: 'dice_roll.created', conversationId: 7,
         diceRoll: {
           summary: { id: 501, conversationId: 7, status: 'PENDING' },
@@ -100,6 +105,7 @@ test('rebuilds the current generation from the replay stream after refresh', asy
         },
       })
       onEvent({ eventType: 'stream.caught_up', conversationId: 7 })
+      onEvent({ eventType: 'turn.completed', conversationId: 7, turnId: 42 })
     }
 
     let workspace!: ReturnType<typeof useWorkspace>
@@ -118,6 +124,10 @@ test('rebuilds the current generation from the replay stream after refresh', asy
     renderer.createApp(defineComponent({
       setup() { workspace = useWorkspace(); return () => h('div') },
     })).mount({})
+    workspace.conversations.value = [{
+      id: 7, userWorldId: 3, worldId: 2,
+      mode: 'trpg', title: '调查', status: 'active',
+    }]
 
     await workspace.selectConversation(7)
     await waitFor(() => resumedWith === 'generation-7')
@@ -127,7 +137,7 @@ test('rebuilds the current generation from the replay stream after refresh', asy
       workspace.messages.value.map(({ id, content, status }) => ({ id, content, status })),
       [
         { id: 10, content: '流中的A', status: 'completed' },
-        { id: 11, content: '流中的B', status: 'streaming' },
+        { id: 11, content: '流中的B', status: 'completed' },
       ],
     )
     assert.equal(workspace.latestDiceRoll.value?.summary.id, 501)
@@ -168,6 +178,7 @@ test('clears a completed generation but retains an interrupted generation for re
     streamTrpgTurn.continue = async (conversationId, clientRequestId, onEvent) => {
       storedWhileConnecting = session.getItem(`galchat:generation:${conversationId}`) === clientRequestId
       onEvent({ eventType: 'stream.caught_up', conversationId })
+      onEvent({ eventType: 'turn.completed', conversationId, turnId: 42 })
     }
     api.groupMessages = async () => []
     api.replyPlan = async () => [{ source: 'USER', displayName: '群聊', items: [] }]
@@ -197,10 +208,13 @@ test('clears a completed generation but retains an interrupted generation for re
     assert.equal(session.getItem('galchat:generation:7'), null)
 
     let interruptedId = ''
-    streamTrpgTurn.continue = async (conversationId, clientRequestId) => {
+    streamTrpgTurn.continue = async (conversationId, clientRequestId, onEvent) => {
       interruptedId = clientRequestId
       assert.equal(session.getItem(`galchat:generation:${conversationId}`), clientRequestId)
-      throw new Error('connection interrupted')
+      onEvent({
+        eventType: 'reply.started', conversationId, turnId: 43,
+        replyStepId: 9, messageId: 100,
+      })
     }
 
     await workspace.startTrpgTurn()
@@ -211,6 +225,210 @@ test('clears a completed generation but retains an interrupted generation for re
     api.groupMessages = originalMessages
     api.replyPlan = originalPlans
     api.currentTurn = originalTurn
+    Object.assign(globalThis, {
+      window: previousWindow,
+      localStorage: previousLocalStorage,
+      sessionStorage: previousSessionStorage,
+    })
+  }
+})
+
+test('keeps generation debug details only in page memory and exposes the failed turn', async () => {
+  const { api, streamTrpgTurn } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  const local = storage()
+  const session = storage()
+  Object.assign(globalThis, {
+    window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: local,
+    sessionStorage: session,
+  })
+  const originalContinue = streamTrpgTurn.continue
+  const originalMessages = api.groupMessages
+  const originalPlans = api.replyPlan
+  const originalTurn = api.currentTurn
+  const originalCombat = api.combatOverview
+  try {
+    const requestIds: string[] = []
+    streamTrpgTurn.continue = async (conversationId, clientRequestId, onEvent) => {
+      requestIds.push(clientRequestId)
+      if (requestIds.length > 1) {
+        onEvent({ eventType: 'stream.caught_up', conversationId })
+        onEvent({ eventType: 'turn.completed', conversationId, turnId: 42 })
+        return
+      }
+      onEvent({
+        eventType: 'generation.failed', conversationId,
+        turnId: 42, replyStepId: 9, messageId: 100,
+        error: '模型调用失败',
+        errorDetail: {
+          errorId: 'error-1', code: 'GENERATION_FAILED',
+          category: 'GENERATION', message: '模型调用失败',
+          retryable: true, occurredAt: '2026-08-27T00:00:00Z',
+          operation: 'continue-trpg-turn',
+          request: { method: 'POST' }, response: { eventCount: 2 },
+          stack: 'java.lang.IllegalStateException: model failed',
+        },
+      })
+    }
+    api.groupMessages = async () => [{
+      id: 100, conversationId: 7, turnId: 42, replyStepId: 9,
+      speakerType: 'kp', speakerName: 'KP', messageKind: 'dialogue',
+      content: '', sequenceNo: 10, status: 'failed',
+    }]
+    api.replyPlan = async () => [{ id: 20, source: 'SCENE', displayName: '密道', items: [] }]
+    api.currentTurn = async () => ({
+      turnId: 42, planId: 20, planSource: 'SCENE', status: 'failed',
+      waitingForUser: false, sceneOptions: {},
+      steps: [{ stepId: 9, itemOrder: 1, actorType: 'kp', status: 'failed' }],
+    })
+    api.combatOverview = async () => []
+
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+      createElement: () => ({}), createText: (text) => ({ text }),
+      createComment: (text) => ({ text }), setText(node, text) { node.text = text },
+      setElementText(node, text) { node.text = text },
+      parentNode: (node) => node.parent as Record<string, unknown> | null,
+      nextSibling: () => null,
+    })
+    renderer.createApp(defineComponent({
+      setup() { workspace = useWorkspace(); return () => h('div') },
+    })).mount({})
+    workspace.conversations.value = [{
+      id: 7, userWorldId: 3, worldId: 2,
+      mode: 'trpg', title: '调查', status: 'active',
+    }]
+    workspace.selectedConversationId.value = 7
+    workspace.currentTurn.value = {
+      turnId: 42, planId: 20, planSource: 'SCENE', status: 'running',
+      waitingForUser: false, sceneOptions: {},
+      steps: [{ stepId: 9, itemOrder: 1, actorType: 'kp', status: 'running' }],
+    }
+
+    await workspace.startTrpgTurn()
+
+    assert.equal(workspace.currentTurn.value?.status, 'failed')
+    assert.equal(workspace.messages.value[0]?.status, 'failed')
+    assert.equal(workspace.generationFailureOpen.value, true)
+    assert.equal(workspace.generationFailure.value?.detail.errorId, 'error-1')
+    assert.equal(session.getItem('galchat:generation:7'), null)
+    assert.equal([...Array.from({ length: local.length }, (_, index) => local.key(index))]
+      .some((key) => key?.includes('error-1')), false)
+
+    const retry = (workspace as unknown as Record<string, unknown>)
+      .retryGenerationFailure
+    assert.equal(typeof retry, 'function')
+    await (retry as () => Promise<void>)()
+    assert.equal(requestIds.length, 2)
+    assert.notEqual(requestIds[0], requestIds[1])
+    assert.equal(workspace.generationFailureOpen.value, false)
+  } finally {
+    streamTrpgTurn.continue = originalContinue
+    api.groupMessages = originalMessages
+    api.replyPlan = originalPlans
+    api.currentTurn = originalTurn
+    api.combatOverview = originalCombat
+    Object.assign(globalThis, {
+      window: previousWindow,
+      localStorage: previousLocalStorage,
+      sessionStorage: previousSessionStorage,
+    })
+  }
+})
+
+test('refresh discards debug details and resyncs an expired generation as retryable', async () => {
+  const { api, streamGroupGeneration } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  const session = storage([['galchat:generation:7', 'expired-7']])
+  Object.assign(globalThis, {
+    window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: storage(),
+    sessionStorage: session,
+  })
+  const originalConversation = api.conversation
+  const originalMessages = api.groupMessages
+  const originalPlans = api.replyPlan
+  const originalTurn = api.currentTurn
+  const originalCombat = api.combatOverview
+  const originalResume = streamGroupGeneration.resume
+  try {
+    api.conversation = async () => ({
+      id: 7, userWorldId: 3, worldId: 2,
+      mode: 'trpg', title: '调查', status: 'active',
+    })
+    api.groupMessages = async () => [{
+      id: 100, conversationId: 7, turnId: 42, replyStepId: 9,
+      speakerType: 'kp', speakerName: 'KP', messageKind: 'dialogue',
+      content: '', sequenceNo: 10, status: 'failed',
+    }]
+    api.replyPlan = async () => [{ id: 20, source: 'SCENE', displayName: '密道', items: [] }]
+    let currentTurnReads = 0
+    api.currentTurn = async () => ({
+      turnId: 42, planId: 20, planSource: 'SCENE',
+      status: currentTurnReads++ === 0 ? 'running' : 'failed',
+      waitingForUser: false, sceneOptions: {},
+      steps: [{
+        stepId: 9, itemOrder: 1, actorType: 'kp',
+        status: currentTurnReads === 1 ? 'running' : 'failed',
+      }],
+    })
+    api.combatOverview = async () => []
+    streamGroupGeneration.resume = async (conversationId, clientRequestId, onEvent) => {
+      assert.equal(conversationId, 7)
+      assert.equal(clientRequestId, 'expired-7')
+      onEvent({
+        eventType: 'generation.failed', conversationId,
+        error: '生成连接已失效，请重试此行动轮',
+        errorDetail: {
+          errorId: 'must-disappear', code: 'GENERATION_FAILED',
+          category: 'RECOVERY', message: '失联', retryable: true,
+          occurredAt: '2026-08-27T00:00:00Z', operation: 'resume',
+          request: {}, response: {}, stack: 'debug stack',
+        },
+      })
+    }
+
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+      createElement: () => ({}), createText: (text) => ({ text }),
+      createComment: (text) => ({ text }), setText(node, text) { node.text = text },
+      setElementText(node, text) { node.text = text },
+      parentNode: (node) => node.parent as Record<string, unknown> | null,
+      nextSibling: () => null,
+    })
+    renderer.createApp(defineComponent({
+      setup() { workspace = useWorkspace(); return () => h('div') },
+    })).mount({})
+
+    workspace.conversations.value = [{
+      id: 7, userWorldId: 3, worldId: 2,
+      mode: 'trpg', title: '调查', status: 'active',
+    }]
+    await workspace.selectConversation(7)
+    await waitFor(() => session.getItem('galchat:generation:7') === null)
+    await waitFor(() => workspace.currentTurn.value?.status === 'failed')
+
+    assert.equal(workspace.generationFailure.value, null)
+    assert.equal(workspace.generationFailureOpen.value, false)
+    assert.equal(workspace.messages.value[0]?.status, 'failed')
+  } finally {
+    api.conversation = originalConversation
+    api.groupMessages = originalMessages
+    api.replyPlan = originalPlans
+    api.currentTurn = originalTurn
+    api.combatOverview = originalCombat
+    streamGroupGeneration.resume = originalResume
     Object.assign(globalThis, {
       window: previousWindow,
       localStorage: previousLocalStorage,

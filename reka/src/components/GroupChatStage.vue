@@ -1,27 +1,30 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Component } from 'vue'
-import { Archive, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, GripVertical, History, LoaderCircle, MessageSquareText, Pause, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Send, Swords, Trash2, UsersRound, X } from '@lucide/vue'
+import { Archive, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, GripVertical, History, LoaderCircle, MessageCircleQuestion, MessageSquareText, Pause, Pencil, Play, Plus, RotateCcw, Save, Send, Swords, Trash2, UsersRound, X } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
-import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgGameTimePeriod } from '@/api/types'
+import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod } from '@/api/types'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
+import CombatResultMessage from './CombatResultMessage.vue'
 import MaterialMessage from './MaterialMessage.vue'
 import TrpgActorRoster from './TrpgActorRoster.vue'
 import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
 import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
 import { syncReasoningDisclosure, type ReasoningPhase } from './reasoningDisclosure'
 import { resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
-import { buildTrpgExecutionState, type TrpgExecutionScene } from './trpgExecutionState'
+import { buildTrpgExecutionState, trpgTurnActionLabel, type TrpgExecutionScene } from './trpgExecutionState'
 
 const input = defineModel<string>('input', { required: true })
+const inquiryInput = defineModel<string>('inquiryInput', { default: '' })
+const composerIntent = defineModel<TrpgComposerIntent>('composerIntent', { default: 'action' })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
 const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; openDice: [aggregate: DiceRollAggregate]; send: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; retry: [message: GroupMessage]; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
@@ -41,6 +44,21 @@ const items = computed(() => visibleReplyPlanItems(props.conversation.mode, plan
 const trpgExecution = computed(() => buildTrpgExecutionState(props.replyPlans, props.currentTurn))
 const loadedPlanSignature = ref('')
 const waitingForMessage = computed(() => props.conversation.mode !== 'trpg' || (props.currentTurn?.waitingForUser && (props.currentTurn.inputType === 'message' || props.currentTurn.inputType === 'clarification')))
+const canAskKp = computed(() => props.conversation.mode === 'trpg'
+  && props.currentTurn?.waitingForUser
+  && props.currentTurn.inputType === 'message'
+  && props.currentTurn.canAskKp === true)
+const effectiveComposerIntent = computed<TrpgComposerIntent>(() =>
+  composerIntent.value === 'inquiry' && canAskKp.value ? 'inquiry' : 'action')
+const composerValue = computed({
+  get: () => effectiveComposerIntent.value === 'inquiry' ? inquiryInput.value : input.value,
+  set: (value: string) => {
+    if (effectiveComposerIntent.value === 'inquiry') inquiryInput.value = value
+    else input.value = value
+  },
+})
+const actionDescription = '告诉 KP，你的调查员现在要做什么。比如走近查看、打开抽屉、与人交谈或发动攻击。'
+const inquiryDescription = '请 KP 补充你此刻本就能知道的事。比如眼前有什么、距离多远，或确认刚才提到的细节。得到回答后，再决定怎么做。'
 const selectionOptions = computed(() => Object.entries(props.currentTurn?.sceneOptions || {}))
 const sceneProposalRole = computed(() => props.currentTurn?.waitingForUser && props.currentTurn.actionType === 'trpg_scene'
   ? (props.currentTurn.itemOrder === 1 ? 'lead' : 'contributor')
@@ -60,13 +78,10 @@ const planTitle = computed(() => props.conversation.mode === 'trpg' ? trpgExecut
 const planDescription = computed(() => props.conversation.mode === 'trpg'
   ? `${trpgExecution.value.subtitle} · 由场景或战斗流程实时维护。`
   : '从上到下依次回复；拖动调整，点击移除后保存。')
-const turnButtonLabel = computed(() => {
-  if (!props.currentTurn) return '开始行动轮'
-  if (props.currentTurn.inputType === 'dice') return '检查投骰并继续'
-  return '继续行动轮'
-})
+const turnButtonLabel = computed(() => trpgTurnActionLabel(props.currentTurn))
 const composerPlaceholder = computed(() => {
   if (props.conversation.status !== 'active') return '这个会话已经关闭'
+  if (effectiveComposerIntent.value === 'inquiry') return '向 KP 询问公开事实或当前可见信息……'
   if (waitingForMessage.value && sceneProposalRole.value === 'lead') return '提出一个具体、可执行的场景计划…'
   if (waitingForMessage.value && sceneProposalRole.value === 'contributor') return '回应已有计划，或提出补充与替代方案…'
   if (props.currentTurn?.inputType === 'clarification') return '回答KP；可以补充、修改或放弃原行动…'
@@ -119,7 +134,16 @@ function submitTime() {
   emit('correctTime', timeForm.dayNo, timeForm.period)
   timeEditing.value = false
 }
-function keydown(event: KeyboardEvent) { if (!event.isComposing && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); emit('send') } }
+function selectComposerIntent(intent: TrpgComposerIntent) {
+  if (props.sending || (intent === 'inquiry' && !canAskKp.value)) return
+  composerIntent.value = intent
+}
+function submitComposer() {
+  if (!composerValue.value.trim()) return
+  if (effectiveComposerIntent.value === 'inquiry') emit('askKp')
+  else emit('send')
+}
+function keydown(event: KeyboardEvent) { if (!event.isComposing && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitComposer() } }
 function scrollToLatest() {
   void nextTick(() => {
     cancelAnimationFrame(latestScrollFrame)
@@ -164,6 +188,7 @@ function handleReasoningScroll(event: Event) {
           <article v-for="message in messages" :key="message.id" class="chat-message" :class="[message.speakerType, message.messageKind]" :data-message-id="message.id">
             <DiceRollMessage v-if="message.messageKind === 'dice_roll' && message.diceRoll" :aggregate="message.diceRoll" @open="emit('openDice', $event)" />
             <MaterialMessage v-else-if="message.messageKind === 'material'" :content="message.content" />
+            <CombatResultMessage v-else-if="message.messageKind === 'combat_result'" :content="message.content" />
             <template v-else>
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>
             <div class="message-content">
@@ -174,7 +199,6 @@ function handleReasoningScroll(event: Event) {
               </CollapsibleRoot>
               <div v-if="message.decisionContent" class="decision-block"><span>角色决策</span><p>{{ message.decisionContent }}</p></div>
               <p>{{ message.content }}<span v-if="message.status === 'streaming'" class="stream-caret" /></p>
-              <button v-if="conversation.mode === 'trpg' && message.speakerType === 'character' && message.status === 'failed'" class="retry-step-button" :disabled="sending" @click="emit('retry', message)"><RefreshCw :size="13" />重试该角色行动</button>
             </div>
             </template>
           </article>
@@ -205,12 +229,24 @@ function handleReasoningScroll(event: Event) {
           </span>
           <span class="clarification-prompt-status"><i />等待回复</span>
         </div>
-        <div class="composer" :class="{ disabled: conversation.status !== 'active' }">
+        <div class="composer" :class="{ disabled: conversation.status !== 'active', 'has-intent-toggle': canAskKp }">
           <button v-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="emit('startTurn')"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
-          <textarea v-else v-model="input" :disabled="conversation.status !== 'active' || sending || !waitingForMessage" rows="1" :placeholder="composerPlaceholder" @keydown="keydown" />
+          <TooltipProvider v-if="canAskKp">
+            <div class="composer-intent-toggle" role="group" aria-label="选择发言方式">
+              <TooltipRoot>
+                <TooltipTrigger as-child><button type="button" data-intent="action" :class="{ active: composerIntent === 'action' }" :aria-pressed="composerIntent === 'action'" :aria-description="actionDescription" :disabled="sending" @click="selectComposerIntent('action')"><Play :size="13" /><span>行动</span></button></TooltipTrigger>
+                <TooltipPortal><TooltipContent class="tooltip composer-intent-tooltip" side="top" :side-offset="9">{{ actionDescription }}</TooltipContent></TooltipPortal>
+              </TooltipRoot>
+              <TooltipRoot>
+                <TooltipTrigger as-child><button type="button" data-intent="inquiry" :class="{ active: composerIntent === 'inquiry' }" :aria-pressed="composerIntent === 'inquiry'" :aria-description="inquiryDescription" :disabled="sending" @click="selectComposerIntent('inquiry')"><MessageCircleQuestion :size="13" /><span>询问</span></button></TooltipTrigger>
+                <TooltipPortal><TooltipContent class="tooltip composer-intent-tooltip" side="top" :side-offset="9">{{ inquiryDescription }}</TooltipContent></TooltipPortal>
+              </TooltipRoot>
+            </div>
+          </TooltipProvider>
+          <textarea v-if="conversation.mode !== 'trpg' || currentTurn?.waitingForUser" v-model="composerValue" :maxlength="effectiveComposerIntent === 'inquiry' ? 200 : undefined" :disabled="conversation.status !== 'active' || sending || !waitingForMessage" rows="1" :placeholder="composerPlaceholder" @keydown="keydown" />
           <div v-if="conversation.mode !== 'trpg' || waitingForMessage" class="composer-actions">
-            <button v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType !== 'trpg_interaction_response' && replyPlan.source === 'SCENE'" class="button ghost" :disabled="sending" @click="emit('endExploration')"><Footprints :size="17" />结束探索</button>
-            <TooltipProvider><TooltipRoot><TooltipTrigger as-child><button class="send-button" :disabled="!input.trim() || sending || conversation.status !== 'active' || !waitingForMessage" @click="emit('send')"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">Enter 发送 · Shift+Enter 换行</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider>
+            <button v-if="effectiveComposerIntent === 'action' && conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType !== 'trpg_interaction_response' && replyPlan.source === 'SCENE'" class="button ghost" :disabled="sending" @click="emit('endExploration')"><Footprints :size="17" />结束探索</button>
+            <TooltipProvider><TooltipRoot><TooltipTrigger as-child><button class="send-button" :disabled="!composerValue.trim() || sending || conversation.status !== 'active' || !waitingForMessage" @click="submitComposer"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">{{ effectiveComposerIntent === 'inquiry' ? 'Enter 询问 KP · Shift+Enter 换行' : 'Enter 发送 · Shift+Enter 换行' }}</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider>
           </div>
         </div>
       </section>

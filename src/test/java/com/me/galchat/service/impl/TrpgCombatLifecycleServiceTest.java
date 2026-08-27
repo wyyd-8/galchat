@@ -33,6 +33,141 @@ import static org.mockito.Mockito.when;
 class TrpgCombatLifecycleServiceTest {
 
     @Test
+    void combatSummaryRemovesBlankLinesInsideEntriesAndSeparatesEntries()
+            throws Exception {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupReplyPlanService plans = mock(GroupReplyPlanService.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        CocCharacterMapper characterMapper =
+                mock(CocCharacterMapper.class);
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        var objectMapper = JsonMapper.builder().build();
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        conversations, plans, planMapper,
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class), stepMapper,
+                        messageMapper, characterMapper, combatMapper,
+                        mock(TrpgQuickNpcTemplateService.class),
+                        objectMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setActiveReplyPlanId(10L);
+        GroupReplyPlan combatPlan = new GroupReplyPlan()
+                .setId(10L).setConversationId(7L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                .setContextId(200L).setResumePlanId(31L);
+        var earlierResults = objectMapper.createArrayNode();
+        earlierResults.addObject().put(
+                "adjudication", "食尸鬼倒地。\n\n走廊恢复安静。");
+        TrpgCombat combat = new TrpgCombat()
+                .setId(200L).setConversationId(7L)
+                .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
+                .setCurrentRound(1).setFinishRequestedStepId(41L)
+                .setParticipants(objectMapper.createArrayNode())
+                .setActiveTurnResults(earlierResults);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setPlanId(10L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_COMBAT);
+        GroupChatReplyStep adjudication = new GroupChatReplyStep()
+                .setId(41L).setTurnId(30L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setSubjectCharacterId(71L);
+        var adjudicationMessage =
+                new com.me.galchat.domain.po.GroupChatMessage()
+                        .setId(51L)
+                        .setContent("查理受到3点伤害。\n\n\n但仍然清醒。");
+        when(planMapper.selectById(10L)).thenReturn(combatPlan);
+        when(combatMapper.selectById(200L)).thenReturn(combat);
+        when(stepMapper.selectList(any())).thenReturn(List.of());
+        when(characterMapper.selectList(any())).thenReturn(List.of());
+        when(conversations.nextSequence(7L)).thenReturn(99L);
+
+        assertThat(service.completeAdjudication(
+                conversation, turn, adjudication,
+                adjudicationMessage)).isTrue();
+
+        ArgumentCaptor<com.me.galchat.domain.po.GroupChatMessage> saved =
+                ArgumentCaptor.forClass(
+                        com.me.galchat.domain.po.GroupChatMessage.class);
+        verify(messageMapper).insert(saved.capture());
+        assertThat(saved.getValue().getContent()).isEqualTo("""
+                战斗结果：
+                1. 食尸鬼倒地。
+                走廊恢复安静。
+
+                2. 查理受到3点伤害。
+                但仍然清醒。""");
+    }
+
+    @Test
+    void finishedCombatCreatesKpTransitionBeforeInvestigatorsResume() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupReplyPlanService plans = mock(GroupReplyPlanService.class);
+        GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        CocCharacterMapper characterMapper =
+                mock(CocCharacterMapper.class);
+        TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
+        var objectMapper = JsonMapper.builder().build();
+        TrpgCombatLifecycleService service =
+                new TrpgCombatLifecycleService(
+                        conversations, plans, planMapper,
+                        mock(GroupChatTurnMapper.class),
+                        mock(GroupChatToolCallMapper.class), stepMapper,
+                        messageMapper, characterMapper, combatMapper,
+                        mock(TrpgQuickNpcTemplateService.class),
+                        objectMapper);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setActiveReplyPlanId(10L);
+        GroupReplyPlan combatPlan = new GroupReplyPlan()
+                .setId(10L).setConversationId(7L)
+                .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
+                .setContextId(200L).setResumePlanId(31L);
+        TrpgCombat combat = new TrpgCombat()
+                .setId(200L).setConversationId(7L)
+                .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
+                .setCurrentRound(1).setFinishRequestedStepId(41L)
+                .setParticipants(objectMapper.createArrayNode());
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setPlanId(10L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_COMBAT);
+        GroupChatReplyStep adjudication = new GroupChatReplyStep()
+                .setId(41L).setTurnId(30L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setSubjectCharacterId(71L);
+        com.me.galchat.domain.po.GroupChatMessage adjudicationMessage =
+                new com.me.galchat.domain.po.GroupChatMessage()
+                        .setId(51L).setContent("敌人倒地，战斗结束。");
+        when(planMapper.selectById(10L)).thenReturn(combatPlan);
+        when(combatMapper.selectById(200L)).thenReturn(combat);
+        when(stepMapper.selectList(any())).thenReturn(List.of());
+        when(characterMapper.selectList(any())).thenReturn(List.of());
+        when(conversations.nextSequence(7L)).thenReturn(99L);
+
+        assertThat(service.completeAdjudication(
+                conversation, turn, adjudication,
+                adjudicationMessage)).isTrue();
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(plans);
+        order.verify(plans).finishActiveUnderLock(conversation);
+        order.verify(plans).startPostCombatTransitionUnderLock(
+                conversation, 200L);
+    }
+
+    @Test
     void quickNpcsAreDeferredUntilTheCompletedSceneTurnActivatesCombat() {
         GroupConversationService conversations =
                 mock(GroupConversationService.class);

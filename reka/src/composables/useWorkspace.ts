@@ -1,7 +1,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { api, clearSession, currentSession, saveSession, streamGroupGeneration, streamGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
 import type {
-  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GroupChatEvent, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgGameTimePeriod,
+  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GenerationFailureState, GroupChatEvent, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod,
   UserInfo, UserWorld, WorldDetail, WorldSave, WorldTemplate,
 } from '@/api/types'
 import { beginReplyTurn, updateReplyTurn, type ReplyTurnState } from '@/components/replyTurnStatus'
@@ -38,9 +38,13 @@ export function useWorkspace() {
   const messageInput = ref('')
   const messageScroller = ref<HTMLElement | null>(null)
   const currentTurn = ref<CurrentTurn | null>(null)
+  const inquiryInput = ref('')
+  const composerIntent = ref<TrpgComposerIntent>('action')
   const combatOverview = ref<TrpgCombatParticipantOverview[]>([])
   const investigatorCards = ref<InvestigatorCardSummary[]>([])
   const replyTurnState = ref<ReplyTurnState | null>(null)
+  const generationFailure = ref<GenerationFailureState | null>(null)
+  const generationFailureOpen = ref(false)
   const latestDiceRoll = ref<DiceRollAggregate | null>(null)
   const incomingDiceRoll = ref<DiceRollAggregate | null>(null)
   const hasOlderGroupMessages = ref(false)
@@ -466,11 +470,25 @@ export function useWorkspace() {
         messages.value.push(message)
       }
       if (message) { if (event.messageId) message.id = event.messageId; message.content = event.content ?? message.content; message.status = 'completed' }
-    } else if (event.eventType === 'reply.failed' && step) {
+    } else if ((event.eventType === 'reply.failed'
+      || event.eventType === 'generation.failed') && step) {
       const message = findEventMessage(event)
-      if (message) { message.status = 'failed'; message.content ||= event.error || '回复生成失败' }
+      if (message) message.status = 'failed'
     } else if (event.eventType === 'reply.failed' && event.error) {
       notify('本轮回复中断', event.error, 'danger')
+    }
+    if (event.eventType === 'generation.failed'
+      && event.errorDetail && !catchingUpGenerationId
+      && selectedConversationId.value != null) {
+      generationFailure.value = {
+        conversationId: selectedConversationId.value,
+        turnId: event.turnId,
+        replyStepId: event.replyStepId,
+        messageId: event.messageId,
+        message: event.error || event.errorDetail.message || '生成失败',
+        detail: event.errorDetail,
+      }
+      generationFailureOpen.value = true
     }
     if (!catchingUpGenerationId) void scrollToBottom()
   }
@@ -480,13 +498,25 @@ export function useWorkspace() {
     connect: (onEvent: (event: GroupChatEvent) => void) => Promise<void>,
     catchingUp = false,
   ) {
+    if (!catchingUp) {
+      generationFailure.value = null
+      generationFailureOpen.value = false
+    }
     rememberGeneration(conversationId, clientRequestId)
     if (catchingUp) catchingUpGenerationId = clientRequestId
+    let failed = false
+    let terminal = false
     try {
       await connect((event) => {
+        if (event.eventType === 'generation.failed') failed = true
+        if (event.eventType === 'generation.failed'
+          || event.eventType === 'turn.completed'
+          || event.eventType === 'turn.waiting_input'
+          || event.eventType === 'turn.paused') terminal = true
         if (selectedConversationId.value === conversationId) applyEvent(event)
       })
-      forgetGeneration(conversationId, clientRequestId)
+      if (terminal) forgetGeneration(conversationId, clientRequestId)
+      return { failed, terminal }
     } finally {
       if (catchingUpGenerationId === clientRequestId) catchingUpGenerationId = null
     }
@@ -496,16 +526,26 @@ export function useWorkspace() {
     if (!clientRequestId) return
     loading.sending = true
     try {
-      await consumeGeneration(
+      const outcome = await consumeGeneration(
         conversationId,
         clientRequestId,
         (onEvent) => streamGroupGeneration.resume(
           conversationId, clientRequestId, onEvent),
         true,
       )
+      const conversation = selectedConversation.value
+      if (outcome.failed && conversation?.id === conversationId
+        && conversation.mode === 'trpg') {
+        await syncTrpgState(conversation)
+      }
     } catch {
       // The replay cache is intentionally best-effort; persisted history
       // loaded by selectConversation remains the fallback after expiry/restart.
+      const conversation = selectedConversation.value
+      if (conversation?.id === conversationId
+        && conversation.mode === 'trpg') {
+        await syncTrpgState(conversation).catch(() => undefined)
+      }
     } finally {
       loading.sending = false
       await scrollToBottom()
@@ -551,6 +591,16 @@ export function useWorkspace() {
     }
     finally { loading.sending = false; await scrollToBottom() }
   }
+  async function retryGenerationFailure() {
+    const conversation = selectedConversation.value
+    const turn = currentTurn.value
+    if (!generationFailure.value
+      || generationFailure.value.conversationId !== conversation?.id
+      || conversation.mode !== 'trpg'
+      || (turn?.status !== 'failed' && turn?.status !== 'blocked')) return
+    generationFailureOpen.value = false
+    await startTrpgTurn()
+  }
   async function selectSceneOption(optionNo: string) {
     const conversation = selectedConversation.value; const turn = currentTurn.value
     if (!conversation || !turn?.waitingForUser || turn.inputType !== 'selection' || !turn.stepId || loading.sending) return
@@ -592,6 +642,38 @@ export function useWorkspace() {
       notify('结束探索失败', errorMessage(error), 'danger')
     }
     finally { loading.sending = false; await scrollToBottom() }
+  }
+
+  async function askKp() {
+    const conversation = selectedConversation.value
+    const turn = currentTurn.value
+    const question = inquiryInput.value.trim()
+    if (!conversation || conversation.mode !== 'trpg'
+      || conversation.status !== 'active' || !question
+      || !turn?.waitingForUser || !turn.canAskKp
+      || turn.inputType !== 'message' || !turn.stepId
+      || loading.sending) return
+    loading.sending = true
+    try {
+      const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
+      const { turnId, stepId } = turn
+      await consumeGeneration(
+        conversation.id,
+        clientRequestId,
+        (onEvent) => streamTrpgTurn.inquiry(
+          conversation.id, turnId, stepId,
+          { clientRequestId, question }, onEvent),
+      )
+      await syncTrpgState(conversation)
+      if (inquiryInput.value.trim() === question) inquiryInput.value = ''
+      composerIntent.value = 'action'
+    } catch (error) {
+      await syncTrpgState(conversation).catch(() => undefined)
+      notify('询问 KP 失败', errorMessage(error), 'danger')
+    } finally {
+      loading.sending = false
+      await scrollToBottom()
+    }
   }
   async function retryStep(message: GroupMessage) {
     const conversation = selectedConversation.value
@@ -681,11 +763,11 @@ export function useWorkspace() {
   onMounted(boot)
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
-    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, messageScroller, currentTurn, combatOverview, investigatorCards, replyTurnState,
-    latestDiceRoll, incomingDiceRoll, hasOlderGroupMessages,
+    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, combatOverview, investigatorCards, replyTurnState,
+    latestDiceRoll, incomingDiceRoll, hasOlderGroupMessages, generationFailure, generationFailureOpen,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,
-    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, startTrpgTurn, selectSceneOption, endExploration, retryStep, correctGameTime, refreshDiceRoll,
+    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, askKp, startTrpgTurn, retryGenerationFailure, selectSceneOption, endExploration, retryStep, correctGameTime, refreshDiceRoll,
   }
 }

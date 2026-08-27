@@ -4,12 +4,15 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.utils.CurrentHolder;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.RLock;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
 import reactor.core.scheduler.Schedulers;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -18,6 +21,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class GroupGenerationStreamRegistryTest {
 
@@ -167,6 +174,203 @@ class GroupGenerationStreamRegistryTest {
         } finally {
             CurrentHolder.remove();
         }
+    }
+
+    @Test
+    void convertsAnUpstreamFailureIntoATerminalGenerationEvent() {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+
+        List<GroupChatEvent> events = registry.start(
+                        7L, "failed-generation",
+                        Flux.error(new IllegalStateException(
+                                "model request failed")))
+                .onErrorComplete()
+                .collectList()
+                .block();
+
+        assertThat(events).isNotNull();
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .contains("generation.failed");
+    }
+
+    @Test
+    void failureEventIncludesKnownGenerationIdsAndDebugDetails()
+            throws Exception {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+        GroupChatEvent started = GroupChatEvent.builder()
+                .eventType(GroupChatConstant.EVENT_REPLY_STARTED)
+                .conversationId(7L)
+                .turnId(41L)
+                .replyStepId(42L)
+                .messageId(43L)
+                .build();
+
+        List<GroupChatEvent> events = registry.start(
+                        7L, "failed-generation-with-context",
+                        Flux.concat(
+                                Flux.just(started),
+                                Flux.error(new IllegalStateException(
+                                        "model request failed"))))
+                .collectList()
+                .block();
+
+        assertThat(events).isNotNull();
+        GroupChatEvent failure = events.stream()
+                .filter(event -> "generation.failed".equals(
+                        event.getEventType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(failure.getTurnId()).isEqualTo(41L);
+        assertThat(failure.getReplyStepId()).isEqualTo(42L);
+        assertThat(failure.getMessageId()).isEqualTo(43L);
+        String json = JsonMapper.builder().build()
+                .writeValueAsString(failure);
+        assertThat(json).contains("errorDetail")
+                .contains("model request failed")
+                .contains("GroupGenerationStreamRegistryTest");
+    }
+
+    @Test
+    void failureDebugRequestIsServerSanitized() {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+        GenerationRequestContext request = new GenerationRequestContext(
+                "continue-trpg-turn",
+                "POST",
+                "/group-chat/conversations/7/turns/continue",
+                Map.of(
+                        "clientRequestId", "request-7",
+                        "token", "must-not-leak",
+                        "nested", Map.of(
+                                "password", "must-not-leak-either")));
+
+        GroupChatEvent failure = registry.start(
+                        7L, "failed-sanitized-generation", request,
+                        Flux.error(new IllegalStateException("failed")))
+                .filter(event -> "generation.failed".equals(
+                        event.getEventType()))
+                .blockFirst();
+
+        assertThat(failure).isNotNull();
+        assertThat(failure.getErrorDetail().getOperation())
+                .isEqualTo("continue-trpg-turn");
+        assertThat(failure.getErrorDetail().getRequest())
+                .containsEntry("method", "POST")
+                .containsEntry("path",
+                        "/group-chat/conversations/7/turns/continue");
+        assertThat(failure.getErrorDetail().getRequest().toString())
+                .contains("[REDACTED]")
+                .doesNotContain("must-not-leak");
+    }
+
+    @Test
+    void convertsLegacyReplyFailureIntoTheOperationFailureContract() {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+        GroupChatEvent replyFailure = GroupChatEvent.builder()
+                .eventType(GroupChatConstant.EVENT_REPLY_FAILED)
+                .conversationId(7L)
+                .turnId(41L)
+                .replyStepId(42L)
+                .messageId(43L)
+                .error("context failed")
+                .build();
+
+        List<GroupChatEvent> events = registry.start(
+                        7L, "legacy-reply-failure",
+                        Flux.just(replyFailure))
+                .collectList()
+                .block();
+
+        assertThat(events).isNotNull();
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .contains("generation.failed")
+                .doesNotContain(GroupChatConstant.EVENT_REPLY_FAILED);
+    }
+
+    @Test
+    void persistsInterruptedStateBeforePublishingTheFailureEvent() {
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupTurnRecoveryService recoveryService =
+                mock(GroupTurnRecoveryService.class);
+        List<String> lifecycle = new CopyOnWriteArrayList<>();
+        doAnswer(invocation -> {
+            lifecycle.add("recovered");
+            return null;
+        }).when(recoveryService).recoverInterrupted(7L);
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(
+                        Duration.ofMinutes(5), lockService,
+                        recoveryService);
+
+        registry.start(
+                        7L, "recover-before-event",
+                        Flux.error(new IllegalStateException("failed")))
+                .doOnNext(event -> {
+                    if ("generation.failed".equals(
+                            event.getEventType())) {
+                        lifecycle.add("failure-event");
+                    }
+                })
+                .collectList()
+                .block();
+
+        assertThat(lifecycle).containsSubsequence(
+                "recovered", "failure-event");
+    }
+
+    @Test
+    void missingResumeRecoversOrphanedStateAndReturnsRetryableFailure() {
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupTurnRecoveryService recoveryService =
+                mock(GroupTurnRecoveryService.class);
+        GroupConversationLockService.OwnedLock lock =
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 7L);
+        when(lockService.tryLock(7L)).thenReturn(lock);
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(
+                        Duration.ofMinutes(5), lockService,
+                        recoveryService);
+
+        List<GroupChatEvent> events = registry.resume(
+                        7L, "expired-generation")
+                .onErrorComplete()
+                .collectList()
+                .block();
+
+        assertThat(events).isNotNull();
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly("generation.failed");
+        verify(recoveryService).recoverInterrupted(7L);
+        verify(lockService).unlock(lock);
+    }
+
+    @Test
+    void resumedFailureKeepsRetryStateButDropsDebugDetails() {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+        registry.start(
+                        7L, "failed-before-refresh",
+                        Flux.error(new IllegalStateException(
+                                "model failed")))
+                .collectList()
+                .block();
+
+        GroupChatEvent resumedFailure = registry.resume(
+                        7L, "failed-before-refresh")
+                .filter(event -> "generation.failed".equals(
+                        event.getEventType()))
+                .blockFirst();
+
+        assertThat(resumedFailure).isNotNull();
+        assertThat(resumedFailure.getError())
+                .isEqualTo("model failed");
+        assertThat(resumedFailure.getErrorDetail()).isNull();
     }
 
     private static GroupChatEvent event(String eventType) {

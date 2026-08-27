@@ -15,6 +15,7 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.TrpgCombat;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
+import com.me.galchat.domain.po.TrpgInvestigatorSuspension;
 import com.me.galchat.domain.po.TrpgWeaponStash;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CocCharacterMapper;
@@ -36,6 +37,7 @@ import com.me.galchat.mapper.TrpgCombatMapper;
 import com.me.galchat.mapper.TrpgSaveRestoreMapper;
 import com.me.galchat.mapper.TrpgWeaponStashMapper;
 import com.me.galchat.mapper.TrpgRuntimeChildSceneMapper;
+import com.me.galchat.mapper.TrpgInvestigatorSuspensionMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.service.ITrpgRedisStateService;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,6 +83,8 @@ class TrpgSaveSnapshotServiceTest {
     private GroupReplyPlanItemMapper planItemMapper;
     @Mock
     private TrpgRuntimeChildSceneMapper runtimeChildSceneMapper;
+    @Mock
+    private TrpgInvestigatorSuspensionMapper suspensionMapper;
     @Mock
     private CocCharacterMapper characterMapper;
     @Mock
@@ -140,6 +144,7 @@ class TrpgSaveSnapshotServiceTest {
                 diceResultMapper,
                 redisStateService,
                 vectorCleanupMapper);
+        service.setSuspensionMapper(suspensionMapper);
     }
 
     @Test
@@ -175,6 +180,14 @@ class TrpgSaveSnapshotServiceTest {
                 .setRunId(51L)
                 .setName("林默")
                 .setQuickNotes("藏着钥匙");
+        TrpgInvestigatorSuspension suspension =
+                new TrpgInvestigatorSuspension()
+                        .setId(601L).setConversationId(51L)
+                        .setSubjectCharacterId(401L)
+                        .setState(TrpgInvestigatorSuspension
+                                .STATE_SUSPENDED)
+                        .setSuspensionContext("林默被带离森林。")
+                        .setOriginContextId(301L);
         TrpgCombat combat = new TrpgCombat()
                 .setId(501L)
                 .setConversationId(51L);
@@ -221,6 +234,8 @@ class TrpgSaveSnapshotServiceTest {
         when(planItemMapper.selectList(any())).thenReturn(List.of(item));
         when(runtimeChildSceneMapper.selectList(any()))
                 .thenReturn(List.of(runtimeChildScene));
+        when(suspensionMapper.selectList(any()))
+                .thenReturn(List.of(suspension));
         when(characterMapper.selectList(any())).thenReturn(List.of(character));
         when(profileMapper.selectList(any())).thenReturn(List.of());
         when(skillMapper.selectList(any())).thenReturn(List.of());
@@ -259,6 +274,8 @@ class TrpgSaveSnapshotServiceTest {
         assertThat(snapshot.getReplyPlanItems()).containsExactly(item);
         assertThat(snapshot.getRuntimeChildScenes())
                 .containsExactly(runtimeChildScene);
+        assertThat(snapshot.getInvestigatorSuspensions())
+                .containsExactly(suspension);
         assertThat(snapshot.getCharacters()).containsExactly(character);
         assertThat(snapshot.getCharacterQuickNotes())
                 .containsEntry(401L, "藏着钥匙");

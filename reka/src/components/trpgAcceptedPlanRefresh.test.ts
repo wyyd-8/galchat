@@ -9,7 +9,8 @@ registerHooks({
     if (specifier.startsWith('@/')) {
       return { url: new URL(`${specifier.slice(2)}.ts`, sourceRoot).href, shortCircuit: true }
     }
-    if (/^\.\.?\//.test(specifier) && !/\.[a-z]+$/i.test(specifier)) {
+    if (context.parentURL?.startsWith(sourceRoot.href)
+      && /^\.\.?\//.test(specifier) && !/\.[a-z]+$/i.test(specifier)) {
       return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true }
     }
     return nextResolve(specifier, context)

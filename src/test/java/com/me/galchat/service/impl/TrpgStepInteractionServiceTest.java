@@ -116,6 +116,156 @@ class TrpgStepInteractionServiceTest {
     }
 
     @Test
+    void investigatorInquiryCreatesKpChildAndSuspendsInvestigatorRoot() {
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        TrpgParticipantService participants =
+                mock(TrpgParticipantService.class);
+        TrpgStepInteractionService service = service(
+                steps, turns, participants);
+        GroupChatReplyStep root = new GroupChatReplyStep()
+                .setId(201L)
+                .setTurnId(101L)
+                .setStepNo(4)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ATTACK)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(9L)
+                .setSubjectCharacterId(32L)
+                .setGroupKey("combat:1")
+                .setGroupName("战斗第1轮")
+                .setGroupOrder(1)
+                .setItemOrder(1)
+                .setOutputMessageId(401L)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        when(turns.selectById(101L)).thenReturn(runningTurn());
+        when(steps.selectById(201L)).thenReturn(root);
+        when(steps.selectList(any()))
+                .thenReturn(List.of(), List.of(root));
+        when(participants.listInvestigators(any()))
+                .thenReturn(List.of(participant(
+                        GroupChatConstant.ACTOR_CHARACTER,
+                        9L, 32L, "陈默")));
+        doAnswer(invocation -> {
+            invocation.<GroupChatReplyStep>getArgument(0).setId(303L);
+            return 1;
+        }).when(steps).insert(any(GroupChatReplyStep.class));
+
+        var result = service.askKp(
+                conversation(), 101L, 201L,
+                new GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L),
+                "DESCRIBE_VISIBLE_INFORMATION",
+                "倒下的书柜是否完全挡住了食尸鬼？");
+
+        ArgumentCaptor<GroupChatReplyStep> inserted =
+                ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(steps).insert(inserted.capture());
+        assertThat(inserted.getValue().getParentStepId()).isEqualTo(201L);
+        assertThat(inserted.getValue().getSpeakerType())
+                .isEqualTo(GroupChatConstant.ACTOR_KP);
+        assertThat(inserted.getValue().getInteractionType())
+                .isEqualTo(TrpgStepInteractionService
+                        .INVESTIGATOR_KP_INQUIRY);
+        assertThat(root.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        assertThat(root.getInteractionType())
+                .isEqualTo(TrpgStepInteractionService
+                        .INVESTIGATOR_KP_INQUIRY);
+        assertThat(result.targetActor())
+                .isEqualTo(new GroupActorRef(
+                        GroupChatConstant.ACTOR_KP, null));
+        assertThat(result.reasonType())
+                .isEqualTo("DESCRIBE_VISIBLE_INFORMATION");
+    }
+
+    @Test
+    void humanInvestigatorCanAskKpFromWaitingSceneAction() {
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        TrpgParticipantService participants =
+                mock(TrpgParticipantService.class);
+        TrpgStepInteractionService service = service(
+                steps, turns, participants);
+        GroupChatReplyStep root = new GroupChatReplyStep()
+                .setId(201L)
+                .setTurnId(101L)
+                .setStepNo(4)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setSpeakerId(31L)
+                .setSubjectCharacterId(31L)
+                .setGroupKey("scene:1")
+                .setGroupName("深夜街道")
+                .setGroupOrder(1)
+                .setItemOrder(1)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        when(turns.selectById(101L)).thenReturn(runningTurn());
+        when(steps.selectById(201L)).thenReturn(root);
+        when(steps.selectList(any()))
+                .thenReturn(List.of(), List.of(root));
+        when(participants.listInvestigators(any()))
+                .thenReturn(List.of(participant(
+                        GroupChatConstant.ACTOR_USER,
+                        31L, 31L, "林恩")));
+        doAnswer(invocation -> {
+            invocation.<GroupChatReplyStep>getArgument(0).setId(304L);
+            return 1;
+        }).when(steps).insert(any(GroupChatReplyStep.class));
+
+        var result = service.askKp(
+                conversation(), 101L, 201L,
+                new GroupActorRef(GroupChatConstant.ACTOR_USER, 31L),
+                "DESCRIBE_VISIBLE_INFORMATION",
+                "现在能看见街上有空载出租车吗？");
+
+        ArgumentCaptor<GroupChatReplyStep> inserted =
+                ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(steps).insert(inserted.capture());
+        assertThat(result.childStepId()).isEqualTo(304L);
+        assertThat(inserted.getValue().getSubjectCharacterId())
+                .isEqualTo(31L);
+        assertThat(root.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
+    }
+
+    @Test
+    void investigatorInquiryRejectsKpNpcAndCombatDefenseSources() {
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        TrpgParticipantService participants =
+                mock(TrpgParticipantService.class);
+        TrpgStepInteractionService service = service(
+                steps, turns, participants);
+        GroupChatReplyStep defense = new GroupChatReplyStep()
+                .setId(201L).setTurnId(101L)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_DEFENSE)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(9L).setSubjectCharacterId(32L)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        when(turns.selectById(101L)).thenReturn(runningTurn());
+        when(steps.selectById(201L)).thenReturn(defense);
+
+        assertThatThrownBy(() -> service.askKp(
+                conversation(), 101L, 201L,
+                new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 9L),
+                "CONFIRM_PUBLIC_FACT", "门是否仍然开着？"))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("当前步骤");
+
+        defense.setActionType(GroupChatConstant.ACTION_COMBAT_ATTACK)
+                .setSpeakerType(GroupChatConstant.ACTOR_KP);
+        assertThatThrownBy(() -> service.askKp(
+                conversation(), 101L, 201L,
+                new GroupActorRef(GroupChatConstant.ACTOR_KP, null),
+                "CONFIRM_PUBLIC_FACT", "门是否仍然开着？"))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("调查员");
+    }
+
+    @Test
     void combatRouteClarificationIsAppendedBesideRouteUnderAdjudicationRoot() {
         GroupChatReplyStepMapper steps =
                 mock(GroupChatReplyStepMapper.class);

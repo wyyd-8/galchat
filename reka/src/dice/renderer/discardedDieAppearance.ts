@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 
-const DISCARDED_OPACITY = 0.3
 const DISCARDED_SATURATION = 0.105
 const DISCARDED_BRIGHTNESS = 0.85
+// Approximate the former 30% canvas compositing over the light dice tray without changing material alpha.
+const DISCARDED_BACKDROP = 0.88
+const DISCARDED_FOREGROUND_MIX = 0.3
 const COLORSPACE_FRAGMENT = '#include <colorspace_fragment>'
 const discardedMaterials = new WeakSet<THREE.Material>()
 
@@ -16,15 +18,14 @@ function applyDiscardedMaterialAppearance(material: THREE.Material): void {
     parameters.fragmentShader = parameters.fragmentShader.replace(
       COLORSPACE_FRAGMENT,
       `${COLORSPACE_FRAGMENT}
-gl_FragColor.rgb = mix(
+vec3 discardedColor = mix(
   vec3(dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722))),
   gl_FragColor.rgb,
   ${DISCARDED_SATURATION}
-) * ${DISCARDED_BRIGHTNESS};`,
+) * ${DISCARDED_BRIGHTNESS};
+gl_FragColor.rgb = mix(vec3(${DISCARDED_BACKDROP}), discardedColor, ${DISCARDED_FOREGROUND_MIX});`,
     )
   }
-  material.opacity *= DISCARDED_OPACITY
-  material.transparent = true
   material.needsUpdate = true
 }
 

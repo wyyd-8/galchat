@@ -656,6 +656,8 @@ public class TrpgCombatLifecycleService {
                 .setUpdatedAt(now);
         combatMapper.updateById(combat);
         replyPlanService.finishActiveUnderLock(conversation);
+        replyPlanService.startPostCombatTransitionUnderLock(
+                conversation, combat.getId());
     }
 
     void clearCombatStates(TrpgCombat combat) {
@@ -698,9 +700,16 @@ public class TrpgCombatLifecycleService {
         for (tools.jackson.databind.JsonNode result : results) {
             String text = result.get("adjudication") == null
                     ? null : result.get("adjudication").asText();
-            if (StringUtils.hasText(text)) {
-                summary.append("\n").append(++count)
-                        .append(". ").append(text.trim());
+            String compacted = StringUtils.hasText(text)
+                    ? text.lines()
+                            .map(String::strip)
+                            .filter(StringUtils::hasText)
+                            .collect(Collectors.joining("\n"))
+                    : "";
+            if (StringUtils.hasText(compacted)) {
+                summary.append(count == 0 ? "\n" : "\n\n")
+                        .append(++count)
+                        .append(". ").append(compacted);
             }
         }
         if (count == 0) {

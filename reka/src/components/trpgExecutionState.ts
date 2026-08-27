@@ -39,6 +39,15 @@ const STEP_LABELS: Record<string, string> = {
   blocked: '执行受阻',
 }
 
+export function trpgTurnActionLabel(turn: CurrentTurn | null): string {
+  if (!turn) return '开始行动轮'
+  if (turn.status === 'failed' || turn.status === 'blocked') {
+    return '重试此行动轮'
+  }
+  if (turn.inputType === 'dice') return '检查投骰并继续'
+  return '继续行动轮'
+}
+
 function isGenericKp(item: ReplyPlanItem): boolean {
   return item.actorType === 'kp' && item.subjectCharacterId == null
 }
@@ -65,7 +74,9 @@ function matchingSteps(
     if (subjectSteps.length) return subjectSteps
   }
   return turn.steps.filter((step) =>
-    step.itemOrder === item.order && step.actorType === item.actorType)
+    (item.subjectCharacterId == null || step.subjectCharacterId == null)
+      && step.itemOrder === item.order
+      && step.actorType === item.actorType)
 }
 
 function updateEventStep(
@@ -156,7 +167,8 @@ export function applyCurrentTurnEvent(
       waitingForUser: false,
     }
   }
-  if (event.eventType === 'reply.failed') {
+  if (event.eventType === 'reply.failed'
+    || event.eventType === 'generation.failed') {
     return {
       ...current,
       status: 'failed',

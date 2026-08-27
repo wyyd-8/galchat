@@ -68,7 +68,8 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
         boolean finishMarker = toolNames.contains(
                 "markCombatFinished");
         boolean clarification = toolNames.contains(
-                "askForClarification");
+                "askForClarification")
+                || toolNames.contains("askKp");
         if (diceToolCount > 0 && toolNames.size() != 1) {
             throw new UserRequestException("一次响应只能调用一个掷骰工具，且不能与其他工具并行");
         }

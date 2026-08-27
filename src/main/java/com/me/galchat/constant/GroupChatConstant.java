@@ -11,6 +11,7 @@ public final class GroupChatConstant {
     public static final String PLAN_SOURCE_USER = "USER";
     public static final String PLAN_SOURCE_SCENE = "SCENE";
     public static final String PLAN_SOURCE_COMBAT = "COMBAT";
+    public static final String PLAN_SOURCE_POST_COMBAT = "POST_COMBAT";
     public static final String TURN_SOURCE_SCENE_SELECTION = "SCENE_SELECTION";
 
     public static final String ACTOR_USER = "user";
@@ -36,6 +37,8 @@ public final class GroupChatConstant {
     public static final String ACTION_COMBAT_ADJUDICATE = "combat_adjudicate";
     public static final String ACTION_COMBAT_UNCONSCIOUS_RECOVERY =
             "combat_unconscious_recovery";
+    public static final String ACTION_TRPG_POST_COMBAT_TRANSITION =
+            "trpg_post_combat_transition";
     public static final String ACTION_TRPG_INTERACTION_RESPONSE =
             "trpg_interaction_response";
     public static final String ACTION_TRPG_SCENE_SELECTION = "trpg_scene_selection";
@@ -80,6 +83,8 @@ public final class GroupChatConstant {
             "scene_selection.choice";
     public static final String EVENT_MESSAGE_COMPLETED = "message.completed";
     public static final String EVENT_REPLY_FAILED = "reply.failed";
+    public static final String EVENT_GENERATION_FAILED =
+            "generation.failed";
     public static final String EVENT_TURN_COMPLETED = "turn.completed";
     public static final String EVENT_TURN_WAITING_INPUT = "turn.waiting_input";
     public static final String EVENT_TURN_PAUSED = "turn.paused";

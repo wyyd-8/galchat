@@ -13,6 +13,8 @@ export type DicePlaybackMode = 'pending' | 'play' | 'settled'
 export type DiceGroupRule = 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'
 export type DiceCheckDifficulty = 'REGULAR' | 'HARD' | 'EXTREME'
 export type DiceGroupOutcomePhase = 'concealed' | 'individual' | 'highlighted' | 'merging' | 'merged'
+export type DicePlayerWindowTone = 'damage' | 'sanity' | 'healing' | 'pushed-check' | 'opposed'
+export type DiceOpposedResultTone = 'winner' | 'draw' | 'no-winner'
 export type DiceOutcomeTone = 'critical-success' | 'success' | 'failure' | 'fumble' | 'none'
 export type DiceSpecialOutcomeTone = Extract<DiceOutcomeTone, 'critical-success' | 'fumble'>
 export type DiceMessageTone = 'pending' | 'damage' | 'sanity' | 'healing' | 'pushed-check'
@@ -39,6 +41,9 @@ export interface DicePlaybackPresentation {
   kind: 'multiplayer-check' | 'opposed-check' | 'value-roll'
   resultLabel: string
   resultValue: string
+  resultHeadline?: string
+  resultDetail?: string
+  resultTone?: DiceOpposedResultTone
   formulaLabel: string
   formulaValue: string
   groups: DicePlaybackGroupPresentation[]
@@ -64,6 +69,7 @@ export interface DicePlaybackRequest {
   autoPlayDelayMs?: number
   initialAnimation?: DiceInitialAnimationPlan
   offerContinueAfterComplete?: boolean
+  windowTone?: DicePlayerWindowTone
 }
 export interface DicePlayerSummary {
   skinLabel: string
@@ -75,6 +81,9 @@ export interface DicePlayerSummary {
   equation: string
   resultLabel: string
   resultValue: number | string
+  resultHeadline?: string
+  resultDetail?: string
+  resultTone?: DiceOpposedResultTone
   formulaLabel: string
   formulaValue: string
 }
@@ -101,7 +110,12 @@ export function resolveDiceSkin(value: unknown): DiceSkin {
     : 'classic'
 }
 
-export function createDicePlayerWindowClass(toolName?: string): string {
+export function createDicePlayerWindowClass(
+  value?: string | Pick<DicePlaybackRequest, 'toolName' | 'windowTone'>,
+): string {
+  const toolName = typeof value === 'string' ? value : value?.toolName
+  const windowTone = typeof value === 'string' ? undefined : value?.windowTone
+  if (windowTone) return `dice-player-window dice-player-window--${windowTone}`
   if (toolName === 'rollDamage') return 'dice-player-window dice-player-window--damage'
   if (toolName === 'requestSanCheck' || toolName === 'rollSanLoss') {
     return 'dice-player-window dice-player-window--sanity'
@@ -356,6 +370,16 @@ export function shouldOfferDiceContinue(
 ): boolean {
   return request?.offerContinueAfterComplete === true
     && (hasQueuedRoll || (summaryStatus === 'COMPLETED' && !hasPendingResults))
+}
+
+export function shouldOfferDiceContinueOnOpen(
+  request: DicePlaybackRequest,
+  summaryStatus: string,
+  hasPendingResults: boolean,
+  hasQueuedRoll = false,
+): boolean {
+  return resolveDicePlayerMode(request) === 'settled'
+    && shouldOfferDiceContinue(request, summaryStatus, hasPendingResults, hasQueuedRoll)
 }
 
 export function createDiceAutoPlayPlan(
@@ -755,6 +779,29 @@ export function createDiceAggregatePlaybackRequest(
     : effectiveGroupRule === 'SEPARATE'
       ? aggregateResult
       : groupSucceeded ? '成功' : '失败'
+  const winningGroup = opposed ? groups.find((group) => group.winner) : undefined
+  const opposedDraw = opposed && /^平局(?:；|$)/.test(aggregateResult)
+  const opposedResultSummary = winningGroup
+    ? {
+        resultHeadline: `${winningGroup.label}胜出`,
+        resultDetail: `${winningGroup.checkName} · ${winningGroup.outcomeLabel}`,
+        resultTone: 'winner' as const,
+      }
+    : opposedDraw
+      ? {
+          resultHeadline: '平局',
+          resultDetail: '对抗未分出胜负',
+          resultTone: 'draw' as const,
+        }
+      : opposed
+        ? {
+            resultHeadline: '无人胜出',
+            resultDetail: groups.every((group) => !group.success)
+              ? `${groups.length === 2 ? '双方' : '所有参与者'}检定均失败`
+              : '对抗未分出胜负',
+            resultTone: 'no-winner' as const,
+          }
+        : undefined
   const formulaValue = opposed
     ? groups.map((group) => `${group.label}（${group.checkName}）`).join(' vs ')
     : `${groups.length} 人参与 · ${checkNames.join(' / ')} · ${effectiveGroupRule === 'ALL_SUCCESS'
@@ -778,6 +825,7 @@ export function createDiceAggregatePlaybackRequest(
           ? '全部成功'
           : effectiveGroupRule === 'ANY_SUCCESS' ? '任一成功' : '分别结果',
       resultValue,
+      ...opposedResultSummary,
       formulaLabel: opposed ? '对抗双方' : '检定项目',
       formulaValue,
       groups,
@@ -805,19 +853,32 @@ export function createDiceMessagePlaybackRequest(
   const valueRoll = details.every((detail) => VALUE_ROLL_TYPES.has(
     detail.resolution?.type || detail.displayType || '',
   ))
-  if (valueRoll) {
-    return createDiceValuePlaybackRequest(previousId, aggregate, details, skin)
-  }
-  if (participantCheck || details.length > 1) {
-    return createDiceAggregatePlaybackRequest(previousId, aggregate, skin)
-  }
-  return createDicePlaybackRequest(
-    previousId,
-    details[0]!.resultData,
-    skin,
-    aggregate.summary.reason || details[0]!.reason,
-    aggregate.summary.toolName,
-  )
+  const request = valueRoll
+    ? createDiceValuePlaybackRequest(previousId, aggregate, details, skin)
+    : participantCheck || details.length > 1
+      ? createDiceAggregatePlaybackRequest(previousId, aggregate, skin)
+      : createDicePlaybackRequest(
+          previousId,
+          details[0]!.resultData,
+          skin,
+          aggregate.summary.reason || details[0]!.reason,
+          aggregate.summary.toolName,
+        )
+  const resolutionTypes = details.map((detail) => (
+    detail.resolution?.type || detail.displayType || ''
+  ))
+  const windowTone: DicePlayerWindowTone | undefined = resolutionTypes.every((type) => (
+    type === 'DAMAGE' || type === 'STUN_DURATION'
+  ))
+    ? 'damage'
+    : resolutionTypes.every((type) => type === 'SAN_CHECK' || type === 'SAN_LOSS')
+      ? 'sanity'
+      : resolutionTypes.every((type) => type === 'HEALING')
+        ? 'healing'
+        : request.presentation?.kind === 'opposed-check'
+          ? 'opposed'
+          : undefined
+  return windowTone ? { ...request, windowTone } : request
 }
 
 export function createIncomingDiceMessagePlaybackRequest(
@@ -898,6 +959,11 @@ export function createDicePlayerSummary(
     equation: `${result.formula} = ${settledResult}`,
     resultLabel: presentation?.resultLabel || '最终结果',
     resultValue: presentation?.resultValue || settledResult,
+    ...(presentation?.resultHeadline ? {
+      resultHeadline: presentation.resultHeadline,
+      resultDetail: presentation.resultDetail,
+      resultTone: presentation.resultTone,
+    } : {}),
     formulaLabel: presentation?.formulaLabel || '判定公式',
     formulaValue: presentation?.formulaValue || result.formula,
   }

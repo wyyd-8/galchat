@@ -35,6 +35,17 @@ public interface GroupChatTurnMapper extends BaseMapper<GroupChatTurn> {
     Long countNonTerminalByConversationId(@Param("conversationId") Long conversationId);
 
     @Select("""
+            SELECT COUNT(*)
+            FROM group_chat_turn
+            WHERE conversation_id = #{conversationId}
+              AND id <> #{excludedTurnId}
+              AND status IN ('pending', 'running', 'waiting_input')
+            """)
+    Long countNonTerminalByConversationIdExcept(
+            @Param("conversationId") Long conversationId,
+            @Param("excludedTurnId") Long excludedTurnId);
+
+    @Select("""
             SELECT COALESCE(MAX(turn_row.id), 0)
             FROM group_chat_turn turn_row
             WHERE turn_row.conversation_id = #{conversationId}

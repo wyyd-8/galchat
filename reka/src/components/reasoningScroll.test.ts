@@ -107,3 +107,40 @@ test('restores following when a different conversation opens in the same viewpor
 
   assert.equal(viewport.scrollTop, 980)
 })
+
+test('unlocks message following on the first upward movement inside the bottom tolerance', async () => {
+  const module = await import('./reasoningScroll.ts')
+  const viewport = {
+    scrollTop: 500,
+    scrollHeight: 900,
+    clientHeight: 400,
+    querySelectorAll() { return [] },
+  }
+
+  module.resetConversationScrollFollowing(viewport as unknown as HTMLElement)
+  viewport.scrollTop = 490
+  module.updateConversationScrollFollowing(viewport as unknown as HTMLElement)
+  viewport.scrollHeight = 980
+  module.scrollConversationToLatest(viewport as unknown as HTMLElement)
+
+  assert.equal(viewport.scrollTop, 490)
+})
+
+test('unlocks reasoning following on the first upward movement inside the bottom tolerance', async () => {
+  const module = await import('./reasoningScroll.ts')
+  const reasoning = { scrollTop: 210, scrollHeight: 360, clientHeight: 150 }
+  const viewport = {
+    scrollTop: 500,
+    scrollHeight: 900,
+    clientHeight: 400,
+    querySelectorAll() { return [reasoning] },
+  }
+
+  module.scrollConversationToLatest(viewport as unknown as HTMLElement)
+  reasoning.scrollTop = 200
+  module.updateReasoningScrollFollowing(reasoning as unknown as HTMLElement)
+  reasoning.scrollHeight = 420
+  module.scrollConversationToLatest(viewport as unknown as HTMLElement)
+
+  assert.equal(reasoning.scrollTop, 200)
+})

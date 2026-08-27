@@ -8,6 +8,7 @@ import {
 import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod } from '@/api/types'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import CombatResultMessage from './CombatResultMessage.vue'
+import EpilogueMessage from './EpilogueMessage.vue'
 import MaterialMessage from './MaterialMessage.vue'
 import TrpgActorRoster from './TrpgActorRoster.vue'
 import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
@@ -189,6 +190,7 @@ function handleReasoningScroll(event: Event) {
             <DiceRollMessage v-if="message.messageKind === 'dice_roll' && message.diceRoll" :aggregate="message.diceRoll" @open="emit('openDice', $event)" />
             <MaterialMessage v-else-if="message.messageKind === 'material'" :content="message.content" />
             <CombatResultMessage v-else-if="message.messageKind === 'combat_result'" :content="message.content" />
+            <EpilogueMessage v-else-if="message.messageKind === 'epilogue'" :content="message.content" />
             <template v-else>
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>
             <div class="message-content">

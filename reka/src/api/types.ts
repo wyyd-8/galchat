@@ -75,7 +75,7 @@ export interface Conversation {
 export interface GroupMessage {
   id: number; conversationId: number; turnId?: number; replyStepId?: number
   speakerType: 'user' | 'character' | 'kp' | 'narrator'; speakerId?: number; speakerName?: string
-  messageKind: 'dialogue' | 'narration' | 'system_event' | 'dice_roll' | 'material' | 'combat_result'; content: string; sequenceNo: number
+  messageKind: 'dialogue' | 'narration' | 'system_event' | 'dice_roll' | 'material' | 'combat_result' | 'epilogue'; content: string; sequenceNo: number
   diceRoll?: DiceRollAggregate
   diceRoundNos?: number[]
   decisionContent?: string; status: string; createdAt?: string

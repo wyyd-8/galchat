@@ -261,12 +261,14 @@ class GroupTurnPlanResolverTest {
                 mock(TrpgProposalOrderService.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
-        when(runLifecycle.finalizeAfterTurn(conversation))
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(9L)
+                .setPlanSource(
+                        GroupChatConstant.TURN_SOURCE_SCENE_SELECTION);
+        when(runLifecycle.finalizeAfterTurn(conversation, 9L))
                 .thenReturn(true);
 
-        resolver.onTurnCompleted(
-                conversation,
-                GroupChatConstant.TURN_SOURCE_SCENE_SELECTION);
+        resolver.onTurnCompleted(conversation, turn);
 
         verify(selectionService, never())
                 .finalizeSelections(conversation);

@@ -179,6 +179,14 @@ public class GroupTurnRecoveryService {
         }
     }
 
+    public void assertConversationHasNoNonTerminalTurnsExcept(
+            Long conversationId, Long excludedTurnId) {
+        if (positive(turnMapper.countNonTerminalByConversationIdExcept(
+                conversationId, excludedTurnId))) {
+            throw new UserRequestException("当前群聊存在其他未完成的轮次");
+        }
+    }
+
     private boolean positive(Long value) {
         return value != null && value > 0;
     }

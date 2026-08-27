@@ -91,15 +91,36 @@ public class GroupConversationLifecycleService {
      */
     public GroupConversation closeUnderLock(
             GroupConversation lockedConversation) {
-        if (lockedConversation == null
-                || lockedConversation.getId() == null
-                || !GroupChatConstant.STATUS_ACTIVE.equals(
-                        lockedConversation.getStatus())) {
-            throw new UserRequestException("群聊会话已结束");
-        }
+        requireActive(lockedConversation);
         Long conversationId = lockedConversation.getId();
         recoveryService.assertConversationHasNoNonTerminalTurns(
                 conversationId);
+        return closeValidated(lockedConversation);
+    }
+
+    public GroupConversation closeAfterTurnUnderLock(
+            GroupConversation lockedConversation,
+            Long completingTurnId) {
+        requireActive(lockedConversation);
+        if (completingTurnId == null) {
+            throw new UserRequestException("结束跑团缺少当前轮次");
+        }
+        recoveryService.assertConversationHasNoNonTerminalTurnsExcept(
+                lockedConversation.getId(), completingTurnId);
+        return closeValidated(lockedConversation);
+    }
+
+    private void requireActive(GroupConversation conversation) {
+        if (conversation == null || conversation.getId() == null
+                || !GroupChatConstant.STATUS_ACTIVE.equals(
+                conversation.getStatus())) {
+            throw new UserRequestException("群聊会话已结束");
+        }
+    }
+
+    private GroupConversation closeValidated(
+            GroupConversation lockedConversation) {
+        Long conversationId = lockedConversation.getId();
         List<GroupChatMessage> messages =
                 completedMessages(conversationId);
         if (GroupChatConstant.MODE_CHAT.equals(

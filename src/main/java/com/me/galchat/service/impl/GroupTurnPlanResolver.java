@@ -83,9 +83,6 @@ public class GroupTurnPlanResolver {
             replyPlanService.finishActiveUnderLock(conversation);
             return;
         }
-        if (runLifecycleService.finalizeAfterTurn(conversation)) {
-            return;
-        }
         if (GroupChatConstant.TURN_SOURCE_SCENE_SELECTION.equals(turnSource)) {
             selectionService.finalizeSelections(conversation);
             return;
@@ -107,6 +104,10 @@ public class GroupTurnPlanResolver {
         }
         if (childSceneCommandService.finalizeStartAfterTurn(
                 conversation, turn)) {
+            return;
+        }
+        if (runLifecycleService.finalizeAfterTurn(
+                conversation, turn.getId())) {
             return;
         }
         onTurnCompleted(conversation, turn.getPlanSource());

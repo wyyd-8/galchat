@@ -29,6 +29,7 @@ public class TrpgRunLifecycleService {
     private final StringRedisTemplate redisTemplate;
     private final GroupConversationLifecycleService conversationLifecycle;
     private final GroupTurnRecoveryService recoveryService;
+    private final TrpgEpilogueService epilogueService;
 
     public void requestFinish(
             Long conversationId, Long replyStepId) {
@@ -58,7 +59,7 @@ public class TrpgRunLifecycleService {
     }
 
     public boolean finalizeAfterTurn(
-            GroupConversation conversation) {
+            GroupConversation conversation, Long completingTurnId) {
         if (conversation == null
                 || conversation.getId() == null
                 || !GroupChatConstant.MODE_TRPG.equals(
@@ -67,7 +68,9 @@ public class TrpgRunLifecycleService {
                         .get(key(conversation.getId())))) {
             return false;
         }
-        conversationLifecycle.closeUnderLock(conversation);
+        epilogueService.generateAndPersist(conversation);
+        conversationLifecycle.closeAfterTurnUnderLock(
+                conversation, completingTurnId);
         redisTemplate.delete(key(conversation.getId()));
         return true;
     }

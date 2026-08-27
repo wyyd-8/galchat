@@ -435,7 +435,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         调用publishExplorationScenes提交当天能够探索的准确地点名称列表和可选目标时间；不得输出地点ID，不要输出时间推进原因、内部判断或额外自然语言。
                         不强制限制地点数量或探索时长。
                         工具是returnDirect；调用后立即结束响应，不要再输出自然语言或JSON。
-                        如果模组已经完整结束，可调用finishRun并继续输出最终公开收束消息。
+                        如果模组已经完整结束，可调用finishRun；系统会在本轮后自动生成每位调查员的人物后传，KP不要自行输出后传。
                         """));
             } else if (sceneIntro) {
                 String kpReentry = suspensionService == null ? ""

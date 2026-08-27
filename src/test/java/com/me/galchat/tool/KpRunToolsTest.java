@@ -28,9 +28,12 @@ class KpRunToolsTest {
                 ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY,
                 8L));
 
-        tools.finishRun(context);
+        String result = tools.finishRun(context);
 
         verify(service).requestFinish(7L, 8L);
+        assertThat(result)
+                .contains("人物后传", "自动生成")
+                .doesNotContain("请向所有调查员给出最终公开收束消息");
         Tool annotation = KpRunTools.class
                 .getMethod("finishRun", ToolContext.class)
                 .getAnnotation(Tool.class);

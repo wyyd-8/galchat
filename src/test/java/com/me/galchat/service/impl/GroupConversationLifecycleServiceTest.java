@@ -135,6 +135,42 @@ class GroupConversationLifecycleServiceTest {
         verify(summaryClient, never()).prompt(any(Prompt.class));
     }
 
+    @Test
+    void turnCompletionCloseIgnoresOnlyTheTurnBeingCompleted() {
+        GroupTurnRecoveryService recoveryService =
+                mock(GroupTurnRecoveryService.class);
+        ChatClient summaryClient = mock(ChatClient.class);
+        GroupConversationLifecycleService service =
+                new GroupConversationLifecycleService(
+                        mock(GroupConversationService.class),
+                        mock(GroupConversationLockService.class),
+                        mock(GroupConversationMapper.class),
+                        mock(GroupReplyPlanService.class),
+                        mock(GroupChatMessageMapper.class),
+                        mock(GroupContextSummaryMapper.class),
+                        mock(IWorldEventLogService.class),
+                        mock(WorldEventLogMapper.class),
+                        mock(WorldEventVectorService.class),
+                        mock(GroupTopicService.class),
+                        recoveryService,
+                        summaryClient,
+                        mock(TransactionTemplate.class));
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        doThrow(new UserRequestException("存在其他未完成轮次"))
+                .when(recoveryService)
+                .assertConversationHasNoNonTerminalTurnsExcept(7L, 9L);
+
+        assertThatThrownBy(() -> service.closeAfterTurnUnderLock(
+                conversation, 9L))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("其他未完成");
+        verify(recoveryService, never())
+                .assertConversationHasNoNonTerminalTurns(7L);
+        verify(summaryClient, never()).prompt(any(Prompt.class));
+    }
+
     private GroupChatMessage message(Long sequence, String type, Long id, String content) {
         return new GroupChatMessage()
                 .setConversationId(7L)

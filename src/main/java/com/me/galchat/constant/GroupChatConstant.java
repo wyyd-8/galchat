@@ -24,6 +24,7 @@ public final class GroupChatConstant {
     public static final String MESSAGE_DICE_ROLL = "dice_roll";
     public static final String MESSAGE_MATERIAL = "material";
     public static final String MESSAGE_COMBAT_RESULT = "combat_result";
+    public static final String MESSAGE_EPILOGUE = "epilogue";
 
     public static final String ACTION_CHAT_REPLY = "chat_reply";
     public static final String ACTION_TRPG_SCENE = "trpg_scene_action";

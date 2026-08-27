@@ -12,6 +12,7 @@ import org.springframework.data.redis.core.ValueOperations;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -28,6 +29,8 @@ class TrpgRunLifecycleServiceTest {
                 mock(GroupChatTurnMapper.class);
         GroupConversationLifecycleService conversationLifecycle =
                 mock(GroupConversationLifecycleService.class);
+        TrpgEpilogueService epilogueService =
+                mock(TrpgEpilogueService.class);
         GroupTurnRecoveryService recoveryService =
                 mock(GroupTurnRecoveryService.class);
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
@@ -55,15 +58,20 @@ class TrpgRunLifecycleServiceTest {
                 new TrpgRunLifecycleService(
                         conversationService, stepMapper, turnMapper,
                         redis, conversationLifecycle,
-                        recoveryService);
+                        recoveryService, epilogueService);
 
         service.requestFinish(7L, 8L);
-        boolean closed = service.finalizeAfterTurn(conversation);
+        boolean closed = service.finalizeAfterTurn(conversation, 9L);
 
         assertThat(closed).isTrue();
         verify(recoveryService).cancelPendingSteps(
                 9L, "KP已结束整个跑团");
-        verify(conversationLifecycle).closeUnderLock(conversation);
+        var closureOrder = inOrder(
+                epilogueService, conversationLifecycle);
+        closureOrder.verify(epilogueService)
+                .generateAndPersist(conversation);
+        closureOrder.verify(conversationLifecycle)
+                .closeAfterTurnUnderLock(conversation, 9L);
         verify(redis).delete(any(String.class));
     }
 }

@@ -9,6 +9,7 @@ import com.me.galchat.domain.dto.KpFirearmRequestDTOs;
 import com.me.galchat.service.ICocDiceOrchestrationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.annotation.Tool;
 
 import java.util.List;
@@ -19,6 +20,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 class KpFirearmToolsTest {
+
+    @Test
+    void schemaExposesOptionalShotgunDistanceBands() {
+        String schema = ToolCallbacks.from(
+                        new KpFirearmTools(null))[0]
+                .getToolDefinition().inputSchema();
+
+        assertThat(schema)
+                .contains("\"distance\"")
+                .contains("NEAR", "MEDIUM", "FAR")
+                .contains("\"required\" : [ \"bulletCount\", \"targetCharacterName\" ]");
+    }
 
     @Test
     void exposesDedicatedReturnDirectFirearmToolAndForwardsKpContext() {

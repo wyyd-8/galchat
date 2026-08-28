@@ -38,6 +38,16 @@ function cssRule(source: string, selector: string): string {
   return source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || ''
 }
 
+function fontSizePx(source: string, selector: string): number {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const rules = source.matchAll(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 'g'))
+  const value = Array.from(rules)
+    .map((match) => match[1]?.match(/font-size:\s*([\d.]+)px/)?.[1])
+    .find(Boolean)
+  assert.ok(value, `${selector} should define a pixel font size`)
+  return Number(value)
+}
+
 function findElement(root: RootNode, predicate: (element: ElementNode) => boolean): ElementNode | undefined {
   const visit = (node: unknown): ElementNode | undefined => {
     if (!node || typeof node !== 'object') return undefined
@@ -379,6 +389,16 @@ test('keeps the result footer visible while an oversized dice stage scrolls', as
   assert.match(scrollRegion, /overflow-y:\s*auto/)
 })
 
+test('leaves calm breathing room above the dice player heading', async () => {
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  const header = cssRule(styles, '.dice-player-window .dialog-header')
+  const minHeight = Number(header.match(/min-height:\s*([\d.]+)px/)?.[1])
+  const paddingTop = Number(header.match(/padding:\s*([\d.]+)px/)?.[1])
+
+  assert.ok(minHeight >= 82 && minHeight <= 86, 'the heading should gain vertical room without becoming oversized')
+  assert.ok(paddingTop >= 20 && paddingTop <= 22, 'the title should keep a comfortable top inset')
+})
+
 test('reveals each lower result only after its dice group merge completes', async () => {
   const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
@@ -409,6 +429,47 @@ test('reveals each lower result only after its dice group merge completes', asyn
       && child.content.type === NodeTypes.SIMPLE_EXPRESSION
       && child.content.content.includes('isFinalDiceResultRevealed')
   )), true, 'a single final result should wait for the dice merge to finish')
+})
+
+test('stacks each revealed participant result above its outcome label', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+
+  const root = baseParse(template)
+  const outcome = findElementByClass(root, 'dice-group-outcome')
+  const value = outcome && findElement(outcome as unknown as RootNode, (element) => element.tag === 'strong')
+  const label = outcome && findElement(outcome as unknown as RootNode, (element) => element.tag === 'small')
+
+  assert.ok(outcome, 'revealed participant results should use a dedicated stacked layout')
+  assert.ok(value, 'the roll value should occupy its own line')
+  assert.ok(label, 'the outcome label should occupy its own line')
+
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  const outcomeRule = cssRule(styles, '.dice-group-result-box > .dice-group-outcome')
+  assert.match(outcomeRule, /display:\s*grid/)
+  assert.match(outcomeRule, /justify-items:\s*end/)
+})
+
+test('keeps the result footer typography within a compact readable scale', async () => {
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  const sizeRanges = [
+    ['.dice-group-outcome-heading span', 8, 9],
+    ['.dice-group-outcome-heading strong', 10, 11],
+    ['.dice-group-result-box > span strong', 10, 11],
+    ['.dice-group-result-box > span small', 8, 9],
+    ['.dice-check-difficulty', 7, 8],
+    ['.dice-group-result-box > .dice-group-outcome strong', 15, 16],
+    ['.dice-group-result-box > .dice-group-outcome small', 7, 8],
+    ['.dice-group-result-box > .dice-group-target strong', 15, 16],
+    ['.dice-group-result-box > .dice-group-target small', 7, 8],
+  ] as const
+
+  for (const [selector, minimum, maximum] of sizeRanges) {
+    const actual = fontSizePx(styles, selector)
+    assert.ok(actual >= minimum, `${selector} should remain at least ${minimum}px`)
+    assert.ok(actual <= maximum, `${selector} should remain at most ${maximum}px`)
+  }
 })
 
 test('stretches each dice message card across the chat message row', async () => {

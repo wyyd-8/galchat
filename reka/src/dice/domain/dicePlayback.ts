@@ -29,6 +29,7 @@ export interface DicePlaybackGroupPresentation {
   checkName: string
   difficulty?: DiceCheckDifficulty
   difficultyLabel?: string
+  targetValue?: number
   outcomeLabel: string
   outcomeTone: DiceOutcomeTone
   success: boolean
@@ -36,6 +37,10 @@ export interface DicePlaybackGroupPresentation {
   moduleStart: number
   moduleCount: number
   rollResult?: number
+}
+export interface DiceGroupResultDisplay {
+  label?: string
+  value: string
 }
 export interface DicePlaybackPresentation {
   kind: 'multiplayer-check' | 'opposed-check' | 'value-roll'
@@ -599,6 +604,7 @@ function aggregateGroup(
     && savedDifficulty in CHECK_DIFFICULTY_LABELS
     ? savedDifficulty as DiceCheckDifficulty
     : undefined
+  const targetValue = detail.resolution?.targetValue
   return {
     label: typeof outcome.characterName === 'string'
       ? outcome.characterName
@@ -610,6 +616,9 @@ function aggregateGroup(
       : detail.resolution?.checkName || combatCheckName || detail.displayType || '检定',
     difficulty,
     difficultyLabel: difficulty ? CHECK_DIFFICULTY_LABELS[difficulty] : undefined,
+    targetValue: typeof targetValue === 'number' && Number.isFinite(targetValue)
+      ? targetValue
+      : undefined,
     outcomeLabel: checkOutcomeLabel(outcome),
     outcomeTone: checkOutcomeTone(outcome),
     success: typeof outcome.category === 'string'
@@ -618,6 +627,24 @@ function aggregateGroup(
     moduleCount: detail.resultData.modules.length,
     rollResult: detail.resultData.result,
   }
+}
+
+export function createDiceGroupResultDisplay(
+  group: DicePlaybackGroupPresentation | undefined,
+  result: number | string,
+  revealed: boolean,
+): DiceGroupResultDisplay | undefined {
+  if (revealed) {
+    const value = String(result)
+    const separatorIndex = value.indexOf(' · ')
+    if (separatorIndex < 0) return { value }
+    return {
+      label: value.slice(separatorIndex + 3),
+      value: value.slice(0, separatorIndex),
+    }
+  }
+  if (typeof group?.targetValue !== 'number') return undefined
+  return { label: '目标', value: String(group.targetValue) }
 }
 
 function signedValue(type: string | undefined, value: number | undefined): string {

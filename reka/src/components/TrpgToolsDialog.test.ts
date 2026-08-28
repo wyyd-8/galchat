@@ -64,8 +64,12 @@ test('keeps an established character card read-only in the TRPG tools dialog', a
   const sheet = findElement(baseParse(template), (element) => hasClass(element, 'binding-sheet'))
 
   assert.ok(sheet, 'the tools dialog should render the selected character card')
-  assert.equal(findElement(sheet as unknown as RootNode, (element) => ['input', 'textarea', 'select'].includes(element.tag)
-    || (element.tag === 'button' && !hasClass(element, 'sheet-skill-category-button'))), undefined)
+  assert.equal(findElement(sheet as unknown as RootNode, (element) => element.tag === 'textarea'
+    || (element.tag === 'input' && !hasClass(element, 'sheet-skill-search-input'))
+    || (element.tag === 'select' && !hasClass(element, 'sheet-skill-sort-select'))
+    || (element.tag === 'button' && ![
+      'sheet-skill-category-button', 'sheet-skill-expand-toggle', 'sheet-skill-direction-toggle', 'sheet-skill-clear',
+    ].some((className) => hasClass(element, className)))), undefined)
 })
 
 test('organizes the read-only character sheet into practical data panels', async () => {
@@ -128,6 +132,39 @@ test('uses a category card to enter and leave a focused skill group', async () =
   assert.equal(hasIfExpression(categoryButton, "item.kind === 'category'"), true)
   assert.equal(hasDirectiveExpression(categoryButton, 'on', 'toggleSkillGroup(item.displayName)'), true)
   assert.match(textContent(categoryButton), /selectedSkillGroup.*返回全部技能.*查看大类技能/)
+})
+
+test('reveals skill search and sorting only inside the expanded desktop panel', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const skillsPanel = findElement(baseParse(template), (element) => element.tag === 'TabsContent'
+    && hasAttribute(element, 'value', 'skills'))
+  assert.ok(skillsPanel, 'the character sheet should contain the skills panel')
+
+  const panelRoot = skillsPanel as unknown as RootNode
+  const primaryTabs = findElement(baseParse(template), (element) => hasClass(element, 'sheet-primary-tabs'))
+  const toggle = findElement(panelRoot, (element) => element.tag === 'button'
+    && hasClass(element, 'sheet-skill-expand-toggle'))
+  const toolbar = findElement(panelRoot, (element) => hasClass(element, 'sheet-skill-toolbar'))
+  const search = findElement(panelRoot, (element) => element.tag === 'input'
+    && hasClass(element, 'sheet-skill-search-input'))
+  const sort = findElement(panelRoot, (element) => element.tag === 'select'
+    && hasClass(element, 'sheet-skill-sort-select'))
+  const direction = findElement(panelRoot, (element) => element.tag === 'button'
+    && hasClass(element, 'sheet-skill-direction-toggle'))
+
+  assert.ok(toggle, 'the green skill heading should expose an icon-only expand toggle')
+  assert.ok(primaryTabs, 'the character sheet should contain its primary tabs')
+  assert.equal(hasDirectiveExpression(primaryTabs, 'show', '!skillPanelExpanded'), true,
+    'the skill, equipment, and background tabs should stay out of the expanded skill panel')
+  assert.equal(hasDirectiveExpression(toggle, 'on', 'skillPanelExpanded = !skillPanelExpanded'), true)
+  assert.ok(toolbar, 'the expanded skill panel should contain its controls')
+  assert.equal(hasIfExpression(toolbar, 'skillPanelExpanded'), true)
+  assert.ok(search, 'the expanded controls should include skill search')
+  assert.ok(sort, 'the expanded controls should include the sort mode')
+  assert.ok(direction, 'the expanded controls should include sort direction')
+  assert.doesNotMatch(textContent(toggle), /展开|收起|点击/)
 })
 
 test('shows contextual risk details only for abnormal or unrecognized weapons', async () => {

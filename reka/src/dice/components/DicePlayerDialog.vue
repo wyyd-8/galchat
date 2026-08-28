@@ -23,6 +23,7 @@ import {
   createGroupOutcomeVisibility,
   createDicePlayerStatus,
   createDicePlayerSummary,
+  createDiceGroupResultDisplay,
   resolveDicePlayerMode,
   resolveDiceAnimationGroups,
   shouldShowDiceRollAction,
@@ -115,7 +116,9 @@ const summary = computed(() => props.request
   ? createDicePlayerSummary(props.request.result, props.request.skin, props.request.presentation)
   : null)
 const presentation = computed(() => createDicePlayerStatus(status.value))
-const playerLayout = computed(() => createDicePlayerLayout(props.request?.result.modules.length || 0))
+const playerLayout = computed(() => createDicePlayerLayout(
+  props.request?.result.modules.map((module) => module.dice.length) || [],
+))
 const dialogContentStyle = computed(() => ({ width: `${dialogWidthPx.value}px` }))
 const dialogContentClass = computed(() => createDicePlayerWindowClass(props.request || undefined))
 const stageStyle = computed(() => ({ minHeight: `${playerLayout.value.stageMinHeightPx}px` }))
@@ -147,6 +150,14 @@ const isFinalDiceResultRevealed = computed(() => {
 function isDiceGroupResultRevealed(index: number): boolean {
   return groupOutcomeVisibility.value.revealIndividualResults
     && revealedDiceResultGroups.value[index] === true
+}
+
+function diceGroupResultDisplay(index: number, result: number | string) {
+  return createDiceGroupResultDisplay(
+    props.request?.presentation?.groups[index],
+    result,
+    isDiceGroupResultRevealed(index),
+  )
 }
 
 function resetDiceResultReveal(revealAll = false) {
@@ -700,7 +711,16 @@ onBeforeUnmount(() => {
                     <span>{{ group.expression }}</span>
                   </small>
                 </span>
-                <b v-if="isDiceGroupResultRevealed(index)">{{ group.result }}</b>
+                <b v-if="isDiceGroupResultRevealed(index)" class="dice-group-outcome">
+                  <strong>{{ diceGroupResultDisplay(index, group.result)?.value }}</strong>
+                  <small v-if="diceGroupResultDisplay(index, group.result)?.label">
+                    {{ diceGroupResultDisplay(index, group.result)?.label }}
+                  </small>
+                </b>
+                <span v-else-if="diceGroupResultDisplay(index, group.result)" class="dice-group-target">
+                  <small>{{ diceGroupResultDisplay(index, group.result)?.label }}</small>
+                  <strong>{{ diceGroupResultDisplay(index, group.result)?.value }}</strong>
+                </span>
               </article>
               <div
                 v-if="isOpposedCheck && index < summary.groups.length - 1"

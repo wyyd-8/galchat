@@ -6,8 +6,14 @@ import {
 } from './dicePlayerLayout.ts'
 import * as dicePlayerLayout from './dicePlayerLayout.ts'
 
-test('keeps three dice groups on one widened row', () => {
-  assert.deepEqual(createDicePlayerLayout(3), {
+test('keeps up to four small dice groups on one row', () => {
+  assert.deepEqual(createDicePlayerLayout([1, 1, 1, 1]), {
+    columns: 4,
+    rows: 1,
+    rowGroupCounts: [4],
+    stageMinHeightPx: 360,
+  })
+  assert.deepEqual(createDicePlayerLayout([1, 1, 1]), {
     columns: 3,
     rows: 1,
     rowGroupCounts: [3],
@@ -15,29 +21,41 @@ test('keeps three dice groups on one widened row', () => {
   })
 })
 
-test('balances four to six groups across at most three columns', () => {
-  assert.deepEqual(createDicePlayerLayout(4).rowGroupCounts, [2, 2])
-  assert.deepEqual(createDicePlayerLayout(5).rowGroupCounts, [3, 2])
-  assert.deepEqual(createDicePlayerLayout(6).rowGroupCounts, [3, 3])
+test('starts a new row before its dice total would exceed six', () => {
+  assert.deepEqual(createDicePlayerLayout([2, 2, 2, 1]).rowGroupCounts, [3, 1])
+  assert.deepEqual(createDicePlayerLayout([3, 3, 1]).rowGroupCounts, [2, 1])
+  assert.deepEqual(createDicePlayerLayout([4, 3]).rowGroupCounts, [1, 1])
 })
 
-test('adds vertically scrollable rows without exceeding three columns', () => {
-  assert.deepEqual(createDicePlayerLayout(7), {
-    columns: 3,
-    rows: 3,
-    rowGroupCounts: [3, 2, 2],
-    stageMinHeightPx: 832,
+test('starts a new row after four groups even when more dice would fit', () => {
+  assert.deepEqual(createDicePlayerLayout([1, 1, 1, 1, 1]), {
+    columns: 4,
+    rows: 2,
+    rowGroupCounts: [4, 1],
+    stageMinHeightPx: 596,
   })
-  assert.deepEqual(createDicePlayerLayout(10), {
-    columns: 3,
-    rows: 4,
-    rowGroupCounts: [3, 3, 2, 2],
-    stageMinHeightPx: 1068,
+})
+
+test('keeps an oversized dice group intact on its own row', () => {
+  assert.deepEqual(createDicePlayerLayout([7, 1, 1]), {
+    columns: 2,
+    rows: 2,
+    rowGroupCounts: [1, 2],
+    stageMinHeightPx: 596,
+  })
+})
+
+test('adds vertically scrollable rows while preserving group order', () => {
+  assert.deepEqual(createDicePlayerLayout([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), {
+    columns: 4,
+    rows: 3,
+    rowGroupCounts: [4, 4, 2],
+    stageMinHeightPx: 832,
   })
 })
 
 test('keeps an empty player in a valid single-cell layout', () => {
-  assert.deepEqual(createDicePlayerLayout(0), {
+  assert.deepEqual(createDicePlayerLayout([]), {
     columns: 1,
     rows: 1,
     rowGroupCounts: [],

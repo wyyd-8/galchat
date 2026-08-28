@@ -29,6 +29,7 @@ public class DiceResolutionDataVO {
         Object savedCharacterName = rule == null ? null : rule.get("characterName");
         Object savedCheckName = rule == null ? null : rule.get("checkName");
         Object savedDifficulty = rule == null ? null : rule.get("difficulty");
+        Object savedTargetValue = rule == null ? null : rule.get("targetValue");
         return new DiceResolutionVO(
                 type,
                 sourceResultId,
@@ -36,6 +37,7 @@ public class DiceResolutionDataVO {
                 savedCharacterName instanceof String value ? value : null,
                 savedCheckName instanceof String value ? value : null,
                 savedDifficulty instanceof String value ? value : null,
+                savedTargetValue instanceof Number value ? value.intValue() : null,
                 outcome,
                 effect);
     }

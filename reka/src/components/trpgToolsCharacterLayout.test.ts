@@ -27,3 +27,21 @@ test('gives the tools character sheet enough desktop canvas to keep its panels t
   assert.ok(sidebarWidth, 'the character-sheet layout should declare a fixed investigator sidebar width')
   assert.ok(Number(sidebarWidth[1]) >= 250, 'the investigator sidebar should be wide enough to keep its heading copy together')
 })
+
+test('expands skills over the statistic rows while keeping the controls desktop-only', async () => {
+  const css = await readFile(new URL('../styles/index.css', import.meta.url), 'utf8')
+  const expanded = declarations(css, '.sheet-detail-tabs.skill-panel-expanded')
+  const toggle = declarations(css, '.sheet-skill-expand-toggle')
+  const expandedTop = expanded.match(/top:\s*(\d+)px/)
+
+  assert.match(expanded, /position:\s*absolute/, 'the expanded skill panel should cover the sheet statistics')
+  assert.match(expanded, /z-index:\s*[1-9]/, 'the expanded skill panel should render above the sheet statistics')
+  assert.ok(expandedTop, 'the expanded skill panel should declare its top offset')
+  assert.ok(Number(expandedTop[1]) >= 107,
+    'the expanded skill panel and its arrow should stay below the investigator identity copy')
+  assert.match(toggle, /opacity:\s*0/, 'the arrow should remain hidden until the green heading is hovered')
+  assert.match(css, /\.sheet-skill-heading:hover \.sheet-skill-expand-toggle[^}]*opacity:\s*1/s,
+    'hovering the green heading should reveal its integrated arrow')
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.sheet-skill-expand-toggle, \.sheet-skill-toolbar\s*\{[^}]*display:\s*none/s,
+    'small screens should hide expansion and filtering controls')
+})

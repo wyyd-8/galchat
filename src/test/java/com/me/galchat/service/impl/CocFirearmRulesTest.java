@@ -5,6 +5,7 @@ import com.me.galchat.constant.FirearmFiringMode;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CocFirearmRulesTest {
 
@@ -57,6 +58,16 @@ class CocFirearmRulesTest {
                 false, false, "1D3+眩晕");
 
         assertThat(damage.formula()).isEqualTo("(1D3)");
+    }
+
+    @Test
+    void legacyShotgunDamageExplainsTheCanonicalDistanceContract() {
+        assertThatThrownBy(() -> CocFirearmRules.damageFormulaForDistance(
+                "近4D6；中2D6；远1D6", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("A/B/C")
+                .hasMessageContaining("distance")
+                .hasMessageNotContaining("先在人物卡中确定当前使用的一档");
     }
 
     @Test

@@ -14,6 +14,7 @@ public class DiceResolutionVO {
     private String characterName;
     private String checkName;
     private String difficulty;
+    private Integer targetValue;
     private Map<String, Object> outcome;
     private Map<String, Object> effect;
 }

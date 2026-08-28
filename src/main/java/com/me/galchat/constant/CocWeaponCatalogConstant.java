@@ -144,7 +144,7 @@ public final class CocWeaponCatalogConstant {
                     WeaponEra.BOTH, AcquisitionLevel.COMMON, true)),
             entry("SHOTGUN_12_DOUBLE", firearm(
                     "SHOTGUN_12_DOUBLE", "12号双管霰弹枪", "射击:步枪/霰弹枪",
-                    "近4D6；中2D6；远1D6", "近≤10m；中≤20m；远≤50m",
+                    "4D6/2D6/1D6", "近≤10m；中≤20m；远≤50m",
                     "1或2", 2, "100", WeaponEra.BOTH,
                     AcquisitionLevel.COMMON, true)),
             entry("DERRINGER_25", firearm(
@@ -153,7 +153,7 @@ public final class CocWeaponCatalogConstant {
                     AcquisitionLevel.COMMON, true)),
             entry("SHOTGUN_12_SAWED_OFF", firearm(
                     "SHOTGUN_12_SAWED_OFF", "12号锯短双管霰弹枪",
-                    "射击:步枪/霰弹枪", "近4D6；中1D6；远无效",
+                    "射击:步枪/霰弹枪", "4D6/1D6/0",
                     "近≤5m；中≤10m；远无效", "1或2", 2, "100",
                     WeaponEra.TWENTIES, AcquisitionLevel.CONTROLLED, false)),
             entry("THOMPSON_SMG", firearm(
@@ -170,7 +170,7 @@ public final class CocWeaponCatalogConstant {
                     AcquisitionLevel.COMMON, true)),
             entry("SHOTGUN_12_PUMP", firearm(
                     "SHOTGUN_12_PUMP", "12号泵动式霰弹枪", "射击:步枪/霰弹枪",
-                    "近4D6；中2D6；远1D6", "近≤10m；中≤20m；远≤50m",
+                    "4D6/2D6/1D6", "近≤10m；中≤20m；远≤50m",
                     "1", 5, "100", WeaponEra.MODERN,
                     AcquisitionLevel.COMMON, true)),
             entry("AK_47", firearm(

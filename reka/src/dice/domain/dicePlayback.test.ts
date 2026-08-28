@@ -1566,6 +1566,27 @@ test('keeps the final result concealed until the dice finish rolling', () => {
   assert.equal(createDicePlayerStatus('error').showDieValues, false)
 })
 
+test('shows the check target before a participant result is revealed', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  const resolution = aggregate.results[0]!.resolution as unknown as Record<string, unknown>
+  resolution.targetValue = 30
+  const request = createDiceAggregatePlaybackRequest(0, aggregate, 'classic')
+  const group = request.presentation?.groups[0]
+  const createGroupResultDisplay = Reflect.get(diceState, 'createDiceGroupResultDisplay') as
+    | ((target: typeof group, result: string, revealed: boolean) => { label?: string, value: string } | undefined)
+    | undefined
+
+  assert.equal(group?.targetValue, 30)
+  assert.deepEqual(createGroupResultDisplay?.(group, '27 · 成功', false), {
+    label: '目标',
+    value: '30',
+  })
+  assert.deepEqual(createGroupResultDisplay?.(group, '27 · 成功', true), {
+    label: '成功',
+    value: '27',
+  })
+})
+
 test('shows a concealed ready state after every die has been preloaded', () => {
   const ready = createDicePlayerStatus('ready')
 

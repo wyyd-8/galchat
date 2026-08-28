@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, BookUser, Check, Dices, FlaskConical, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, UserRound } from '@lucide/vue'
+import { Activity, ArrowDown, ArrowUp, BookUser, Check, ChevronDown, ChevronUp, Dices, FlaskConical, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, Search, UserRound, X } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
@@ -17,7 +17,7 @@ import {
   buildFetchedRollbackMessagePreview, buildSkillDisplayItems, buildToolCharacterTargets, buildToolRecoveryTimeline, buildToolRollbackActions, formatCheckRate, formatKpPromptUpdatedAt, formatRollbackPreviewMessage, nextSkillGroup, preferredToolCharacterTargetKey, resolveRollbackMessagePreview, resolveToolRestoreInvestigators, resolveWeaponCheckValue, restoreInvestigatorCondition, shouldShowWeaponRisk, toolDialogContentClass,
   useToolRestoreConfirmation,
 } from '@/components/trpgToolsState'
-import type { ToolRecoveryTimelineItem, ToolRestoreAction, ToolRollbackMessagePreview } from '@/components/trpgToolsState'
+import type { ToolRecoveryTimelineItem, ToolRestoreAction, ToolRollbackMessagePreview, ToolSkillSortDirection, ToolSkillSortMode } from '@/components/trpgToolsState'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{
@@ -47,6 +47,10 @@ const selectedToolTab = ref('status')
 const selectedSheetTab = ref('skills')
 const selectedProfileTab = ref('background')
 const selectedSkillGroup = ref<string | null>(null)
+const skillPanelExpanded = ref(false)
+const skillSearchQuery = ref('')
+const skillSortMode = ref<ToolSkillSortMode>('default')
+const skillSortDirection = ref<ToolSkillSortDirection>('asc')
 const restoreConfirmation = useToolRestoreConfirmation(open, selectedToolTab)
 const rollbackMessagePreview = ref<ToolRollbackMessagePreview | null>(null)
 const rollbackPreviewLoading = ref(false)
@@ -106,7 +110,16 @@ const characterAttributes = computed(() => card.value ? [
   { code: 'POW', label: '意志', value: card.value.character.pow },
   { code: 'EDU', label: '教育', value: card.value.character.edu },
 ] : [])
-const displaySkills = computed(() => buildSkillDisplayItems(card.value?.skills || [], selectedSkillGroup.value))
+const displaySkills = computed(() => buildSkillDisplayItems(
+  card.value?.skills || [],
+  selectedSkillGroup.value,
+  {
+    query: skillSearchQuery.value,
+    sortMode: skillSortMode.value,
+    sortDirection: skillSortDirection.value,
+  },
+))
+const displaySkillCount = computed(() => displaySkills.value.filter((item) => item.kind === 'skill').length)
 const dodgeValue = computed(() => {
   const skill = card.value?.skills.find((item) => item.displayName.trim() === '闪避')
   return skill?.value ?? (card.value ? Math.floor(card.value.character.dex / 2) : undefined)
@@ -293,6 +306,7 @@ async function selectTarget(key: string) {
   selectedSheetTab.value = 'skills'
   selectedProfileTab.value = 'background'
   selectedSkillGroup.value = null
+  skillPanelExpanded.value = false
   cardText.value = ''
   await execute(loadCard)
 }
@@ -300,7 +314,14 @@ function toggleSkillGroup(group: string) {
   selectedSkillGroup.value = nextSkillGroup(selectedSkillGroup.value, group)
 }
 watch(open, (visible) => {
-  if (!visible) return
+  if (!visible) {
+    skillPanelExpanded.value = false
+    skillSearchQuery.value = ''
+    skillSortMode.value = 'default'
+    skillSortDirection.value = 'asc'
+    selectedSkillGroup.value = null
+    return
+  }
   if (props.requestedCardId != null) selectedToolTab.value = 'card'
   void execute(() => refreshOverview(props.requestedCardId ?? null))
 })
@@ -309,6 +330,10 @@ watch(() => props.conversation.id, () => {
   selectedSheetTab.value = 'skills'
   selectedProfileTab.value = 'background'
   selectedSkillGroup.value = null
+  skillPanelExpanded.value = false
+  skillSearchQuery.value = ''
+  skillSortMode.value = 'default'
+  skillSortDirection.value = 'asc'
   cards.value = []
   card.value = null
   rollbackOverview.value = null
@@ -321,6 +346,9 @@ watch(() => restoreConfirmation.action.value, (action) => {
   rollbackMessagePreview.value = null
   rollbackPreviewLoading.value = false
   rollbackPreviewFailed.value = false
+})
+watch(selectedSheetTab, (tab) => {
+  if (tab !== 'skills') skillPanelExpanded.value = false
 })
 </script>
 
@@ -474,8 +502,8 @@ watch(() => restoreConfirmation.action.value, (action) => {
                 <span v-for="stat in derivedStats" :key="stat.label"><small>{{ stat.label }}</small><strong>{{ shown(stat.value) }}</strong></span>
               </div>
 
-              <TabsRoot v-model="selectedSheetTab" class="sheet-detail-tabs">
-                <TabsList class="sheet-primary-tabs">
+              <TabsRoot v-model="selectedSheetTab" class="sheet-detail-tabs" :class="{ 'skill-panel-expanded': skillPanelExpanded }">
+                <TabsList v-show="!skillPanelExpanded" class="sheet-primary-tabs">
                   <TabsTrigger value="skills">技能</TabsTrigger>
                   <TabsTrigger value="combat">战斗与装备</TabsTrigger>
                   <TabsTrigger value="profile">背景与资产</TabsTrigger>
@@ -484,9 +512,57 @@ watch(() => restoreConfirmation.action.value, (action) => {
                 <TabsContent value="skills" class="sheet-tab-content">
                   <div class="sheet-skill-panel">
                     <header class="sheet-skill-heading">
+                      <button
+                        type="button"
+                        class="sheet-skill-expand-toggle"
+                        :aria-label="skillPanelExpanded ? '收起技能面板' : '展开技能面板'"
+                        :title="skillPanelExpanded ? '收起技能面板' : '展开技能面板'"
+                        @click="skillPanelExpanded = !skillPanelExpanded"
+                      >
+                        <ChevronDown v-if="skillPanelExpanded" :size="15" />
+                        <ChevronUp v-else :size="15" />
+                      </button>
                       <strong>技能</strong>
                       <span>成功率 <small>常规 / 困难 / 极难</small></span>
                     </header>
+                    <div v-if="skillPanelExpanded" class="sheet-skill-toolbar">
+                      <label class="sheet-skill-search">
+                        <Search :size="14" />
+                        <input
+                          v-model="skillSearchQuery"
+                          class="sheet-skill-search-input"
+                          type="search"
+                          aria-label="检索技能"
+                          placeholder="检索技能名称"
+                          autocomplete="off"
+                        />
+                        <button
+                          v-if="skillSearchQuery"
+                          type="button"
+                          class="sheet-skill-clear"
+                          aria-label="清除技能检索"
+                          @click="skillSearchQuery = ''"
+                        ><X :size="13" /></button>
+                      </label>
+                      <label class="sheet-skill-sort">
+                        <select v-model="skillSortMode" class="sheet-skill-sort-select" aria-label="技能排序方式">
+                          <option value="default">默认顺序</option>
+                          <option value="value">成功率</option>
+                          <option value="category">大类</option>
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        class="sheet-skill-direction-toggle"
+                        :aria-label="skillSortDirection === 'asc' ? '切换为倒序' : '切换为正序'"
+                        @click="skillSortDirection = skillSortDirection === 'asc' ? 'desc' : 'asc'"
+                      >
+                        <ArrowUp v-if="skillSortDirection === 'asc'" :size="13" />
+                        <ArrowDown v-else :size="13" />
+                        {{ skillSortDirection === 'asc' ? '正序' : '倒序' }}
+                      </button>
+                      <small class="sheet-skill-result-count">{{ displaySkillCount }} 项</small>
+                    </div>
                     <div class="sheet-skill-scroll">
                       <div v-if="displaySkills.length" class="sheet-skill-grid" role="list">
                         <div v-for="item in displaySkills" :key="item.key" class="sheet-skill-item" :class="{ category: item.kind === 'category' }" role="listitem">
@@ -506,7 +582,7 @@ watch(() => restoreConfirmation.action.value, (action) => {
                           <code v-if="item.kind === 'skill'" class="check-rate">{{ formatCheckRate(item.value) }}</code>
                         </div>
                       </div>
-                      <div v-else class="sheet-table-empty">暂无技能</div>
+                      <div v-else class="sheet-table-empty">{{ skillSearchQuery ? '没有匹配的技能' : '暂无技能' }}</div>
                     </div>
                   </div>
                 </TabsContent>

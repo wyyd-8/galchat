@@ -75,13 +75,15 @@ class CocWeaponCatalogConstantTest {
                     assertThat(weapon.kind()).isEqualTo(
                             CocWeaponCatalogConstant.WeaponKind.FIREARM);
                     assertThat(weapon.damage())
-                            .isEqualTo("近4D6；中2D6；远1D6");
+                            .isEqualTo("4D6/2D6/1D6");
                     assertThat(weapon.range())
                             .isEqualTo("近≤10m；中≤20m；远≤50m");
                     assertThat(weapon.acquisitionLevel()).isEqualTo(
                             CocWeaponCatalogConstant.AcquisitionLevel.COMMON);
                     assertThat(weapon.canImpale()).isTrue();
                 });
+        assertThat(CocWeaponCatalogConstant.require("SHOTGUN_12_SAWED_OFF")
+                .damage()).isEqualTo("4D6/1D6/0");
         assertThat(CocWeaponCatalogConstant.require("TASER").canImpale())
                 .isFalse();
     }

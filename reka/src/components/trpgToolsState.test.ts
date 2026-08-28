@@ -445,6 +445,62 @@ test('moves an opened category first and shows only every skill in that category
   ])
 })
 
+test('filters skills by normalized names and keeps approximate Chinese matches', () => {
+  const skills: CocSkill[] = [
+    { id: 1, characterId: 9, displayName: '侦查', category: '感知', baseValue: 25, value: 60 },
+    { id: 2, characterId: 9, displayName: '射击：手枪', category: '射击', specialization: '手枪', baseValue: 20, value: 55 },
+    { id: 3, characterId: 9, displayName: '图书馆使用', category: '调查', baseValue: 20, value: 50 },
+  ]
+
+  assert.deepEqual(trpgToolsState.buildSkillDisplayItems(skills, null, { query: '射击手枪' })
+    .map((item) => item.displayName), ['射击：手枪'])
+  assert.deepEqual(trpgToolsState.buildSkillDisplayItems(skills, null, { query: '侦察' })
+    .map((item) => item.displayName), ['侦查'])
+})
+
+test('sorts every concrete skill by success rate in either direction', () => {
+  const skills: CocSkill[] = [
+    { id: 1, characterId: 9, displayName: '科学', category: '科学', baseValue: 1, value: 1 },
+    { id: 2, characterId: 9, displayName: '科学:天文学', category: '科学', specialization: '天文学', baseValue: 1, value: 5 },
+    { id: 3, characterId: 9, displayName: '侦查', category: '感知', baseValue: 25, value: 60 },
+    { id: 4, characterId: 9, displayName: '图书馆使用', category: '调查', baseValue: 20, value: 50 },
+  ]
+
+  assert.deepEqual(trpgToolsState.buildSkillDisplayItems(skills, null, {
+    sortMode: 'value', sortDirection: 'asc',
+  }).map((item) => item.displayName), ['科学:天文学', '图书馆使用', '侦查'])
+  assert.deepEqual(trpgToolsState.buildSkillDisplayItems(skills, null, {
+    sortMode: 'value', sortDirection: 'desc',
+  }).map((item) => item.displayName), ['侦查', '图书馆使用', '科学:天文学'])
+})
+
+test('sorts concrete skills by category and then by name', () => {
+  const skills: CocSkill[] = [
+    { id: 1, characterId: 9, displayName: '追踪', category: 'B', baseValue: 10, value: 40 },
+    { id: 2, characterId: 9, displayName: '话术', category: 'A', baseValue: 5, value: 45 },
+    { id: 3, characterId: 9, displayName: '恐吓', category: 'A', baseValue: 15, value: 50 },
+  ]
+
+  assert.deepEqual(trpgToolsState.buildSkillDisplayItems(skills, null, {
+    sortMode: 'category', sortDirection: 'asc',
+  }).map((item) => item.displayName), ['话术', '恐吓', '追踪'])
+  assert.deepEqual(trpgToolsState.buildSkillDisplayItems(skills, null, {
+    sortMode: 'category', sortDirection: 'desc',
+  }).map((item) => item.displayName), ['追踪', '恐吓', '话术'])
+})
+
+test('reverses the existing compact category view for default descending order', () => {
+  const skills: CocSkill[] = [
+    { id: 1, characterId: 9, displayName: '会计', category: '知识', baseValue: 5, value: 5 },
+    { id: 2, characterId: 9, displayName: '科学', category: '科学', baseValue: 1, value: 1 },
+    { id: 3, characterId: 9, displayName: '科学:地质学', category: '科学', specialization: '地质学', baseValue: 1, value: 40 },
+  ]
+
+  assert.deepEqual(trpgToolsState.buildSkillDisplayItems(skills, null, {
+    sortMode: 'default', sortDirection: 'desc',
+  }).map((item) => item.displayName), ['科学:地质学', '科学', '会计'])
+})
+
 test('clicking the opened skill category returns to the overview', () => {
   const nextSkillGroup = (trpgToolsState as typeof trpgToolsState & {
     nextSkillGroup?: (current: string | null, requested: string) => string | null

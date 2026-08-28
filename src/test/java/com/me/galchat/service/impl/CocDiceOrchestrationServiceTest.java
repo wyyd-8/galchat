@@ -5,6 +5,7 @@ import com.me.galchat.constant.CocPercentileModifier;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
+import com.me.galchat.constant.FirearmDistance;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.domain.dto.KpFirearmRequestDTOs;
@@ -202,6 +203,234 @@ class CocDiceOrchestrationServiceTest {
                 .extracting(draft -> draft.getResolutionData()
                         .getRule().get("bulletsInGroup"))
                 .containsExactly(4, 2);
+    }
+
+    @Test
+    void shotgunSelectsNearMediumAndFarDamageForEachTarget() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "猎人", Map.of("射击:步枪/霰弹枪", 60));
+        when(cards.requireDiceCharacter(5L, "猎人")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "近处目标")).thenReturn(
+                card(21L, 91L, "近处目标", Map.of()));
+        when(cards.requireDiceCharacter(5L, "中距目标")).thenReturn(
+                card(22L, 92L, "中距目标", Map.of()));
+        when(cards.requireDiceCharacter(5L, "远处目标")).thenReturn(
+                card(23L, 93L, "远处目标", Map.of()));
+        CocCharacterWeapon weapon = shotgun("4D6/2D6/1D6", 3);
+        when(cards.requireWeaponForUpdate(5L, "猎人", "泵动霰弹枪"))
+                .thenReturn(weapon);
+        stubCreate(7L);
+
+        service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "依次射击三个目标", "猎人", "泵动霰弹枪",
+                        FirearmFiringMode.SINGLE, true,
+                        List.of(
+                                new KpFirearmRequestDTOs.Target(
+                                        "近处目标", 1,
+                                        CocPercentileModifier.NORMAL,
+                                        FirearmDistance.NEAR, false),
+                                new KpFirearmRequestDTOs.Target(
+                                        "中距目标", 1,
+                                        CocPercentileModifier.NORMAL,
+                                        FirearmDistance.MEDIUM, false),
+                                new KpFirearmRequestDTOs.Target(
+                                        "远处目标", 1,
+                                        CocPercentileModifier.NORMAL,
+                                        FirearmDistance.FAR, false))));
+
+        assertThat(createdDrafts())
+                .extracting(draft -> draft.getResolutionData()
+                        .getRule().get("damageFormula"))
+                .containsExactly("4D6", "2D6", "1D6");
+    }
+
+    @Test
+    void shotgunRequiresDistanceBeforeDeductingAmmo() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "猎人", Map.of("射击:步枪/霰弹枪", 60));
+        when(cards.requireDiceCharacter(5L, "猎人")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "目标")).thenReturn(
+                card(21L, 91L, "目标", Map.of()));
+        CocCharacterWeapon weapon = shotgun("4D6/2D6/1D6", 2);
+        when(cards.requireWeaponForUpdate(5L, "猎人", "泵动霰弹枪"))
+                .thenReturn(weapon);
+
+        assertThatThrownBy(() -> service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "射击目标", "猎人", "泵动霰弹枪",
+                        FirearmFiringMode.SINGLE, true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "目标", 1,
+                                CocPercentileModifier.NORMAL)))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("distance");
+
+        assertThat(weapon.getRemainingAmmo()).isEqualTo(2);
+        verify(cards, never()).updateWeapon(any());
+        verify(internal, never()).createDiceRoll(any(), any(), any());
+    }
+
+    @Test
+    void ineffectiveShotgunDistanceIsRejectedBeforeDeductingAmmo() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "猎人", Map.of("射击:步枪/霰弹枪", 60));
+        when(cards.requireDiceCharacter(5L, "猎人")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "目标")).thenReturn(
+                card(21L, 91L, "目标", Map.of()));
+        CocCharacterWeapon weapon = shotgun("4D6/1D6/0", 2);
+        when(cards.requireWeaponForUpdate(5L, "猎人", "泵动霰弹枪"))
+                .thenReturn(weapon);
+
+        assertThatThrownBy(() -> service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "远距离射击", "猎人", "泵动霰弹枪",
+                        FirearmFiringMode.SINGLE, true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "目标", 1,
+                                CocPercentileModifier.NORMAL,
+                                FirearmDistance.FAR, false)))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("该距离无效");
+
+        assertThat(weapon.getRemainingAmmo()).isEqualTo(2);
+        verify(cards, never()).updateWeapon(any());
+        verify(internal, never()).createDiceRoll(any(), any(), any());
+    }
+
+    @Test
+    void shotgunDamageRequiresExactlyThreeValidSlashSeparatedTiers() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "猎人", Map.of("射击:步枪/霰弹枪", 60));
+        when(cards.requireDiceCharacter(5L, "猎人")).thenReturn(attacker);
+        CocCharacterWeapon weapon = shotgun("4D6/2D6", 2);
+        when(cards.requireWeaponForUpdate(5L, "猎人", "泵动霰弹枪"))
+                .thenReturn(weapon);
+        KpFirearmRequestDTOs.Attack request = new KpFirearmRequestDTOs.Attack(
+                "射击目标", "猎人", "泵动霰弹枪",
+                FirearmFiringMode.SINGLE, true,
+                List.of(new KpFirearmRequestDTOs.Target(
+                        "目标", 1, CocPercentileModifier.NORMAL,
+                        FirearmDistance.NEAR, false)));
+
+        assertThatThrownBy(() -> service.requestFirearmAttack(7L, 5L, request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("A/B/C");
+
+        weapon.setDamage("4D6//1D6");
+        assertThatThrownBy(() -> service.requestFirearmAttack(7L, 5L, request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("A/B/C");
+
+        weapon.setDamage("4D6/2D6/1D6/1D3");
+        assertThatThrownBy(() -> service.requestFirearmAttack(7L, 5L, request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("A/B/C");
+
+        weapon.setDamage("4D6/无效/1D6");
+        assertThatThrownBy(() -> service.requestFirearmAttack(7L, 5L, request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("枪械伤害公式");
+    }
+
+    @Test
+    void fixedDamageFirearmSilentlyIgnoresDistance() {
+        CocDiceCharacterVO attacker = card(
+                11L, 88L, "枪手", Map.of("射击:手枪", 60));
+        when(cards.requireDiceCharacter(5L, "枪手")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "目标")).thenReturn(
+                card(21L, 91L, "目标", Map.of()));
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L).setCharacterId(11L)
+                .setName("手枪").setSkillName("射击:手枪")
+                .setDamage("1D10").setAmmoCapacity(6).setRemainingAmmo(1)
+                .setMalfunction("100").setCanImpale(true)
+                .setIsBroken(false);
+        when(cards.requireWeaponForUpdate(5L, "枪手", "手枪"))
+                .thenReturn(weapon);
+        stubCreate(7L);
+
+        service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "射击目标", "枪手", "手枪",
+                        FirearmFiringMode.SINGLE, true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "目标", 1,
+                                CocPercentileModifier.NORMAL,
+                                FirearmDistance.FAR, false))));
+
+        assertThat(createdDrafts()).singleElement().satisfies(draft ->
+                assertThat(draft.getResolutionData().getRule())
+                        .containsEntry("damageFormula", "1D10"));
+    }
+
+    @Test
+    void onePlayerClickRollsEveryFirearmAttackGroupTogether() {
+        CocDiceCharacterVO attacker = card(
+                11L, null, "林恩", Map.of("射击:冲锋枪", 40));
+        CocDiceCharacterVO target = card(
+                21L, 91L, "邪教徒", Map.of());
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(attacker);
+        when(cards.requireDiceCharacter(5L, "邪教徒")).thenReturn(target);
+        CocCharacterWeapon weapon = new CocCharacterWeapon()
+                .setId(81L)
+                .setCharacterId(11L)
+                .setName("汤普森冲锋枪")
+                .setSkillName("射击:冲锋枪")
+                .setDamage("1D10+2")
+                .setAmmoCapacity(20)
+                .setRemainingAmmo(12)
+                .setMalfunction("96")
+                .setCanImpale(true)
+                .setIsBroken(false);
+        when(cards.requireWeaponForUpdate(
+                5L, "林恩", "汤普森冲锋枪"))
+                .thenReturn(weapon);
+
+        AtomicReference<List<DiceRollResult>> attacksRef =
+                new AtomicReference<>();
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setReason("全自动扫射")
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> attacks = materialize(
+                            101L, 1, invocation.getArgument(2));
+                    attacks.forEach(attack -> attack.setResultData(
+                            DiceUtils.prepare("1D1")));
+                    attacksRef.set(attacks);
+                    return new DiceRollAggregate(summary, attacks);
+                });
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> materialize(
+                        101L, 2, invocation.getArgument(2)));
+
+        service.requestFirearmAttack(
+                7L,
+                5L,
+                new KpFirearmRequestDTOs.Attack(
+                        "全自动扫射",
+                        "林恩",
+                        "汤普森冲锋枪",
+                        FirearmFiringMode.FULL_AUTO,
+                        true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "邪教徒", 12,
+                                CocPercentileModifier.NORMAL))));
+        when(internal.requireResult(201L))
+                .thenAnswer(ignored -> attacksRef.get().getFirst());
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L))
+                .thenAnswer(ignored -> attacksRef.get());
+
+        service.rollPlayerResult(201L);
+
+        assertThat(attacksRef.get()).hasSize(3)
+                .allSatisfy(attack -> assertThat(attack.getResolvedAt())
+                        .isNotNull());
     }
 
     @Test
@@ -2142,6 +2371,20 @@ class CocDiceOrchestrationServiceTest {
                 .setResultData(resultData)
                 .setResolutionData(resolution)
                 .setResolvedAt(resolved ? LocalDateTime.now() : null);
+    }
+
+    private CocCharacterWeapon shotgun(String damage, int remainingAmmo) {
+        return new CocCharacterWeapon()
+                .setId(81L)
+                .setCharacterId(11L)
+                .setName("泵动霰弹枪")
+                .setSkillName("射击:步枪/霰弹枪")
+                .setDamage(damage)
+                .setAmmoCapacity(5)
+                .setRemainingAmmo(remainingAmmo)
+                .setMalfunction("100")
+                .setCanImpale(true)
+                .setIsBroken(false);
     }
 
     private CocCharacter damageCard(Long id, String name) {

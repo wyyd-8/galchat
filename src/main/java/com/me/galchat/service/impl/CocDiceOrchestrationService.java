@@ -129,11 +129,12 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             throw new UserRequestException("人物卡缺少武器对应的射击技能");
         }
         int malfunctionThreshold = parseMalfunction(weapon.getMalfunction());
-        CocFirearmRules.maximumDamage(weapon.getDamage());
 
         int remaining = weapon.getRemainingAmmo();
         int globalGroupIndex = 0;
         int displayOrder = 1;
+        String rollBundleKey = "firearm-attack:"
+                + attacker.cardId() + ":" + weapon.getId();
         int shooterSituationPenaltyDice = 0;
         if (Boolean.TRUE.equals(request.shooterMovingFast())) {
             shooterSituationPenaltyDice++;
@@ -153,6 +154,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             if (!targetNames.add(targetName)) {
                 throw new UserRequestException("同一目标只能声明一次子弹分配");
             }
+            String damageFormula = CocFirearmRules.damageFormulaForDistance(
+                    weapon.getDamage(), target.distance());
             CocDiceCharacterVO targetCard = characterCardService
                     .requireDiceCharacter(runId, targetName);
             boolean targetInCover = Boolean.TRUE.equals(
@@ -185,6 +188,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 rule.put("characterName", attacker.name());
                 rule.put("weaponName", weapon.getName());
                 rule.put("skillName", weapon.getSkillName());
+                rule.put("rollBundleKey", rollBundleKey);
                 rule.put("targetValue", skillValue);
                 rule.put("targetCardId", targetCard.cardId());
                 rule.put("targetCharacterName", targetCard.name());
@@ -207,7 +211,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 rule.put("fumbleBreaksWeapon", request.fumbleBreaksWeapon());
                 rule.put("canImpale", Boolean.TRUE.equals(
                         weapon.getCanImpale()));
-                rule.put("damageFormula", weapon.getDamage().trim());
+                rule.put("damageFormula", damageFormula);
 
                 DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
                 draft.setCharacterId(automaticRoller(attacker));

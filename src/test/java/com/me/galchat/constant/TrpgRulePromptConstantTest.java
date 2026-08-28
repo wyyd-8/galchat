@@ -64,10 +64,14 @@ class TrpgRulePromptConstantTest {
                 .contains("`shooterMovingFast=true`")
                 .contains("`firingPostureRestricted=true`")
                 .contains("`targetMovingFast=true`")
+                .contains("`distance` 只用于伤害为三档 `A/B/C` 的霰弹枪")
+                .contains("`NEAR`、`MEDIUM`、`FAR`")
+                .contains("其他固定伤害枪械会静默忽略 `distance`")
                 .contains("不得把它们再次计入 `baseModifier`")
                 .contains("速射、多次单发、短点射、全自动分组和转换目标")
                 .contains("同一因素不能既提高难度又再给惩罚骰")
                 .contains("没有明确显著因素时必须使用 `NORMAL`")
+                .doesNotContain("枪械工具会拒绝调用；这类武器暂用普通检定与伤害工具结算")
                 .doesNotContain("射手 DEX 的五分之一");
     }
 

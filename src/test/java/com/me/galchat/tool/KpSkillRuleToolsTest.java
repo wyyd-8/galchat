@@ -58,10 +58,11 @@ class KpSkillRuleToolsTest {
                 .contains("| 名称 | 伤害 | 射程 | 弹容量 | 获取级别 |")
                 .contains("| 弓箭 |", "| 弩 |", "| 泰瑟枪 |")
                 .contains("| .38/9mm左轮手枪 | 1D10 | 15m | 6 | 普通 |")
-                .contains("| 12号双管霰弹枪 | 近4D6；中2D6；远1D6 | 近≤10m；中≤20m；远≤50m | 2 | 普通 |")
+                .contains("| 12号双管霰弹枪 | 4D6/2D6/1D6 | 近≤10m；中≤20m；远≤50m | 2 | 普通 |")
                 .contains("#### 1920s", "汤普森冲锋枪", "受管制")
                 .contains("#### 现代", "AK-47/AKM", "H&K MP5")
                 .contains("使用requestFirearmAttack")
+                .contains("NEAR", "MEDIUM", "FAR")
                 .contains("短点射和全自动")
                 .doesNotContain("| 所需技能 |", "| 价格 |", "| 故障值 |");
     }

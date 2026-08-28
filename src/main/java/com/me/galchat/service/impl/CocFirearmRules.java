@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.CocPercentileModifier;
+import com.me.galchat.constant.FirearmDistance;
 import com.me.galchat.constant.FirearmFiringMode;
 
 import java.util.ArrayList;
@@ -170,6 +171,41 @@ public final class CocFirearmRules {
         return total;
     }
 
+    static String damageFormulaForDistance(
+            String formula, FirearmDistance distance) {
+        if (formula == null || formula.isBlank()) {
+            throw new IllegalArgumentException("枪械伤害公式不能为空");
+        }
+        String normalized = formula.replaceAll("\\s+", "");
+        if (!normalized.contains("/")) {
+            maximumDamage(normalized);
+            return normalized;
+        }
+        String[] tiers = normalized.split("/", -1);
+        if (tiers.length != 3
+                || java.util.Arrays.stream(tiers).anyMatch(String::isBlank)) {
+            throw new IllegalArgumentException(
+                    "多档霰弹枪伤害必须使用A/B/C三档表达式");
+        }
+        for (String tier : tiers) {
+            maximumDamage(tier);
+        }
+        if (distance == null) {
+            throw new IllegalArgumentException(
+                    "多档霰弹枪的每个目标必须填写distance");
+        }
+        int tierIndex = switch (distance) {
+            case NEAR -> 0;
+            case MEDIUM -> 1;
+            case FAR -> 2;
+        };
+        String selected = tiers[tierIndex];
+        if ("0".equals(selected)) {
+            throw new IllegalArgumentException("多档霰弹枪在该距离无效");
+        }
+        return selected;
+    }
+
     private static CocDamageRules.DamageExpression requireDamageFormula(
             String formula) {
         if (formula == null || formula.isBlank()) {
@@ -177,7 +213,9 @@ public final class CocFirearmRules {
         }
         String normalized = formula.replaceAll("\\s+", "");
         if (normalized.contains("；") || normalized.contains(";")) {
-            throw new IllegalArgumentException("多档枪械伤害需要先在人物卡中确定当前使用的一档");
+            throw new IllegalArgumentException(
+                    "多档霰弹枪伤害必须使用A/B/C三档表达式，"
+                            + "并为每个目标填写distance选择近、中、远伤害");
         }
         return CocDamageRules.parse(normalized);
     }

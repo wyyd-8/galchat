@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DiceRollDetailVOTest {
 
     @Test
-    void pendingDetailExposesParticipantDisplayFieldsWithoutInternalRuleValues()
+    void pendingDetailExposesParticipantDisplayFieldsAndTargetWithoutInternalIds()
             throws Exception {
         DiceResolutionDataVO resolution = DiceResolutionDataVO.pending(
                 "CHECK",
@@ -36,7 +36,8 @@ class DiceRollDetailVOTest {
                 .contains("\"characterName\":\"康特·奈尔\"")
                 .contains("\"checkName\":\"侦查\"")
                 .contains("\"difficulty\":\"HARD\"")
-                .doesNotContain("cardId", "targetValue");
+                .contains("\"targetValue\":70")
+                .doesNotContain("cardId");
     }
 
     @Test

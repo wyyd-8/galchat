@@ -19,6 +19,15 @@ export interface ToolSkillDisplayItem {
   value?: number
 }
 
+export type ToolSkillSortMode = 'default' | 'value' | 'category'
+export type ToolSkillSortDirection = 'asc' | 'desc'
+
+export interface ToolSkillDisplayOptions {
+  query?: string
+  sortMode?: ToolSkillSortMode
+  sortDirection?: ToolSkillSortDirection
+}
+
 const COLLAPSIBLE_SKILL_GROUPS = [
   '艺术和手艺', '技艺', '语言', '科学', '生存', '操纵', '驾驶', '学识',
   '格斗', '射击', '炮术',
@@ -101,19 +110,101 @@ function skillDisplayItem(skill: CocSkill): ToolSkillDisplayItem {
   }
 }
 
+function normalizedSkillSearchValue(value?: string): string {
+  return (value || '')
+    .normalize('NFKC')
+    .toLocaleLowerCase('zh-CN')
+    .replaceAll(/[\s:：()（）·_\-]/g, '')
+}
+
+function skillNameDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex]
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      )
+    }
+    previous.splice(0, previous.length, ...current)
+  }
+  return previous[right.length] ?? left.length
+}
+
+function skillMatchesQuery(skill: CocSkill, query: string): boolean {
+  const normalizedQuery = normalizedSkillSearchValue(query)
+  if (!normalizedQuery) return true
+  const values = [skill.displayName, skill.category, skill.specialization]
+    .map(normalizedSkillSearchValue)
+    .filter(Boolean)
+  if (values.some((value) => value.includes(normalizedQuery))) return true
+  if (normalizedQuery.length < 2) return false
+  const distanceLimit = normalizedQuery.length > 4 ? 2 : 1
+  return values.some((value) => skillNameDistance(value, normalizedQuery) <= distanceLimit)
+}
+
+function concreteSkills(skills: CocSkill[]): CocSkill[] {
+  const populatedGroups = new Set(skills
+    .map(collapsibleSkillGroup)
+    .filter((group): group is string => Boolean(group)))
+  return skills.filter((skill) => {
+    const group = collapsibleSkillGroup(skill)
+    return !group || normalizedSkillGroupName(skill.displayName) !== group || !populatedGroups.has(group)
+  })
+}
+
+function sortedSkills(
+  skills: CocSkill[],
+  mode: ToolSkillSortMode,
+  direction: ToolSkillSortDirection,
+): CocSkill[] {
+  const factor = direction === 'asc' ? 1 : -1
+  const indexed = skills.map((skill, index) => ({ skill, index }))
+  indexed.sort((left, right) => {
+    let comparison = 0
+    if (mode === 'value') comparison = left.skill.value - right.skill.value
+    if (mode === 'category') {
+      comparison = normalizedSkillGroupName(left.skill.category)
+        .localeCompare(normalizedSkillGroupName(right.skill.category), 'zh-CN')
+    }
+    if (mode !== 'default' && comparison === 0) {
+      comparison = left.skill.displayName.localeCompare(right.skill.displayName, 'zh-CN')
+    }
+    if (comparison === 0) comparison = left.index - right.index
+    return comparison * factor
+  })
+  return indexed.map(({ skill }) => skill)
+}
+
 export function buildSkillDisplayItems(
   skills: CocSkill[],
   activeGroup?: string | null,
+  options: ToolSkillDisplayOptions = {},
 ): ToolSkillDisplayItem[] {
   const normalizedActiveGroup = normalizedSkillGroupName(activeGroup || undefined)
+  const query = options.query?.trim() || ''
+  const sortMode = options.sortMode || 'default'
+  const sortDirection = options.sortDirection || 'asc'
   if (normalizedActiveGroup) {
+    const groupSkills = skills
+      .filter((skill) => collapsibleSkillGroup(skill) === normalizedActiveGroup
+        && normalizedSkillGroupName(skill.displayName) !== normalizedActiveGroup)
+      .filter((skill) => skillMatchesQuery(skill, query))
     return [
       { key: `category:${normalizedActiveGroup}`, kind: 'category', displayName: normalizedActiveGroup },
-      ...skills
-        .filter((skill) => collapsibleSkillGroup(skill) === normalizedActiveGroup
-          && normalizedSkillGroupName(skill.displayName) !== normalizedActiveGroup)
+      ...sortedSkills(groupSkills, sortMode, sortDirection)
         .map(skillDisplayItem),
     ]
+  }
+
+  if (query || sortMode !== 'default') {
+    return sortedSkills(
+      concreteSkills(skills).filter((skill) => skillMatchesQuery(skill, query)),
+      sortMode,
+      sortDirection,
+    ).map(skillDisplayItem)
   }
 
   const displayedGroups = new Set<string>()
@@ -131,7 +222,7 @@ export function buildSkillDisplayItems(
     }
     result.push(skillDisplayItem(skill))
   }
-  return result
+  return sortDirection === 'desc' ? result.reverse() : result
 }
 
 export function nextSkillGroup(current: string | null, requested: string): string | null {

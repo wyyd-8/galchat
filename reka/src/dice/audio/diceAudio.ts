@@ -1,10 +1,5 @@
 import type { DiceOutcomeTone, DicePlaybackPresentation } from '../domain/dicePlayback'
 
-export interface DiceEndCuePlan {
-  startDelayMs: number
-  startOffsetSeconds: number
-}
-
 export type AudibleDiceOutcomeTone = Exclude<DiceOutcomeTone, 'none'>
 
 export interface DiceOutcomeCuePlan {
@@ -34,18 +29,6 @@ export function createSingleCheckOutcomeCuePlan(
   }
 }
 
-export function createDiceEndCuePlan(
-  settleAfterMs: number,
-  endCueDurationMs: number,
-): DiceEndCuePlan {
-  const settleDelay = Math.max(0, settleAfterMs)
-  const cueDuration = Math.max(0, endCueDurationMs)
-  return {
-    startDelayMs: Math.max(0, settleDelay - cueDuration),
-    startOffsetSeconds: Math.max(0, cueDuration - settleDelay) / 1_000,
-  }
-}
-
 interface DiceAudioElement {
   currentTime: number
   preload: string
@@ -55,21 +38,15 @@ interface DiceAudioElement {
 
 interface DiceAudioRuntime {
   createAudio(url: string): DiceAudioElement
-  setTimeout(callback: () => void, delayMs: number): number
-  clearTimeout(handle: number): void
 }
 
 interface DiceRollAudioControllerOptions {
-  startUrl: string
-  endUrl: string
-  endCueDurationMs: number
+  url: string
   runtime?: DiceAudioRuntime
 }
 
 const browserAudioRuntime: DiceAudioRuntime = {
   createAudio: (url) => new Audio(url),
-  setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
-  clearTimeout: (handle) => window.clearTimeout(handle),
 }
 
 function playSafely(audio: DiceAudioElement): void {
@@ -79,43 +56,23 @@ function playSafely(audio: DiceAudioElement): void {
 }
 
 export class DiceRollAudioController {
-  private readonly startCue: DiceAudioElement
-  private readonly endCue: DiceAudioElement
-  private readonly endCueDurationMs: number
-  private readonly runtime: DiceAudioRuntime
-  private endTimer?: number
+  private readonly cue: DiceAudioElement
 
   constructor(options: DiceRollAudioControllerOptions) {
-    this.runtime = options.runtime || browserAudioRuntime
-    this.endCueDurationMs = Math.max(0, options.endCueDurationMs)
-    this.startCue = this.runtime.createAudio(options.startUrl)
-    this.endCue = this.runtime.createAudio(options.endUrl)
-    this.startCue.preload = 'auto'
-    this.endCue.preload = 'auto'
+    const runtime = options.runtime || browserAudioRuntime
+    this.cue = runtime.createAudio(options.url)
+    this.cue.preload = 'auto'
   }
 
-  play(settleAfterMs: number): void {
+  play(): void {
     this.stop()
-    this.startCue.currentTime = 0
-    playSafely(this.startCue)
-
-    const plan = createDiceEndCuePlan(settleAfterMs, this.endCueDurationMs)
-    this.endTimer = this.runtime.setTimeout(() => {
-      this.endTimer = undefined
-      this.endCue.currentTime = plan.startOffsetSeconds
-      playSafely(this.endCue)
-    }, plan.startDelayMs)
+    this.cue.currentTime = 0
+    playSafely(this.cue)
   }
 
   stop(): void {
-    if (this.endTimer !== undefined) {
-      this.runtime.clearTimeout(this.endTimer)
-      this.endTimer = undefined
-    }
-    for (const cue of [this.startCue, this.endCue]) {
-      cue.pause()
-      cue.currentTime = 0
-    }
+    this.cue.pause()
+    this.cue.currentTime = 0
   }
 }
 

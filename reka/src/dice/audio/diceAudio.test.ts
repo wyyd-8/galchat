@@ -4,7 +4,6 @@ import test from 'node:test'
 import {
   DiceOutcomeAudioController,
   DiceRollAudioController,
-  createDiceEndCuePlan,
   createSingleCheckOutcomeCuePlan,
 } from './diceAudio.ts'
 import type { DicePlaybackPresentation } from '../domain/dicePlayback.ts'
@@ -65,21 +64,7 @@ test('does not create outcome cues for multiplayer, opposed, value, or unresolve
   assert.equal(createSingleCheckOutcomeCuePlan(singleCheckPresentation('none'), []), undefined)
 })
 
-test('starts the ending cue late enough for it to finish when the dice settle', () => {
-  assert.deepEqual(createDiceEndCuePlan(4_050, 1_384), {
-    startDelayMs: 2_666,
-    startOffsetSeconds: 0,
-  })
-})
-
-test('uses only the ending tail when the roll is shorter than the cue', () => {
-  assert.deepEqual(createDiceEndCuePlan(360, 1_384), {
-    startDelayMs: 0,
-    startOffsetSeconds: 1.024,
-  })
-})
-
-test('plays the start cue immediately and schedules the ending cue', () => {
+test('plays one combined roll cue immediately without scheduling another cue', () => {
   const audioElements: Array<{
     url: string
     currentTime: number
@@ -89,7 +74,7 @@ test('plays the start cue immediately and schedules the ending cue', () => {
     play: () => Promise<void>
     pause: () => void
   }> = []
-  const scheduled: Array<{ callback: () => void, delayMs: number }> = []
+  let scheduledCount = 0
   const runtime = {
     createAudio(url: string) {
       const audio = {
@@ -109,35 +94,26 @@ test('plays the start cue immediately and schedules the ending cue', () => {
       audioElements.push(audio)
       return audio
     },
-    setTimeout(callback: () => void, delayMs: number) {
-      scheduled.push({ callback, delayMs })
-      return scheduled.length
+    setTimeout() {
+      scheduledCount += 1
+      return scheduledCount
     },
     clearTimeout() {},
   }
   const controller = new DiceRollAudioController({
-    startUrl: '/start.mp3',
-    endUrl: '/end.mp3',
-    endCueDurationMs: 1_384,
+    url: '/combined-roll.mp3',
     runtime,
   })
 
-  controller.play(4_050)
+  controller.play()
 
-  assert.deepEqual(audioElements.map((audio) => audio.url), ['/start.mp3', '/end.mp3'])
+  assert.deepEqual(audioElements.map((audio) => audio.url), ['/combined-roll.mp3'])
   assert.equal(audioElements[0]?.playCount, 1)
-  assert.equal(audioElements[1]?.playCount, 0)
-  assert.equal(scheduled[0]?.delayMs, 2_666)
-
-  scheduled[0]?.callback()
-  assert.equal(audioElements[1]?.currentTime, 0)
-  assert.equal(audioElements[1]?.playCount, 1)
+  assert.equal(audioElements[0]?.currentTime, 0)
+  assert.equal(scheduledCount, 0)
 })
 
-test('cancels a pending ending cue when playback is stopped', () => {
-  let nextTimer = 0
-  const pending = new Map<number, () => void>()
-  const cleared: number[] = []
+test('stops the combined roll cue', () => {
   const audioElements: Array<{
     currentTime: number
     preload: string
@@ -164,30 +140,20 @@ test('cancels a pending ending cue when playback is stopped', () => {
       audioElements.push(audio)
       return audio
     },
-    setTimeout(callback: () => void) {
-      const id = ++nextTimer
-      pending.set(id, callback)
-      return id
-    },
-    clearTimeout(id: number) {
-      cleared.push(id)
-      pending.delete(id)
-    },
+    setTimeout() { return 0 },
+    clearTimeout() {},
   }
   const controller = new DiceRollAudioController({
-    startUrl: '/start.mp3',
-    endUrl: '/end.mp3',
-    endCueDurationMs: 1_384,
+    url: '/combined-roll.mp3',
     runtime,
   })
 
-  controller.play(4_050)
+  controller.play()
   controller.stop()
 
-  assert.deepEqual(cleared, [1])
-  assert.equal(pending.size, 0)
-  assert.equal(audioElements[1]?.playCount, 0)
-  assert.equal(audioElements.every((audio) => audio.pauseCount > 0), true)
+  assert.equal(audioElements.length, 1)
+  assert.equal(audioElements[0]?.pauseCount, 2)
+  assert.equal(audioElements[0]?.currentTime, 0)
 })
 
 test('plays only the requested single-check outcome cue from its beginning', () => {

@@ -505,7 +505,7 @@ watch(selectedSheetTab, (tab) => {
               <TabsRoot v-model="selectedSheetTab" class="sheet-detail-tabs" :class="{ 'skill-panel-expanded': skillPanelExpanded }">
                 <TabsList v-show="!skillPanelExpanded" class="sheet-primary-tabs">
                   <TabsTrigger value="skills">技能</TabsTrigger>
-                  <TabsTrigger value="combat">战斗与装备</TabsTrigger>
+                  <TabsTrigger value="combat">武器</TabsTrigger>
                   <TabsTrigger value="profile">背景与资产</TabsTrigger>
                 </TabsList>
 
@@ -611,9 +611,6 @@ watch(selectedSheetTab, (tab) => {
                         </tbody>
                       </table>
                   </div>
-                  <section class="sheet-equipment-summary">
-                    <strong>随身装备</strong><p>{{ card.profile?.equipmentText || '无额外装备' }}</p>
-                  </section>
                 </TabsContent>
 
                 <TabsContent value="profile" class="sheet-tab-content profile-tab-content">

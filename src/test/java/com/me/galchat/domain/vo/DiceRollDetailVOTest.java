@@ -36,8 +36,27 @@ class DiceRollDetailVOTest {
                 .contains("\"characterName\":\"康特·奈尔\"")
                 .contains("\"checkName\":\"侦查\"")
                 .contains("\"difficulty\":\"HARD\"")
-                .contains("\"targetValue\":70")
+                .contains("\"targetValue\":35")
                 .doesNotContain("cardId");
+    }
+
+    @Test
+    void publicTargetValueReflectsTheEffectiveCheckRequirement() {
+        assertThat(DiceResolutionDataVO.pending(
+                "CHECK", null, Map.of("targetValue", 70, "difficulty", "REGULAR"))
+                .publicView().getTargetValue()).isEqualTo(70);
+        assertThat(DiceResolutionDataVO.pending(
+                "CHECK", null, Map.of("targetValue", 70, "difficulty", "HARD"))
+                .publicView().getTargetValue()).isEqualTo(35);
+        assertThat(DiceResolutionDataVO.pending(
+                "CHECK", null, Map.of("targetValue", 70, "difficulty", "EXTREME"))
+                .publicView().getTargetValue()).isEqualTo(14);
+        assertThat(DiceResolutionDataVO.pending(
+                "FIREARM_ATTACK", null, Map.of("targetValue", 70, "difficultyIncrease", 3))
+                .publicView().getTargetValue()).isEqualTo(1);
+        assertThat(DiceResolutionDataVO.pending(
+                "CHECK", null, Map.of("targetValue", 1, "difficulty", "EXTREME"))
+                .publicView().getTargetValue()).isEqualTo(1);
     }
 
     @Test

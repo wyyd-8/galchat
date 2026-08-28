@@ -11,6 +11,15 @@ function declaredFontSize(css: string, selector: string): number {
   return Number(fontSize[1])
 }
 
+function declaredVerticalPadding(css: string, selector: string): number {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const rule = css.match(new RegExp(`(?:^|\\n)${escapedSelector}\\s*\\{([^}]*)\\}`))
+  assert.ok(rule, `expected a style rule for ${selector}`)
+  const padding = rule[1].match(/padding:\s*(\d+)px(?:\s+\d+px)?/)
+  assert.ok(padding, `expected ${selector} to declare pixel padding`)
+  return Number(padding[1])
+}
+
 test('keeps the TRPG character-card details at a readable minimum size', async () => {
   const css = await readFile(new URL('../styles/index.css', import.meta.url), 'utf8')
   const detailSelectors = [
@@ -40,4 +49,43 @@ test('keeps the compact skill list readable without tiny labels or rates', async
     'skill categories should be at least 10px')
   assert.ok(declaredFontSize(css, '.sheet-skill-item .check-rate') >= 11,
     'three-level skill rates should be at least 11px')
+})
+
+test('matches combat equipment table typography to the skill table', async () => {
+  const css = await readFile(new URL('../styles/index.css', import.meta.url), 'utf8')
+
+  assert.equal(
+    declaredFontSize(css, '.weapon-data-table'),
+    declaredFontSize(css, '.sheet-skill-item .check-rate'),
+    'weapon detail cells should match skill rates',
+  )
+  assert.equal(
+    declaredFontSize(css, '.weapon-data-table th'),
+    declaredFontSize(css, '.sheet-skill-heading small'),
+    'weapon headings should match the skill legend',
+  )
+  assert.equal(
+    declaredFontSize(css, '.weapon-data-table td strong'),
+    declaredFontSize(css, '.sheet-skill-item strong'),
+    'weapon names should match skill names',
+  )
+  assert.equal(
+    declaredFontSize(css, '.weapon-data-table td small'),
+    declaredFontSize(css, '.sheet-skill-item small'),
+    'weapon notes should match skill categories',
+  )
+  assert.equal(
+    declaredFontSize(css, '.weapon-data-table .check-rate'),
+    declaredFontSize(css, '.sheet-skill-item .check-rate'),
+    'weapon check rates should match skill check rates',
+  )
+})
+
+test('gives the combat equipment table slightly taller rows', async () => {
+  const css = await readFile(new URL('../styles/index.css', import.meta.url), 'utf8')
+
+  assert.ok(declaredVerticalPadding(css, '.weapon-data-table th') >= 9,
+    'weapon table headings should have at least 9px vertical padding')
+  assert.ok(declaredVerticalPadding(css, '.weapon-data-table td') >= 9,
+    'weapon table cells should have at least 9px vertical padding')
 })

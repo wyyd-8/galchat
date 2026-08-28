@@ -182,6 +182,26 @@ test('shows contextual risk details only for abnormal or unrecognized weapons', 
   assert.equal(hasDirectiveExpression(notice, 'bind', 'weapon'), true)
 })
 
+test('uses the full combat panel for the weapon table', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const root = baseParse(template)
+  const weaponTab = findElement(root, (element) => element.tag === 'TabsTrigger'
+    && hasAttribute(element, 'value', 'combat'))
+  const combatPanel = findElement(root, (element) => element.tag === 'TabsContent'
+    && hasAttribute(element, 'value', 'combat'))
+
+  assert.ok(weaponTab, 'the character sheet should contain the weapon tab')
+  assert.equal(textContent(weaponTab).trim(), '武器')
+  assert.ok(combatPanel, 'the character sheet should contain the weapon panel')
+  assert.ok(findElement(combatPanel as unknown as RootNode,
+    (element) => hasClass(element, 'sheet-table-scroll')), 'the weapon table should fill the panel')
+  assert.equal(findElement(combatPanel as unknown as RootNode,
+    (element) => hasClass(element, 'sheet-equipment-summary')), undefined,
+  'the weapon panel should not reserve space for carried equipment')
+})
+
 test('groups each attribute name and code above its value', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]

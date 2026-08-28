@@ -869,7 +869,12 @@ button.sidebar-recent-item:hover { background: #efede6; }
   from { opacity: .72; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.weapon-data-table { min-width: 680px; }
+.weapon-data-table { min-width: 680px; font-size: 11px; }
+.weapon-data-table th { padding: 9px; font-size: 10px; }
+.weapon-data-table td { padding: 9px; }
+.weapon-data-table td strong { font-size: 12px; }
+.weapon-data-table td small { font-size: 10px; }
+.weapon-data-table .check-rate { font-size: 11px; }
 .weapon-data-table td:not(:first-child), .weapon-data-table th:not(:first-child) { text-align: center; white-space: nowrap; }
 .weapon-data-table tr.broken { color: var(--wine); background: #faf0f1; }
 .weapon-data-table td em { margin-top: 3px; padding: 2px 5px; border-radius: 99px; display: inline-block; color: var(--wine); background: #f3e3e5; font-size: 9px; font-style: normal; }
@@ -890,9 +895,6 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .weapon-risk-tooltip li span { color: #55564f; }
 .weapon-risk-tooltip > p { margin: 9px 0 0; color: #55564f; }
 .sheet-table-empty { height: 86px; color: var(--muted); text-align: center !important; }
-.sheet-equipment-summary { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f0eee7; }
-.sheet-equipment-summary strong { font-size: 10px; }
-.sheet-equipment-summary p { max-height: 38px; margin: 3px 0 0; overflow: auto; color: var(--muted); font-size: 10px; line-height: 1.55; white-space: pre-wrap; }
 .profile-tab-content { overflow: hidden; }
 .sheet-secondary-tabs { margin-bottom: 8px; overflow-x: auto; border-bottom: 1px solid var(--line); }
 .sheet-secondary-tabs button { padding: 6px 8px; border-bottom: 2px solid transparent; flex: 0 0 auto; color: var(--muted); background: transparent; font-size: 10px; }

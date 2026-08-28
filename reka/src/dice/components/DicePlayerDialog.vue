@@ -4,8 +4,7 @@ import { ArrowRight, CircleAlert, Dices, LoaderCircle, RotateCcw, Swords } from 
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import diceCriticalSuccessUrl from '@/dice/assets/audio/dice_superwin.mp3'
 import diceFailureUrl from '@/dice/assets/audio/dice_lose.mp3'
-import diceRollEndUrl from '@/dice/assets/audio/dice_full.mp3'
-import diceRollStartUrl from '@/dice/assets/audio/ui_dice.mp3'
+import diceRollUrl from '@/dice/assets/audio/dice_roll.mp3'
 import diceSuccessUrl from '@/dice/assets/audio/dice_win.mp3'
 import diceFumbleUrl from '@/dice/assets/audio/dice_superlose.mp3'
 import {
@@ -51,7 +50,6 @@ import type {
   DiceRollResult,
   ThreeDiceBoard,
 } from '@/dice/renderer/ThreeDice'
-import { createDicePhysicalSettleDelay } from '@/dice/renderer/rollRotation'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean }>()
@@ -74,9 +72,7 @@ let groupOutcomeTimers: number[] = []
 let outcomeVfxTimers: number[] = []
 let rowScrollPlayback: AbortController | undefined
 const diceAudio = new DiceRollAudioController({
-  startUrl: diceRollStartUrl,
-  endUrl: diceRollEndUrl,
-  endCueDurationMs: 1_384.49,
+  url: diceRollUrl,
 })
 const diceOutcomeAudio = new DiceOutcomeAudioController({
   urls: {
@@ -531,12 +527,7 @@ async function roll() {
       arrangeDiceModuleRows()
     }
     const animationGroups = resolveDiceAnimationGroups(request, needsPreparation)
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    diceAudio.play(createDicePhysicalSettleDelay(
-      playableResult.modules.map((module) => module.dice.length),
-      animationGroups,
-      reducedMotion,
-    ))
+    diceAudio.play()
     await board.playResult(
       playableResult,
       animationGroups,

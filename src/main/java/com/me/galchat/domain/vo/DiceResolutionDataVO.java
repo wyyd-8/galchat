@@ -1,5 +1,6 @@
 package com.me.galchat.domain.vo;
 
+import com.me.galchat.constant.CocCheckDifficulty;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -37,8 +38,45 @@ public class DiceResolutionDataVO {
                 savedCharacterName instanceof String value ? value : null,
                 savedCheckName instanceof String value ? value : null,
                 savedDifficulty instanceof String value ? value : null,
-                savedTargetValue instanceof Number value ? value.intValue() : null,
+                effectiveTargetValue(
+                        savedTargetValue,
+                        savedDifficulty,
+                        rule == null ? null : rule.get("difficultyIncrease")),
                 outcome,
                 effect);
+    }
+
+    private static Integer effectiveTargetValue(
+            Object savedTargetValue,
+            Object savedDifficulty,
+            Object savedDifficultyIncrease) {
+        if (!(savedTargetValue instanceof Number value)) {
+            return null;
+        }
+        int targetValue = value.intValue();
+        if (savedDifficultyIncrease instanceof Number increase) {
+            int levels = increase.intValue();
+            if (levels >= 3) {
+                return 1;
+            }
+            CocCheckDifficulty difficulty = levels == 1
+                    ? CocCheckDifficulty.HARD
+                    : levels == 2
+                    ? CocCheckDifficulty.EXTREME
+                    : CocCheckDifficulty.REGULAR;
+            return Math.max(1, difficulty.requiredThreshold(targetValue));
+        }
+        if ("CRITICAL".equals(savedDifficulty)) {
+            return 1;
+        }
+        if (savedDifficulty instanceof String difficultyName) {
+            try {
+                CocCheckDifficulty difficulty = CocCheckDifficulty.valueOf(difficultyName);
+                return Math.max(1, difficulty.requiredThreshold(targetValue));
+            } catch (IllegalArgumentException ignored) {
+                // Preserve legacy values with an unknown difficulty label.
+            }
+        }
+        return targetValue;
     }
 }

@@ -50,6 +50,12 @@ mybatis-plus:
       update-strategy: not_null
       id-type: auto
 galchat:
+  model-api:
+    # 生产环境必须通过环境变量提供 Base64 编码的 32 字节主密钥。
+    master-key: ${GALCHAT_MODEL_API_MASTER_KEY:}
+    connect-timeout: 5s
+    request-timeout: 30s
+    max-response-bytes: 1048576
   alioss:
     endpoint: https://oss-cn-beijing.aliyuncs.com
     bucket-name: galchat

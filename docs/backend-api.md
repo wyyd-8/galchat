@@ -1,8 +1,8 @@
 # GalChat 后端接口文档
 
-> 文档基线：2026-08-04，以当前仓库的 Controller、DTO/VO、鉴权拦截器和 Python FastAPI 源码为准。
+> 文档基线：2026-08-29，以当前仓库的 Controller、DTO/VO、鉴权拦截器和 Python FastAPI 源码为准。
 >
-> 覆盖范围：69 个 Java REST 业务接口、1 个 WebSocket 入口、2 个 Python 辅助服务接口。Spring Boot Actuator 端点和 FastAPI 自动生成的 `/docs`、`/redoc`、`/openapi.json` 属于框架运维/文档端点，不计入业务接口。
+> 覆盖范围：74 个 Java REST 业务接口、1 个 WebSocket 入口、2 个 Python 辅助服务接口。Spring Boot Actuator 端点和 FastAPI 自动生成的 `/docs`、`/redoc`、`/openapi.json` 属于框架运维/文档端点，不计入业务接口。
 
 ## 1. 通用约定
 
@@ -668,11 +668,47 @@ curl -X POST 'http://localhost:8080/upload' \
 - 同时校验扩展名、MIME 类型和文件头签名，不能只修改扩展名伪装图片。
 - 后续世界/角色图片字段只接受指定 OSS 上传路径下的 URL。
 
-## 12. Python 辅助服务（2 个）
+## 12. 模型 API 管理（5 个）
+
+第一版中一条配置只对应一个模型，暂不接入单聊、群聊或跑团。所有接口均只能操作当前登录用户自己的配置。
+
+用户注册成功时，系统会自动创建一条“DeepSeek 主模型”配置：`baseUrl` 为 `https://api.deepseek.com`，`modelName` 为 `deepseek-v4-pro`。默认配置不含 API Key，状态为 `UNTESTED`，各项能力为 `UNKNOWN`；用户需在模型管理中填写 API Key 后才能测试。注册与默认配置创建处于同一事务中，配置创建失败时注册也会回滚。通过 `POST /model-apis` 手动新建配置时，`apiKey` 仍然必填。
+
+| 方法与路径 | 请求 | `data` | 说明 |
+| --- | --- | --- | --- |
+| `GET /model-apis` | 无 | `ModelApi[]` | 按最近更新时间列出当前用户配置 |
+| `POST /model-apis` | `ModelApiSaveRequest` | `ModelApi` | 新建配置；`apiKey` 必填 |
+| `PUT /model-apis/{id}` | `ModelApiSaveRequest` | `ModelApi` | 全量更新；省略或留空 `apiKey` 时保留原密钥 |
+| `DELETE /model-apis/{id}` | 路径 `id` | 无 | 物理删除当前用户配置 |
+| `POST /model-apis/{id}/test` | 无 | `ModelApi` | 同步测试聊天、SSE 流式和工具调用并覆盖最近结果 |
+
+`ModelApiSaveRequest`：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 当前用户内唯一，最长 100 字符 |
+| `baseUrl` | string | 是 | OpenAI-compatible API 根地址，例如 `https://api.example.com/v1`；仅允许解析到公网地址的 HTTPS URL |
+| `modelName` | string | 是 | 模型标识，最长 255 字符 |
+| `apiKey` | string | 新建必填 | 仅支持 `Authorization: Bearer`；更新时省略或留空表示保持不变 |
+
+`ModelApi` 不返回明文或密文密钥，只返回 `hasApiKey` 和末四位提示 `apiKeyHint`。其余主要字段为：
+
+- `status`：`UNTESTED / SUCCESS / PARTIAL / FAILED`
+- `chatCapability`、`streamingCapability`、`toolCallingCapability`：`UNKNOWN / SUPPORTED / UNSUPPORTED / INCONCLUSIVE`
+- `reasoningOutputStatus`：`UNKNOWN / DETECTED / NOT_DETECTED`
+- `lastTestCode / lastTestMessage / lastTestAt`：最近一次同步测试结果
+
+测试固定请求 `{baseUrl}/chat/completions`。基础聊天失败时停止后续测试并标记 `FAILED`；基础聊天成功但流式或工具调用未确认时标记 `PARTIAL`；三项均确认支持时标记 `SUCCESS`。`NOT_DETECTED` 只表示本次响应未发现可展示的推理字段，不代表模型没有内部推理。
+
+服务端禁用上游重定向，并限制连接时间、总请求时间和响应大小。保存或测试前会重新解析域名并拒绝回环、私网、链路本地、多播、云元数据等非公网地址。
+
+API Key 使用 AES-256-GCM 加密后存库。部署前必须设置 `GALCHAT_MODEL_API_MASTER_KEY`，值为 Base64 编码的 32 字节随机密钥，例如可用 `openssl rand -base64 32` 生成。该主密钥不可提交到仓库，丢失后已有 API Key 无法恢复。
+
+## 13. Python 辅助服务（2 个）
 
 Python 接口直接返回 FastAPI 响应，不使用 Java `Result` 包装，也不需要 JWT。Java 主服务调用失败时会按各自业务逻辑降级。
 
-### 12.1 输入完整性判断
+### 13.1 输入完整性判断
 
 `POST http://localhost:8081/predict`
 
@@ -693,7 +729,7 @@ true
 
 `true` 表示输入看起来已完整，可提前触发自动回复；`false` 表示继续等待。模型输入最大长度为 128 token，并带有句末标点/连接词规则预判。
 
-### 12.2 文档重排
+### 13.2 文档重排
 
 `POST http://localhost:8082/rerank`
 
@@ -726,7 +762,7 @@ true
 
 `index` 是原 `documents` 数组下标，结果按 `score` 降序排列。分数是当前排序模型的原始相关性输出，不保证归一化到 `0..1`。
 
-## 13. 调用示例
+## 14. 调用示例
 
 登录并查询用户信息：
 
@@ -756,7 +792,7 @@ GET /group-chat/conversations/100/messages?beforeId=850&size=50
 token: <jwt>
 ```
 
-## 14. 维护说明
+## 15. 维护说明
 
 新增或修改接口时，应同步检查以下来源并更新本文档：
 

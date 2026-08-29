@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { BookOpen, Dices, LogOut, MessageCircle, MessagesSquare, MoreHorizontal, Plus, Settings, Sparkles, UserRound } from '@lucide/vue'
+import { BookOpen, Cpu, Dices, LogOut, MessageCircle, MessagesSquare, MoreHorizontal, Plus, Settings, Sparkles, UserRound } from '@lucide/vue'
 import {
   DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuSeparator, DropdownMenuTrigger,
   ScrollAreaRoot, ScrollAreaScrollbar, ScrollAreaThumb, ScrollAreaViewport,
@@ -8,7 +8,7 @@ import {
 import type { Character, Conversation, Session, UserWorld } from '@/api/types'
 
 const props = defineProps<{ session: Session; worlds: UserWorld[]; characters: Character[]; conversations: Conversation[]; selectedWorldId: number | null; selectedCharacterId: number | null; selectedConversationId: number | null; loading: boolean }>()
-const emit = defineEmits<{ selectWorld: [id: number]; selectDirect: [id: number]; selectConversation: [id: number]; home: []; newWorld: []; account: []; password: []; logout: [] }>()
+const emit = defineEmits<{ selectWorld: [id: number]; selectDirect: [id: number]; selectConversation: [id: number]; home: []; newWorld: []; account: []; password: []; models: []; logout: [] }>()
 
 const recentDirect = computed(() => latestItem(props.characters, (item) => item.lastChatTime))
 const recentGroup = computed(() => latestItem(props.conversations.filter((item) => item.mode === 'chat'), (item) => item.lastChatTime || item.updatedAt))
@@ -80,6 +80,7 @@ function activityLabel(value?: string) {
       <DropdownMenuPortal><DropdownMenuContent class="menu-content" :side-offset="8" align="start">
         <DropdownMenuItem class="menu-item" @select="emit('account')"><Settings :size="16" />账号资料</DropdownMenuItem>
         <DropdownMenuItem class="menu-item" @select="emit('password')"><MessageCircle :size="16" />修改密码</DropdownMenuItem>
+        <DropdownMenuItem class="menu-item" @select="emit('models')"><Cpu :size="16" />模型管理</DropdownMenuItem>
         <DropdownMenuSeparator class="menu-separator" />
         <DropdownMenuItem class="menu-item danger" @select="emit('logout')"><LogOut :size="16" />退出登录</DropdownMenuItem>
       </DropdownMenuContent></DropdownMenuPortal>

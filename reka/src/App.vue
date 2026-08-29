@@ -6,6 +6,7 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import AuthDialog from '@/components/AuthDialog.vue'
 import DirectChatStage from '@/components/DirectChatStage.vue'
 import GroupChatStage from '@/components/GroupChatStage.vue'
+import ModelApiManagerDialog from '@/components/ModelApiManagerDialog.vue'
 import TrpgCharacterBindingDialog from '@/components/TrpgCharacterBindingDialog.vue'
 import TrpgToolsDialog from '@/components/TrpgToolsDialog.vue'
 import DicePlayerDialog from '@/dice/components/DicePlayerDialog.vue'
@@ -45,7 +46,7 @@ const workspace = useWorkspace()
 const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters })
 const authOpen = ref(!workspace.isLoggedIn.value)
 const view = ref<'library' | 'world' | 'group' | 'direct'>('library')
-const dialogs = reactive({ world: false, template: false, templatePreview: false, templateDelete: false, templateReplaceConfirm: false, conversation: false, trpgBinding: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, end: false, trpgTools: false })
+const dialogs = reactive({ world: false, template: false, templatePreview: false, templateDelete: false, templateReplaceConfirm: false, conversation: false, trpgBinding: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, modelApis: false, end: false, trpgTools: false })
 const busy = ref(false)
 const canRetryGenerationFailure = computed(() => {
   const failure = workspace.generationFailure.value
@@ -626,7 +627,7 @@ async function changePassword() {
 
 <template>
   <div v-if="workspace.isLoggedIn.value" class="app-shell">
-    <AppSidebar :session="workspace.session" :worlds="workspace.worlds.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :selected-world-id="workspace.selectedWorldId.value" :selected-character-id="view === 'direct' ? direct.selectedCharacter.value?.characterId || null : null" :selected-conversation-id="view === 'group' ? workspace.selectedConversationId.value : null" :loading="workspace.loading.worlds" @home="home" @select-world="selectWorld" @select-direct="openDirectChat" @select-conversation="selectConversation" @new-world="openNewWorld" @account="openAccount" @password="openPassword" @logout="logout" />
+    <AppSidebar :session="workspace.session" :worlds="workspace.worlds.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :selected-world-id="workspace.selectedWorldId.value" :selected-character-id="view === 'direct' ? direct.selectedCharacter.value?.characterId || null : null" :selected-conversation-id="view === 'group' ? workspace.selectedConversationId.value : null" :loading="workspace.loading.worlds" @home="home" @select-world="selectWorld" @select-direct="openDirectChat" @select-conversation="selectConversation" @new-world="openNewWorld" @account="openAccount" @password="openPassword" @models="dialogs.modelApis = true" @logout="logout" />
     <div class="app-content">
       <WorldLibrary v-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
@@ -928,6 +929,7 @@ async function changePassword() {
   </BaseDialog>
   <BaseDialog v-model="dialogs.account" title="账号资料"><div class="form-stack"><label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label><label class="field"><span>邮箱（不可在此修改）</span><input v-model="accountForm.email" disabled /></label><label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label><label class="field"><span>骰子皮肤</span><select v-model="accountForm.diceSkin"><option v-for="option in DICE_SKIN_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><small>保存后，新打开的掷骰动画会使用这套皮肤。</small></label></div><template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.password" title="修改密码" description="验证码发送到当前账户邮箱，5 分钟内有效。"><div class="form-stack"><label class="field"><span>账户邮箱</span><input v-model="passwordForm.email" disabled /></label><label class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="passwordForm.code" inputmode="numeric" maxlength="6" /><button class="button secondary" @click="sendPasswordCode">发送验证码</button></div></label><label class="field"><span>新密码</span><input v-model="passwordForm.newPassword" type="password" placeholder="请输入非空新密码" /></label><label class="field"><span>确认新密码</span><input v-model="passwordForm.confirmPassword" type="password" /></label></div><template #footer><button class="button primary" :disabled="!passwordForm.code || !passwordForm.newPassword || !passwordForm.confirmPassword" @click="run(changePassword, 'password')">更新密码</button></template></BaseDialog>
+  <ModelApiManagerDialog v-model="dialogs.modelApis" />
   <BaseDialog v-model="dialogs.end" title="关闭会话" description="服务端会生成会话总结并将状态设为已关闭，之后不能继续发送消息。"><template #footer><button class="button ghost" @click="dialogs.end = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.closeConversation, 'end')">确认关闭</button></template></BaseDialog>
   <BaseDialog
     v-if="workspace.generationFailure.value"

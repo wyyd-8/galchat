@@ -506,6 +506,58 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .segmented { padding: 3px; border: 1px solid var(--line); border-radius: 9px; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: #efeee9; }
 .segmented button { min-height: 33px; padding: 0 11px; border: 0; border-radius: 6px; background: transparent; font-size: 11px; cursor: pointer; }
 .segmented button.active { background: var(--surface-strong); box-shadow: 0 2px 8px rgba(38,38,34,.08); }
+
+.model-api-manager-dialog { width: min(calc(100vw - 32px), 820px); max-height: min(88vh, 900px); }
+.model-api-toolbar { margin-bottom: 16px; padding-bottom: 15px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.model-api-toolbar > div { min-width: 0; }
+.model-api-toolbar p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
+.model-api-loading { min-height: 230px; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
+.model-api-list { display: grid; gap: 11px; }
+.model-api-card { position: relative; padding: 16px; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: rgba(255,255,255,.46); box-shadow: 0 5px 16px rgba(48,47,41,.035); }
+.model-api-card::before { width: 3px; position: absolute; inset: 0 auto 0 0; content: ''; background: #aaa9a2; }
+.model-api-card.is-success::before { background: var(--pine); }
+.model-api-card.is-partial::before { background: var(--amber); }
+.model-api-card.is-failed::before { background: var(--wine); }
+.model-api-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.model-api-identity { min-width: 0; flex: 1; }
+.model-api-title-line { display: flex; align-items: center; gap: 9px; }
+.model-api-title-line h3 { min-width: 0; margin: 0; overflow: hidden; font-family: var(--font-display); font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.model-api-status { padding: 3px 7px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; color: #777970; background: #eceae4; font-size: 8px; font-weight: 750; white-space: nowrap; }
+.model-api-status i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent); }
+.model-api-status.is-success { color: var(--pine); background: var(--pine-soft); }
+.model-api-status.is-partial { color: #91662c; background: #f4e9d8; }
+.model-api-status.is-failed { color: var(--wine); background: #f4e5e7; }
+.model-api-model-name, .model-api-base-url { display: block; font-family: var(--font-mono); font-weight: 400; }
+.model-api-model-name { width: fit-content; max-width: 100%; margin-top: 8px; padding: 3px 6px; overflow: hidden; border-radius: 5px; color: #4e665e; background: #eef2ee; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.model-api-base-url { margin-top: 6px; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.model-api-card-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.model-api-test-button { min-height: 34px; padding-inline: 11px; font-size: 10px; }
+.model-api-card-actions .icon-button { width: 34px; height: 34px; }
+.model-api-capabilities { margin-top: 14px; padding: 10px; border: 1px solid #e3e0d7; border-radius: 9px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; background: #f7f5ef; }
+.model-api-capability { min-width: 0; padding: 4px 6px; border-radius: 6px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; color: #92938d; }
+.model-api-capability > span, .model-api-capability strong, .model-api-capability small { min-width: 0; display: block; }
+.model-api-capability strong { overflow: hidden; color: #62645e; font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.model-api-capability small { margin-top: 2px; color: currentColor; font-size: 8px; }
+.model-api-capability.is-supported { color: #4d7469; background: rgba(228,236,232,.7); }
+.model-api-capability.is-unsupported { color: var(--wine); background: rgba(244,229,231,.72); }
+.model-api-capability.is-inconclusive { color: #966c32; background: rgba(244,233,216,.72); }
+.model-api-capability.is-neutral, .model-api-capability.is-unknown { color: #94958f; }
+.model-api-diagnostic { margin-top: 9px; padding: 8px 10px; border: 1px solid #ead9bb; border-radius: 8px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; color: #805f31; background: #faf3e7; font-size: 9px; line-height: 1.55; }
+.model-api-diagnostic.is-error { border-color: #e8ced1; color: var(--wine); background: #fbf2f3; }
+.model-api-diagnostic code { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; background: rgba(255,255,255,.65); font-family: var(--font-mono); font-size: 8px; }
+.model-api-card-footer { margin-top: 11px; display: flex; justify-content: space-between; gap: 12px; color: #8d8f87; font-size: 8px; }
+.model-api-card-footer code { color: #61635d; font-family: var(--font-mono); }
+.model-api-empty { min-height: 260px; padding: 28px; border: 1px dashed var(--line-strong); border-radius: 11px; display: grid; place-content: center; justify-items: center; color: var(--muted); text-align: center; background: rgba(255,255,255,.24); }
+.model-api-empty > span { width: 45px; height: 45px; margin-bottom: 11px; border-radius: 12px; display: grid; place-items: center; color: var(--pine); background: var(--pine-soft); }
+.model-api-empty strong { color: var(--ink); font-family: var(--font-display); font-size: 14px; }
+.model-api-empty p { max-width: 330px; margin: 6px 0 15px; font-size: 10px; line-height: 1.65; }
+.model-api-key-field { position: relative; }
+.model-api-key-field > svg { position: absolute; z-index: 1; left: 11px; top: 50%; transform: translateY(-50%); color: #8b8d85; }
+.field .model-api-key-field input { padding-left: 34px; }
+.model-api-delete-confirmation { padding: 14px; border: 1px solid #ead1d5; border-radius: 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; background: #fbf4f4; }
+.model-api-delete-confirmation > span { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; color: var(--wine); background: #f1dfe2; }
+.model-api-delete-confirmation strong { font-size: 12px; }
+.model-api-delete-confirmation p { margin: 4px 0 0; overflow-wrap: anywhere; color: var(--muted); font-family: var(--font-mono); font-size: 8px; line-height: 1.55; }
 .check-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .check-card { padding: 9px; border: 1px solid var(--line); border-radius: 9px; display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 8px; background: var(--surface); cursor: pointer; }
 .check-card:has(input:checked) { border-color: #789089; background: var(--pine-soft); }
@@ -1320,6 +1372,19 @@ button.sidebar-recent-item:hover { background: #efede6; }
   .message-content { max-width: 86%; }
   .dice-message-card { width: 100%; }
   .form-grid, .check-grid, .upload-row, .template-preview, .replacement-groups { grid-template-columns: 1fr; }
+  .model-api-manager-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+  .model-api-manager-dialog .dialog-header { padding: 17px 16px 12px; }
+  .model-api-manager-dialog .dialog-body { padding: 7px 16px 18px; }
+  .model-api-toolbar { align-items: flex-start; }
+  .model-api-toolbar .eyebrow, .model-api-toolbar p { display: none; }
+  .model-api-toolbar .button { width: 100%; }
+  .model-api-card { padding: 14px; }
+  .model-api-card-header { display: grid; gap: 13px; }
+  .model-api-card-actions { width: 100%; }
+  .model-api-test-button { flex: 1; }
+  .model-api-capabilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-api-card-footer { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .model-api-diagnostic { align-items: flex-start; flex-direction: column; gap: 5px; }
   .trpg-participant-picker-layout, .trpg-binding-layout { grid-template-columns: 1fr; }
   .trpg-participant-preview-pane, .trpg-binding-card-pane { min-height: 260px; padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .trpg-setup-steps { gap: 5px; }

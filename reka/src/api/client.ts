@@ -1,6 +1,6 @@
 import type {
   ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
-  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
+  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
 } from './types'
@@ -72,6 +72,12 @@ export const api = {
   updateUserInfo: (payload: Partial<UserInfo>) => request<void>('/user/info', { method: 'PUT', body: body(payload) }),
   sendPasswordCode: (email: string) => request<void>('/user/password/email-code', { method: 'POST', body: body({ email }) }),
   updatePassword: (payload: { email: string; newPassword: string; verificationCode: string }) => request<void>('/user/password', { method: 'PUT', body: body(payload) }),
+
+  modelApis: () => request<ModelApi[]>('/model-apis'),
+  createModelApi: (payload: ModelApiSavePayload) => request<ModelApi>('/model-apis', { method: 'POST', body: body(payload) }),
+  updateModelApi: (id: number, payload: ModelApiSavePayload) => request<ModelApi>(`/model-apis/${id}`, { method: 'PUT', body: body(payload) }),
+  testModelApi: (id: number) => request<ModelApi>(`/model-apis/${id}/test`, { method: 'POST' }),
+  deleteModelApi: (id: number) => request<void>(`/model-apis/${id}`, { method: 'DELETE' }),
 
   worldTemplates: () => request<WorldTemplate[]>('/world/templates'),
   worldTemplate: (id: number) => request<WorldTemplate>(`/world/templates/${id}`),

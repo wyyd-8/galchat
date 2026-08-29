@@ -3,6 +3,34 @@ export interface Session { token: string; id: number | null; username: string }
 export interface UserToken { token: string; id: number; username: string }
 export interface UserInfo { id: number; username: string; email?: string; birthday?: string; diceSkin?: string; createTime?: string }
 
+export type ModelApiTestStatus = 'UNTESTED' | 'SUCCESS' | 'PARTIAL' | 'FAILED'
+export type ModelApiCapability = 'UNKNOWN' | 'SUPPORTED' | 'UNSUPPORTED' | 'INCONCLUSIVE'
+export type ReasoningOutputStatus = 'UNKNOWN' | 'DETECTED' | 'NOT_DETECTED'
+export interface ModelApi {
+  id: number
+  name: string
+  baseUrl: string
+  modelName: string
+  hasApiKey: boolean
+  apiKeyHint?: string
+  status: ModelApiTestStatus
+  chatCapability: ModelApiCapability
+  streamingCapability: ModelApiCapability
+  toolCallingCapability: ModelApiCapability
+  reasoningOutputStatus: ReasoningOutputStatus
+  lastTestCode?: string
+  lastTestMessage?: string
+  lastTestAt?: string
+  createdAt?: string
+  updatedAt?: string
+}
+export interface ModelApiSavePayload {
+  name: string
+  baseUrl: string
+  modelName: string
+  apiKey?: string
+}
+
 export interface WorldTemplate {
   id?: number; name: string; image?: string; author?: string; background?: string; authorId?: number; visible?: boolean
 }

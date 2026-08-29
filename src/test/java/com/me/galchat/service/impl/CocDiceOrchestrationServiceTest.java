@@ -6,6 +6,7 @@ import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
 import com.me.galchat.constant.FirearmDistance;
+import com.me.galchat.constant.GroupCheckRule;
 import com.me.galchat.domain.dto.DiceRollResultCreateDTO;
 import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.domain.dto.KpFirearmRequestDTOs;
@@ -40,6 +41,7 @@ import com.me.galchat.constant.FirearmFiringMode;
 import com.me.galchat.constant.MeleeDefenseMode;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -203,6 +205,10 @@ class CocDiceOrchestrationServiceTest {
                 .extracting(draft -> draft.getResolutionData()
                         .getRule().get("bulletsInGroup"))
                 .containsExactly(4, 2);
+        assertThat(createdDrafts())
+                .allSatisfy(draft -> assertThat(
+                        draft.getResolutionData().getRule())
+                        .doesNotContainKey("rollBundleKey"));
     }
 
     @Test
@@ -1170,11 +1176,57 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
-    void pushedCheckUsesLatestCompatibleFailureSnapshot() {
+    void onePlayerClickRollsBothUnkeyedOpposedChecksTogether() {
+        when(cards.requireDiceCharacter(5L, "林恩"))
+                .thenReturn(player("林恩", 70));
+        when(cards.requireDiceCharacter(5L, "陈默"))
+                .thenReturn(card(12L, null, "陈默", 45));
+        AtomicReference<List<DiceRollResult>> checksRef =
+                new AtomicReference<>();
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setReason("争夺手枪")
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        when(internal.createDiceRoll(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<DiceRollResult> checks = materialize(
+                            101L, 1, invocation.getArgument(2));
+                    checks.forEach(check -> check.setResultData(
+                            DiceUtils.prepare("1D1")));
+                    checksRef.set(checks);
+                    return new DiceRollAggregate(summary, checks);
+                });
+
+        service.requestOpposedCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Opposed(
+                        "争夺手枪",
+                        List.of(
+                                target("林恩", "侦查"),
+                                target("陈默", "侦查")),
+                        null));
+        when(internal.requireResult(201L))
+                .thenAnswer(ignored -> checksRef.get().getFirst());
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L))
+                .thenAnswer(ignored -> checksRef.get());
+
+        service.rollPlayerResult(201L);
+
+        assertThat(checksRef.get()).hasSize(2)
+                .allSatisfy(check -> assertThat(check.getResolvedAt())
+                        .isNotNull());
+    }
+
+    @Test
+    void pushedCheckUsesExplicitSummaryInsteadOfLatestCompatibleSummary() {
         when(followUps.requireLatestSummaryId(7L, Set.of(
                 DiceRollConstant.TOOL_REQUEST_CHECK,
                 DiceRollConstant.TOOL_REQUEST_GROUP_CHECK)))
-                .thenReturn(101L);
+                .thenReturn(102L);
         DiceRollSummary previous = new DiceRollSummary()
                 .setId(101L)
                 .setConversationId(7L)
@@ -1184,45 +1236,173 @@ class CocDiceOrchestrationServiceTest {
                 201L, 101L, 1, "林恩", 11L, 70, "FAILURE");
         when(internal.requireSummaryForUpdate(101L)).thenReturn(previous);
         when(internal.listResultEntities(101L)).thenReturn(List.of(failed));
+        when(cards.requireDiceCharacter(5L, "林恩"))
+                .thenReturn(player("林恩", 70));
+        DiceRollSummary latest = new DiceRollSummary()
+                .setId(102L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        DiceRollResult latestFailure = resolvedCheck(
+                202L, 102L, 1, "林恩", 11L, 70, "FAILURE");
+        when(internal.requireSummaryForUpdate(102L)).thenReturn(latest);
+        when(internal.listResultEntities(102L)).thenReturn(List.of(latestFailure));
         when(internal.appendDiceRollRound(any(), any(), any()))
                 .thenAnswer(invocation -> {
                     List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
-                    return materialize(101L, 2, drafts);
+                    Long summaryId = invocation.getArgument(1);
+                    return materialize(summaryId, 2, drafts);
                 });
 
         KpDiceToolResult result = service.requestPushedCheck(
                 7L,
                 5L,
-                new KpDiceRequestDTOs.Pushed("孤注一掷搜索密室", List.of("林恩")));
+                new KpDiceRequestDTOs.Pushed(
+                        "孤注一掷搜索密室",
+                        101L,
+                        CocCheckDifficulty.REGULAR,
+                        null,
+                        List.of(target("林恩", "侦查"))));
 
+        assertThat(result.summary().getId()).isEqualTo(101L);
         assertThat(result.results()).singleElement().satisfies(pushed -> {
             assertThat(pushed.getRoundNo()).isEqualTo(2);
+            assertThat(pushed.getResolution().getSourceResultId()).isNull();
             assertThat(pushed.getResolution().getOutcome()).isNull();
         });
-        verify(followUps).requireLatestSummaryId(7L, Set.of(
-                DiceRollConstant.TOOL_REQUEST_CHECK,
-                DiceRollConstant.TOOL_REQUEST_GROUP_CHECK));
+        verify(followUps, never()).requireLatestSummaryId(any(), any());
     }
 
     @Test
-    void pushedCheckRejectsPreviousSuccess() {
-        when(followUps.requireLatestSummaryId(7L, Set.of(
-                DiceRollConstant.TOOL_REQUEST_CHECK,
-                DiceRollConstant.TOOL_REQUEST_GROUP_CHECK)))
-                .thenReturn(101L);
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(new DiceRollSummary()
+    void pushedCheckUsesFreshExecutorSkillDifficultyAndModifier() {
+        DiceRollSummary previous = new DiceRollSummary()
                 .setId(101L)
                 .setConversationId(7L)
                 .setRoundCount(1)
-                .setStatus(DiceRollConstant.STATUS_COMPLETED));
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        DiceRollResult oldCheck = resolvedCheck(
+                201L, 101L, 1, "林恩", 11L, 70, "FAILURE");
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(previous);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(oldCheck));
+        when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(
+                card(12L, 88L, "陈默", Map.of("急救", 60, "医学", 80)));
+        when(internal.appendDiceRollRound(any(), any(), any()))
+                .thenAnswer(invocation -> materialize(
+                        101L, 2, invocation.getArgument(2)));
+
+        KpDiceToolResult result = service.requestPushedCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Pushed(
+                        "陈默改用医学处理伤势",
+                        101L,
+                        CocCheckDifficulty.HARD,
+                        null,
+                        List.of(new KpDiceRequestDTOs.CheckTarget(
+                                "陈默",
+                                List.of("急救", "医学"),
+                                CocPercentileModifier.BONUS_1))));
+
+        assertThat(result.results()).singleElement().satisfies(pushed -> {
+            assertThat(pushed.getResolution().getCharacterName()).isEqualTo("陈默");
+            assertThat(pushed.getResolution().getCheckName()).isEqualTo("医学");
+            assertThat(pushed.getResolution().getTargetValue()).isEqualTo(40);
+            assertThat(pushed.getResolution().getDifficulty()).isEqualTo("HARD");
+            assertThat(pushed.getResolution().getSourceResultId()).isNull();
+            assertThat(pushed.getResultData().getFormula()).isEqualTo("1D100#");
+        });
+    }
+
+    @Test
+    void pushedCheckUsesFreshGroupTargetsAndRule() {
+        DiceRollSummary previous = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(previous);
         when(internal.listResultEntities(101L)).thenReturn(List.of(
-                resolvedCheck(201L, 101L, 1, "林恩", 11L, 70, "SUCCESS")));
+                resolvedCheck(201L, 101L, 1, "旧执行者", 10L, 50, "FAILURE")));
+        when(cards.requireDiceCharacter(5L, "林恩"))
+                .thenReturn(player("林恩", 70));
+        when(cards.requireDiceCharacter(5L, "陈默"))
+                .thenReturn(card(12L, 88L, "陈默", Map.of("医学", 80)));
+        when(internal.appendDiceRollRound(any(), any(), any()))
+                .thenAnswer(invocation -> materialize(
+                        101L, 2, invocation.getArgument(2)));
+
+        KpDiceToolResult result = service.requestPushedCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Pushed(
+                        "两人换方法继续救治",
+                        101L,
+                        CocCheckDifficulty.REGULAR,
+                        GroupCheckRule.ANY_SUCCESS,
+                        List.of(
+                                target("林恩", "侦查"),
+                                new KpDiceRequestDTOs.CheckTarget(
+                                        "陈默", "医学", CocPercentileModifier.PENALTY_1))));
+
+        assertThat(result.results()).hasSize(2).allSatisfy(pushed ->
+                assertThat(pushed.getResolution().getGroupRule())
+                        .isEqualTo("ANY_SUCCESS"));
+        assertThat(result.results())
+                .extracting(pushed -> pushed.getResolution().getCharacterName())
+                .containsExactly("林恩", "陈默");
+    }
+
+    @Test
+    void pushedCheckDoesNotRevalidateKpEligibilityDecision() {
+        DiceRollSummary previous = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_PENDING);
+        DiceRollResult successful = resolvedCheck(
+                201L, 101L, 1, "林恩", 11L, 70, "SUCCESS");
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(previous);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(successful));
+        when(cards.requireDiceCharacter(5L, "林恩"))
+                .thenReturn(player("林恩", 70));
+        when(internal.appendDiceRollRound(any(), any(), any()))
+                .thenAnswer(invocation -> materialize(
+                        101L, 2, invocation.getArgument(2)));
+
+        assertThatCode(() -> service.requestPushedCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Pushed(
+                        "KP判定可以孤注一掷",
+                        101L,
+                        null,
+                        null,
+                        List.of(target("林恩", "侦查")))))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void pushedCheckRejectsNonCheckSummary() {
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(1)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(
+                resolvedSanCheck(
+                        201L, 101L, "林恩", 11L, null, "FAILURE")));
 
         assertThatThrownBy(() -> service.requestPushedCheck(
                 7L,
                 5L,
-                new KpDiceRequestDTOs.Pushed("不合法的孤注一掷", List.of("林恩"))))
-                .hasMessageContaining("失败");
+                new KpDiceRequestDTOs.Pushed(
+                        "错误关联",
+                        101L,
+                        null,
+                        null,
+                        List.of(target("林恩", "侦查")))))
+                .hasMessageContaining("不是普通检定");
     }
 
     @Test
@@ -1301,12 +1481,16 @@ class CocDiceOrchestrationServiceTest {
                 .setResultData(DiceUtils.prepare("1D1"))
                 .setResolvedAt(null);
         rolling.getResolutionData().setOutcome(null);
+        rolling.getResolutionData().getRule()
+                .put("rollBundleKey", "check:林恩");
         DiceRollResult stillPending = resolvedCheck(
                 202L, 101L, 2, "周晴", 13L, 60, "FAILURE")
                 .setCharacterId(null)
                 .setResultData(DiceUtils.prepare("1D100"))
                 .setResolvedAt(null);
         stillPending.getResolutionData().setOutcome(null);
+        stillPending.getResolutionData().getRule()
+                .put("rollBundleKey", "check:周晴");
         when(internal.requireResult(201L)).thenReturn(rolling);
         when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
         when(internal.listResultEntities(101L))

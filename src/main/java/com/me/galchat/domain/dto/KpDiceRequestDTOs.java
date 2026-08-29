@@ -76,8 +76,18 @@ public final class KpDiceRequestDTOs {
     public record Pushed(
             @ToolParam(description = "用简短短语概括孤注一掷原因或玩家的新行动；不要复述完整行动过程、规则或预期结果")
             String reason,
-            @ToolParam(description = "需要对最近一次失败检定进行孤注一掷的角色名列表")
-            List<String> characterNames) {
+            @ToolParam(description = "原检定的掷骰概要ID，即历史<dice-roll>中的summary-id")
+            Long diceRollSummaryId,
+            @ToolParam(
+                    description = "新一轮检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
+                    required = false)
+            CocCheckDifficulty difficulty,
+            @ToolParam(
+                    description = "新一轮包含多人时的群体通过规则：ANY_SUCCESS、ALL_SUCCESS或SEPARATE；单人时省略，多人省略时为SEPARATE",
+                    required = false)
+            GroupCheckRule groupRule,
+            @ToolParam(description = "新一轮检定的角色及候选检定项；可更换执行者、技能和修饰。一个目标按单人检定处理，多个目标按群体检定处理")
+            List<CheckTarget> targets) {
     }
 
     public record SanCheck(

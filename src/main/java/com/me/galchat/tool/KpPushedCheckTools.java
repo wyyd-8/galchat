@@ -24,10 +24,10 @@ public class KpPushedCheckTools {
 
     @Tool(
             name = "requestPushedCheck",
-            description = "为最近一次兼容且失败的普通检定追加孤注一掷轮。",
+            description = "为KP指定的普通检定追加孤注一掷轮。summary-id只关联不变的最终目标；新一轮的执行者、候选技能、难度、修饰及群体规则全部重新提供。是否属于同一目标及是否允许孤注一掷由KP裁定。",
             returnDirect = true)
     public KpDiceToolResult requestPushedCheck(
-            @ToolParam(description = "孤注一掷原因和需要重掷的角色名")
+            @ToolParam(description = "原检定summary-id，以及与单人或群体检定相同的新一轮完整参数")
             KpDiceRequestDTOs.Pushed request,
             ToolContext context) {
         KpExecutionContext kp = requireKpContext(context);

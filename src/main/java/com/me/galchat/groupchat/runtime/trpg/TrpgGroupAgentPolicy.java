@@ -530,7 +530,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         + "公开消息只能确认被登记的参战者，不得描述先攻顺序、战斗轮或任何角色的新行动，"
                         + "也不得替未参战角色决定移动、旁观、逃跑或协助。确认参战者后立即结束回复，"
                         + "战斗环境和首个行动留给后续独立步骤。"
-                        : "根据公开上下文裁定并行动；需要掷骰时只调用一个对应工具。")
+                        : "根据公开上下文裁定并行动；需要掷骰时调用对应工具。")
                         + (scenePhase
                         ? """
                          结束当前主场景或子场景时必须调用finishSceneExploration。

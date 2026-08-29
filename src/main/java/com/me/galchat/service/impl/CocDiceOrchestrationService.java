@@ -133,8 +133,6 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         int remaining = weapon.getRemainingAmmo();
         int globalGroupIndex = 0;
         int displayOrder = 1;
-        String rollBundleKey = "firearm-attack:"
-                + attacker.cardId() + ":" + weapon.getId();
         int shooterSituationPenaltyDice = 0;
         if (Boolean.TRUE.equals(request.shooterMovingFast())) {
             shooterSituationPenaltyDice++;
@@ -188,7 +186,6 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 rule.put("characterName", attacker.name());
                 rule.put("weaponName", weapon.getName());
                 rule.put("skillName", weapon.getSkillName());
-                rule.put("rollBundleKey", rollBundleKey);
                 rule.put("targetValue", skillValue);
                 rule.put("targetCardId", targetCard.cardId());
                 rule.put("targetCharacterName", targetCard.name());
@@ -521,48 +518,53 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             Long conversationId, Long runId, KpDiceRequestDTOs.Pushed request) {
         requireContext(conversationId, runId);
         requireRequest(request, request == null ? null : request.reason());
-        List<String> names = requireCharacterNames(request.characterNames());
-        Long summaryId = followUpLocator.requireLatestSummaryId(
-                conversationId,
-                Set.of(
-                        DiceRollConstant.TOOL_REQUEST_CHECK,
-                        DiceRollConstant.TOOL_REQUEST_GROUP_CHECK));
+        CocCheckDifficulty difficulty = Objects.requireNonNullElse(
+                request.difficulty(), CocCheckDifficulty.REGULAR);
+        List<KpDiceRequestDTOs.CheckTarget> targets =
+                requireTargets(request.targets(), false);
+        GroupCheckRule groupRule = targets.size() > 1
+                ? Objects.requireNonNullElse(
+                        request.groupRule(), GroupCheckRule.SEPARATE)
+                : null;
+        Long summaryId = request.diceRollSummaryId();
         DiceRollSummary summary = internalService.requireSummaryForUpdate(summaryId);
         requireConversation(summary, conversationId);
-        if (!DiceRollConstant.STATUS_COMPLETED.equals(summary.getStatus())) {
-            throw new UserRequestException("前一轮检定尚未完成");
-        }
 
-        List<DiceRollResult> existing = internalService.listResultEntities(summaryId);
-        int previousRound = summary.getRoundCount();
-        List<DiceRollResult> previousChecks = safeResults(existing).stream()
-                .filter(result -> Objects.equals(previousRound, result.getRoundNo()))
+        List<DiceRollResult> existing = safeResults(
+                internalService.listResultEntities(summaryId));
+        List<DiceRollResult> checks = existing.stream()
                 .filter(result -> DiceRollConstant.TYPE_CHECK.equals(
                         resolution(result).getType()))
                 .toList();
-        List<DiceRollResultCreateDTO> drafts = new ArrayList<>(names.size());
-        for (int index = 0; index < names.size(); index++) {
-            String name = names.get(index);
-            DiceRollResult previous = previousChecks.stream()
-                    .filter(result -> name.equals(ruleString(result, "characterName")))
-                    .findFirst()
-                    .orElseThrow(() -> new UserRequestException(
-                            "找不到角色“" + name + "”的前一次检定"));
-            if (!CocCheckOutcome.FAILURE.name().equals(outcomeString(previous, "category"))) {
-                throw new UserRequestException("只有前一次检定失败才能孤注一掷");
+        if (checks.isEmpty() || checks.size() != existing.size()) {
+            throw new UserRequestException("指定掷骰不是普通检定");
+        }
+        int latestRound = checks.stream()
+                .map(DiceRollResult::getRoundNo)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElseThrow(() -> new UserRequestException("指定掷骰不是普通检定"));
+        List<DiceRollResultCreateDTO> drafts = new ArrayList<>(targets.size());
+        for (int index = 0; index < targets.size(); index++) {
+            KpDiceRequestDTOs.CheckTarget target = targets.get(index);
+            CocDiceCharacterVO card = characterCardService.requireDiceCharacter(
+                    runId, target.characterName().trim());
+            CheckSelection check = selectHighestCheck(card, target.checkNames());
+            DiceRollResultCreateDTO draft = checkDraft(
+                    card,
+                    check.name(),
+                    check.value(),
+                    difficulty,
+                    normalizeModifier(target.modifier()),
+                    true,
+                    DiceRollConstant.TYPE_CHECK,
+                    request.reason(),
+                    index + 1,
+                    null);
+            if (groupRule != null) {
+                draft.getResolutionData().getRule()
+                        .put("groupRule", groupRule.name());
             }
-            Map<String, Object> previousRule = resolution(previous).getRule();
-            Map<String, Object> pushedRule = new LinkedHashMap<>(previousRule);
-            pushedRule.put("pushed", true);
-            DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
-            draft.setCharacterId(previous.getCharacterId());
-            draft.setDisplayOrder(index + 1);
-            draft.setDisplayType(DiceRollConstant.TYPE_CHECK);
-            draft.setReason(request.reason().trim());
-            draft.setFormula(CocPercentileModifier.valueOf(
-                    stringValue(previousRule, "modifier")).formula());
-            draft.setResolutionData(DiceResolutionDataVO.pending(
-                    DiceRollConstant.TYPE_CHECK, previous.getId(), pushedRule));
             drafts.add(draft);
         }
 
@@ -572,8 +574,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 .map(DiceRollResult::getRoundNo)
                 .filter(Objects::nonNull)
                 .max(Integer::compareTo)
-                .orElse(previousRound + 1);
-        summary.setRoundCount(Math.max(previousRound, nextRound));
+                .orElse(latestRound + 1);
+        summary.setRoundCount(Math.max(latestRound, nextRound));
         settleAlreadyRolled(created);
         List<DiceRollResult> allResults = mergeResults(existing, created);
         refreshSummary(summary, allResults);
@@ -945,17 +947,22 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             List<DiceRollResult> storedResults) {
         Object savedBundleKey = resolution(requested).getRule()
                 .get("rollBundleKey");
-        if (!(savedBundleKey instanceof String bundleKey)
-                || bundleKey.isBlank()) {
-            return List.of(requested);
-        }
+        String bundleKey = savedBundleKey instanceof String value
+                && !value.isBlank() ? value : null;
         List<DiceRollResult> bundled = safeResults(storedResults).stream()
                 .filter(candidate -> candidate.getCharacterId() == null)
                 .filter(candidate -> candidate.getResolvedAt() == null)
                 .filter(candidate -> Objects.equals(
                         requested.getRoundNo(), candidate.getRoundNo()))
-                .filter(candidate -> bundleKey.equals(
-                        resolution(candidate).getRule().get("rollBundleKey")))
+                .filter(candidate -> {
+                    Object candidateBundleKey = resolution(candidate)
+                            .getRule().get("rollBundleKey");
+                    if (bundleKey != null) {
+                        return bundleKey.equals(candidateBundleKey);
+                    }
+                    return !(candidateBundleKey instanceof String candidateKey)
+                            || candidateKey.isBlank();
+                })
                 .map(candidate -> Objects.equals(
                         requested.getId(), candidate.getId())
                         ? requested : candidate)

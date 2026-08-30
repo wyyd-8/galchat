@@ -52,6 +52,82 @@ class TrpgTurnExecutionServiceTest {
     }
 
     @Test
+    void manualCharacterInputIsStoredAsTheCharacterNotTheUser() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        GroupConversationLockService locks =
+                mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messages =
+                mock(GroupChatMessageMapper.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L).setConversationId(7L)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(201L).setTurnId(101L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(31L)
+                .setExecutionMode(GroupChatConstant.CONTROL_MANUAL)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        when(conversations.requireAuthorized(7L)).thenReturn(conversation);
+        when(conversations.requireActive(7L)).thenReturn(conversation);
+        when(conversations.nextSequence(7L)).thenReturn(9L);
+        when(locks.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turns.selectById(101L)).thenReturn(turn);
+        when(steps.selectById(201L)).thenReturn(step);
+        when(messages.selectCount(any())).thenReturn(0L);
+        when(turns.selectCount(any())).thenReturn(0L);
+        when(messages.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0)
+                            .setId(401L);
+                    return 1;
+                });
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                conversations, locks, mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class), turns, steps, messages,
+                mock(GroupTurnRecoveryService.class),
+                mock(GroupChatService.class), immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+        GroupChatRequestDTO request = new GroupChatRequestDTO();
+        request.setClientRequestId("manual-1");
+        request.setContent("我检查书桌下方。 ");
+
+        service.submitMessage(7L, 101L, 201L, request)
+                .take(1).blockLast();
+
+        verify(messages).insert(
+                org.mockito.ArgumentMatchers.argThat(
+                        (GroupChatMessage message) ->
+                                GroupChatConstant.ACTOR_CHARACTER.equals(
+                                        message.getSpeakerType())
+                                        && Long.valueOf(31L).equals(
+                                        message.getSpeakerId())
+                                        && "我检查书桌下方。".equals(
+                                        message.getContent())));
+    }
+
+    @Test
     void humanInquiryPublishesQuestionAndCreatesKpChildWithoutCompletingAction() {
         GroupConversationService conversations =
                 mock(GroupConversationService.class);

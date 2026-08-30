@@ -1,86 +1,112 @@
 package com.me.galchat.config;
 
+import com.me.galchat.groupchat.tool.GroupToolCallStore;
+import com.me.galchat.groupchat.tool.RecordingGroupToolCallingManager;
+import com.me.galchat.groupchat.runtime.GroupChatClientFactory;
 import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.mapper.UserChatThinkingHistoryMapper;
 import com.me.galchat.mapper.UserChatToolCallMapper;
 import com.me.galchat.memory.TopicAwareMessageChatMemoryAdvisor;
 import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.memory.UserChatMemory;
-import com.me.galchat.model.DeepSeekChatModel;
+import com.me.galchat.tool.RecordingToolCallingManager;
 import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
 import com.me.galchat.vector.MutiSearchService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
+import org.springframework.ai.chat.client.advisor.ToolCallingAdvisor;
+import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
+import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Configuration
 public class CommonConfiguration {
     @Bean
-    public ChatClient deepThinkChatClient(@Qualifier("deepSeekThinkingChatModel") DeepSeekChatModel model,
+    public ChatClient deepThinkChatClient(DeepSeekChatModel model,
                                           TopicBoundaryService topicBoundaryService,
                                           @Qualifier("thinkChatMemory") UserChatMemory thinkChatMemory,
                                           MutiSearchService mutiSearchService,
                                           VectorTools vectorTools,
                                           UserCharacterFavorTools userCharacterFavorTools,
-                                          UserCharacterInfoTools userCharacterInfoTools) {
+                                          UserCharacterInfoTools userCharacterInfoTools,
+                                          ToolCallingManager toolCallingManager) {
         return ChatClient
                 .builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().enableThinking())
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(thinkChatMemory, topicBoundaryService,
                         mutiSearchService).build())
+                .defaultAdvisors(toolCallingAdvisor(
+                        new RecordingToolCallingManager(toolCallingManager, thinkChatMemory)))
                 .defaultTools(vectorTools, userCharacterFavorTools, userCharacterInfoTools)
                 .build();
     }
 
     @Bean
-    public ChatClient normalChatClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model,
+    public ChatClient normalChatClient(DeepSeekChatModel model,
                                        TopicBoundaryService topicBoundaryService,
                                        @Qualifier("defaultChatMemory") UserChatMemory defaultChatMemory,
                                        MutiSearchService mutiSearchService,
                                        VectorTools vectorTools,
                                        UserCharacterFavorTools userCharacterFavorTools,
-                                       UserCharacterInfoTools userCharacterInfoTools) {
+                                       UserCharacterInfoTools userCharacterInfoTools,
+                                       ToolCallingManager toolCallingManager) {
         return ChatClient
                 .builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(defaultChatMemory, topicBoundaryService,
                         mutiSearchService).build())
+                .defaultAdvisors(toolCallingAdvisor(
+                        new RecordingToolCallingManager(toolCallingManager, defaultChatMemory)))
                 .defaultTools(vectorTools, userCharacterFavorTools, userCharacterInfoTools)
                 .build();
     }
 
     @Bean
     public ChatClient chatGroupChatClient(
-            @Qualifier("groupDeepSeekThinkingChatModel") DeepSeekChatModel model) {
-        return ChatClient.builder(model)
-                .defaultAdvisors(new SimpleLoggerAdvisor())
-                .build();
+            DeepSeekChatModel model,
+            GroupChatClientFactory clientFactory) {
+        return clientFactory.create(ChatClient.builder(model)
+                .defaultOptions(
+                        DeepSeekChatOptions.builder().enableThinking()));
     }
 
     @Bean
     public ChatClient trpgGroupChatClient(
-            @Qualifier("groupDeepSeekThinkingChatModel") DeepSeekChatModel model) {
-        return ChatClient.builder(model)
-                .defaultAdvisors(new SimpleLoggerAdvisor())
-                .build();
+            DeepSeekChatModel model,
+            GroupChatClientFactory clientFactory) {
+        return clientFactory.create(ChatClient.builder(model)
+                .defaultOptions(
+                        DeepSeekChatOptions.builder().enableThinking()));
     }
 
     @Bean
     public ChatClient groupNonThinkingChatClient(
-            @Qualifier("groupDeepSeekNonThinkingChatModel") DeepSeekChatModel model) {
-        return ChatClient.builder(model).build();
+            DeepSeekChatModel model,
+            ToolCallingManager toolCallingManager,
+            GroupToolCallStore groupToolCallStore,
+            TransactionTemplate transactionTemplate) {
+        return ChatClient.builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
+                .defaultAdvisors(groupToolCallingAdvisor(
+                        toolCallingManager, groupToolCallStore, transactionTemplate))
+                .build();
     }
 
     @Bean
-    public ChatClient topicClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+    public ChatClient topicClient(DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
                 .defaultSystem("""
                         你是一个专业的对话概要机器人，能够判断当前对话与上一段对话是否连续且为同一话题
                         每个对话均包含对话人，时间戳与对话内容
@@ -92,9 +118,10 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient rewriteClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+    public ChatClient rewriteClient(DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
                 .defaultSystem("""
                         你是一个专业的对话重写机器人，能够重写提供的一段对话
                         你的目标为去除对话中无意义的部分与语气词，尽可能替换 对话中的代词 、 指代不明确的部分 与 时间指代（例如“昨天”，“上周”等） 为 具体人名 与 具体时间（例如2026年3月1日23:30，没有的部分可以省略），保留有实际意义的内容
@@ -108,9 +135,10 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient userEventLogClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+    public ChatClient userEventLogClient(DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
                 .defaultSystem("""
                         你是一个专业的用户事件判断机器人。
                         你会收到当前窗口的对话历史，其中每条对话包含对话人、时间戳与对话内容；标记为“当前用户消息”的 user 对话是本次需要判断的消息。
@@ -137,9 +165,10 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient userEventCareClient(@Qualifier("deepSeekNonThinkingChatModel") DeepSeekChatModel model) {
+    public ChatClient userEventCareClient(DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
                 .defaultAdvisors(new SimpleLoggerAdvisor())
                 .build();
     }
@@ -179,6 +208,20 @@ public class CommonConfiguration {
                 .includeToolCalls(false)
                 .includeAutoSearchInfo(false)
                 .readOnly(true)
+                .build();
+    }
+
+    private ToolCallingAdvisor groupToolCallingAdvisor(
+            ToolCallingManager toolCallingManager,
+            GroupToolCallStore groupToolCallStore,
+            TransactionTemplate transactionTemplate) {
+        return toolCallingAdvisor(new RecordingGroupToolCallingManager(
+                toolCallingManager, groupToolCallStore, transactionTemplate));
+    }
+
+    private ToolCallingAdvisor toolCallingAdvisor(ToolCallingManager toolCallingManager) {
+        return ToolCallingAdvisor.builder()
+                .toolCallingManager(toolCallingManager)
                 .build();
     }
 }

@@ -31,7 +31,7 @@ test('renders a successful model with capability results and a masked API key', 
     name: 'DeepSeek 主模型',
     baseUrl: 'https://api.deepseek.com/v1',
     modelName: 'deepseek-chat',
-    hasApiKey: true,
+    requestOverrides: { thinking: { type: 'enabled' }, reasoning_effort: 'high' },
     apiKeyHint: '8F2A',
     status: 'SUCCESS',
     chatCapability: 'SUPPORTED',
@@ -54,6 +54,7 @@ test('renders a successful model with capability results and a masked API key', 
   assert.match(html, /工具调用/)
   assert.match(html, /推理信息/)
   assert.match(html, /未检测到/)
+  assert.match(html, /额外参数 2/)
   assert.match(html, /•••• 8F2A/)
   assert.doesNotMatch(html, /sk-secret/)
   assert.match(html, /aria-label="测试 DeepSeek 主模型"/)
@@ -67,7 +68,7 @@ test('keeps a failed model actionable and exposes the latest diagnostic', async 
     name: '备用模型',
     baseUrl: 'https://api.example.com/v1',
     modelName: 'example-chat',
-    hasApiKey: true,
+    requestOverrides: {},
     apiKeyHint: '1234',
     status: 'FAILED',
     chatCapability: 'UNSUPPORTED',
@@ -85,27 +86,4 @@ test('keeps a failed model actionable and exposes the latest diagnostic', async 
   assert.match(html, /API Key 无效/)
   assert.match(html, /AUTH_FAILED/)
   assert.match(html, />重新测试</)
-})
-
-test('requires adding an API key before the default model can be tested', async () => {
-  const html = await renderCard({
-    id: 7,
-    name: 'DeepSeek 主模型',
-    baseUrl: 'https://api.deepseek.com',
-    modelName: 'deepseek-v4-pro',
-    hasApiKey: false,
-    status: 'UNTESTED',
-    chatCapability: 'UNKNOWN',
-    streamingCapability: 'UNKNOWN',
-    toolCallingCapability: 'UNKNOWN',
-    reasoningOutputStatus: 'UNKNOWN',
-    createdAt: '2026-08-29T09:00:00',
-    updatedAt: '2026-08-29T09:00:00',
-  })
-
-  assert.match(html, /deepseek-v4-pro/)
-  assert.match(html, /API Key：/)
-  assert.match(html, /未保存/)
-  assert.match(html, /disabled[^>]*aria-label="测试 DeepSeek 主模型"|aria-label="测试 DeepSeek 主模型"[^>]*disabled/)
-  assert.match(html, />配置 Key 后测试</)
 })

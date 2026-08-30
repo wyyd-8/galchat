@@ -62,11 +62,14 @@ class ModelApiControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name":"主模型","baseUrl":"https://models.example.com/v1",
-                                "modelName":"model-a","apiKey":"sk-secret"}
+                                "modelName":"model-a","apiKey":"sk-secret",
+                                "requestOverrides":{"thinking":{"type":"enabled"},"reasoning_effort":"high"}}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(1));
         assertThat(service.lastDto.getModelName()).isEqualTo("model-a");
+        assertThat(service.lastDto.getRequestOverrides())
+                .containsEntry("reasoning_effort", "high");
 
         mvc.perform(put("/model-apis/41")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -88,6 +91,7 @@ class ModelApiControllerTest {
         private StubService() {
             super((UserModelApiMapper) null, null,
                     (PublicHttpsUrlValidator) null,
+                    null,
                     (ModelApiProbeService) null);
         }
 

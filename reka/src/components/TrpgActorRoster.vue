@@ -12,7 +12,9 @@ const props = withDefaults(defineProps<{
 }>(), {
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ openCard: [cardId: number] }>()
+const emit = defineEmits<{
+  openCard: [cardId: number]
+}>()
 
 function actorKey(actor: TrpgExecutionActor): string {
   const item = actor.item
@@ -47,16 +49,16 @@ function actorKey(actor: TrpgExecutionActor): string {
         <span><Pause :size="12" :stroke-width="1.8" /><strong>暂不参与</strong></span><small>{{ scene.waitingActors.length }} 人</small>
       </header>
       <div class="trpg-participant-list">
-        <TrpgActorRow
-          v-for="actor in scene.waitingActors"
-          :key="actorKey(actor)"
-          :actor="actor"
-          :scene-kind="scene.kind"
-          :combat-overview="combatOverview"
-          :investigator-cards="investigatorCards"
-          display-state="waiting"
-          @open-card="emit('openCard', $event)"
-        />
+        <div v-for="actor in scene.waitingActors" :key="actorKey(actor)" class="trpg-actor-stack">
+          <TrpgActorRow
+            :actor="actor"
+            :scene-kind="scene.kind"
+            :combat-overview="combatOverview"
+            :investigator-cards="investigatorCards"
+            display-state="waiting"
+            @open-card="emit('openCard', $event)"
+          />
+        </div>
       </div>
     </section>
     <section v-if="scene.readyActors.length" class="trpg-participant-group ready">
@@ -64,16 +66,16 @@ function actorKey(actor: TrpgExecutionActor): string {
         <span><Check :size="12" :stroke-width="1.8" /><strong>已完成</strong></span><small>{{ scene.readyActors.length }} 人</small>
       </header>
       <div class="trpg-participant-list">
-        <TrpgActorRow
-          v-for="actor in scene.readyActors"
-          :key="actorKey(actor)"
-          :actor="actor"
-          :scene-kind="scene.kind"
-          :combat-overview="combatOverview"
-          :investigator-cards="investigatorCards"
-          display-state="ready"
-          @open-card="emit('openCard', $event)"
-        />
+        <div v-for="actor in scene.readyActors" :key="actorKey(actor)" class="trpg-actor-stack">
+          <TrpgActorRow
+            :actor="actor"
+            :scene-kind="scene.kind"
+            :combat-overview="combatOverview"
+            :investigator-cards="investigatorCards"
+            display-state="ready"
+            @open-card="emit('openCard', $event)"
+          />
+        </div>
       </div>
     </section>
   </TooltipProvider>

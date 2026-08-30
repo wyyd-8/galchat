@@ -577,8 +577,12 @@ public class TrpgTurnExecutionService {
         boolean waiting = step != null
                 && GroupChatConstant.STATUS_WAITING_INPUT.equals(
                         step.getStatus())
-                && GroupChatConstant.ACTOR_USER.equals(
-                        step.getSpeakerType());
+                && (GroupChatConstant.ACTOR_USER.equals(
+                        step.getSpeakerType())
+                || (GroupChatConstant.ACTOR_CHARACTER.equals(
+                        step.getSpeakerType())
+                && GroupChatConstant.CONTROL_MANUAL.equals(
+                        step.getExecutionMode())));
         String inputType = GroupChatConstant.STATUS_PAUSED.equals(
                 turn.getStatus()) ? "continue"
                 : GroupChatConstant.STATUS_WAITING_DICE.equals(
@@ -629,6 +633,8 @@ public class TrpgTurnExecutionService {
             boolean waitingForUser,
             List<GroupChatReplyStep> allSteps) {
         if (!waitingForUser || step == null
+                || !GroupChatConstant.ACTOR_USER.equals(
+                step.getSpeakerType())
                 || step.getParentStepId() != null
                 || !(GroupChatConstant.ACTION_TRPG_SCENE.equals(
                 step.getActionType())
@@ -785,6 +791,11 @@ public class TrpgTurnExecutionService {
                         requireWaitingTurn(conversationId, turnId);
                 GroupChatReplyStep userStep =
                         requireWaitingUserStep(turnId, stepId);
+                if (!GroupChatConstant.ACTOR_USER.equals(
+                        userStep.getSpeakerType())) {
+                    throw new UserRequestException(
+                            "只有用户调查员可以向KP询问");
+                }
                 PreparedInquiry prepared = transactionTemplate.execute(
                         status -> prepareUserInquiry(
                                 conversation, turn, userStep, request));
@@ -934,13 +945,16 @@ public class TrpgTurnExecutionService {
                         sceneSelectionService.selectOption(
                                 conversationId, turnId,
                                 new GroupActorRef(
-                                        GroupChatConstant.ACTOR_USER,
+                                        userStep.getSpeakerType(),
                                         userStep.getSpeakerId()),
                                 request.getOptionNo());
                 GroupChatMessage message = transactionTemplate.execute(
                         status -> completeStructuredUserStep(
                                 conversation, turn, userStep,
-                                "用户:" + choice.investigatorName()
+                                (GroupChatConstant.ACTOR_USER.equals(
+                                        userStep.getSpeakerType())
+                                        ? "用户" : "角色") + ":"
+                                        + choice.investigatorName()
                                         + ":" + choice.locationName(),
                                 request.getClientRequestId()));
                 if (message == null) {
@@ -993,12 +1007,16 @@ public class TrpgTurnExecutionService {
                 }
                 sceneLifecycleService.requestInvestigatorFinish(
                         conversationId, stepId,
-                        GroupChatConstant.ACTOR_USER,
+                        userStep.getSpeakerType(),
                         userStep.getSpeakerId());
                 GroupChatMessage message = transactionTemplate.execute(
                         status -> completeStructuredUserStep(
                                 conversation, turn, userStep,
-                                "用户调查员已结束当前场景探索。",
+                                (GroupChatConstant.ACTOR_USER.equals(
+                                        userStep.getSpeakerType())
+                                        ? "用户调查员"
+                                        : "调查员")
+                                        + "已结束当前场景探索。",
                                 request.getClientRequestId()));
                 if (message == null) {
                     throw new UserRequestException(
@@ -1081,7 +1099,7 @@ public class TrpgTurnExecutionService {
                 .setReplyStepId(userStep.getId())
                 .setClientRequestId(normalizeClientRequestId(
                         clientRequestId))
-                .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                .setSpeakerType(userStep.getSpeakerType())
                 .setSpeakerId(userStep.getSpeakerId())
                 .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
                 .setVisibility("public")
@@ -1125,7 +1143,13 @@ public class TrpgTurnExecutionService {
         if (step == null || !turnId.equals(step.getTurnId())) {
             throw new UserRequestException("用户行动步骤不存在");
         }
-        if (!GroupChatConstant.ACTOR_USER.equals(step.getSpeakerType())
+        boolean userControlled = GroupChatConstant.ACTOR_USER.equals(
+                step.getSpeakerType())
+                || (GroupChatConstant.ACTOR_CHARACTER.equals(
+                step.getSpeakerType())
+                && GroupChatConstant.CONTROL_MANUAL.equals(
+                step.getExecutionMode()));
+        if (!userControlled
                 || !GroupChatConstant.STATUS_WAITING_INPUT.equals(
                         step.getStatus())) {
             throw new UserRequestException("当前步骤不等待用户输入");
@@ -1363,6 +1387,9 @@ public class TrpgTurnExecutionService {
                     next.getSpeakerType())) {
                 return waitForUser(conversation, turn, next);
             }
+            if (groupChatService.isManualStep(conversation, next)) {
+                return waitForUser(conversation, turn, next);
+            }
             return groupChatService.streamPersistedStep(
                             conversation, turn, next)
                     .concatWith(Flux.defer(() ->
@@ -1477,6 +1504,9 @@ public class TrpgTurnExecutionService {
         }
         if (GroupChatConstant.ACTOR_USER.equals(
                 child.getSpeakerType())) {
+            return waitForUser(conversation, turn, child);
+        }
+        if (groupChatService.isManualStep(conversation, child)) {
             return waitForUser(conversation, turn, child);
         }
         return groupChatService.streamPersistedStep(
@@ -1597,6 +1627,15 @@ public class TrpgTurnExecutionService {
             GroupConversation conversation,
             GroupChatTurn turn,
             GroupChatReplyStep step) {
+        String speakerName = GroupChatConstant.ACTOR_USER.equals(
+                step.getSpeakerType())
+                ? "用户"
+                : runtimeRegistry.require(conversation.getMode())
+                .agentPolicy().actorName(
+                        conversation.getUserWorldId(),
+                        new GroupActorRef(
+                                step.getSpeakerType(),
+                                step.getSpeakerId()));
         GroupChatEvent.GroupChatEventBuilder builder =
                 GroupChatEvent.builder()
                 .eventType(GroupChatConstant.EVENT_TURN_WAITING_INPUT)
@@ -1615,7 +1654,7 @@ public class TrpgTurnExecutionService {
                 .speaker(GroupChatEvent.Speaker.builder()
                         .type(step.getSpeakerType())
                         .id(step.getSpeakerId())
-                        .name("用户")
+                        .name(speakerName)
                         .build());
         if (GroupChatConstant.ACTION_TRPG_SCENE_SELECTION.equals(
                 step.getActionType())) {

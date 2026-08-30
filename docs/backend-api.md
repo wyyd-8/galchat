@@ -1,8 +1,8 @@
 # GalChat 后端接口文档
 
-> 文档基线：2026-08-29，以当前仓库的 Controller、DTO/VO、鉴权拦截器和 Python FastAPI 源码为准。
+> 文档基线：2026-08-31，以当前仓库的 Controller、DTO/VO、鉴权拦截器和 Python FastAPI 源码为准。
 >
-> 覆盖范围：74 个 Java REST 业务接口、1 个 WebSocket 入口、2 个 Python 辅助服务接口。Spring Boot Actuator 端点和 FastAPI 自动生成的 `/docs`、`/redoc`、`/openapi.json` 属于框架运维/文档端点，不计入业务接口。
+> 覆盖范围：77 个 Java REST 业务接口、1 个 WebSocket 入口、2 个 Python 辅助服务接口。Spring Boot Actuator 端点和 FastAPI 自动生成的 `/docs`、`/redoc`、`/openapi.json` 属于框架运维/文档端点，不计入业务接口。
 
 ## 1. 通用约定
 
@@ -315,7 +315,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 
 `CocModule` 字段为 `id/name/author/era/introduction/investigatorCreation/coverUrl/playerCount/estimatedDuration/visible/createdAt/updatedAt`。这两个接口只返回 `visible = true` 的模组，不暴露事件真相、隐藏线索、KP 指引等私密模组上下文。创建 TRPG 会话时也只允许绑定当前可选模组。
 
-## 7. 群聊与 TRPG 行动轮（19 个）
+## 7. 群聊与 TRPG 行动轮（22 个）
 
 ### 7.1 会话、消息和历史
 
@@ -324,12 +324,15 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `POST /group-chat/conversations` | `GroupConversationCreateRequest` | `GroupConversation` | 创建普通群聊或 TRPG 会话 |
 | `GET /group-chat/conversations` | `userWorldId`，可选 `status` | `GroupConversationVO[]` | 查询用户世界下的会话，ID 倒序 |
 | `GET /group-chat/conversations/{conversationId}` | 路径 ID | `GroupConversationVO` | 查询会话详情 |
-| `GET /group-chat/conversations/{conversationId}/context-window` | 路径 ID | `ContextWindowUsage` 或 `null` | 查询最近一次 TRPG 模型提示词的字符量；Redis 记录保留 7 天 |
+| `GET /group-chat/conversations/{conversationId}/context-window` | 路径 ID | `ContextWindowOverview` 或 `null` | 查询最近一次 KP 及各调查员模型提示词的字符量；Redis 记录保留 7 天 |
 | `PUT /group-chat/conversations/{conversationId}/game-time` | `TrpgGameTimeUpdateDTO` | `TrpgGameTimeVO` | 活动 TRPG 的所有者手动校正已初始化的时间；不产生公开消息 |
 | `POST /group-chat/conversations/{conversationId}/close` | 无 | `GroupConversation` | 生成总结并关闭活动会话；已关闭会话会被拒绝 |
 | `POST /group-chat/conversations/{conversationId}/messages` | `GroupChatRequest` | SSE `GroupChatEvent` | 普通群聊发送消息；也由公共运行时处理相应模式 |
 | `GET /group-chat/conversations/{conversationId}/messages` | 可选 `beforeId/size` | `GroupChatMessageVO[]` | 查询公开历史；默认 50，范围 1..200，返回时间正序 |
 | `POST /group-chat/conversations/{conversationId}/withdraw` | 无 | 无 | 仅活动中的普通 `chat` 会话可撤回最近一整轮，最多连续 3 轮 |
+| `GET /group-chat/conversations/{conversationId}/actor-runtimes` | 无 | `GroupActorRuntime[]` | 查询每个角色以及 TRPG 的 KP 发言方式；未保存的角色返回默认模型配置 |
+| `PUT /group-chat/conversations/{conversationId}/actor-runtimes` | `GroupActorRuntimeSaveRequest` | `GroupActorRuntime` | 保存角色/KP 的发言方式与可选用户模型绑定；只校验模型归属，不测试连接或能力 |
+| `POST /group-chat/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/manual-message` | `GroupChatRequest` | SSE `GroupChatEvent` | 普通群聊为等待中的人工接管角色提交发言，并继续执行本轮剩余角色 |
 
 `GroupConversationCreateRequest`：
 
@@ -344,6 +347,20 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 `GroupConversationVO` 字段：`id/userWorldId/worldId/moduleId/activeReplyPlanId/mode/title/summary/status/version/gameTime/createdAt/updatedAt/closedAt/lastChatContent/lastChatTime`。状态主要为 `active`、`closed`。普通群聊或尚未由 KP 初始化时间的跑团，其 `gameTime` 为 `null`。
 
 创建和关闭接口返回数据库会话对象 `GroupConversation`，字段与上面相同但不包含计算字段 `lastChatContent/lastChatTime`。
+
+`ContextWindowOverview` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `kp` | `ContextWindowUsage` 或 `null` | 最近一次 KP 模型提示词统计 |
+| `investigators` | `InvestigatorContextWindowUsage[]` | 各调查员最近一次模型提示词统计，按人物卡 ID 升序排列 |
+
+`InvestigatorContextWindowUsage` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `subjectCharacterId` | integer | 当前跑团中的调查员人物卡 ID |
+| `usage` | `ContextWindowUsage` | 该调查员最近一次模型提示词统计 |
 
 `ContextWindowUsage` 字段：
 
@@ -364,6 +381,21 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 ```
 
 `content` 必须非空；TRPG 用户行动接口还限制最长 4000 字符。`clientRequestId` 可省略，但强烈建议提供。
+
+角色运行配置请求示例：
+
+```json
+{
+  "actorType": "character",
+  "actorId": 12,
+  "controlMode": "MODEL",
+  "modelApiId": 7
+}
+```
+
+`actorType` 仅支持 `character/kp`；KP 的 `actorId` 必须为空且不能使用 `MANUAL`。`controlMode` 为 `MODEL/MANUAL`。`modelApiId` 为空时使用系统默认 DeepSeek；指定配置存在但真实调用失败时直接报错，不会降级；配置已经删除或请求时不存在时才切换到系统默认模型。绑定模型的测试状态与能力结果仅供前端提示，不阻止保存或调用。响应额外包含 `modelApiName/modelApiAvailable`。
+
+每个回复步骤在首次执行时快照控制方式与模型 ID，执行中的配置修改不会改变该步骤。TRPG 人工接管角色复用 `/turns/{turnId}/steps/{stepId}/message` 输入接口，保存消息时发言者仍是该角色；普通群聊使用上面的 `/manual-message` 接口。人工接管不适用于 KP。
 
 游戏时间由 KP 在选景工具调用中可选推进，粒度为“天 + 时段”。首次选景必须初始化；之后可保持不变，或推进到严格晚于当前时间的任意天/时段。时段枚举依次为 `DAWN/MORNING/NOON/AFTERNOON/EVENING/LATE_NIGHT`，显示为“清晨/上午/中午/下午/晚上/深夜”。KP 只把时间作为内部选景依据，不公开输出判断理由。
 
@@ -420,7 +452,7 @@ ws://localhost:8080/ws/{sid}?userWorldId={userWorldId}&token={jwt}
 | `itemOrder` | integer/null | 当前步骤在本轮计划中的顺序；探索场景中为 `1` 表示当前调查员是首位提案者 |
 | `inputType` | string/null | `message/selection/continue/dice` |
 | `sceneName` | string/null | 当前分组/场景名 |
-| `waitingForUser` | boolean | 是否在等待用户调查员输入 |
+| `waitingForUser` | boolean | 是否在等待用户调查员或人工接管角色输入 |
 | `canAskKp` | boolean | 当前用户行动步骤是否允许先向 KP 询问；仅场景行动和当前战斗攻击者为 `true` |
 | `sceneOptions` | object<string,string> | 选景编号到地点名的映射 |
 | `steps` | array | 本轮全部步骤，按 `stepNo` 升序返回 |
@@ -670,9 +702,7 @@ curl -X POST 'http://localhost:8080/upload' \
 
 ## 12. 模型 API 管理（5 个）
 
-第一版中一条配置只对应一个模型，暂不接入单聊、群聊或跑团。所有接口均只能操作当前登录用户自己的配置。
-
-用户注册成功时，系统会自动创建一条“DeepSeek 主模型”配置：`baseUrl` 为 `https://api.deepseek.com`，`modelName` 为 `deepseek-v4-pro`。默认配置不含 API Key，状态为 `UNTESTED`，各项能力为 `UNKNOWN`；用户需在模型管理中填写 API Key 后才能测试。注册与默认配置创建处于同一事务中，配置创建失败时注册也会回滚。通过 `POST /model-apis` 手动新建配置时，`apiKey` 仍然必填。
+一条配置只对应一个模型，可供群聊与跑团中实际发言的角色/KP选择；单聊暂不接入。所有接口均只能操作当前登录用户自己的配置。
 
 | 方法与路径 | 请求 | `data` | 说明 |
 | --- | --- | --- | --- |
@@ -690,17 +720,19 @@ curl -X POST 'http://localhost:8080/upload' \
 | `baseUrl` | string | 是 | OpenAI-compatible API 根地址，例如 `https://api.example.com/v1`；仅允许解析到公网地址的 HTTPS URL |
 | `modelName` | string | 是 | 模型标识，最长 255 字符 |
 | `apiKey` | string | 新建必填 | 仅支持 `Authorization: Bearer`；更新时省略或留空表示保持不变 |
+| `requestOverrides` | object | 否 | OpenAI-compatible 请求的额外顶层参数；前端从 cURL 请求体提取，省略时保存为空对象 |
 
-`ModelApi` 不返回明文或密文密钥，只返回 `hasApiKey` 和末四位提示 `apiKeyHint`。其余主要字段为：
+`ModelApi` 不返回明文或密文密钥，只返回末四位提示 `apiKeyHint`。其余主要字段为：
 
 - `status`：`UNTESTED / SUCCESS / PARTIAL / FAILED`
 - `chatCapability`、`streamingCapability`、`toolCallingCapability`：`UNKNOWN / SUPPORTED / UNSUPPORTED / INCONCLUSIVE`
 - `reasoningOutputStatus`：`UNKNOWN / DETECTED / NOT_DETECTED`
+- `requestOverrides`：保存的额外请求参数，不包含 cURL 原文或 API Key
 - `lastTestCode / lastTestMessage / lastTestAt`：最近一次同步测试结果
 
-测试固定请求 `{baseUrl}/chat/completions`。基础聊天失败时停止后续测试并标记 `FAILED`；基础聊天成功但流式或工具调用未确认时标记 `PARTIAL`；三项均确认支持时标记 `SUCCESS`。`NOT_DETECTED` 只表示本次响应未发现可展示的推理字段，不代表模型没有内部推理。
+测试会通过 `userId + modelApiId` 动态装配 Spring AI `OpenAiChatModel` 与 `ChatClient`，并把 `requestOverrides` 作为额外顶层参数用于聊天、流式和完整工具调用回环。归属校验只使用显式传入的 `userId`，不依赖线程上下文，后续异步群聊或跑团调用可以复用同一装配入口。基础聊天失败时停止后续测试并标记 `FAILED`；基础聊天成功但流式或工具调用未确认时标记 `PARTIAL`；三项均确认支持时标记 `SUCCESS`。`NOT_DETECTED` 只表示 Spring AI 本次暴露的响应元数据中未发现可展示推理，不代表模型没有内部推理。
 
-服务端禁用上游重定向，并限制连接时间、总请求时间和响应大小。保存或测试前会重新解析域名并拒绝回环、私网、链路本地、多播、云元数据等非公网地址。
+保存及每次动态装配前都会重新解析域名，并拒绝回环、私网、链路本地、多播、云元数据等非公网地址；动态客户端使用服务端配置的请求超时。历史测试状态不参与运行时准入，实际调用结果才是最终依据。
 
 API Key 使用 AES-256-GCM 加密后存库。部署前必须设置 `GALCHAT_MODEL_API_MASTER_KEY`，值为 Base64 编码的 32 字节随机密钥，例如可用 `openssl rand -base64 32` 生成。该主密钥不可提交到仓库，丢失后已有 API Key 无法恢复。
 

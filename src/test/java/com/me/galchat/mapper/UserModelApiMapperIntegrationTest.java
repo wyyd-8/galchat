@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -53,6 +54,10 @@ class UserModelApiMapperIntegrationTest {
         assertThat(mapper.deleteOwned(owned.getId(), 8L)).isZero();
         assertThat(mapper.selectOwned(owned.getId(), 7L).getName())
                 .isEqualTo("主模型");
+        assertThat(mapper.selectOwned(owned.getId(), 7L).getRequestOverrides())
+                .isEqualTo(Map.of(
+                        "thinking", Map.of("type", "enabled"),
+                        "reasoning_effort", "high"));
 
         owned.setUserId(7L)
                 .setStatus("PARTIAL")
@@ -76,6 +81,9 @@ class UserModelApiMapperIntegrationTest {
                 .setName(name)
                 .setBaseUrl("https://models.example.com/v1")
                 .setModelName("model-a")
+                .setRequestOverrides(Map.of(
+                        "thinking", Map.of("type", "enabled"),
+                        "reasoning_effort", "high"))
                 .setApiKeyEncrypted("v1:nonce:ciphertext")
                 .setApiKeyHint("…test")
                 .setStatus("UNTESTED")

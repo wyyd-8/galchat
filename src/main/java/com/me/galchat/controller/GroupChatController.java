@@ -197,6 +197,30 @@ public class GroupChatController {
     }
 
     @PostMapping(
+            value = "/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/manual-message",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> submitManualMessage(
+            @PathVariable Long conversationId,
+            @PathVariable Long turnId,
+            @PathVariable Long stepId,
+            @RequestBody GroupChatRequestDTO request) {
+        conversationService.requireAuthorized(conversationId);
+        return generationStreamRegistry.start(
+                conversationId,
+                request == null ? null : request.getClientRequestId(),
+                requestContext(
+                        "submit-manual-character-message",
+                        stepPath(conversationId, turnId, stepId)
+                                + "/manual-message",
+                        request == null ? null
+                                : request.getClientRequestId(),
+                        "content", request == null ? null
+                                : request.getContent()),
+                groupChatService.submitManualMessage(
+                        conversationId, turnId, stepId, request));
+    }
+
+    @PostMapping(
             value = "/conversations/{conversationId}/turns/{turnId}/steps/{stepId}/inquiry",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<GroupChatEvent> submitInquiry(

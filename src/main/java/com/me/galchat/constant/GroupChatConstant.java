@@ -19,6 +19,9 @@ public final class GroupChatConstant {
     public static final String ACTOR_KP = "kp";
     public static final String ACTOR_NARRATOR = "narrator";
 
+    public static final String CONTROL_MODEL = "MODEL";
+    public static final String CONTROL_MANUAL = "MANUAL";
+
     public static final String MESSAGE_DIALOGUE = "dialogue";
     public static final String MESSAGE_NARRATION = "narration";
     public static final String MESSAGE_DICE_ROLL = "dice_roll";

@@ -44,8 +44,8 @@ class UserInfoServiceImplTest {
                     name VARCHAR(100) NOT NULL,
                     base_url VARCHAR(1000) NOT NULL,
                     model_name VARCHAR(255) NOT NULL,
-                    api_key_encrypted TEXT,
-                    api_key_hint VARCHAR(32),
+                    api_key_encrypted TEXT NOT NULL,
+                    api_key_hint VARCHAR(32) NOT NULL,
                     status VARCHAR(20) NOT NULL,
                     chat_capability VARCHAR(20) NOT NULL,
                     streaming_capability VARCHAR(20) NOT NULL,
@@ -61,7 +61,7 @@ class UserInfoServiceImplTest {
     }
 
     @Test
-    void registrationProvisionsTheDefaultModelForTheCreatedUser() {
+    void registrationDoesNotProvisionAModelConfiguration() {
         String email = "registration-model-test@bjtu.edu.cn";
         String code = "123456";
         String verificationKey = RedisConstant.EMAIL_VERIFY_CODE_KEY_PREFIX
@@ -75,17 +75,11 @@ class UserInfoServiceImplTest {
 
             var token = service.register(request);
 
-            assertThat(jdbcTemplate.queryForMap("""
-                    SELECT name, base_url, model_name,
-                           api_key_encrypted, api_key_hint, status
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
                     FROM user_model_api
                     WHERE user_id = ?
-                    """, token.getId())).containsEntry("name", "DeepSeek 主模型")
-                    .containsEntry("base_url", "https://api.deepseek.com")
-                    .containsEntry("model_name", "deepseek-v4-pro")
-                    .containsEntry("status", "UNTESTED")
-                    .containsEntry("api_key_encrypted", null)
-                    .containsEntry("api_key_hint", null);
+                    """, Integer.class, token.getId())).isZero();
         } finally {
             redisTemplate.delete(verificationKey);
         }

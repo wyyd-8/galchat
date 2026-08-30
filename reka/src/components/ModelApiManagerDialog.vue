@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { KeyRound, LoaderCircle, Plus, ServerCog, Trash2 } from '@lucide/vue'
+import { Braces, KeyRound, LoaderCircle, Plus, ServerCog, TerminalSquare, Trash2, TriangleAlert, X } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import ModelApiCard from '@/components/ModelApiCard.vue'
 import { api } from '@/api/client'
 import type { ModelApi, ModelApiSavePayload } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
-import { apiKeyEditorHint, createModelApiManagerState } from '@/components/modelApiManagerState'
+import {
+  apiKeyEditorHint,
+  cloneRequestOverrides,
+  createModelApiManagerState,
+} from '@/components/modelApiManagerState'
+import { parseOpenAiCurl, requestOverrideWarnings } from '@/components/modelApiCurlImport'
 
 const open = defineModel<boolean>({ required: true })
 const manager = createModelApiManagerState({
@@ -25,7 +30,16 @@ const deleteOpen = computed({
   get: () => deleteTarget.value !== null,
   set: (value: boolean) => { if (!value) deleteTarget.value = null },
 })
-const form = reactive({ name: '', baseUrl: '', modelName: '', apiKey: '' })
+const form = reactive({
+  name: '',
+  baseUrl: '',
+  modelName: '',
+  apiKey: '',
+  requestOverrides: {} as Record<string, unknown>,
+})
+const curlSource = ref('')
+const curlError = ref('')
+const curlParsed = ref(false)
 const canSave = computed(() => Boolean(
   form.name.trim()
   && form.baseUrl.trim()
@@ -33,6 +47,9 @@ const canSave = computed(() => Boolean(
   && (editorMode.value === 'edit' || form.apiKey.trim()),
 ))
 const editingModel = computed(() => manager.models.value.find((item) => item.id === editingId.value) || null)
+const overrideEntries = computed(() => Object.entries(form.requestOverrides))
+const overrideJson = computed(() => JSON.stringify(form.requestOverrides, null, 2))
+const overrideWarnings = computed(() => requestOverrideWarnings(form.requestOverrides))
 
 watch(open, (value) => {
   if (!value) return
@@ -42,7 +59,8 @@ watch(open, (value) => {
 function openCreate() {
   editorMode.value = 'create'
   editingId.value = null
-  Object.assign(form, { name: '', baseUrl: '', modelName: '', apiKey: '' })
+  Object.assign(form, { name: '', baseUrl: '', modelName: '', apiKey: '', requestOverrides: {} })
+  resetCurlImport()
   editorOpen.value = true
 }
 
@@ -54,7 +72,9 @@ function openEdit(model: ModelApi) {
     baseUrl: model.baseUrl,
     modelName: model.modelName,
     apiKey: '',
+    requestOverrides: cloneRequestOverrides(model.requestOverrides || {}),
   })
+  resetCurlImport()
   editorOpen.value = true
 }
 
@@ -64,7 +84,34 @@ function payload(): ModelApiSavePayload {
     baseUrl: form.baseUrl.trim(),
     modelName: form.modelName.trim(),
     apiKey: form.apiKey.trim() || undefined,
+    requestOverrides: cloneRequestOverrides(form.requestOverrides),
   }
+}
+
+function resetCurlImport() {
+  curlSource.value = ''
+  curlError.value = ''
+  curlParsed.value = false
+}
+
+function importCurl() {
+  try {
+    const parsed = parseOpenAiCurl(curlSource.value)
+    form.baseUrl = parsed.baseUrl
+    form.modelName = parsed.modelName
+    form.requestOverrides = parsed.requestOverrides
+    if (parsed.apiKey) form.apiKey = parsed.apiKey
+    curlError.value = ''
+    curlParsed.value = true
+  } catch (error) {
+    curlParsed.value = false
+    curlError.value = error instanceof Error ? error.message : 'cURL 解析失败。'
+  }
+}
+
+function clearOverrides() {
+  form.requestOverrides = {}
+  curlParsed.value = false
 }
 
 async function saveModel() {
@@ -141,8 +188,33 @@ async function confirmDelete() {
     :title="editorMode === 'create' ? '添加模型' : '编辑模型'"
     :description="editorMode === 'create' ? '一条配置对应一个模型。保存后可单独运行能力测试。' : '修改连接信息后，原有测试结果会重置。'"
     layer="foreground"
+    size="lg"
+    content-class="model-api-editor-dialog"
   >
     <div class="form-stack">
+      <section class="model-api-curl-import">
+        <div class="model-api-curl-heading">
+          <span><TerminalSquare :size="16" /></span>
+          <div>
+            <strong>从 cURL 导入</strong>
+            <small>解析仅在本地浏览器中进行，原始 cURL 不会上传或保存。</small>
+          </div>
+        </div>
+        <textarea
+          v-model="curlSource"
+          rows="5"
+          :spellcheck="false"
+          placeholder="粘贴服务商文档中的 /chat/completions cURL 示例…"
+          aria-label="OpenAI Chat Completions cURL"
+        />
+        <div class="model-api-curl-actions">
+          <small>解析会填充下方连接信息，并提取思考模式等额外请求参数。</small>
+          <button class="button secondary" :disabled="!curlSource.trim()" @click="importCurl">解析并填充</button>
+        </div>
+        <p v-if="curlError" class="model-api-curl-error">{{ curlError }}</p>
+        <p v-else-if="curlParsed" class="model-api-curl-success">已解析，请检查下方信息后再保存。</p>
+      </section>
+
       <label class="field"><span>配置名称</span><input v-model.trim="form.name" maxlength="100" placeholder="例如：DeepSeek 主模型" /></label>
       <label class="field"><span>API 地址</span><input v-model.trim="form.baseUrl" type="url" placeholder="https://api.example.com/v1" /><small>仅支持解析到公网地址的 HTTPS 接口。</small></label>
       <label class="field"><span>模型名称</span><input v-model.trim="form.modelName" maxlength="255" placeholder="例如：deepseek-chat" /></label>
@@ -152,6 +224,18 @@ async function confirmDelete() {
         <small v-if="editorMode === 'edit' && editingModel">{{ apiKeyEditorHint(editingModel) }}</small>
         <small v-else>填写期间明文可见，保存后只显示密钥末四位。</small>
       </label>
+
+      <section v-if="overrideEntries.length" class="model-api-overrides">
+        <header>
+          <span><Braces :size="15" /></span>
+          <div><strong>额外请求参数</strong><small>已从 cURL 提取 {{ overrideEntries.length }} 项，调用时将作为顶层字段传递。</small></div>
+          <button class="icon-button" aria-label="清空额外请求参数" title="清空额外请求参数" @click="clearOverrides"><X :size="14" /></button>
+        </header>
+        <pre>{{ overrideJson }}</pre>
+        <div v-for="warning in overrideWarnings" :key="warning" class="model-api-override-warning">
+          <TriangleAlert :size="14" /><span>{{ warning }}</span>
+        </div>
+      </section>
     </div>
     <template #footer>
       <button class="button ghost" :disabled="manager.saving.value" @click="editorOpen = false">取消</button>

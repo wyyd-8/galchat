@@ -13,6 +13,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
@@ -29,6 +30,7 @@ class DeepSeekCharacterCardGenerationModelTest {
     @Test
     void buildGenerationUsesOnlyPersonalityPrototypeAndCreatesANewInvestigatorIdentity() {
         DeepSeekChatModel chatModel = mock(DeepSeekChatModel.class);
+        when(chatModel.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
         when(chatModel.call(any(Prompt.class))).thenReturn(response("""
                 {"name":"埃莉诺·克劳福德","age":30,"sex":"女","birthplace":"波士顿",
                  "residence":"阿卡姆","occupation":"记者",
@@ -58,6 +60,7 @@ class DeepSeekCharacterCardGenerationModelTest {
     @Test
     void backgroundGenerationUsesGeneratedInvestigatorInsteadOfSourceWorldIdentity() {
         DeepSeekChatModel chatModel = mock(DeepSeekChatModel.class);
+        when(chatModel.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
         when(chatModel.call(any(Prompt.class))).thenReturn(response("""
                 {"appearance":"总戴着一顶旧呢帽","ideology":"真相值得冒险",
                  "significantPeople":"编辑玛格丽特","meaningfulLocations":"波士顿公共图书馆",

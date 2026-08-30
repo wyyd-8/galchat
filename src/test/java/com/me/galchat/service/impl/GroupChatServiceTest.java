@@ -28,11 +28,11 @@ import com.me.galchat.groupchat.tool.GroupToolContextFactory;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
-import com.me.galchat.model.DeepSeekChatModel;
 import com.me.galchat.service.IUserWorldPrefixService;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
@@ -41,7 +41,8 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
-import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
+import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -50,6 +51,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -74,8 +76,251 @@ class GroupChatServiceTest {
     }
 
     @Test
+    void persistedStepUsesTheActorSelectedChatClient() {
+        DeepSeekChatModel fallbackModel = newChatModel();
+        DeepSeekChatModel selectedModel = newChatModel();
+        ChatClient fallback = ChatClient.builder(fallbackModel).build();
+        ChatClient selected = ChatClient.builder(selectedModel).build();
+        GroupActorRuntimeService actorRuntime =
+                mock(GroupActorRuntimeService.class);
+        GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupContextPolicy contextPolicy = mock(GroupContextPolicy.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatMessageMapper messages = mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        IUserWorldPrefixService worlds =
+                mock(IUserWorldPrefixService.class);
+        GroupChatService service = new GroupChatService(
+                conversations, mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class), runtimes, messages,
+                mock(GroupChatTurnMapper.class), steps,
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(), worlds,
+                immediateTransactionTemplate(), diceMessageCodec(),
+                JsonMapper.builder().build(), emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class), actorRuntime);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L).setWorldId(3L)
+                .setMode(GroupChatConstant.MODE_CHAT);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(31L).setTurnId(30L)
+                .setActionType(GroupChatConstant.ACTION_CHAT_REPLY)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(9L)
+                .setGroupKey("default").setGroupName("群聊")
+                .setGroupOrder(1).setItemOrder(1)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        GroupActionSpec action = new GroupActionSpec(
+                step.getActionType(), step.getSpeakerType(),
+                step.getSpeakerId(), step.getGroupKey(),
+                step.getGroupName(), 1, 1);
+        when(runtimes.require(GroupChatConstant.MODE_CHAT))
+                .thenReturn(runtime);
+        when(runtime.contextPolicy()).thenReturn(contextPolicy);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(contextPolicy.load(conversation, action))
+                .thenReturn(new GroupContextMaterial(List.of()));
+        when(agentPolicy.prepare(eq(conversation), eq(action), any()))
+                .thenReturn(new GroupModelInvocation(
+                        fallback, new Prompt(List.of(
+                        new UserMessage("回复"))), List.of()));
+        when(agentPolicy.actorName(5L, action.actor()))
+                .thenReturn("爱丽丝");
+        when(actorRuntime.chatClient(conversation, step, fallback))
+                .thenReturn(selected);
+        when(actorRuntime.snapshot(conversation, step)).thenReturn(
+                new GroupActorRuntimeService.StepRuntime(
+                        GroupChatConstant.CONTROL_MODEL, 44L));
+        when(conversations.nextSequence(7L)).thenReturn(1L);
+        when(worlds.getById(5L)).thenReturn(
+                new UserWorldPrefix().setId(5L).setUserId(8L));
+        when(messages.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0).setId(40L);
+                    return 1;
+                });
+        when(selectedModel.stream(any(Prompt.class))).thenReturn(
+                Flux.just(new ChatResponse(List.of(new Generation(
+                        new AssistantMessage("自选模型回复"))))));
+
+        List<GroupChatEvent> events = service.streamPersistedStep(
+                conversation, turn, step).collectList().block();
+
+        assertThat(events.getLast().getContent())
+                .isEqualTo("自选模型回复");
+        verify(fallbackModel, never()).stream(any(Prompt.class));
+    }
+
+    @Test
+    void manualCharacterStepWaitsForInputWithoutStartingAModelReply() {
+        GroupActorRuntimeService actorRuntime =
+                mock(GroupActorRuntimeService.class);
+        GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatService service = new GroupChatService(
+                mock(GroupConversationService.class),
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class), runtimes,
+                mock(GroupChatMessageMapper.class), turns, steps,
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                immediateTransactionTemplate(), diceMessageCodec(),
+                JsonMapper.builder().build(), emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class), actorRuntime);
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L)
+                .setMode(GroupChatConstant.MODE_CHAT);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setStatus(GroupChatConstant.STATUS_RUNNING);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(31L).setTurnId(30L)
+                .setActionType(GroupChatConstant.ACTION_CHAT_REPLY)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(9L)
+                .setGroupKey("default").setGroupName("群聊")
+                .setGroupOrder(1).setItemOrder(1)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(actorRuntime.snapshot(conversation, step)).thenReturn(
+                new GroupActorRuntimeService.StepRuntime(
+                        GroupChatConstant.CONTROL_MANUAL, 44L));
+        when(runtimes.require(GroupChatConstant.MODE_CHAT))
+                .thenReturn(runtime);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(agentPolicy.actorName(5L,
+                new GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L)))
+                .thenReturn("爱丽丝");
+
+        List<GroupChatEvent> events = service.streamPersistedStep(
+                conversation, turn, step).collectList().block();
+
+        assertThat(events).singleElement().satisfies(event -> {
+            assertThat(event.getEventType())
+                    .isEqualTo(GroupChatConstant.EVENT_TURN_WAITING_INPUT);
+            assertThat(event.getSpeaker().getName()).isEqualTo("爱丽丝");
+        });
+        assertThat(step.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
+        assertThat(turn.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
+        verify(runtime, never()).contextPolicy();
+    }
+
+    @Test
+    void manualGroupMessageIsStoredAsTheCharacterAndCompletesTheTurn() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupTurnPlanResolver turnPlanResolver =
+                mock(GroupTurnPlanResolver.class);
+        GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
+        GroupModeRuntime runtime = mock(GroupModeRuntime.class);
+        GroupAgentPolicy agentPolicy = mock(GroupAgentPolicy.class);
+        GroupChatMessageMapper messages =
+                mock(GroupChatMessageMapper.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper steps =
+                mock(GroupChatReplyStepMapper.class);
+        TransactionTemplate transactionTemplate =
+                immediateTransactionTemplate();
+        GroupChatService service = new GroupChatService(
+                conversationService, lockService, turnPlanResolver,
+                runtimes, messages, turns, steps,
+                mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                transactionTemplate, diceMessageCodec(),
+                JsonMapper.builder().build(), emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L).setUserWorldId(5L)
+                .setMode(GroupChatConstant.MODE_CHAT)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(30L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_USER)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        GroupChatReplyStep step = new GroupChatReplyStep()
+                .setId(31L).setTurnId(30L).setStepNo(1)
+                .setActionType(GroupChatConstant.ACTION_CHAT_REPLY)
+                .setSpeakerType(GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(9L)
+                .setGroupKey("default").setGroupName("群聊")
+                .setGroupOrder(1).setItemOrder(1)
+                .setExecutionMode(GroupChatConstant.CONTROL_MANUAL)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turns.selectById(30L)).thenReturn(turn);
+        when(steps.selectById(31L)).thenReturn(step);
+        when(conversationService.nextSequence(7L)).thenReturn(8L);
+        when(messages.insert(any(GroupChatMessage.class)))
+                .thenAnswer(invocation -> {
+                    invocation.<GroupChatMessage>getArgument(0)
+                            .setId(50L);
+                    return 1;
+                });
+        when(runtimes.require(GroupChatConstant.MODE_CHAT))
+                .thenReturn(runtime);
+        when(runtime.agentPolicy()).thenReturn(agentPolicy);
+        when(agentPolicy.actorName(5L,
+                new GroupActorRef(
+                        GroupChatConstant.ACTOR_CHARACTER, 9L)))
+                .thenReturn("爱丽丝");
+        GroupChatRequestDTO request = new GroupChatRequestDTO();
+        request.setClientRequestId("manual-1");
+        request.setContent("我来回答这个问题。");
+
+        List<GroupChatEvent> events = service.submitManualMessage(
+                7L, 30L, 31L, request).collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(
+                        GroupChatConstant.EVENT_TURN_ACCEPTED,
+                        GroupChatConstant.EVENT_MESSAGE_COMPLETED,
+                        GroupChatConstant.EVENT_TURN_COMPLETED);
+        verify(messages).insert(
+                org.mockito.ArgumentMatchers.argThat(
+                        (GroupChatMessage message) ->
+                                GroupChatConstant.ACTOR_CHARACTER.equals(
+                                        message.getSpeakerType())
+                                        && Long.valueOf(9L).equals(
+                                        message.getSpeakerId())
+                                        && "我来回答这个问题。".equals(
+                                        message.getContent())));
+        verify(turnPlanResolver).onTurnCompleted(
+                conversation, GroupChatConstant.PLAN_SOURCE_USER);
+    }
+
+    @Test
     void publishingScenesEmitsGameTimeBeforeOptionsWithoutPublicTimeMessage() {
-        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimeRegistry =
                 mock(GroupRuntimeRegistry.class);
@@ -106,7 +351,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -186,7 +432,7 @@ class GroupChatServiceTest {
 
     @Test
     void trpgCharacterStepSplitsDecisionAndActionFromOneModelStream() {
-        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimeRegistry =
                 mock(GroupRuntimeRegistry.class);
@@ -221,7 +467,7 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 decisionStore,
                 mock(TrpgCombatLifecycleService.class),
-                checkpointService);
+                checkpointService, defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -268,11 +514,12 @@ class GroupChatServiceTest {
                     return 1;
                 });
         when(conversationService.nextSequence(7L)).thenReturn(1L);
-        DeepSeekAssistantMessage output =
-                new DeepSeekAssistantMessage.Builder()
-                        .reasoningContent("原始推理")
+        AssistantMessage output =
+                AssistantMessage.builder()
                         .content("<decision>先确认窗边脚印的方向。</decision>"
                                 + "<action>我蹲到窗边检查脚印。</action>")
+                        .properties(Map.of(
+                                "reasoningContent", "原始推理"))
                         .build();
         when(model.stream(any(Prompt.class))).thenReturn(
                 Flux.just(new ChatResponse(
@@ -332,7 +579,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -354,8 +602,56 @@ class GroupChatServiceTest {
     }
 
     @Test
-    void streamsThinkingWithoutPersistingIt() {
-        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+    void chatRejectsANewTurnWhileManualCharacterInputIsPending() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turnMapper =
+                mock(GroupChatTurnMapper.class);
+        GroupTurnRecoveryService recoveryService =
+                mock(GroupTurnRecoveryService.class);
+        GroupRuntimeRegistry runtimeRegistry =
+                mock(GroupRuntimeRegistry.class);
+        GroupChatService service = new GroupChatService(
+                conversationService, lockService,
+                mock(GroupTurnPlanResolver.class), runtimeRegistry,
+                mock(GroupChatMessageMapper.class), turnMapper,
+                mock(GroupChatReplyStepMapper.class), recoveryService,
+                new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class),
+                mock(TransactionTemplate.class), diceMessageCodec(),
+                JsonMapper.builder().build(), emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
+        GroupConversation conversation = new GroupConversation()
+                .setId(7L)
+                .setMode(GroupChatConstant.MODE_CHAT)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        when(conversationService.requireActive(7L))
+                .thenReturn(conversation);
+        when(lockService.tryLock(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turnMapper.countNonTerminalByConversationId(7L))
+                .thenReturn(1L);
+        GroupChatRequestDTO request = new GroupChatRequestDTO();
+        request.setContent("误提交的新消息");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> service.chat(7L, request).collectList().block())
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("等待角色人工输出");
+        verify(recoveryService).recoverInterrupted(7L);
+        verifyNoMoreInteractions(runtimeRegistry);
+    }
+
+    @Test
+    void streamsOpenAiReasoningMetadataWithoutPersistingIt() {
+        DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupConversationService conversationService = mock(GroupConversationService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
@@ -378,7 +674,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -450,9 +747,10 @@ class GroupChatServiceTest {
             return 1;
         }).when(stepMapper).insert(any(GroupChatReplyStep.class));
 
-        DeepSeekAssistantMessage output = new DeepSeekAssistantMessage.Builder()
-                .reasoningContent("只供前端展示的思考")
+        AssistantMessage output = AssistantMessage.builder()
                 .content("公开回复")
+                .properties(Map.of(
+                        "reasoningContent", "只供前端展示的思考"))
                 .build();
         AtomicReference<Prompt> modelPrompt = new AtomicReference<>();
         when(model.stream(any(Prompt.class))).thenAnswer(invocation -> {
@@ -548,7 +846,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -639,7 +938,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(7L)
                 .setStatus(GroupChatConstant.STATUS_RUNNING);
@@ -689,7 +989,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupChatReplyStep scheduled =
                 new GroupChatReplyStep().setId(41L)
                         .setStatus(GroupChatConstant.STATUS_PENDING);
@@ -702,7 +1003,7 @@ class GroupChatServiceTest {
 
     @Test
     void directInvestigatorInquiryPublishesQuestionAndSuspendsParentStep() {
-        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimeRegistry =
                 mock(GroupRuntimeRegistry.class);
@@ -728,7 +1029,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -809,7 +1111,7 @@ class GroupChatServiceTest {
 
     @Test
     void emptyModelStreamFailsTheStepAtTheOrchestrationBoundary() {
-        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
         GroupModeRuntime runtime = mock(GroupModeRuntime.class);
@@ -835,7 +1137,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
                 .setMode(GroupChatConstant.MODE_CHAT);
@@ -887,7 +1190,7 @@ class GroupChatServiceTest {
 
     @Test
     void combatRouteClarificationIsPublicAndCompletesRouteChild() {
-        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
         GroupModeRuntime runtime = mock(GroupModeRuntime.class);
@@ -912,7 +1215,8 @@ class GroupChatServiceTest {
                 JsonMapper.builder().build(), emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class), combats,
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -981,7 +1285,7 @@ class GroupChatServiceTest {
 
     @Test
     void directDiceToolResponseEmitsDiceEventWithoutPersistingJsonAsDialogue() {
-        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupConversationService conversationService = mock(GroupConversationService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
@@ -1004,7 +1308,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
 
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(1L).setWorldId(2L)
@@ -1095,7 +1400,7 @@ class GroupChatServiceTest {
 
     @Test
     void invalidAgentSelectionTextIsBufferedAndOnlyCanonicalChoiceIsStored() {
-        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
@@ -1128,7 +1433,8 @@ class GroupChatServiceTest {
                 selectionService,
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
                 .setMode(GroupChatConstant.MODE_TRPG);
@@ -1231,7 +1537,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
@@ -1289,7 +1596,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 decisionStore,
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setUserWorldId(5L)
@@ -1381,7 +1689,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 decisionStore,
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         when(conversationService.requireAuthorized(7L))
@@ -1456,7 +1765,8 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 decisionStore,
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class));
+                mock(GroupTurnCheckpointService.class),
+                defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_TRPG);
         when(conversationService.requireAuthorized(7L))
@@ -1532,6 +1842,17 @@ class GroupChatServiceTest {
         return template;
     }
 
+    private GroupActorRuntimeService defaultActorRuntime() {
+        GroupActorRuntimeService runtime =
+                mock(GroupActorRuntimeService.class);
+        when(runtime.chatClient(any(), any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(2));
+        when(runtime.snapshot(any(), any())).thenReturn(
+                new GroupActorRuntimeService.StepRuntime(
+                        GroupChatConstant.CONTROL_MODEL, null));
+        return runtime;
+    }
+
     private GroupMaterialMessageFeed emptyMaterialFeed() {
         GroupMaterialMessageFeed feed = mock(GroupMaterialMessageFeed.class);
         when(feed.listNew(any(), any())).thenReturn(List.of());
@@ -1540,6 +1861,12 @@ class GroupChatServiceTest {
 
     private DiceRollMessageCodec diceMessageCodec() {
         return new DiceRollMessageCodec(JsonMapper.builder().build());
+    }
+
+    private DeepSeekChatModel newChatModel() {
+        DeepSeekChatModel model = mock(DeepSeekChatModel.class);
+        when(model.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
+        return model;
     }
 
     private GroupReplyPlanItem planItem(Long id, Long actorId, int order) {

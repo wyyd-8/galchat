@@ -11,7 +11,6 @@ import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.WorldEventLogMapper;
-import com.me.galchat.model.DeepSeekChatModel;
 import com.me.galchat.service.IWorldEventLogService;
 import com.me.galchat.vector.WorldEventVectorService;
 import com.me.galchat.exception.UserRequestException;
@@ -22,6 +21,8 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -54,6 +55,7 @@ class GroupConversationLifecycleServiceTest {
         GroupTopicService topicService = mock(GroupTopicService.class);
         GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         DeepSeekChatModel summaryModel = mock(DeepSeekChatModel.class);
+        when(summaryModel.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
         ChatClient summaryClient = ChatClient.builder(summaryModel).build();
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         GroupConversationLifecycleService service = new GroupConversationLifecycleService(conversationService,

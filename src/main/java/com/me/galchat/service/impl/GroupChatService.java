@@ -34,7 +34,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -74,6 +73,7 @@ public class GroupChatService {
     private final GroupAgentDecisionStore decisionStore;
     private final TrpgCombatLifecycleService combatLifecycleService;
     private final GroupTurnCheckpointService checkpointService;
+    private final GroupActorRuntimeService actorRuntimeService;
 
     @Autowired
     public GroupChatService(GroupConversationService conversationService,
@@ -96,7 +96,8 @@ public class GroupChatService {
                             TrpgCombatLifecycleService
                                     combatLifecycleService,
                             GroupTurnCheckpointService
-                                    checkpointService) {
+                                    checkpointService,
+                            GroupActorRuntimeService actorRuntimeService) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.turnPlanResolver = turnPlanResolver;
@@ -115,6 +116,7 @@ public class GroupChatService {
         this.decisionStore = decisionStore;
         this.combatLifecycleService = combatLifecycleService;
         this.checkpointService = checkpointService;
+        this.actorRuntimeService = actorRuntimeService;
     }
 
     public Flux<GroupChatEvent> chat(Long conversationId, GroupChatRequestDTO request) {
@@ -134,6 +136,12 @@ public class GroupChatService {
                             "TRPG群聊请使用行动轮接口");
                 }
                 recoveryService.recoverInterrupted(conversationId);
+                Long activeTurns = turnMapper
+                        .countNonTerminalByConversationId(conversationId);
+                if (activeTurns != null && activeTurns > 0) {
+                    throw new UserRequestException(
+                            "当前群聊正等待角色人工输出，请先完成该角色发言");
+                }
                 GroupModeRuntime runtime = runtimeRegistry.require(conversation.getMode());
                 PreparedTurn prepared = transactionTemplate.execute(
                         status -> prepareTurn(conversation, request, runtime));
@@ -154,19 +162,10 @@ public class GroupChatService {
                         .messageId(prepared.userMessage().getId())
                         .sequence(prepared.userMessage().getSequenceNo())
                         .build());
-                Flux<GroupChatEvent> replies = Flux.fromIterable(prepared.actions())
-                        .concatMap(action -> executeStep(runtime, conversation, prepared.turn(), action));
-                Flux<GroupChatEvent> completed = Flux.defer(() -> {
-                    completeTurn(prepared.turn());
-                    turnPlanResolver.onTurnCompleted(
-                            conversation, prepared.turn().getPlanSource());
-                    return Flux.just(GroupChatEvent.builder()
-                            .eventType(GroupChatConstant.EVENT_TURN_COMPLETED)
-                            .conversationId(conversationId)
-                            .turnId(prepared.turn().getId())
-                            .build());
-                });
-                return Flux.concat(accepted, replies, completed)
+                Flux<GroupChatEvent> replies = executeChatActions(
+                        runtime, conversation, prepared.turn(),
+                        prepared.actions(), 0);
+                return Flux.concat(accepted, replies)
                         .doOnError(error -> recoveryService.recoverInterrupted(conversationId))
                         .onErrorResume(error -> Flux.just(
                                 failureEvent(conversationId, prepared.turn().getId(), error)))
@@ -184,6 +183,35 @@ public class GroupChatService {
                 lockService.unlock(lock);
                 return Flux.error(e);
             }
+        });
+    }
+
+    private Flux<GroupChatEvent> executeChatActions(
+            GroupModeRuntime runtime,
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            List<PreparedAction> actions,
+            int index) {
+        return Flux.defer(() -> {
+            if (index >= actions.size()) {
+                completeTurn(turn);
+                turnPlanResolver.onTurnCompleted(
+                        conversation, turn.getPlanSource());
+                return Flux.just(GroupChatEvent.builder()
+                        .eventType(GroupChatConstant.EVENT_TURN_COMPLETED)
+                        .conversationId(conversation.getId())
+                        .turnId(turn.getId())
+                        .build());
+            }
+            PreparedAction prepared = actions.get(index);
+            if (isManualStep(conversation, prepared.step())) {
+                return waitForManualInput(
+                        conversation, turn, prepared.step());
+            }
+            return executeStep(runtime, conversation, turn, prepared)
+                    .concatWith(executeChatActions(
+                            runtime, conversation, turn,
+                            actions, index + 1));
         });
     }
 
@@ -231,6 +259,190 @@ public class GroupChatService {
                                 message.getReplyStepId()))
                         ? null : decisions.get(message.getReplyStepId()),
                 message.getSequenceNo(), message.getStatus(), message.getCreatedAt())).toList();
+    }
+
+    public Flux<GroupChatEvent> submitManualMessage(
+            Long conversationId,
+            Long turnId,
+            Long stepId,
+            GroupChatRequestDTO request) {
+        return Flux.defer(() -> {
+            validateRequest(request);
+            conversationService.requireAuthorized(conversationId);
+            GroupConversationLockService.OwnedLock lock =
+                    lockService.tryLock(conversationId);
+            if (lock == null) {
+                return Flux.error(new UserRequestException(
+                        "当前群聊正在执行回复，请稍后再试"));
+            }
+            try {
+                GroupConversation conversation =
+                        conversationService.requireActive(conversationId);
+                if (!GroupChatConstant.MODE_CHAT.equals(
+                        conversation.getMode())) {
+                    throw new UserRequestException(
+                            "跑团人工输出请使用行动输入接口");
+                }
+                assertManualRequestIdAvailable(
+                        conversationId, request.getClientRequestId());
+                GroupChatTurn turn = requireManualTurn(
+                        conversationId, turnId);
+                GroupChatReplyStep step = requireManualStep(
+                        turnId, stepId);
+                GroupChatMessage message = transactionTemplate.execute(
+                        status -> completeManualStep(
+                                conversation, turn, step, request));
+                if (message == null) {
+                    throw new UserRequestException("保存人工输出失败");
+                }
+                List<GroupChatReplyStep> remaining =
+                        stepMapper.selectList(
+                                new LambdaQueryWrapper<
+                                        GroupChatReplyStep>()
+                                        .eq(GroupChatReplyStep::getTurnId,
+                                                turnId)
+                                        .gt(GroupChatReplyStep::getStepNo,
+                                                step.getStepNo())
+                                        .eq(GroupChatReplyStep::getStatus,
+                                                GroupChatConstant
+                                                        .STATUS_PENDING)
+                                        .orderByAsc(
+                                                GroupChatReplyStep
+                                                        ::getStepNo));
+                List<PreparedAction> actions = remaining == null
+                        ? List.of()
+                        : remaining.stream()
+                        .map(this::toPreparedAction)
+                        .toList();
+                GroupModeRuntime runtime = runtimeRegistry.require(
+                        conversation.getMode());
+                GroupChatEvent.Speaker speaker =
+                        GroupChatEvent.Speaker.builder()
+                                .type(step.getSpeakerType())
+                                .id(step.getSpeakerId())
+                                .name(runtime.agentPolicy().actorName(
+                                        conversation.getUserWorldId(),
+                                        new GroupActorRef(
+                                                step.getSpeakerType(),
+                                                step.getSpeakerId())))
+                                .build();
+                Flux<GroupChatEvent> accepted = Flux.just(
+                        GroupChatEvent.builder()
+                                .eventType(GroupChatConstant
+                                        .EVENT_TURN_ACCEPTED)
+                                .conversationId(conversationId)
+                                .turnId(turnId)
+                                .replyStepId(stepId)
+                                .messageId(message.getId())
+                                .sequence(message.getSequenceNo())
+                                .build(),
+                        baseEvent(
+                                GroupChatConstant.EVENT_MESSAGE_COMPLETED,
+                                conversation, turn, step, message, speaker)
+                                .content(message.getContent())
+                                .build());
+                return Flux.concat(
+                                accepted,
+                                executeChatActions(runtime, conversation,
+                                        turn, actions, 0))
+                        .doOnError(error -> recoveryService
+                                .recoverInterrupted(conversationId))
+                        .doFinally(signal -> lockService.unlock(lock));
+            } catch (RuntimeException exception) {
+                lockService.unlock(lock);
+                return Flux.error(exception);
+            }
+        });
+    }
+
+    private GroupChatTurn requireManualTurn(
+            Long conversationId, Long turnId) {
+        GroupChatTurn turn = turnMapper.selectById(turnId);
+        if (turn == null
+                || !conversationId.equals(turn.getConversationId())) {
+            throw new UserRequestException("群聊回复轮次不存在");
+        }
+        if (!GroupChatConstant.STATUS_WAITING_INPUT.equals(
+                turn.getStatus())) {
+            throw new UserRequestException("当前回复轮次不等待人工输出");
+        }
+        return turn;
+    }
+
+    private GroupChatReplyStep requireManualStep(
+            Long turnId, Long stepId) {
+        GroupChatReplyStep step = stepMapper.selectById(stepId);
+        if (step == null || !turnId.equals(step.getTurnId())) {
+            throw new UserRequestException("人工输出步骤不存在");
+        }
+        if (!GroupChatConstant.ACTOR_CHARACTER.equals(
+                step.getSpeakerType())
+                || !GroupChatConstant.CONTROL_MANUAL.equals(
+                step.getExecutionMode())
+                || !GroupChatConstant.STATUS_WAITING_INPUT.equals(
+                step.getStatus())) {
+            throw new UserRequestException("当前步骤不等待人工输出");
+        }
+        return step;
+    }
+
+    private GroupChatMessage completeManualStep(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step,
+            GroupChatRequestDTO request) {
+        LocalDateTime now = LocalDateTime.now();
+        GroupChatMessage message = new GroupChatMessage()
+                .setConversationId(conversation.getId())
+                .setTurnId(turn.getId())
+                .setReplyStepId(step.getId())
+                .setClientRequestId(request.getClientRequestId() == null
+                        ? null : request.getClientRequestId().trim())
+                .setSpeakerType(step.getSpeakerType())
+                .setSpeakerId(step.getSpeakerId())
+                .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
+                .setVisibility("public")
+                .setContent(request.getContent().trim())
+                .setSequenceNo(conversationService.nextSequence(
+                        conversation.getId()))
+                .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                .setCreatedAt(now)
+                .setUpdatedAt(now);
+        messageMapper.insert(message);
+        step.setOutputMessageId(message.getId())
+                .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                .setUpdatedAt(now);
+        stepMapper.updateById(step);
+        turn.setStatus(GroupChatConstant.STATUS_RUNNING)
+                .setUpdatedAt(now);
+        turnMapper.updateById(turn);
+        return message;
+    }
+
+    private void assertManualRequestIdAvailable(
+            Long conversationId, String clientRequestId) {
+        if (!StringUtils.hasText(clientRequestId)) {
+            return;
+        }
+        Long count = messageMapper.selectCount(
+                new LambdaQueryWrapper<GroupChatMessage>()
+                        .eq(GroupChatMessage::getConversationId,
+                                conversationId)
+                        .eq(GroupChatMessage::getClientRequestId,
+                                clientRequestId.trim()));
+        if (count != null && count > 0) {
+            throw new UserRequestException(
+                    "clientRequestId已处理，请勿重复提交");
+        }
+    }
+
+    private PreparedAction toPreparedAction(GroupChatReplyStep step) {
+        return new PreparedAction(new GroupActionSpec(
+                step.getActionType(), step.getSpeakerType(),
+                step.getSpeakerId(), step.getSubjectCharacterId(),
+                step.getGroupKey(), step.getGroupName(),
+                step.getGroupOrder(), step.getItemOrder(),
+                step.getInteractionType()), step);
     }
 
     private PreparedTurn prepareTurn(GroupConversation conversation, GroupChatRequestDTO request,
@@ -333,7 +545,9 @@ public class GroupChatService {
                     .type(step.getSpeakerType()).id(step.getSpeakerId()).name(speakerName).build();
             UserWorldPrefix userWorld = userWorldPrefixService.getById(conversation.getUserWorldId());
             String favorSystemStatus = userWorld == null ? null : userWorld.getFavorSystemStatus();
-            ChatClient.ChatClientRequestSpec requestSpec = invocation.chatClient().prompt(invocation.prompt())
+            ChatClient selectedClient = actorRuntimeService.chatClient(
+                    conversation, step, invocation.chatClient());
+            ChatClient.ChatClientRequestSpec requestSpec = selectedClient.prompt(invocation.prompt())
                     .toolContext(toolContextFactory.create(
                             conversation, action, turn.getId(),
                             step.getId(), favorSystemStatus,
@@ -681,6 +895,9 @@ public class GroupChatService {
             GroupConversation conversation,
             GroupChatTurn turn,
             GroupChatReplyStep step) {
+        if (isManualStep(conversation, step)) {
+            return waitForManualInput(conversation, turn, step);
+        }
         GroupActionSpec action = new GroupActionSpec(
                 step.getActionType(),
                 step.getSpeakerType(),
@@ -696,6 +913,52 @@ public class GroupChatService {
         return executeStep(
                 runtime, conversation, turn,
                 new PreparedAction(action, step));
+    }
+
+    boolean isManualStep(
+            GroupConversation conversation,
+            GroupChatReplyStep step) {
+        return actorRuntimeService.snapshot(conversation, step).manual();
+    }
+
+    Flux<GroupChatEvent> waitForManualInput(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step) {
+        return Flux.defer(() -> {
+            LocalDateTime now = LocalDateTime.now();
+            step.setStatus(GroupChatConstant.STATUS_WAITING_INPUT)
+                    .setUpdatedAt(now);
+            turn.setStatus(GroupChatConstant.STATUS_WAITING_INPUT)
+                    .setUpdatedAt(now);
+            transactionTemplate.executeWithoutResult(status -> {
+                stepMapper.updateById(step);
+                turnMapper.updateById(turn);
+            });
+            String speakerName = runtimeRegistry
+                    .require(conversation.getMode())
+                    .agentPolicy()
+                    .actorName(conversation.getUserWorldId(),
+                            new GroupActorRef(
+                                    step.getSpeakerType(),
+                                    step.getSpeakerId()));
+            return Flux.just(GroupChatEvent.builder()
+                    .eventType(GroupChatConstant.EVENT_TURN_WAITING_INPUT)
+                    .conversationId(conversation.getId())
+                    .turnId(turn.getId())
+                    .replyStepId(step.getId())
+                    .actionType(step.getActionType())
+                    .groupKey(step.getGroupKey())
+                    .groupName(step.getGroupName())
+                    .groupOrder(step.getGroupOrder())
+                    .itemOrder(step.getItemOrder())
+                    .speaker(GroupChatEvent.Speaker.builder()
+                            .type(step.getSpeakerType())
+                            .id(step.getSpeakerId())
+                            .name(speakerName)
+                            .build())
+                    .build());
+        });
     }
 
     boolean shouldSkipStep(GroupChatReplyStep scheduledStep) {
@@ -803,13 +1066,15 @@ public class GroupChatService {
                         .build());
                 continue;
             }
-            if (output instanceof DeepSeekAssistantMessage deepSeek) {
-                String reasoning = deepSeek.getReasoningContent();
-                if (StringUtils.hasText(reasoning)) {
-                    accumulator.reasoning.append(reasoning);
-                    events.add(baseEvent(GroupChatConstant.EVENT_REASONING_DELTA,
-                            conversation, turn, step, message, speaker).delta(reasoning).build());
-                }
+            Object reasoningValue = output.getMetadata()
+                    .get("reasoningContent");
+            if (reasoningValue instanceof String reasoning
+                    && StringUtils.hasText(reasoning)) {
+                accumulator.reasoning.append(reasoning);
+                events.add(baseEvent(GroupChatConstant.EVENT_REASONING_DELTA,
+                        conversation, turn, step, message, speaker)
+                        .delta(reasoning)
+                        .build());
             }
             String content = output.getText();
             if (StringUtils.hasText(content)) {

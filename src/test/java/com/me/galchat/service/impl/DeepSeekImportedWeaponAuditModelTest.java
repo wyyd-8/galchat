@@ -10,6 +10,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
@@ -26,6 +27,7 @@ class DeepSeekImportedWeaponAuditModelTest {
     @Test
     void matchesOnlyByOriginalNameAndReturnsCatalogCode() {
         DeepSeekChatModel chatModel = mock(DeepSeekChatModel.class);
+        when(chatModel.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
         when(chatModel.call(any(Prompt.class))).thenReturn(response("""
                 {"weapons":[{"weaponId":81,"catalogCode":"PISTOL_22_AUTO"}]}
                 """));

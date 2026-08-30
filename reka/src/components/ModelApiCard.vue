@@ -36,16 +36,15 @@ const capabilities = computed(() => [
   { name: '工具调用', ...capabilityView(props.model.toolCallingCapability) },
   { name: '推理信息', ...reasoningView(props.model.reasoningOutputStatus) },
 ])
+const overrideCount = computed(() => Object.keys(props.model.requestOverrides || {}).length)
 
 const apiKeyLabel = computed(() => {
-  if (!props.model.hasApiKey) return '未保存'
-  const hint = props.model.apiKeyHint?.replace(/^…+/, '') || '••••'
+  const hint = props.model.apiKeyHint.replace(/^…+/, '')
   return `•••• ${hint}`
 })
 
 const testLabel = computed(() => {
   if (props.testing) return '测试中…'
-  if (!props.model.hasApiKey) return '配置 Key 后测试'
   if (props.model.status === 'FAILED') return '重新测试'
   if (props.model.status === 'UNTESTED') return '开始测试'
   return '测试'
@@ -69,11 +68,14 @@ function formatTestTime(value?: string) {
           <h3>{{ model.name }}</h3>
           <span class="model-api-status" :class="`is-${statusView.tone}`"><i />{{ statusView.label }}</span>
         </div>
-        <code class="model-api-model-name">{{ model.modelName }}</code>
+        <div class="model-api-model-meta">
+          <code class="model-api-model-name">{{ model.modelName }}</code>
+          <span v-if="overrideCount" class="model-api-override-count">额外参数 {{ overrideCount }}</span>
+        </div>
         <code class="model-api-base-url">{{ model.baseUrl }}</code>
       </div>
       <div class="model-api-card-actions">
-        <button class="button secondary model-api-test-button" :disabled="testing || !model.hasApiKey" :aria-label="`测试 ${model.name}`" @click="emit('test')">
+        <button class="button secondary model-api-test-button" :disabled="testing" :aria-label="`测试 ${model.name}`" @click="emit('test')">
           <LoaderCircle v-if="testing" :size="14" class="spin" />
           <Play v-else :size="14" />{{ testLabel }}
         </button>

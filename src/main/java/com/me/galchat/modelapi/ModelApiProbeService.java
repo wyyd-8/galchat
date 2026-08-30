@@ -1,86 +1,71 @@
 package com.me.galchat.modelapi;
 
+import com.openai.errors.OpenAIServiceException;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.ObjectMapper;
 
-import java.net.URI;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.util.List;
-import java.util.Map;
+import java.util.Locale;
 
 @Service
 public class ModelApiProbeService {
 
-    private final ModelApiHttpTransport transport;
-    private final ModelApiProbeResponseInterpreter interpreter;
-    private final ObjectMapper objectMapper;
-
-    public ModelApiProbeService(
-            ModelApiHttpTransport transport,
-            ModelApiProbeResponseInterpreter interpreter,
-            ObjectMapper objectMapper) {
-        this.transport = transport;
-        this.interpreter = interpreter;
-        this.objectMapper = objectMapper;
-    }
-
-    public ModelApiProbeResult probe(URI baseUrl, String apiKey, String model) {
-        URI endpoint = URI.create(baseUrl.toString() + "/chat/completions");
-        boolean reasoningDetected = false;
-        ModelApiHttpTransport.Response chat;
+    public ModelApiProbeResult probe(ResolvedUserModelRuntime runtime) {
+        ChatClient chatClient = runtime.newChatClientBuilder().build();
+        ChatResponse chatResponse;
         try {
-            chat = transport.post(new ModelApiHttpTransport.Request(
-                    endpoint, apiKey, chatBody(model), false));
-        } catch (ModelApiTransportException exception) {
-            return failed(exception.getCode(), exception.getMessage());
+            chatResponse = chatClient.prompt()
+                    .user("Reply with OK.")
+                    .call()
+                    .chatResponse();
+        } catch (RuntimeException exception) {
+            Failure failure = classify(exception);
+            return failed(failure.code(), failure.message());
         }
-        if (!successful(chat.statusCode())) {
-            return failed(statusCode(chat.statusCode()),
-                    statusMessage(chat.statusCode()));
+        if (!valid(chatResponse)) {
+            return failed("INVALID_RESPONSE",
+                    "上游未返回有效的 assistant 消息");
         }
-        ModelApiProbeResponseInterpreter.ChatObservation chatObservation =
-                interpreter.inspectChat(chat.body());
-        if (!chatObservation.valid()) {
-            return failed("INVALID_RESPONSE", "上游未返回有效的 assistant 消息");
-        }
-        reasoningDetected = chatObservation.reasoningDetected();
+        boolean reasoningDetected = reasoningDetected(chatResponse);
 
         ModelApiCapability streaming = ModelApiCapability.INCONCLUSIVE;
         try {
-            ModelApiHttpTransport.Response stream = transport.post(
-                    new ModelApiHttpTransport.Request(endpoint, apiKey,
-                            streamingBody(model), true));
-            if (successful(stream.statusCode())) {
-                ModelApiProbeResponseInterpreter.StreamObservation observation =
-                        interpreter.inspectStream(stream.lines());
-                streaming = observation.validChunkCount() > 0
-                        && observation.completed()
-                        ? ModelApiCapability.SUPPORTED
-                        : ModelApiCapability.INCONCLUSIVE;
+            List<ChatResponse> chunks = chatClient.prompt()
+                    .user("Reply with OK.")
+                    .stream()
+                    .chatResponse()
+                    .collectList()
+                    .block();
+            if (chunks != null && chunks.stream().anyMatch(this::valid)) {
+                streaming = ModelApiCapability.SUPPORTED;
                 reasoningDetected = reasoningDetected
-                        || observation.reasoningDetected();
-            } else if (stream.statusCode() >= 400
-                    && stream.statusCode() < 500) {
-                streaming = ModelApiCapability.UNSUPPORTED;
+                        || chunks.stream().anyMatch(this::reasoningDetected);
             }
-        } catch (ModelApiTransportException ignored) {
+        } catch (RuntimeException ignored) {
             streaming = ModelApiCapability.INCONCLUSIVE;
         }
 
         ModelApiCapability toolCalling = ModelApiCapability.INCONCLUSIVE;
+        ProbeTool tool = new ProbeTool();
         try {
-            ModelApiHttpTransport.Response tool = transport.post(
-                    new ModelApiHttpTransport.Request(endpoint, apiKey,
-                            toolBody(model), false));
-            if (successful(tool.statusCode())) {
-                toolCalling = interpreter.inspectToolCall(tool.body());
-                reasoningDetected = reasoningDetected
-                        || interpreter.inspectChat(tool.body()).reasoningDetected();
-            } else if (tool.statusCode() >= 400 && tool.statusCode() < 500
-                    && explicitlyRejectsTools(tool.body())) {
+            ChatResponse toolResponse = chatClient.prompt()
+                    .user("Call get_test_value exactly once, then briefly confirm the returned value.")
+                    .tools(tool)
+                    .call()
+                    .chatResponse();
+            if (tool.called() && valid(toolResponse)) {
+                toolCalling = ModelApiCapability.SUPPORTED;
+            }
+            reasoningDetected = reasoningDetected
+                    || reasoningDetected(toolResponse);
+        } catch (RuntimeException exception) {
+            if (explicitlyRejectsTools(exception)) {
                 toolCalling = ModelApiCapability.UNSUPPORTED;
             }
-        } catch (ModelApiTransportException ignored) {
-            toolCalling = ModelApiCapability.INCONCLUSIVE;
         }
 
         boolean allSupported = streaming == ModelApiCapability.SUPPORTED
@@ -98,6 +83,109 @@ public class ModelApiProbeService {
                         : "基础聊天可用，部分能力不支持或本次无法确认");
     }
 
+    private boolean valid(ChatResponse response) {
+        return response != null
+                && response.getResult() != null
+                && response.getResult().getOutput() != null
+                && (response.getResult().getOutput().getText() != null
+                || response.getResult().getOutput().hasToolCalls());
+    }
+
+    private boolean reasoningDetected(ChatResponse response) {
+        if (response == null || response.getResults() == null) {
+            return false;
+        }
+        return response.getResults().stream()
+                .filter(generation -> generation != null
+                        && generation.getOutput() != null)
+                .map(generation -> generation.getOutput()
+                        .getMetadata().get("reasoningContent"))
+                .anyMatch(value -> value instanceof String text
+                        && !text.isBlank());
+    }
+
+    private boolean explicitlyRejectsTools(Throwable exception) {
+        String message = allMessages(exception).toLowerCase(Locale.ROOT);
+        boolean mentionsTool = message.contains("tool")
+                || message.contains("function");
+        boolean rejects = message.contains("not support")
+                || message.contains("unsupported")
+                || message.contains("not allowed")
+                || message.contains("unknown field")
+                || message.contains("unrecognized");
+        return mentionsTool && rejects;
+    }
+
+    private Failure classify(Throwable exception) {
+        OpenAIServiceException serviceException = findCause(
+                exception, OpenAIServiceException.class);
+        if (serviceException != null) {
+            return statusFailure(serviceException.statusCode());
+        }
+        String message = allMessages(exception).toLowerCase(Locale.ROOT);
+        if (message.contains("401") || message.contains("403")
+                || message.contains("unauthorized")) {
+            return statusFailure(401);
+        }
+        if (message.contains("404") || message.contains("not found")) {
+            return statusFailure(404);
+        }
+        if (message.contains("429") || message.contains("rate limit")) {
+            return statusFailure(429);
+        }
+        if (findCause(exception, SocketTimeoutException.class) != null
+                || message.contains("timeout")
+                || message.contains("timed out")) {
+            return new Failure("TIMEOUT", "连接上游模型服务超时");
+        }
+        if (findCause(exception, javax.net.ssl.SSLException.class) != null) {
+            return new Failure("TLS_ERROR", "上游模型服务 TLS 校验失败");
+        }
+        if (findCause(exception, ConnectException.class) != null) {
+            return new Failure("NETWORK_ERROR", "无法连接上游模型服务");
+        }
+        return new Failure("REQUEST_FAILED", "上游模型调用失败");
+    }
+
+    private Failure statusFailure(int statusCode) {
+        return switch (statusCode) {
+            case 401, 403 -> new Failure("AUTH_FAILED",
+                    "API Key 无效或无权访问该模型");
+            case 404 -> new Failure("MODEL_NOT_FOUND",
+                    "接口路径或模型不存在");
+            case 429 -> new Failure("RATE_LIMITED",
+                    "上游服务请求过于频繁");
+            default -> statusCode >= 500
+                    ? new Failure("UPSTREAM_5XX", "上游服务暂时不可用")
+                    : new Failure("REQUEST_REJECTED",
+                    "上游拒绝了基础聊天请求");
+        };
+    }
+
+    private String allMessages(Throwable throwable) {
+        StringBuilder value = new StringBuilder();
+        Throwable current = throwable;
+        while (current != null) {
+            if (current.getMessage() != null) {
+                value.append(' ').append(current.getMessage());
+            }
+            current = current.getCause();
+        }
+        return value.toString();
+    }
+
+    private <T extends Throwable> T findCause(
+            Throwable throwable, Class<T> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return type.cast(current);
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
     private ModelApiProbeResult failed(String code, String message) {
         return new ModelApiProbeResult(
                 ModelApiTestStatus.FAILED,
@@ -109,83 +197,21 @@ public class ModelApiProbeService {
                 message);
     }
 
-    private String chatBody(String model) {
-        return objectMapper.writeValueAsString(Map.of(
-                "model", model,
-                "messages", List.of(Map.of(
-                        "role", "user",
-                        "content", "Reply with OK.")),
-                "stream", false,
-                "max_tokens", 8));
-    }
+    public static final class ProbeTool {
+        private boolean called;
 
-    private String streamingBody(String model) {
-        return objectMapper.writeValueAsString(Map.of(
-                "model", model,
-                "messages", List.of(Map.of(
-                        "role", "user",
-                        "content", "Reply with OK.")),
-                "stream", true,
-                "max_tokens", 8));
-    }
-
-    private String toolBody(String model) {
-        Map<String, Object> function = Map.of(
-                "name", "get_test_value",
-                "description", "Return a harmless test value",
-                "parameters", Map.of(
-                        "type", "object",
-                        "properties", Map.of(),
-                        "additionalProperties", false));
-        return objectMapper.writeValueAsString(Map.of(
-                "model", model,
-                "messages", List.of(Map.of(
-                        "role", "user",
-                        "content", "Call get_test_value now.")),
-                "tools", List.of(Map.of(
-                        "type", "function", "function", function)),
-                "tool_choice", Map.of(
-                        "type", "function",
-                        "function", Map.of("name", "get_test_value")),
-                "stream", false,
-                "max_tokens", 32));
-    }
-
-    private boolean explicitlyRejectsTools(String body) {
-        if (body == null) {
-            return false;
+        @Tool(name = "get_test_value",
+                description = "Return a harmless test value")
+        public String getTestValue() {
+            called = true;
+            return "test-value";
         }
-        String normalized = body.toLowerCase();
-        boolean mentionsTool = normalized.contains("tool")
-                || normalized.contains("function");
-        boolean rejects = normalized.contains("not support")
-                || normalized.contains("unsupported")
-                || normalized.contains("not allowed")
-                || normalized.contains("unknown field")
-                || normalized.contains("unrecognized");
-        return mentionsTool && rejects;
+
+        boolean called() {
+            return called;
+        }
     }
 
-    private boolean successful(int statusCode) {
-        return statusCode >= 200 && statusCode < 300;
-    }
-
-    private String statusCode(int statusCode) {
-        return switch (statusCode) {
-            case 401, 403 -> "AUTH_FAILED";
-            case 404 -> "MODEL_NOT_FOUND";
-            case 429 -> "RATE_LIMITED";
-            default -> statusCode >= 500 ? "UPSTREAM_5XX" : "REQUEST_REJECTED";
-        };
-    }
-
-    private String statusMessage(int statusCode) {
-        return switch (statusCode) {
-            case 401, 403 -> "API Key 无效或无权访问该模型";
-            case 404 -> "接口路径或模型不存在";
-            case 429 -> "上游服务请求过于频繁";
-            default -> statusCode >= 500 ? "上游服务暂时不可用"
-                    : "上游拒绝了基础聊天请求";
-        };
+    private record Failure(String code, String message) {
     }
 }

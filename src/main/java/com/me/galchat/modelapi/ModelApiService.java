@@ -11,6 +11,8 @@ import org.springframework.util.StringUtils;
 import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 
 @Service
@@ -19,16 +21,19 @@ public class ModelApiService {
     private final UserModelApiMapper mapper;
     private final ApiKeyCipher cipher;
     private final PublicHttpsUrlValidator validator;
+    private final UserModelRuntimeProvider runtimeProvider;
     private final ModelApiProbeService probeService;
 
     public ModelApiService(
             UserModelApiMapper mapper,
             ApiKeyCipher cipher,
             PublicHttpsUrlValidator validator,
+            UserModelRuntimeProvider runtimeProvider,
             ModelApiProbeService probeService) {
         this.mapper = mapper;
         this.cipher = cipher;
         this.validator = validator;
+        this.runtimeProvider = runtimeProvider;
         this.probeService = probeService;
     }
 
@@ -41,6 +46,7 @@ public class ModelApiService {
                 .setName(input.name())
                 .setBaseUrl(input.baseUrl().toString())
                 .setModelName(input.modelName())
+                .setRequestOverrides(input.requestOverrides())
                 .setApiKeyEncrypted(cipher.encrypt(input.apiKey()))
                 .setApiKeyHint(keyHint(input.apiKey()))
                 .setCreatedAt(now)
@@ -54,17 +60,18 @@ public class ModelApiService {
         UserModelApi existing = requireOwned(userId, id);
         ValidatedInput input = validate(dto, false);
         boolean hasNewKey = StringUtils.hasText(input.apiKey());
-        boolean keyChanged = hasNewKey
-                && (!StringUtils.hasText(existing.getApiKeyEncrypted())
-                || !Objects.equals(cipher.decrypt(existing.getApiKeyEncrypted()),
-                input.apiKey()));
+        boolean keyChanged = hasNewKey && !Objects.equals(
+                cipher.decrypt(existing.getApiKeyEncrypted()), input.apiKey());
         boolean connectionChanged = !Objects.equals(existing.getBaseUrl(),
                 input.baseUrl().toString())
                 || !Objects.equals(existing.getModelName(), input.modelName())
+                || !Objects.equals(existing.getRequestOverrides(),
+                        input.requestOverrides())
                 || keyChanged;
         existing.setName(input.name())
                 .setBaseUrl(input.baseUrl().toString())
                 .setModelName(input.modelName())
+                .setRequestOverrides(input.requestOverrides())
                 .setUpdatedAt(LocalDateTime.now());
         if (hasNewKey) {
             existing.setApiKeyEncrypted(cipher.encrypt(input.apiKey()))
@@ -88,15 +95,9 @@ public class ModelApiService {
     }
 
     public ModelApiVO test(Long userId, Long id) {
-        UserModelApi existing = requireOwned(userId, id);
-        if (!StringUtils.hasText(existing.getApiKeyEncrypted())) {
-            throw new UserRequestException("请先配置 API Key");
-        }
-        URI safeBaseUrl = validator.validateAndNormalize(existing.getBaseUrl());
-        ModelApiProbeResult result = probeService.probe(
-                safeBaseUrl,
-                cipher.decrypt(existing.getApiKeyEncrypted()),
-                existing.getModelName());
+        ResolvedUserModelRuntime runtime = runtimeProvider.resolve(userId, id);
+        UserModelApi existing = runtime.configuration();
+        ModelApiProbeResult result = probeService.probe(runtime);
         existing.setStatus(result.status().name())
                 .setChatCapability(result.chat().name())
                 .setStreamingCapability(result.streaming().name())
@@ -150,7 +151,7 @@ public class ModelApiService {
         }
         return new ValidatedInput(name,
                 validator.validateAndNormalize(dto.getBaseUrl()),
-                model, apiKey);
+                model, apiKey, normalizedOverrides(dto.getRequestOverrides()));
     }
 
     private void resetTestResult(UserModelApi modelApi) {
@@ -170,7 +171,7 @@ public class ModelApiService {
                 .setName(value.getName())
                 .setBaseUrl(value.getBaseUrl())
                 .setModelName(value.getModelName())
-                .setHasApiKey(StringUtils.hasText(value.getApiKeyEncrypted()))
+                .setRequestOverrides(value.getRequestOverrides())
                 .setApiKeyHint(value.getApiKeyHint())
                 .setStatus(ModelApiTestStatus.valueOf(value.getStatus()))
                 .setChatCapability(ModelApiCapability.valueOf(
@@ -197,6 +198,14 @@ public class ModelApiService {
         return value == null ? null : value.trim();
     }
 
+    private Map<String, Object> normalizedOverrides(
+            Map<String, Object> requestOverrides) {
+        if (requestOverrides == null || requestOverrides.isEmpty()) {
+            return Map.of();
+        }
+        return new LinkedHashMap<>(requestOverrides);
+    }
+
     private void requireUserId(Long userId) {
         if (userId == null) {
             throw new UserRequestException("用户未登录");
@@ -210,6 +219,7 @@ public class ModelApiService {
     }
 
     private record ValidatedInput(
-            String name, URI baseUrl, String modelName, String apiKey) {
+            String name, URI baseUrl, String modelName, String apiKey,
+            Map<String, Object> requestOverrides) {
     }
 }

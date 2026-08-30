@@ -4,6 +4,9 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.me.galchat.domain.po.UserModelApi;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.ResultMap;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
@@ -15,6 +18,10 @@ public interface UserModelApiMapper extends BaseMapper<UserModelApi> {
             WHERE id = #{id} AND user_id = #{userId}
             LIMIT 1
             """)
+    @Results(id = "userModelApiResultMap", value = {
+            @Result(column = "request_overrides", property = "requestOverrides",
+                    typeHandler = com.me.galchat.typehandler.JsonbTypeHandler.class)
+    })
     UserModelApi selectOwned(
             @Param("id") Long id,
             @Param("userId") Long userId);
@@ -24,6 +31,7 @@ public interface UserModelApiMapper extends BaseMapper<UserModelApi> {
             WHERE user_id = #{userId}
             ORDER BY updated_at DESC, id DESC
             """)
+    @ResultMap("userModelApiResultMap")
     List<UserModelApi> selectByUserId(@Param("userId") Long userId);
 
     @Update("""
@@ -33,6 +41,8 @@ public interface UserModelApiMapper extends BaseMapper<UserModelApi> {
                 model_name = #{modelName},
                 api_key_encrypted = #{apiKeyEncrypted},
                 api_key_hint = #{apiKeyHint},
+                request_overrides = #{requestOverrides,
+                    typeHandler=com.me.galchat.typehandler.JsonbTypeHandler},
                 status = #{status},
                 chat_capability = #{chatCapability},
                 streaming_capability = #{streamingCapability},

@@ -4,8 +4,9 @@ CREATE TABLE user_model_api (
     name VARCHAR(100) NOT NULL,
     base_url VARCHAR(1000) NOT NULL,
     model_name VARCHAR(255) NOT NULL,
-    api_key_encrypted TEXT,
-    api_key_hint VARCHAR(32),
+    api_key_encrypted TEXT NOT NULL,
+    api_key_hint VARCHAR(32) NOT NULL,
+    request_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
     status VARCHAR(20) NOT NULL DEFAULT 'UNTESTED'
         CHECK (status IN ('UNTESTED', 'SUCCESS', 'PARTIAL', 'FAILED')),
     chat_capability VARCHAR(20) NOT NULL DEFAULT 'UNKNOWN'

@@ -1,140 +1,139 @@
 package com.me.galchat.modelapi;
 
+import com.me.galchat.domain.po.UserModelApi;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.retry.NonTransientAiException;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import reactor.core.publisher.Flux;
 
-import java.net.URI;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Queue;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ModelApiProbeServiceTest {
 
     @Test
-    void reportsSuccessOnlyWhenChatStreamingAndToolCallingAreSupported() {
-        QueueTransport transport = new QueueTransport(
-                response(200, """
-                        {"choices":[{"message":{"role":"assistant","content":"OK",
-                        "reasoning_content":"checked"}}]}
-                        """),
-                streamResponse(200, List.of(
-                        "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}")),
-                response(200, """
-                        {"choices":[{"message":{"role":"assistant","content":null,
-                        "tool_calls":[{"type":"function","function":
-                        {"name":"get_test_value","arguments":"{}"}}]}}]}
-                        """));
-        ModelApiProbeService service = service(transport);
+    void probesChatStreamingAndTheCompleteSpringAiToolLoop() {
+        ScriptedChatModel model = new ScriptedChatModel(true, true);
 
-        ModelApiProbeResult result = service.probe(
-                URI.create("https://models.example.com/openai/v1"),
-                "sk-secret", "model-a");
+        ModelApiProbeResult result = new ModelApiProbeService().probe(
+                runtime(model));
 
-        assertThat(result.status()).isEqualTo(ModelApiTestStatus.SUCCESS);
         assertThat(result.chat()).isEqualTo(ModelApiCapability.SUPPORTED);
         assertThat(result.streaming()).isEqualTo(ModelApiCapability.SUPPORTED);
+        assertThat(model.blockingCalls).isEqualTo(3);
         assertThat(result.toolCalling()).isEqualTo(ModelApiCapability.SUPPORTED);
+        assertThat(result.status()).isEqualTo(ModelApiTestStatus.SUCCESS);
         assertThat(result.reasoningOutput())
                 .isEqualTo(ReasoningOutputStatus.DETECTED);
-        assertThat(result.code()).isEqualTo("OK");
-        assertThat(transport.requests).hasSize(3)
-                .allSatisfy(request -> {
-                    assertThat(request.uri().toString()).isEqualTo(
-                            "https://models.example.com/openai/v1/chat/completions");
-                    assertThat(request.apiKey()).isEqualTo("sk-secret");
-                    assertThat(request.body()).contains("\"model\":\"model-a\"");
-                });
+        assertThat(model.streamingCalls).isEqualTo(1);
     }
 
     @Test
-    void stopsAfterBasicAuthenticationFailure() {
-        QueueTransport transport = new QueueTransport(response(401,
-                "{\"error\":{\"message\":\"invalid key\"}}"));
+    void reportsToolCallingAsInconclusiveWhenTheModelOnlyAnswersWithText() {
+        ScriptedChatModel model = new ScriptedChatModel(false, false);
 
-        ModelApiProbeResult result = service(transport).probe(
-                URI.create("https://models.example.com/v1"),
-                "sk-secret", "model-a");
-
-        assertThat(result.status()).isEqualTo(ModelApiTestStatus.FAILED);
-        assertThat(result.chat()).isEqualTo(ModelApiCapability.UNSUPPORTED);
-        assertThat(result.streaming()).isEqualTo(ModelApiCapability.UNKNOWN);
-        assertThat(result.toolCalling()).isEqualTo(ModelApiCapability.UNKNOWN);
-        assertThat(result.code()).isEqualTo("AUTH_FAILED");
-        assertThat(transport.requests).hasSize(1);
-    }
-
-    @Test
-    void treatsTextOnlyToolResponseAsInconclusiveAndOverallPartial() {
-        QueueTransport transport = new QueueTransport(
-                response(200, chat("OK")),
-                streamResponse(200, List.of(
-                        "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}")),
-                response(200, chat("I will not call it")));
-
-        ModelApiProbeResult result = service(transport).probe(
-                URI.create("https://models.example.com/v1"),
-                "sk-secret", "model-a");
+        ModelApiProbeResult result = new ModelApiProbeService().probe(
+                runtime(model));
 
         assertThat(result.status()).isEqualTo(ModelApiTestStatus.PARTIAL);
         assertThat(result.toolCalling())
                 .isEqualTo(ModelApiCapability.INCONCLUSIVE);
         assertThat(result.reasoningOutput())
                 .isEqualTo(ReasoningOutputStatus.NOT_DETECTED);
-        assertThat(result.code()).isEqualTo("CAPABILITY_PARTIAL");
     }
 
     @Test
-    void recordsExplicitToolRejectionAsUnsupported() {
-        QueueTransport transport = new QueueTransport(
-                response(200, chat("OK")),
-                streamResponse(200, List.of(
-                        "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}")),
-                response(400, "{\"error\":{\"message\":\"tools are not supported\"}}"));
+    void mapsARealCallAuthenticationFailureAndStopsFurtherProbes() {
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse call(Prompt prompt) {
+                throw new NonTransientAiException("HTTP 401: invalid api key");
+            }
+        };
 
-        ModelApiProbeResult result = service(transport).probe(
-                URI.create("https://models.example.com/v1"),
-                "sk-secret", "model-a");
+        ModelApiProbeResult result = new ModelApiProbeService().probe(
+                runtime(model));
 
-        assertThat(result.status()).isEqualTo(ModelApiTestStatus.PARTIAL);
-        assertThat(result.toolCalling())
-                .isEqualTo(ModelApiCapability.UNSUPPORTED);
+        assertThat(result.status()).isEqualTo(ModelApiTestStatus.FAILED);
+        assertThat(result.code()).isEqualTo("AUTH_FAILED");
+        assertThat(result.streaming()).isEqualTo(ModelApiCapability.UNKNOWN);
+        assertThat(result.toolCalling()).isEqualTo(ModelApiCapability.UNKNOWN);
     }
 
-    private ModelApiProbeService service(QueueTransport transport) {
-        ObjectMapper objectMapper = new ObjectMapper();
-        return new ModelApiProbeService(transport,
-                new ModelApiProbeResponseInterpreter(objectMapper), objectMapper);
+    private ResolvedUserModelRuntime runtime(ChatModel model) {
+        UserModelApi configuration = new UserModelApi()
+                .setId(41L)
+                .setUserId(7L);
+        return new ResolvedUserModelRuntime(7L, 41L, configuration, model);
     }
 
-    private static String chat(String content) {
-        return "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\""
-                + content + "\"}}]}";
+    private static ChatResponse response(String content) {
+        return new ChatResponse(List.of(new Generation(
+                new AssistantMessage(content))));
     }
 
-    private static ModelApiHttpTransport.Response response(int status, String body) {
-        return new ModelApiHttpTransport.Response(status, body, List.of());
+    private static ChatResponse reasoningResponse(String content) {
+        AssistantMessage message = AssistantMessage.builder()
+                .content(content)
+                .properties(Map.of("reasoningContent", "checked"))
+                .build();
+        return new ChatResponse(List.of(new Generation(message)));
     }
 
-    private static ModelApiHttpTransport.Response streamResponse(
-            int status, List<String> lines) {
-        return new ModelApiHttpTransport.Response(status, "", lines);
+    private static ChatResponse toolCallResponse() {
+        AssistantMessage message = AssistantMessage.builder()
+                .content("")
+                .toolCalls(List.of(new AssistantMessage.ToolCall(
+                        "call-1", "function", "get_test_value", "{}")))
+                .build();
+        return new ChatResponse(List.of(new Generation(message,
+                ChatGenerationMetadata.builder()
+                        .finishReason("TOOL_CALLS")
+                        .build())));
     }
 
-    private static class QueueTransport implements ModelApiHttpTransport {
-        private final Queue<Response> responses = new ArrayDeque<>();
-        private final List<Request> requests = new ArrayList<>();
+    private static final class ScriptedChatModel implements ChatModel {
+        private final boolean requestTool;
+        private final boolean exposeReasoning;
+        private int blockingCalls;
+        private int streamingCalls;
 
-        private QueueTransport(Response... responses) {
-            this.responses.addAll(List.of(responses));
+        private ScriptedChatModel(
+                boolean requestTool, boolean exposeReasoning) {
+            this.requestTool = requestTool;
+            this.exposeReasoning = exposeReasoning;
         }
 
         @Override
-        public Response post(Request request) {
-            requests.add(request);
-            return responses.remove();
+        public ChatResponse call(Prompt prompt) {
+            blockingCalls++;
+            if (blockingCalls == 1) {
+                return exposeReasoning
+                        ? reasoningResponse("OK") : response("OK");
+            }
+            if (blockingCalls == 2 && requestTool) {
+                return toolCallResponse();
+            }
+            return response("tool result received");
+        }
+
+        @Override
+        public Flux<ChatResponse> stream(Prompt prompt) {
+            streamingCalls++;
+            return Flux.just(response("O"), response("K"));
+        }
+
+        @Override
+        public OpenAiChatOptions getOptions() {
+            return OpenAiChatOptions.builder().model("model-a").build();
         }
     }
 }

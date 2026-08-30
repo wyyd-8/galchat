@@ -335,7 +335,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .trpg-execution-scene.current > .trpg-scene-header .trpg-scene-status-icon { color: var(--scene-accent); }
 .trpg-child-scenes { margin: 9px 0; display: grid; gap: 7px; }
 .trpg-actor-roster { margin-top: 7px; display: grid; gap: 4px; }
-.trpg-actor-stack { display: grid; gap: 3px; }
+.trpg-actor-stack { position: relative; display: grid; gap: 3px; }
 .trpg-routed-actor { position: relative; margin-left: 17px; padding-left: 9px; }
 .trpg-routed-actor::before { position: absolute; left: 0; top: -4px; width: 7px; height: 18px; border-left: 1px solid color-mix(in srgb, var(--scene-accent) 44%, var(--line)); border-bottom: 1px solid color-mix(in srgb, var(--scene-accent) 44%, var(--line)); border-bottom-left-radius: 5px; content: ''; }
 .trpg-actor-row { min-height: 29px; padding: 5px 6px 5px 8px; border: 1px solid color-mix(in srgb, var(--scene-accent) 18%, var(--line)); border-radius: 7px; display: grid; grid-template-columns: minmax(0, 1fr) 20px; align-items: center; gap: 6px; background: rgba(255,255,255,.54); transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
@@ -508,6 +508,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .segmented button.active { background: var(--surface-strong); box-shadow: 0 2px 8px rgba(38,38,34,.08); }
 
 .model-api-manager-dialog { width: min(calc(100vw - 32px), 820px); max-height: min(88vh, 900px); }
+.model-api-editor-dialog { width: min(calc(100vw - 32px), 720px); max-height: min(90vh, 920px); }
 .model-api-toolbar { margin-bottom: 16px; padding-bottom: 15px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .model-api-toolbar > div { min-width: 0; }
 .model-api-toolbar p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
@@ -528,7 +529,9 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .model-api-status.is-partial { color: #91662c; background: #f4e9d8; }
 .model-api-status.is-failed { color: var(--wine); background: #f4e5e7; }
 .model-api-model-name, .model-api-base-url { display: block; font-family: var(--font-mono); font-weight: 400; }
-.model-api-model-name { width: fit-content; max-width: 100%; margin-top: 8px; padding: 3px 6px; overflow: hidden; border-radius: 5px; color: #4e665e; background: #eef2ee; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.model-api-model-meta { margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+.model-api-model-name { width: fit-content; max-width: 100%; padding: 3px 6px; overflow: hidden; border-radius: 5px; color: #4e665e; background: #eef2ee; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.model-api-override-count { padding: 3px 6px; border: 1px solid #dfdbce; border-radius: 5px; color: #7b684d; background: #f5efe4; font-family: var(--font-mono); font-size: 8px; white-space: nowrap; }
 .model-api-base-url { margin-top: 6px; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .model-api-card-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
 .model-api-test-button { min-height: 34px; padding-inline: 11px; font-size: 10px; }
@@ -554,6 +557,29 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .model-api-key-field { position: relative; }
 .model-api-key-field > svg { position: absolute; z-index: 1; left: 11px; top: 50%; transform: translateY(-50%); color: #8b8d85; }
 .field .model-api-key-field input { padding-left: 34px; }
+.model-api-curl-import { padding: 14px; border: 1px solid #d9ded8; border-radius: 11px; background: linear-gradient(145deg, rgba(238,243,239,.88), rgba(247,246,241,.72)); }
+.model-api-curl-heading { margin-bottom: 11px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; }
+.model-api-curl-heading > span { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--pine); background: rgba(255,255,255,.7); box-shadow: inset 0 0 0 1px rgba(72,111,101,.1); }
+.model-api-curl-heading strong, .model-api-curl-heading small { display: block; }
+.model-api-curl-heading strong { color: var(--ink); font-family: var(--font-display); font-size: 13px; }
+.model-api-curl-heading small { margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.model-api-curl-import textarea { width: 100%; min-height: 118px; padding: 11px; resize: vertical; border: 1px solid #cfd7d2; border-radius: 8px; color: #41463f; background: rgba(255,255,255,.88); outline: none; font-family: var(--font-mono); font-size: 10px; line-height: 1.55; }
+.model-api-curl-import textarea:focus { border-color: #789089; box-shadow: 0 0 0 3px rgba(72,111,101,.1); }
+.model-api-curl-actions { margin-top: 9px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.model-api-curl-actions small { color: var(--muted); font-size: 9px; line-height: 1.5; }
+.model-api-curl-actions .button { flex: 0 0 auto; min-height: 32px; padding-inline: 11px; font-size: 10px; }
+.model-api-curl-error, .model-api-curl-success { margin: 9px 0 0; padding: 7px 9px; border-radius: 7px; font-size: 9px; line-height: 1.5; }
+.model-api-curl-error { color: var(--wine); background: #f8e9eb; }
+.model-api-curl-success { color: var(--pine); background: rgba(224,235,229,.84); }
+.model-api-overrides { border: 1px solid #dcd9d0; border-radius: 10px; overflow: hidden; background: #f6f4ee; }
+.model-api-overrides header { padding: 10px 11px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+.model-api-overrides header > span { color: var(--pine); }
+.model-api-overrides header strong, .model-api-overrides header small { display: block; }
+.model-api-overrides header strong { color: var(--ink); font-size: 11px; }
+.model-api-overrides header small { margin-top: 2px; color: var(--muted); font-size: 8px; font-weight: 400; }
+.model-api-overrides header .icon-button { width: 28px; height: 28px; }
+.model-api-overrides pre { max-height: 190px; margin: 0; padding: 11px 13px; overflow: auto; border-top: 1px solid #dfdcd3; color: #44524d; background: rgba(255,255,255,.6); font-family: var(--font-mono); font-size: 9px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.model-api-override-warning { margin: 9px; padding: 8px 9px; border: 1px solid #ead9bb; border-radius: 7px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 7px; color: #805f31; background: #faf3e7; font-size: 9px; line-height: 1.55; }
 .model-api-delete-confirmation { padding: 14px; border: 1px solid #ead1d5; border-radius: 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; background: #fbf4f4; }
 .model-api-delete-confirmation > span { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; color: var(--wine); background: #f1dfe2; }
 .model-api-delete-confirmation strong { font-size: 12px; }
@@ -1373,6 +1399,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
   .dice-message-card { width: 100%; }
   .form-grid, .check-grid, .upload-row, .template-preview, .replacement-groups { grid-template-columns: 1fr; }
   .model-api-manager-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+  .model-api-editor-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
   .model-api-manager-dialog .dialog-header { padding: 17px 16px 12px; }
   .model-api-manager-dialog .dialog-body { padding: 7px 16px 18px; }
   .model-api-toolbar { align-items: flex-start; }
@@ -1385,6 +1412,8 @@ button.sidebar-recent-item:hover { background: #efede6; }
   .model-api-capabilities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .model-api-card-footer { align-items: flex-start; flex-direction: column; gap: 5px; }
   .model-api-diagnostic { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .model-api-curl-actions { align-items: stretch; flex-direction: column; }
+  .model-api-curl-actions .button { width: 100%; }
   .trpg-participant-picker-layout, .trpg-binding-layout { grid-template-columns: 1fr; }
   .trpg-participant-preview-pane, .trpg-binding-card-pane { min-height: 260px; padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .trpg-setup-steps { gap: 5px; }

@@ -11,8 +11,8 @@ export interface ModelApi {
   name: string
   baseUrl: string
   modelName: string
-  hasApiKey: boolean
-  apiKeyHint?: string
+  requestOverrides: Record<string, unknown>
+  apiKeyHint: string
   status: ModelApiTestStatus
   chatCapability: ModelApiCapability
   streamingCapability: ModelApiCapability
@@ -29,6 +29,23 @@ export interface ModelApiSavePayload {
   baseUrl: string
   modelName: string
   apiKey?: string
+  requestOverrides: Record<string, unknown>
+}
+
+export type GroupActorControlMode = 'MODEL' | 'MANUAL'
+export interface GroupActorRuntime {
+  actorType: 'character' | 'kp'
+  actorId?: number
+  controlMode: GroupActorControlMode
+  modelApiId?: number
+  modelApiName?: string
+  modelApiAvailable: boolean
+}
+export interface GroupActorRuntimeSavePayload {
+  actorType: 'character' | 'kp'
+  actorId?: number
+  controlMode: GroupActorControlMode
+  modelApiId?: number
 }
 
 export interface WorldTemplate {

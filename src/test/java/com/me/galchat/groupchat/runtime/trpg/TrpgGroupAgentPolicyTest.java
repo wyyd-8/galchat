@@ -183,6 +183,8 @@ class TrpgGroupAgentPolicyTest {
                 mock(GroupContextAssembler.class);
         TrpgInvestigatorContextAssembler investigatorAssembler =
                 mock(TrpgInvestigatorContextAssembler.class);
+        TrpgContextWindowService contextWindowService =
+                mock(TrpgContextWindowService.class);
         TrpgInvestigatorSuspensionService suspensions =
                 mock(TrpgInvestigatorSuspensionService.class);
         GroupConversation conversation = new GroupConversation()
@@ -209,7 +211,7 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
-                mock(TrpgContextWindowService.class), investigatorAssembler,
+                contextWindowService, investigatorAssembler,
                 mock(com.me.galchat.tool.KpCombatTools.class),
                 mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.tool.KpChildSceneTools.class),
@@ -229,6 +231,9 @@ class TrpgGroupAgentPolicyTest {
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("<investigator-storyline-reentry>")
                 .contains("桥接内容");
+        org.mockito.Mockito.verify(contextWindowService).recordPrompt(
+                7L, GroupChatConstant.ACTOR_CHARACTER, 109L,
+                invocation.prompt().getInstructions());
     }
 
     @Test
@@ -606,6 +611,9 @@ class TrpgGroupAgentPolicyTest {
         org.mockito.Mockito.verify(contextWindowService)
                 .recordPrompt(
                         org.mockito.ArgumentMatchers.eq(7L),
+                        org.mockito.ArgumentMatchers.eq(
+                                GroupChatConstant.ACTOR_KP),
+                        org.mockito.ArgumentMatchers.isNull(),
                         org.mockito.ArgumentMatchers.eq(
                                 invocation.prompt().getInstructions()));
     }

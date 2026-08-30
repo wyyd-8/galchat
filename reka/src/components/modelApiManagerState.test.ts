@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { apiKeyEditorHint, createModelApiManagerState, type ModelApiGateway } from './modelApiManagerState.ts'
+import { reactive } from 'vue'
+import {
+  apiKeyEditorHint,
+  cloneRequestOverrides,
+  createModelApiManagerState,
+  type ModelApiGateway,
+} from './modelApiManagerState.ts'
 
 const untestedModel = {
   id: 7,
   name: 'DeepSeek 主模型',
   baseUrl: 'https://api.deepseek.com/v1',
   modelName: 'deepseek-chat',
-  hasApiKey: true,
+  requestOverrides: {},
   apiKeyHint: '8F2A',
   status: 'UNTESTED' as const,
   chatCapability: 'UNKNOWN' as const,
@@ -71,6 +77,7 @@ test('creates, updates, and deletes models while keeping the visible list in syn
     baseUrl: 'https://api.deepseek.com/v1',
     modelName: 'deepseek-chat',
     apiKey: 'sk-secret',
+    requestOverrides: {},
   }
 
   await manager.create(createPayload)
@@ -108,9 +115,24 @@ test('always clears operation indicators when the upstream request fails', async
   assert.equal(manager.deletingId.value, null)
 })
 
-test('distinguishes an unconfigured default key from an existing masked key', () => {
-  assert.equal(apiKeyEditorHint({ ...untestedModel, hasApiKey: false, apiKeyHint: undefined }),
-    '尚未配置 API Key，填写后即可运行测试。')
+test('formats the saved key hint without exposing the full key', () => {
   assert.equal(apiKeyEditorHint(untestedModel),
     '已保存密钥：8F2A，不会在页面中回显。')
+})
+
+test('copies reactive request overrides into a plain JSON object', () => {
+  const overrides = reactive({
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high',
+  })
+
+  const copied = cloneRequestOverrides(overrides)
+
+  assert.deepEqual(copied, {
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high',
+  })
+  assert.notEqual(copied, overrides)
+  assert.notEqual(copied.thinking, overrides.thinking)
+  assert.doesNotThrow(() => structuredClone(copied))
 })

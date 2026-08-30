@@ -1,6 +1,6 @@
 import type {
   ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
-  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
+  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
 } from './types'
@@ -133,6 +133,9 @@ export const api = {
   saveReplyPlan: (id: number, plan: ReplyPlanRequest) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
   finishReplyPlan: (id: number) => request<ReplyPlan | null>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),
   currentTurn: (id: number) => request<CurrentTurn | null>(`/group-chat/conversations/${id}/turns/current`),
+  actorRuntimes: (id: number) => request<GroupActorRuntime[]>(`/group-chat/conversations/${id}/actor-runtimes`),
+  saveActorRuntime: (id: number, payload: GroupActorRuntimeSavePayload) =>
+    request<GroupActorRuntime>(`/group-chat/conversations/${id}/actor-runtimes`, { method: 'PUT', body: body(payload) }),
   combatOverview: (id: number) => request<TrpgCombatParticipantOverview[]>(`/group-chat/conversations/${id}/combat-overview`),
 
   investigatorCards: (runId: number) => request<InvestigatorCardSummary[]>(`/character-cards/investigators?${new URLSearchParams({ runId: String(runId) })}`),
@@ -205,6 +208,16 @@ export async function uploadImage(file: File) {
 
 export async function streamGroupMessage(id: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) {
   return streamGroupTurn(`/group-chat/conversations/${id}/messages`, payload, onEvent)
+}
+
+export async function streamManualGroupMessage(
+  id: number,
+  turnId: number,
+  stepId: number,
+  payload: { clientRequestId: string; content: string },
+  onEvent: (event: GroupChatEvent) => void,
+) {
+  return streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/manual-message`, payload, onEvent)
 }
 
 async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: GroupChatEvent) => void, method = 'POST') {

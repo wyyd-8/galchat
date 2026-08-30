@@ -9,11 +9,15 @@ export interface ModelApiGateway {
   delete: (id: number) => Promise<void>
 }
 
-export function apiKeyEditorHint(model: Pick<ModelApi, 'hasApiKey' | 'apiKeyHint'>) {
-  if (!model.hasApiKey) return '尚未配置 API Key，填写后即可运行测试。'
-
-  const hint = model.apiKeyHint?.replace(/^…+/, '') || '••••'
+export function apiKeyEditorHint(model: Pick<ModelApi, 'apiKeyHint'>) {
+  const hint = model.apiKeyHint.replace(/^…+/, '')
   return `已保存密钥：${hint}，不会在页面中回显。`
+}
+
+export function cloneRequestOverrides(
+  requestOverrides: Record<string, unknown>,
+): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(requestOverrides)) as Record<string, unknown>
 }
 
 export function createModelApiManagerState(gateway: ModelApiGateway) {

@@ -10,7 +10,6 @@ import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserNotFoundException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserInfoMapper;
-import com.me.galchat.modelapi.DefaultModelApiProvisioner;
 import com.me.galchat.service.IUserInfoService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.constant.RedisConstant;
@@ -19,7 +18,6 @@ import com.me.galchat.utils.AliyunEmailSender;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -47,7 +45,6 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
 
     private final StringRedisTemplate redisTemplate;
     private final AliyunEmailSender emailSender;
-    private final DefaultModelApiProvisioner defaultModelApiProvisioner;
 
     @Override
     public UserInfo getInfoById(Integer id) {
@@ -74,7 +71,6 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
     }
 
     @Override
-    @Transactional
     public UserTokenVO register(UserAuthDTO userAuthDTO) {
         if (userAuthDTO == null) {
             throw new UserRequestException("请求参数不能为空");
@@ -95,7 +91,6 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
                 .setDiceSkin(UserConstant.DEFAULT_DICE_SKIN)
                 .setCreateTime(LocalDateTime.now());
         save(userInfo);
-        defaultModelApiProvisioner.provision(userInfo.getId());
         redisTemplate.delete(buildEmailVerifyCodeKey(email, verificationCode));
         return buildUserToken(userInfo);
     }

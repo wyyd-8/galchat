@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.experimental.Accessors;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Data
 @Accessors(chain = true)
@@ -15,7 +16,7 @@ public class ModelApiVO {
     private String name;
     private String baseUrl;
     private String modelName;
-    private Boolean hasApiKey;
+    private Map<String, Object> requestOverrides;
     private String apiKeyHint;
     private ModelApiTestStatus status;
     private ModelApiCapability chatCapability;

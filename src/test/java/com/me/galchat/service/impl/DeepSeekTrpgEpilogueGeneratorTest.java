@@ -9,6 +9,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
@@ -24,6 +25,7 @@ class DeepSeekTrpgEpilogueGeneratorTest {
     @Test
     void generatesOnlyCharacterFocusedAfterstoriesForLivingAndDeadInvestigators() {
         DeepSeekChatModel chatModel = mock(DeepSeekChatModel.class);
+        when(chatModel.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
         when(chatModel.call(any(Prompt.class))).thenReturn(response("""
                 {"entries":[
                   {"characterId":11,"investigatorName":"林恩","content":"林恩重新回到了报社。"},

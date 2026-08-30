@@ -18,8 +18,6 @@ class UserModelApiSchemaMigrationIntegrationTest {
 
     private static final Path MIGRATION = Path.of(
             "docs/sql/V20260829_2__user_model_api.sql");
-    private static final Path NULLABLE_KEY_MIGRATION = Path.of(
-            "docs/sql/V20260829_3__allow_empty_model_api_key.sql");
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -42,7 +40,7 @@ class UserModelApiSchemaMigrationIntegrationTest {
                 ORDER BY ordinal_position
                 """, String.class, schema)).containsExactly(
                 "id", "user_id", "name", "base_url", "model_name",
-                "api_key_encrypted", "api_key_hint", "status",
+                "api_key_encrypted", "api_key_hint", "request_overrides", "status",
                 "chat_capability", "streaming_capability",
                 "tool_calling_capability", "reasoning_output_status",
                 "last_test_code", "last_test_message", "last_test_at",
@@ -56,37 +54,25 @@ class UserModelApiSchemaMigrationIntegrationTest {
                   AND indexname = 'uk_user_model_api_user_name'
                 """, Integer.class, schema)).isEqualTo(1);
 
-        assertThat(jdbcTemplate.queryForList("""
-                SELECT column_name
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
                 FROM information_schema.columns
                 WHERE table_schema = ?
                   AND table_name = 'user_model_api'
+                  AND column_name IN ('api_key_encrypted', 'api_key_hint')
                   AND is_nullable = 'YES'
-                ORDER BY column_name
-                """, String.class, schema)).contains(
-                "api_key_encrypted", "api_key_hint");
+                """, Integer.class, schema)).isZero();
+
+        assertThat(jdbcTemplate.queryForMap("""
+                SELECT data_type, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = ?
+                  AND table_name = 'user_model_api'
+                  AND column_name = 'request_overrides'
+                """, schema))
+                .containsEntry("data_type", "jsonb")
+                .containsEntry("is_nullable", "NO")
+                .containsEntry("column_default", "'{}'::jsonb");
     }
 
-    @Test
-    void upgradeAllowsAnExistingConfigurationToHaveNoApiKey()
-            throws Exception {
-        assertThat(NULLABLE_KEY_MIGRATION).exists();
-        jdbcTemplate.execute("""
-                CREATE TEMP TABLE user_model_api (
-                    api_key_encrypted TEXT NOT NULL,
-                    api_key_hint VARCHAR(32) NOT NULL
-                ) ON COMMIT DROP
-                """);
-
-        jdbcTemplate.execute(Files.readString(NULLABLE_KEY_MIGRATION));
-        jdbcTemplate.update("""
-                INSERT INTO user_model_api
-                    (api_key_encrypted, api_key_hint)
-                VALUES (NULL, NULL)
-                """);
-
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM user_model_api",
-                Integer.class)).isEqualTo(1);
-    }
 }

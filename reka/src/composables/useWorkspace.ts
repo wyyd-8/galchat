@@ -1,7 +1,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { api, clearSession, currentSession, saveSession, streamGroupGeneration, streamGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
+import { api, clearSession, currentSession, saveSession, streamGroupGeneration, streamGroupMessage, streamManualGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
 import type {
-  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GenerationFailureState, GroupChatEvent, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod,
+  Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GenerationFailureState, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, InvestigatorCardSummary, ModelApi, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod,
   UserInfo, UserWorld, WorldDetail, WorldSave, WorldTemplate,
 } from '@/api/types'
 import { beginReplyTurn, updateReplyTurn, type ReplyTurnState } from '@/components/replyTurnStatus'
@@ -38,6 +38,8 @@ export function useWorkspace() {
   const messageInput = ref('')
   const messageScroller = ref<HTMLElement | null>(null)
   const currentTurn = ref<CurrentTurn | null>(null)
+  const actorRuntimes = ref<GroupActorRuntime[]>([])
+  const modelApis = ref<ModelApi[]>([])
   const inquiryInput = ref('')
   const composerIntent = ref<TrpgComposerIntent>('action')
   const combatOverview = ref<TrpgCombatParticipantOverview[]>([])
@@ -90,7 +92,7 @@ export function useWorkspace() {
   }
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
-    conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; modules.value = []
+    conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; modules.value = []
     latestDiceRoll.value = null; incomingDiceRoll.value = null; hasOlderGroupMessages.value = false; diceRollCache.clear()
   }
 
@@ -275,16 +277,18 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
-      const [conversationDetail, history, plans, turn, overview, cards] = await Promise.all([
-        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), loadCombatOverview(id), loadInvestigatorCards(id),
+      const [conversationDetail, history, plans, turn, runtimes, models, overview, cards] = await Promise.all([
+        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), api.actorRuntimes(id), api.modelApis(), loadCombatOverview(id), loadInvestigatorCards(id),
       ])
       conversations.value = conversations.value.map((item) => item.id === id ? { ...item, ...conversationDetail } : item)
       messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
       hasOlderGroupMessages.value = history.length === 50
       setReplyPlans(plans)
       currentTurn.value = turn
+      actorRuntimes.value = runtimes
+      modelApis.value = models
       combatOverview.value = overview
       investigatorCards.value = cards
       const plannedParticipantIds = [...new Set(replyPlan.value.items
@@ -392,10 +396,10 @@ export function useWorkspace() {
         ? applyGameTimeEvent(conversation, event)
         : conversation)
     }
+    currentTurn.value = applyCurrentTurnEvent(
+      currentTurn.value, event, replyPlan.value,
+    )
     if (selectedConversation.value?.mode === 'trpg') {
-      currentTurn.value = applyCurrentTurnEvent(
-        currentTurn.value, event, replyPlan.value,
-      )
       if (event.eventType === 'turn.accepted' && event.turnId != null
         && selectedConversationId.value != null) {
         refreshPlanForAcceptedTurn(selectedConversationId.value, event.turnId)
@@ -702,6 +706,11 @@ export function useWorkspace() {
   async function sendMessage() {
     const content = messageInput.value.trim(); const conversation = selectedConversation.value
     if (!content || !conversation || conversation.status !== 'active' || loading.sending) return
+    const waitingStep = currentTurn.value?.steps.find((step) => step.stepId === currentTurn.value?.stepId)
+    const manualCharacter = currentTurn.value?.waitingForUser === true
+      && waitingStep?.actorType === 'character'
+    const manualChat = conversation.mode === 'chat'
+      && manualCharacter
     if (conversation.mode === 'trpg') {
       const turn = currentTurn.value
       const acceptsMessage = turn?.inputType === 'message' || turn?.inputType === 'clarification'
@@ -713,8 +722,8 @@ export function useWorkspace() {
     const originalInput = messageInput.value
     const optimisticId = tempMessageId--
     messageInput.value = ''; loading.sending = true
-    if (conversation.mode === 'chat') replyTurnState.value = beginReplyTurn()
-    messages.value.push({ id: optimisticId, conversationId: conversation.id, speakerType: 'user', messageKind: 'dialogue', content,
+    if (conversation.mode === 'chat' && !manualChat) replyTurnState.value = beginReplyTurn()
+    messages.value.push({ id: optimisticId, conversationId: conversation.id, speakerType: manualCharacter ? 'character' : 'user', speakerId: manualCharacter ? waitingStep?.actorId : undefined, speakerName: manualCharacter ? characterById(waitingStep?.actorId)?.characterName : undefined, messageKind: 'dialogue', content,
       sequenceNo: Date.now(), status: 'completed', createdAt: new Date().toISOString() })
     await scrollToBottom()
     try {
@@ -731,6 +740,23 @@ export function useWorkspace() {
             { clientRequestId, content }, onEvent),
         )
         await syncTrpgState(conversation)
+      } else if (manualChat) {
+        const turn = currentTurn.value
+        if (!turn?.stepId) throw new Error('当前人工接管步骤已变化，请重试')
+        await consumeGeneration(
+          conversation.id,
+          clientRequestId,
+          (onEvent) => streamManualGroupMessage(
+            conversation.id, turn.turnId, turn.stepId!,
+            { clientRequestId, content }, onEvent,
+          ),
+        )
+        const [history, plans, nextTurn] = await Promise.all([
+          api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id),
+        ])
+        messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
+        setReplyPlans(plans)
+        currentTurn.value = nextTurn
       } else {
         await consumeGeneration(
           conversation.id,
@@ -738,8 +764,8 @@ export function useWorkspace() {
           (onEvent) => streamGroupMessage(
             conversation.id, { clientRequestId, content }, onEvent),
         )
-        const [history, plans] = await Promise.all([api.groupMessages(conversation.id), api.replyPlan(conversation.id)])
-        messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo); setReplyPlans(plans)
+        const [history, plans, nextTurn] = await Promise.all([api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id)])
+        messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo); setReplyPlans(plans); currentTurn.value = nextTurn
       }
     } catch (error) {
       if (conversation.mode === 'trpg') {
@@ -755,6 +781,22 @@ export function useWorkspace() {
     }
     finally { loading.sending = false; await scrollToBottom() }
   }
+
+  async function saveActorRuntime(payload: GroupActorRuntimeSavePayload) {
+    const conversation = selectedConversation.value
+    if (!conversation) return
+    try {
+      const saved = await api.saveActorRuntime(conversation.id, payload)
+      const key = `${saved.actorType}:${saved.actorId ?? ''}`
+      const exists = actorRuntimes.value.some((value) => `${value.actorType}:${value.actorId ?? ''}` === key)
+      actorRuntimes.value = exists
+        ? actorRuntimes.value.map((value) => `${value.actorType}:${value.actorId ?? ''}` === key ? saved : value)
+        : [...actorRuntimes.value, saved]
+      notify('发言方式已保存', saved.controlMode === 'MANUAL' ? '轮到该角色时会等待人工输入。' : '后续步骤会使用所选模型。', 'success')
+    } catch (error) {
+      notify('发言方式保存失败', errorMessage(error), 'danger')
+    }
+  }
   async function scrollToBottom(force = false) {
     await nextTick()
     const viewport = messageScroller.value
@@ -767,11 +809,11 @@ export function useWorkspace() {
   onMounted(boot)
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
-    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, combatOverview, investigatorCards, replyTurnState,
+    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, actorRuntimes, modelApis, combatOverview, investigatorCards, replyTurnState,
     latestDiceRoll, incomingDiceRoll, hasOlderGroupMessages, generationFailure, generationFailureOpen,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,
-    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, askKp, startTrpgTurn, retryGenerationFailure, selectSceneOption, endExploration, retryStep, correctGameTime, refreshDiceRoll,
+    loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, saveActorRuntime, askKp, startTrpgTurn, retryGenerationFailure, selectSceneOption, endExploration, retryStep, correctGameTime, refreshDiceRoll,
   }
 }

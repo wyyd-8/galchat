@@ -54,6 +54,7 @@ test('uses the authenticated model API CRUD and test endpoints', async (context)
     baseUrl: 'https://api.deepseek.com/v1',
     modelName: 'deepseek-chat',
     apiKey: 'sk-secret',
+    requestOverrides: { thinking: { type: 'enabled' }, reasoning_effort: 'high' },
   }
 
   await api.modelApis()
@@ -65,7 +66,7 @@ test('uses the authenticated model API CRUD and test endpoints', async (context)
   assert.deepEqual(calls, [
     { url: '/api/model-apis', method: 'GET', token: 'test-token' },
     { url: '/api/model-apis', method: 'POST', body: payload, token: 'test-token' },
-    { url: '/api/model-apis/7', method: 'PUT', body: { name: payload.name, baseUrl: payload.baseUrl, modelName: payload.modelName }, token: 'test-token' },
+    { url: '/api/model-apis/7', method: 'PUT', body: { name: payload.name, baseUrl: payload.baseUrl, modelName: payload.modelName, requestOverrides: payload.requestOverrides }, token: 'test-token' },
     { url: '/api/model-apis/7/test', method: 'POST', token: 'test-token' },
     { url: '/api/model-apis/7', method: 'DELETE', token: 'test-token' },
   ])

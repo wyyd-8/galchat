@@ -702,10 +702,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     : List.of();
         }
         Prompt prompt = new Prompt(messages);
-        if (GroupChatConstant.ACTOR_KP.equals(actor.type())) {
-            contextWindowService.recordPrompt(
-                    conversation.getId(), prompt.getInstructions());
-        }
+        contextWindowService.recordPrompt(
+                conversation.getId(), actor.type(),
+                action.subjectCharacterId(), prompt.getInstructions());
         return new GroupModelInvocation(chatClient, prompt, tools);
     }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {
-  Check, CircleDot, Dices, MessageCircle, Minus, Pause, X,
+  Check, CircleDot, Dices, MessageCircle, Minus, Pause, UserRound, X,
 } from '@lucide/vue'
 import type { Component } from 'vue'
 import {
@@ -17,9 +17,11 @@ const props = withDefaults(defineProps<{
   combatOverview: TrpgCombatParticipantOverview[]
   investigatorCards?: InvestigatorCardSummary[]
   displayState?: 'active' | 'waiting' | 'ready'
+  playerControlled?: boolean
 }>(), {
   investigatorCards: () => [],
   displayState: 'active',
+  playerControlled: false,
 })
 const emit = defineEmits<{ openCard: [cardId: number] }>()
 
@@ -130,9 +132,12 @@ function explorationMetrics(
         @click="openCard"
       >
         <span class="trpg-actor-name">{{ actor.name }}</span>
-        <span class="trpg-status-icon" aria-hidden="true">
-          <small v-if="rowStatusLabel()" :class="displayState === 'active' ? 'trpg-active-label' : 'trpg-row-state-label'">{{ rowStatusLabel() }}</small>
-          <component :is="actorIcon()" v-if="actorIcon()" :size="13" :stroke-width="1.8" />
+        <span class="trpg-actor-row-meta">
+          <span v-if="playerControlled" class="trpg-player-control-badge" title="由你控制" aria-label="由你控制"><UserRound :size="11" :stroke-width="2" aria-hidden="true" /></span>
+          <span class="trpg-status-icon" aria-hidden="true">
+            <small v-if="rowStatusLabel()" :class="displayState === 'active' ? 'trpg-active-label' : 'trpg-row-state-label'">{{ rowStatusLabel() }}</small>
+            <component :is="actorIcon()" v-if="actorIcon()" :size="13" :stroke-width="1.8" />
+          </span>
         </span>
       </component>
     </TooltipTrigger>
@@ -182,9 +187,12 @@ function explorationMetrics(
   </TooltipRoot>
   <div v-else class="trpg-actor-row" :class="rowStatus()" :title="actor.statusLabel" :aria-label="rowAriaLabel()">
     <span class="trpg-actor-name">{{ actor.name }}</span>
-    <span class="trpg-status-icon" aria-hidden="true">
-      <small v-if="rowStatusLabel()" :class="displayState === 'active' ? 'trpg-active-label' : 'trpg-row-state-label'">{{ rowStatusLabel() }}</small>
-      <component :is="actorIcon()" v-if="actorIcon()" :size="13" :stroke-width="1.8" />
+    <span class="trpg-actor-row-meta">
+      <span v-if="playerControlled" class="trpg-player-control-badge" title="由你控制" aria-label="由你控制"><UserRound :size="11" :stroke-width="2" aria-hidden="true" /></span>
+      <span class="trpg-status-icon" aria-hidden="true">
+        <small v-if="rowStatusLabel()" :class="displayState === 'active' ? 'trpg-active-label' : 'trpg-row-state-label'">{{ rowStatusLabel() }}</small>
+        <component :is="actorIcon()" v-if="actorIcon()" :size="13" :stroke-width="1.8" />
+      </span>
     </span>
   </div>
 </template>

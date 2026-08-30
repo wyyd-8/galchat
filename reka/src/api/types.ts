@@ -188,6 +188,13 @@ export interface ReplyPlanRequest {
 export interface ContextWindowUsage {
   characterCount: number; softLimit: number; ratio: number; updatedAt: string
 }
+export interface InvestigatorContextWindowUsage {
+  subjectCharacterId: number; usage: ContextWindowUsage
+}
+export interface ContextWindowOverview {
+  kp?: ContextWindowUsage
+  investigators: InvestigatorContextWindowUsage[]
+}
 
 export interface CocCharacter {
   id: number; runId: number; actorType: 'PLAYER' | 'BOT'; participantId?: number; name: string; playerName?: string

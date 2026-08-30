@@ -7,13 +7,16 @@ import org.springframework.ai.tool.annotation.ToolParam;
 
 import java.util.List;
 
+import static com.me.galchat.domain.dto.KpDiceRequestDTOs.SELF_CONTAINED_REASON;
+
 public final class KpFirearmRequestDTOs {
 
     private KpFirearmRequestDTOs() {
     }
 
     public record Attack(
-            @ToolParam(description = "用简短短语概括本轮枪械攻击")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "枪械攻击写明谁用什么武器向谁射击；不要写规则或预期结果")
             String reason,
             @ToolParam(description = "开火角色的准确人物卡名称")
             String characterName,

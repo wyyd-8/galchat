@@ -4,13 +4,16 @@ import com.me.galchat.constant.CocPercentileModifier;
 import com.me.galchat.constant.MeleeDefenseMode;
 import org.springframework.ai.tool.annotation.ToolParam;
 
+import static com.me.galchat.domain.dto.KpDiceRequestDTOs.SELF_CONTAINED_REASON;
+
 public final class KpMeleeRequestDTOs {
 
     private KpMeleeRequestDTOs() {
     }
 
     public record Attack(
-            @ToolParam(description = "用简短短语概括本次近战攻击")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "近战攻击写明谁用什么方式攻击谁，以及对方如何防守或反击；不要写规则或预期结果")
             String reason,
             @ToolParam(description = "攻击者、攻击武器和攻击检定奖惩骰")
             Attacker attacker,

@@ -7,6 +7,7 @@ import com.me.galchat.domain.dto.KpDiceRequestDTOs;
 import com.me.galchat.service.ICocDiceOrchestrationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.annotation.Tool;
 
 import java.lang.reflect.Method;
@@ -78,6 +79,27 @@ class KpDiceToolsTest {
                     DiceRollConstant.TOOL_REQUEST_PUSHED_CHECK);
             assertThat(tool.returnDirect()).isTrue();
         });
+    }
+
+    @Test
+    void allDiceToolSchemasUseDistinctiveShortNamesForActorsAndActions() {
+        List<String> schemas = List.of(
+                        new KpDiceTools(null),
+                        new KpPushedCheckTools(null),
+                        new KpFirearmTools(null),
+                        new KpMeleeTools(null))
+                .stream()
+                .flatMap(owner -> Arrays.stream(ToolCallbacks.from(owner)))
+                .map(callback -> callback.getToolDefinition().inputSchema())
+                .filter(schema -> schema.contains("\"reason\""))
+                .toList();
+
+        assertThat(schemas).hasSize(10).allSatisfy(schema ->
+                assertThat(schema)
+                        .contains("不得省略主语")
+                        .contains("谁做了什么或经历了什么")
+                        .contains("有区分度的角色简称")
+                        .contains("无需使用准确人物卡全名"));
     }
 
     @Test

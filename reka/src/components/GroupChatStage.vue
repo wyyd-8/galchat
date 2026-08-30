@@ -5,7 +5,7 @@ import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
-import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod } from '@/api/types'
+import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupActorRuntime, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod } from '@/api/types'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import CombatResultMessage from './CombatResultMessage.vue'
 import EpilogueMessage from './EpilogueMessage.vue'
@@ -21,7 +21,8 @@ const input = defineModel<string>('input', { required: true })
 const inquiryInput = defineModel<string>('inquiryInput', { default: '' })
 const composerIntent = defineModel<TrpgComposerIntent>('composerIntent', { default: 'action' })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
+const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; actorRuntimes?: GroupActorRuntime[]; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
+  actorRuntimes: () => [],
   combatOverview: () => [],
   investigatorCards: () => [],
 })
@@ -278,10 +279,10 @@ function handleReasoningScroll(event: Event) {
                     <strong>{{ child.plan.displayName }}</strong>
                     <span class="trpg-scene-status-icon" :title="child.statusLabel" role="img" :aria-label="child.statusLabel"><component :is="sceneIcon(child)" :size="13" :stroke-width="1.8" /></span>
                   </header>
-                  <TrpgActorRoster :scene="child" :combat-overview="combatOverview" :investigator-cards="investigatorCards" @open-card="emit('openCharacterCard', $event)" />
+                  <TrpgActorRoster :scene="child" :combat-overview="combatOverview" :investigator-cards="investigatorCards" :actor-runtimes="actorRuntimes" @open-card="emit('openCharacterCard', $event)" />
                 </section>
               </div>
-              <TrpgActorRoster :scene="scene" :combat-overview="combatOverview" :investigator-cards="investigatorCards" @open-card="emit('openCharacterCard', $event)" />
+              <TrpgActorRoster :scene="scene" :combat-overview="combatOverview" :investigator-cards="investigatorCards" :actor-runtimes="actorRuntimes" @open-card="emit('openCharacterCard', $event)" />
             </section>
             <div v-if="!trpgExecution.scenes.length" class="plan-empty">暂无场景计划</div>
           </template>

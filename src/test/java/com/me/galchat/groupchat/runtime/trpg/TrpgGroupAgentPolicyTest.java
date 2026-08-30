@@ -116,6 +116,10 @@ class TrpgGroupAgentPolicyTest {
                 .contains("不要使用其中的参与者代替当前参与者")
                 .contains("<kp-storyline-reentry>")
                 .contains("KP恢复桥接")
+                .contains("公开回复必须使用无包裹的小说正文")
+                .contains("任何段落不得以全角或半角圆括号、方括号开头或结尾")
+                .contains("不得使用括号、星号、地点标签或角色标签充当舞台指示")
+                .contains("存在多个并行地点时，直接用空行分段，不添加镜头标记")
                 .contains("不得附加括号式或其他场外行动提示")
                 .contains("不要建议调查员换一种查法")
                 .contains("完成当前叙述后立即结束回复");
@@ -419,6 +423,10 @@ class TrpgGroupAgentPolicyTest {
                 .contains("战斗尚未激活")
                 .contains("不得描述先攻顺序、战斗轮或任何角色的新行动")
                 .contains("确认参战者后立即结束回复")
+                .contains("公开回复必须使用无包裹的小说正文")
+                .contains("任何段落不得以全角或半角圆括号、方括号开头或结尾")
+                .contains("不得使用括号、星号、地点标签或角色标签充当舞台指示")
+                .contains("存在多个并行地点时，直接用空行分段，不添加镜头标记")
                 .contains("不得附加括号式或其他场外行动提示")
                 .contains("不要建议调查员换一种查法")
                 .contains("完成当前叙述后立即结束回复");

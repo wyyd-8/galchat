@@ -8,13 +8,14 @@ import DiceDebugPanel from '@/dice/components/DiceDebugPanel.vue'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import { api } from '@/api/client'
 import type {
-  Character, CharacterCard, CocModule, ContextWindowUsage, Conversation, DiceRollAggregate, GroupMessage,
-  InvestigatorCardSummary, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave,
+  Character, CharacterCard, CocModule, ContextWindowOverview, ContextWindowUsage, Conversation, DiceRollAggregate,
+  GroupActorControlMode, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupMessage, InvestigatorCardSummary,
+  ModelApi, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave,
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { hydrateDiceMessage, listDiceHistoryEntriesNewestFirst } from '@/dice/domain/dicePlayback'
 import {
-  buildFetchedRollbackMessagePreview, buildSkillDisplayItems, buildToolCharacterTargets, buildToolRecoveryTimeline, buildToolRollbackActions, formatCheckRate, formatKpPromptUpdatedAt, formatRollbackPreviewMessage, nextSkillGroup, preferredToolCharacterTargetKey, resolveRollbackMessagePreview, resolveToolRestoreInvestigators, resolveWeaponCheckValue, restoreInvestigatorCondition, shouldShowWeaponRisk, toolDialogContentClass,
+  buildFetchedRollbackMessagePreview, buildSkillDisplayItems, buildToolCharacterTargets, buildToolRecoveryTimeline, buildToolRollbackActions, formatCheckRate, formatRollbackPreviewMessage, nextSkillGroup, preferredToolCharacterTargetKey, resolveRollbackMessagePreview, resolveToolRestoreInvestigators, resolveWeaponCheckValue, restoreInvestigatorCondition, shouldShowWeaponRisk, toolDialogContentClass,
   useToolRestoreConfirmation,
 } from '@/components/trpgToolsState'
 import type { ToolRecoveryTimelineItem, ToolRestoreAction, ToolRollbackMessagePreview, ToolSkillSortDirection, ToolSkillSortMode } from '@/components/trpgToolsState'
@@ -27,6 +28,9 @@ const props = defineProps<{
   characters: Character[]
   participantIds: number[]
   messages: GroupMessage[]
+  actorRuntimes: GroupActorRuntime[]
+  modelApis: ModelApi[]
+  saveActorRuntime: (payload: GroupActorRuntimeSavePayload) => Promise<GroupActorRuntime | undefined>
   requestedCardId?: number | null
 }>()
 const emit = defineEmits<{
@@ -37,7 +41,7 @@ const emit = defineEmits<{
 }>()
 
 const busy = ref(false)
-const contextUsage = ref<ContextWindowUsage | null>(null)
+const contextOverview = ref<ContextWindowOverview | null>(null)
 const save = ref<TrpgSave | null>(null)
 const rollbackOverview = ref<TrpgRollbackOverview | null>(null)
 const saveRemark = ref('')
@@ -58,7 +62,19 @@ const rollbackPreviewFailed = ref(false)
 const saveEditorOpen = ref(false)
 const card = ref<CharacterCard | null>(null)
 const cardText = ref('')
+const expandedRuntimeKey = ref<string | null>(null)
+const runtimeControlMode = ref<GroupActorControlMode>('MODEL')
+const runtimeModelApiId = ref('')
+const runtimeSavingKey = ref<string | null>(null)
 let rollbackPreviewRequestId = 0
+
+interface RuntimeActorView {
+  key: string
+  name: string
+  image?: string
+  runtime: GroupActorRuntime
+  usage?: ContextWindowUsage
+}
 
 const characterTargets = computed(() => buildToolCharacterTargets(
   props.characters,
@@ -69,8 +85,38 @@ const characterTargets = computed(() => buildToolCharacterTargets(
 const selectedTarget = computed(() => characterTargets.value.find((target) => target.key === selectedKey.value)
   || characterTargets.value[0])
 const selectedParticipantId = computed(() => selectedTarget.value?.participantId)
-const contextPercent = computed(() => Math.max(0, Math.round((contextUsage.value?.ratio || 0) * 100)))
-const contextTone = computed(() => contextPercent.value >= 90 ? 'danger' : contextPercent.value >= 70 ? 'warning' : 'safe')
+const runtimeActors = computed<RuntimeActorView[]>(() => {
+  const kpRuntime = props.actorRuntimes.find((runtime) => runtime.actorType === 'kp') || {
+    actorType: 'kp' as const,
+    controlMode: 'MODEL' as const,
+    modelApiAvailable: true,
+  }
+  const kp: RuntimeActorView = {
+    key: 'kp',
+    name: 'KP',
+    runtime: kpRuntime,
+    usage: contextOverview.value?.kp,
+  }
+  const investigators = props.actorRuntimes
+    .filter((runtime) => runtime.actorType === 'character')
+    .map((runtime) => {
+      const character = props.characters.find((item) => item.characterId === runtime.actorId)
+      const investigator = cards.value.find((item) => item.actorType === 'BOT'
+        && item.participantId === runtime.actorId)
+      const usage = contextOverview.value?.investigators.find((item) =>
+        item.subjectCharacterId === investigator?.cardId)?.usage
+      return {
+        key: `character:${runtime.actorId}`,
+        name: investigator?.name || character?.characterName || `角色 #${runtime.actorId}`,
+        image: character?.characterImage,
+        runtime,
+        usage,
+      }
+    })
+  return [kp, ...investigators]
+})
+const modelRuntimeCount = computed(() => runtimeActors.value.filter((actor) => actor.runtime.controlMode === 'MODEL').length)
+const manualRuntimeCount = computed(() => runtimeActors.value.filter((actor) => actor.runtime.controlMode === 'MANUAL').length)
 const selectedActorName = computed(() => selectedTarget.value?.name || props.username.trim() || '当前玩家')
 const completedCardCount = computed(() => characterTargets.value.filter((target) => target.cardId !== undefined).length)
 const dialogContentClass = computed(() => toolDialogContentClass(selectedToolTab.value))
@@ -161,6 +207,63 @@ function previewSpeaker(message: GroupMessage) {
   if (message.speakerType === 'kp') return message.speakerName || 'KP'
   return message.speakerName || '角色'
 }
+function runtimeContextPercent(actor: RuntimeActorView): number {
+  return Math.max(0, Math.round((actor.usage?.ratio || 0) * 100))
+}
+function runtimeContextTone(actor: RuntimeActorView): 'safe' | 'warning' | 'danger' {
+  const percent = runtimeContextPercent(actor)
+  return percent >= 90 ? 'danger' : percent >= 70 ? 'warning' : 'safe'
+}
+function draftRuntimeModel(): ModelApi | undefined {
+  return props.modelApis.find((model) => String(model.id) === runtimeModelApiId.value)
+}
+function runtimeSummary(actor: RuntimeActorView): string {
+  if (actor.runtime.controlMode === 'MANUAL') return '等待输入'
+  if (!actor.runtime.modelApiAvailable) return '默认模型'
+  return actor.runtime.modelApiName || '默认模型'
+}
+function runtimeModeLabel(actor: RuntimeActorView): string {
+  return actor.runtime.controlMode === 'MANUAL' ? '人工' : '模型'
+}
+function modelStatusLabel(model?: ModelApi): string {
+  if (!model) return ''
+  return {
+    SUCCESS: '可用', PARTIAL: '部分可用', FAILED: '连接异常', UNTESTED: '未测试',
+  }[model.status]
+}
+function openRuntimeEditor(actor: RuntimeActorView) {
+  if (expandedRuntimeKey.value === actor.key) {
+    expandedRuntimeKey.value = null
+    return
+  }
+  expandedRuntimeKey.value = actor.key
+  runtimeControlMode.value = actor.runtime.actorType === 'kp' ? 'MODEL' : actor.runtime.controlMode
+  runtimeModelApiId.value = actor.runtime.modelApiAvailable && actor.runtime.modelApiId != null
+    ? String(actor.runtime.modelApiId)
+    : ''
+}
+function runtimeDraftChanged(actor: RuntimeActorView): boolean {
+  const currentModelId = actor.runtime.modelApiAvailable && actor.runtime.modelApiId != null
+    ? String(actor.runtime.modelApiId)
+    : ''
+  return runtimeControlMode.value !== actor.runtime.controlMode
+    || runtimeModelApiId.value !== currentModelId
+}
+async function saveRuntime(actor: RuntimeActorView) {
+  if (runtimeSavingKey.value) return
+  runtimeSavingKey.value = actor.key
+  try {
+    const saved = await props.saveActorRuntime({
+      actorType: actor.runtime.actorType,
+      actorId: actor.runtime.actorId,
+      controlMode: actor.runtime.actorType === 'kp' ? 'MODEL' : runtimeControlMode.value,
+      modelApiId: runtimeModelApiId.value ? Number(runtimeModelApiId.value) : undefined,
+    })
+    if (saved) expandedRuntimeKey.value = null
+  } finally {
+    runtimeSavingKey.value = null
+  }
+}
 async function execute(action: () => Promise<void>) {
   if (busy.value) return
   busy.value = true
@@ -189,7 +292,7 @@ async function refreshOverview(requestedCardId: number | null = null) {
     api.trpgSave(props.conversation.id),
     api.trpgRollbackStatus(props.conversation.id),
   ])
-  contextUsage.value = usageResult
+  contextOverview.value = usageResult
   save.value = saveResult
   rollbackOverview.value = rollbackResult
   saveRemark.value = saveResult?.remark || ''
@@ -320,6 +423,7 @@ watch(open, (visible) => {
     skillSortMode.value = 'default'
     skillSortDirection.value = 'asc'
     selectedSkillGroup.value = null
+    expandedRuntimeKey.value = null
     return
   }
   if (props.requestedCardId != null) selectedToolTab.value = 'card'
@@ -335,6 +439,8 @@ watch(() => props.conversation.id, () => {
   skillSortMode.value = 'default'
   skillSortDirection.value = 'asc'
   cards.value = []
+  contextOverview.value = null
+  expandedRuntimeKey.value = null
   card.value = null
   rollbackOverview.value = null
   saveEditorOpen.value = false
@@ -364,9 +470,73 @@ watch(selectedSheetTab, (tab) => {
       </TabsList>
 
       <TabsContent value="status" class="tabs-content tool-section">
-        <section class="tool-card">
-          <div class="tool-card-heading"><span><strong>最近一次 KP 提示词长度</strong><small>{{ contextUsage ? `${contextUsage.characterCount.toLocaleString()} / ${contextUsage.softLimit.toLocaleString()} 字符` : '尚无记录' }}</small></span><button class="icon-button bordered" :disabled="busy" title="刷新" @click="execute(refreshOverview)"><RefreshCw :size="15" /></button></div>
-          <div class="context-meter" :class="contextTone"><i :style="{ width: `${Math.min(contextPercent, 100)}%` }" /></div><small>{{ contextPercent }}% · {{ contextUsage ? `更新于 ${formatKpPromptUpdatedAt(contextUsage.updatedAt)}` : '模型执行一次跑团行动后显示' }}</small>
+        <section class="trpg-runtime-dashboard">
+          <header class="trpg-runtime-heading">
+            <span><strong>角色发言</strong><small>模型 {{ modelRuntimeCount }} · 人工 {{ manualRuntimeCount }}</small></span>
+            <button class="icon-button bordered" :disabled="busy" title="刷新" aria-label="刷新角色发言状态" @click="execute(refreshOverview)"><RefreshCw :size="15" /></button>
+          </header>
+
+          <div class="trpg-runtime-list">
+            <template v-for="(actor, index) in runtimeActors" :key="actor.key">
+              <div v-if="index === 1" class="trpg-runtime-section-label">调查员</div>
+              <article class="trpg-runtime-card" :class="[{ expanded: expandedRuntimeKey === actor.key }, actor.runtime.controlMode.toLowerCase()]">
+                <button type="button" class="trpg-runtime-card-summary" :aria-expanded="expandedRuntimeKey === actor.key" @click="openRuntimeEditor(actor)">
+                  <span
+                    class="trpg-runtime-avatar"
+                    :class="{ kp: actor.runtime.actorType === 'kp', placeholder: !actor.image }"
+                    :style="actor.image ? { backgroundImage: `url(${actor.image})` } : {}"
+                  ><UserRound v-if="!actor.image" :size="16" /></span>
+                  <span class="trpg-runtime-identity">
+                    <strong>{{ actor.name }}</strong>
+                    <small>{{ runtimeSummary(actor) }}</small>
+                  </span>
+                  <span class="trpg-runtime-mode" :class="actor.runtime.controlMode.toLowerCase()">{{ runtimeModeLabel(actor) }}</span>
+                  <ChevronDown :size="16" :class="{ rotated: expandedRuntimeKey === actor.key }" />
+                </button>
+
+                <div v-if="actor.usage" class="trpg-runtime-context">
+                  <span><small>上下文</small><em>{{ runtimeContextPercent(actor) }}%</em></span>
+                  <div class="context-meter" :class="runtimeContextTone(actor)"><i :style="{ width: `${Math.min(runtimeContextPercent(actor), 100)}%` }" /></div>
+                </div>
+                <p v-if="!actor.runtime.modelApiAvailable" class="trpg-runtime-inline-warning">原模型已删除，现使用默认模型</p>
+
+                <div v-if="expandedRuntimeKey === actor.key" class="trpg-runtime-editor">
+                  <div v-if="actor.runtime.actorType === 'character'" class="trpg-runtime-field">
+                    <span>发言方式</span>
+                    <div class="segmented trpg-runtime-mode-switch">
+                      <button type="button" :class="{ active: runtimeControlMode === 'MODEL' }" @click="runtimeControlMode = 'MODEL'">模型</button>
+                      <button type="button" :class="{ active: runtimeControlMode === 'MANUAL' }" @click="runtimeControlMode = 'MANUAL'">人工</button>
+                    </div>
+                  </div>
+                  <p v-else class="trpg-runtime-kp-note">KP 仅支持模型发言</p>
+
+                  <template v-if="runtimeControlMode === 'MODEL'">
+                    <label class="trpg-runtime-field">
+                      <span>使用模型</span>
+                      <select v-model="runtimeModelApiId" class="trpg-runtime-model-select">
+                        <option value="">默认模型</option>
+                        <option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option>
+                      </select>
+                    </label>
+                    <div v-if="runtimeModelApiId && draftRuntimeModel()" class="trpg-runtime-model-meta">
+                      <span :class="`is-${draftRuntimeModel()?.status.toLowerCase()}`"><i />{{ modelStatusLabel(draftRuntimeModel()) }}</span>
+                      <em v-if="draftRuntimeModel()?.reasoningOutputStatus === 'DETECTED'">推理</em>
+                      <em v-if="Object.keys(draftRuntimeModel()?.requestOverrides || {}).length">{{ Object.keys(draftRuntimeModel()?.requestOverrides || {}).length }} 个额外参数</em>
+                    </div>
+                    <p v-if="draftRuntimeModel()?.status === 'FAILED'" class="trpg-runtime-warning">当前模型连接异常，发言可能失败。</p>
+                  </template>
+                  <p v-else class="trpg-runtime-manual-note">轮到该角色时由你输入</p>
+
+                  <div class="trpg-runtime-actions">
+                    <button type="button" class="button ghost" :disabled="runtimeSavingKey === actor.key" @click="expandedRuntimeKey = null">取消</button>
+                    <button type="button" class="button secondary" :disabled="runtimeSavingKey === actor.key || !runtimeDraftChanged(actor)" @click="saveRuntime(actor)">
+                      <LoaderCircle v-if="runtimeSavingKey === actor.key" class="spin" :size="14" />保存
+                    </button>
+                  </div>
+                </div>
+              </article>
+            </template>
+          </div>
         </section>
       </TabsContent>
 

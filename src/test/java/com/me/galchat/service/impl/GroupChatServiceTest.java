@@ -41,6 +41,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.transaction.TransactionStatus;
@@ -431,7 +432,7 @@ class GroupChatServiceTest {
     }
 
     @Test
-    void trpgCharacterStepSplitsDecisionAndActionFromOneModelStream() {
+    void trpgCharacterStepStreamsDeepSeekReasoningAndSplitsDecisionAction() {
         DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimeRegistry =
@@ -515,11 +516,10 @@ class GroupChatServiceTest {
                 });
         when(conversationService.nextSequence(7L)).thenReturn(1L);
         AssistantMessage output =
-                AssistantMessage.builder()
+                new DeepSeekAssistantMessage.Builder()
                         .content("<decision>先确认窗边脚印的方向。</decision>"
                                 + "<action>我蹲到窗边检查脚印。</action>")
-                        .properties(Map.of(
-                                "reasoningContent", "原始推理"))
+                        .reasoningContent("原始推理")
                         .build();
         when(model.stream(any(Prompt.class))).thenReturn(
                 Flux.just(new ChatResponse(

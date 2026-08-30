@@ -46,6 +46,22 @@ test('limits the activity pulse to active-turn status icons', async () => {
   assert.match(iconRule, /animation:\s*trpg-active-pulse\s+1\.8s\s+ease-in-out\s+infinite/)
 })
 
+test('uses a warm deep-orange rounded-square badge for the current user investigator', async () => {
+  const css = await readFile(new URL('../styles/index.css', import.meta.url), 'utf8')
+  const badgeRule = styleRule(css, '.trpg-player-control-badge')
+  const foreground = hexColor(badgeRule, 'color')
+  const background = hexColor(badgeRule, 'background')
+
+  assert.ok(foreground[0] - foreground[1] >= 60,
+    'the badge foreground should read as orange-red rather than brown or green')
+  assert.ok(foreground[1] - foreground[2] >= 25,
+    'the badge foreground should stay warm rather than red or gray')
+  assert.ok(background[0] - background[2] >= 25,
+    'the badge background should retain a visible warm-orange tint')
+  assert.match(badgeRule, /border-radius:\s*6px/,
+    'the player badge should be a rounded square rather than a circle')
+})
+
 test('renders an explicit event label for every active-turn actor', async (context) => {
   const vite = await createServer({
     appType: 'custom',
@@ -187,6 +203,60 @@ test('makes exploration investigator rows keyboard-focusable for their overview 
   }))
 
   assert.match(html, /class="trpg-actor-row running[^\"]*"[^>]*tabindex="0"/)
+})
+
+test('marks player and manually controlled investigators in execution rows', async (context) => {
+  const vite = await createServer({
+    appType: 'custom',
+    configFile: false,
+    root: fileURLToPath(new URL('../..', import.meta.url)),
+    plugins: [vue()],
+    resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  })
+  context.after(() => vite.close())
+  const { default: TrpgActorRoster } = await vite.ssrLoadModule('/src/components/TrpgActorRoster.vue')
+  const scene: TrpgExecutionScene = {
+    plan: { id: 25, source: 'COMBAT', displayName: '战斗第1轮', items: [] },
+    kind: 'combat', status: 'current', statusLabel: '当前战斗',
+    activeActors: [
+      {
+        item: { order: 1, actorType: 'user', subjectCharacterId: 501 },
+        name: '威尔', status: 'waiting_input', statusLabel: '等待玩家输入', genericKp: false,
+      },
+      {
+        item: { order: 2, actorType: 'character', actorId: 102, subjectCharacterId: 502 },
+        name: '查理', status: 'pending', statusLabel: '等待行动', genericKp: false,
+      },
+      {
+        item: { order: 3, actorType: 'character', actorId: 103, subjectCharacterId: 503 },
+        name: '安娜', status: 'pending', statusLabel: '等待行动', genericKp: false,
+      },
+    ],
+    waitingActors: [], readyActors: [], childScenes: [],
+  }
+
+  const html = await renderToString(createSSRApp({
+    render: () => h(TrpgActorRoster, {
+      scene,
+      combatOverview: [],
+      investigatorCards: [
+        { cardId: 501, actorType: 'PLAYER', name: '威尔', checkValues: {} },
+        { cardId: 502, actorType: 'BOT', name: '查理', checkValues: {} },
+        { cardId: 503, actorType: 'BOT', name: '安娜', checkValues: {} },
+      ],
+      actorRuntimes: [
+        { actorType: 'character', actorId: 102, controlMode: 'MANUAL', modelApiAvailable: true },
+        { actorType: 'character', actorId: 103, controlMode: 'MODEL', modelApiAvailable: true },
+      ],
+    }),
+  }))
+
+  assert.equal(html.match(/class="trpg-player-control-badge"/g)?.length, 2)
+  assert.match(html, /威尔[\s\S]*?class="trpg-player-control-badge"[^>]*aria-label="由你控制"[^>]*>[\s\S]*?<svg/)
+  assert.match(html, /查理[\s\S]*?class="trpg-player-control-badge"[^>]*aria-label="由你控制"[^>]*>[\s\S]*?<svg/)
+  assert.doesNotMatch(html, /class="trpg-player-control-badge"[^>]*>你<\//)
+  assert.doesNotMatch(html, /安娜[\s\S]*?class="trpg-player-control-badge"/)
 })
 
 test('renders an investigator execution row as an explicit character-card action', async (context) => {

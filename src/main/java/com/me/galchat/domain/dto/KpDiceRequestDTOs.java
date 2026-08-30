@@ -11,11 +11,15 @@ import java.util.List;
 
 public final class KpDiceRequestDTOs {
 
+    public static final String SELF_CONTAINED_REASON =
+            "写成可独立展示的简短完整句，必须使用有区分度的角色简称明确写出谁做了什么或经历了什么，不得省略主语；无需使用准确人物卡全名，只有简称会混淆时才补充必要部分；";
+
     private KpDiceRequestDTOs() {
     }
 
     public record Check(
-            @ToolParam(description = "用简短短语概括本次检定原因；不要复述行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "单人检定写明检定者与具体行动或目的；不要复述完整行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(
                     description = "检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
@@ -26,7 +30,8 @@ public final class KpDiceRequestDTOs {
     }
 
     public record GroupCheck(
-            @ToolParam(description = "用简短短语概括本次群体检定原因；不要复述行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "群体检定写明全部参与者与共同行动或各自行动；不要复述完整行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(
                     description = "检定难度：REGULAR普通、HARD困难、EXTREME极难；省略时为REGULAR",
@@ -63,7 +68,8 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Opposed(
-            @ToolParam(description = "用简短短语概括本次对抗原因；不要复述行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "对抗检定写明对抗各方及其互斥行动或目标；不要复述完整行动过程、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(description = "参与对抗的角色及其检定项，至少包含两个不同角色")
             List<CheckTarget> targets,
@@ -74,7 +80,8 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Pushed(
-            @ToolParam(description = "用简短短语概括孤注一掷原因或玩家的新行动；不要复述完整行动过程、规则或预期结果")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "孤注一掷写明本轮实际执行者及其新增努力；不要复述完整行动过程、规则或预期结果")
             String reason,
             @ToolParam(description = "原检定的掷骰概要ID，即历史<dice-roll>中的summary-id")
             Long diceRollSummaryId,
@@ -91,14 +98,16 @@ public final class KpDiceRequestDTOs {
     }
 
     public record SanCheck(
-            @ToolParam(description = "用简短短语概括触发理智检定的原因；不要复述完整场景、规则或预期结果。会作为掷骰概要和前端展示文本")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "理智检定写明谁目睹或经历了什么；不要复述完整场景、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(description = "需要按当前SAN值进行理智检定的角色名列表")
             List<String> characterNames) {
     }
 
     public record SanLoss(
-            @ToolParam(description = "用简短短语概括理智损失原因；不要复述完整场景、规则或结果。会作为新增掷骰轮的展示文本")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "理智损失写明谁因何种恐怖经历承受损失；不要复述完整场景、规则或结果。会作为新增掷骰轮的展示文本")
             String reason,
             @ToolParam(description = "上一轮理智检定成功时使用的SAN损失表达式，例如0或1")
             String successFormula,
@@ -107,7 +116,8 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Damage(
-            @ToolParam(description = "用简短短语概括伤害原因；不要复述行动过程、规则或结果。会作为掷骰概要和前端展示文本")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "伤害写明谁因谁的何种行为或哪种环境危险受到伤害；不要复述完整行动过程、规则或结果。会作为掷骰概要和前端展示文本")
             String reason,
             @ToolParam(description = "本轮各受伤角色及对应伤害表达式")
             List<DamageTarget> targets) {
@@ -121,7 +131,8 @@ public final class KpDiceRequestDTOs {
     }
 
     public record Healing(
-            @ToolParam(description = "用简短短语概括恢复生命的原因；不要复述行动过程、规则或结果。会作为掷骰概要或新增掷骰轮的展示文本")
+            @ToolParam(description = SELF_CONTAINED_REASON
+                    + "治疗写明谁以何种方式为谁恢复生命；不要复述完整行动过程、规则或结果。会作为掷骰概要或新增掷骰轮的展示文本")
             String reason,
             @ToolParam(description = "回血来源模式：STANDALONE无来源回血，FOLLOW_UP单次检定成功后的回血")
             HealingSourceMode sourceMode,

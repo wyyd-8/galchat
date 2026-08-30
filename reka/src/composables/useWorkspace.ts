@@ -793,8 +793,10 @@ export function useWorkspace() {
         ? actorRuntimes.value.map((value) => `${value.actorType}:${value.actorId ?? ''}` === key ? saved : value)
         : [...actorRuntimes.value, saved]
       notify('发言方式已保存', saved.controlMode === 'MANUAL' ? '轮到该角色时会等待人工输入。' : '后续步骤会使用所选模型。', 'success')
+      return saved
     } catch (error) {
       notify('发言方式保存失败', errorMessage(error), 'danger')
+      return undefined
     }
   }
   async function scrollToBottom(force = false) {

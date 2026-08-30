@@ -1,5 +1,5 @@
 import type {
-  ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowUsage, Conversation, CurrentTurn, InvestigatorCardSummary,
+  ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
@@ -124,7 +124,7 @@ export const api = {
   conversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}`),
   createConversation: (payload: { userWorldId: number; moduleId?: number; mode: string; title: string; characterIds: number[] }) => request<Conversation>('/group-chat/conversations', { method: 'POST', body: body(payload) }),
   closeConversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}/close`, { method: 'POST' }),
-  contextWindow: (id: number) => request<ContextWindowUsage | null>(`/group-chat/conversations/${id}/context-window`),
+  contextWindow: (id: number) => request<ContextWindowOverview | null>(`/group-chat/conversations/${id}/context-window`),
   updateGameTime: (id: number, payload: { dayNo: number; period: TrpgGameTimePeriod; revision: number }) =>
     request<TrpgGameTime>(`/group-chat/conversations/${id}/game-time`, { method: 'PUT', body: body(payload) }),
   groupMessages: (id: number, beforeId?: number, size = 50) => request<GroupMessage[]>(`/group-chat/conversations/${id}/messages?size=${size}${beforeId ? `&beforeId=${beforeId}` : ''}`),

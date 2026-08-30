@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Check, Pause } from '@lucide/vue'
 import { TooltipProvider } from 'reka-ui'
-import type { InvestigatorCardSummary, TrpgCombatParticipantOverview } from '../api/types'
+import type { GroupActorRuntime, InvestigatorCardSummary, TrpgCombatParticipantOverview } from '../api/types'
 import TrpgActorRow from './TrpgActorRow.vue'
 import type { TrpgExecutionActor, TrpgExecutionScene } from './trpgExecutionState'
 
@@ -9,8 +9,10 @@ const props = withDefaults(defineProps<{
   scene: TrpgExecutionScene
   combatOverview: TrpgCombatParticipantOverview[]
   investigatorCards?: InvestigatorCardSummary[]
+  actorRuntimes?: GroupActorRuntime[]
 }>(), {
   investigatorCards: () => [],
+  actorRuntimes: () => [],
 })
 const emit = defineEmits<{
   openCard: [cardId: number]
@@ -19,6 +21,17 @@ const emit = defineEmits<{
 function actorKey(actor: TrpgExecutionActor): string {
   const item = actor.item
   return `${item.actorType}-${item.actorId ?? 'none'}-${item.subjectCharacterId ?? 'none'}-${item.order}`
+}
+
+function isUserControlled(actor: TrpgExecutionActor): boolean {
+  const subjectCharacterId = actor.item.subjectCharacterId
+  const playerControlled = subjectCharacterId != null && props.investigatorCards.some((card) =>
+    card.actorType === 'PLAYER' && card.cardId === subjectCharacterId)
+  if (playerControlled) return true
+  return actor.item.actorType === 'character' && actor.item.actorId != null
+    && props.actorRuntimes.some((runtime) => runtime.actorType === 'character'
+      && runtime.actorId === actor.item.actorId
+      && runtime.controlMode === 'MANUAL')
 }
 </script>
 
@@ -31,6 +44,7 @@ function actorKey(actor: TrpgExecutionActor): string {
           :scene-kind="scene.kind"
           :combat-overview="combatOverview"
           :investigator-cards="investigatorCards"
+          :player-controlled="isUserControlled(actor)"
           @open-card="emit('openCard', $event)"
         />
         <div v-if="actor.routedActor" class="trpg-routed-actor">
@@ -39,6 +53,7 @@ function actorKey(actor: TrpgExecutionActor): string {
             :scene-kind="scene.kind"
             :combat-overview="combatOverview"
             :investigator-cards="investigatorCards"
+            :player-controlled="isUserControlled(actor.routedActor)"
             @open-card="emit('openCard', $event)"
           />
         </div>
@@ -55,6 +70,7 @@ function actorKey(actor: TrpgExecutionActor): string {
             :scene-kind="scene.kind"
             :combat-overview="combatOverview"
             :investigator-cards="investigatorCards"
+            :player-controlled="isUserControlled(actor)"
             display-state="waiting"
             @open-card="emit('openCard', $event)"
           />
@@ -72,6 +88,7 @@ function actorKey(actor: TrpgExecutionActor): string {
             :scene-kind="scene.kind"
             :combat-overview="combatOverview"
             :investigator-cards="investigatorCards"
+            :player-controlled="isUserControlled(actor)"
             display-state="ready"
             @open-card="emit('openCard', $event)"
           />

@@ -249,6 +249,29 @@ test('moves manual and automatic restore points into one recovery timeline', asy
   'investigator state should not be shown on the recovery timeline')
 })
 
+test('keeps actor speaking controls inside the compact status dashboard', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const statusPanel = findElement(baseParse(template), (element) => element.tag === 'TabsContent'
+    && hasAttribute(element, 'value', 'status'))
+  assert.ok(statusPanel, 'the tools dialog should keep a status panel')
+
+  const dashboard = findElement(statusPanel as unknown as RootNode,
+    (element) => hasClass(element, 'trpg-runtime-dashboard'))
+  assert.ok(dashboard, 'the status panel should contain the actor speaking dashboard')
+  assert.match(textContent(dashboard), /角色发言/)
+  assert.match(textContent(dashboard), /模型.*人工/)
+  assert.ok(findElement(dashboard as unknown as RootNode,
+    (element) => hasClass(element, 'trpg-runtime-card')),
+  'actors should be displayed as compact expandable cards')
+  assert.ok(findElement(dashboard as unknown as RootNode,
+    (element) => element.tag === 'select' && hasClass(element, 'trpg-runtime-model-select')),
+  'expanded actor cards should choose a managed model inline')
+  assert.match(textContent(dashboard), /KP 仅支持模型发言/)
+  assert.doesNotMatch(textContent(dashboard), /运行时|自动降级|请求参数会在实际调用时/)
+})
+
 test('uses foreground dialogs for load, rollback, and manual-save deletion confirmation', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]

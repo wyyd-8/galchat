@@ -13,6 +13,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TrpgRulePromptConstantTest {
 
     @Test
+    void diceReasonsUseDistinctiveShortNamesForActorActionDescriptions() {
+        assertThat(TrpgRulePromptConstant.KP_RESIDENT_RULES)
+                .contains("reason")
+                .contains("独立展示")
+                .contains("不得省略主语")
+                .contains("谁做了什么或经历了什么")
+                .contains("有区分度的简称")
+                .contains("无需复述准确人物卡全名")
+                .contains("群体或对抗")
+                .contains("伤害或治疗");
+    }
+
+    @Test
     void publicAdjudicationNarratesObservableConsequencesWithoutMechanics() {
         assertThat(TrpgRulePromptConstant.KP_RESIDENT_RULES)
                 .contains("骰点和工具结果只用于内部确定事实")

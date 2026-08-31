@@ -67,6 +67,16 @@ function findElement(root: RootNode, predicate: (element: ElementNode) => boolea
   return visit(root)
 }
 
+function textContent(node: unknown): string {
+  if (!node || typeof node !== 'object') return ''
+  const candidate = node as { type?: number, content?: unknown, children?: unknown[] }
+  if (candidate.type === NodeTypes.TEXT || candidate.type === NodeTypes.SIMPLE_EXPRESSION) {
+    return typeof candidate.content === 'string' ? candidate.content : ''
+  }
+  if (candidate.type === NodeTypes.INTERPOLATION) return textContent(candidate.content)
+  return (candidate.children || []).map(textContent).join('')
+}
+
 test('renders the opposed-check separator as an accessible crossed-swords icon', async () => {
   const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
@@ -107,7 +117,7 @@ test('renders structured dice messages with the dedicated compact component', as
   assert.equal(visit(root), true)
 })
 
-test('reuses iconless chat dice cards for the tool dice history', async () => {
+test('matches the approved filter hierarchy and uses dedicated tool history cards', async () => {
   const source = await readFile(new URL('../../components/TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
@@ -117,16 +127,65 @@ test('reuses iconless chat dice cards for the tool dice history', async () => {
   )))
 
   assert.ok(diceTab, 'the tools dialog should contain a dice tab')
-  assert.equal(Boolean(findElement(diceTab as unknown as RootNode, (element) => element.tag === 'input')), false)
-  const card = findElement(diceTab as unknown as RootNode, (element) => element.tag === 'DiceRollMessage')
-  assert.ok(card, 'the dice tab should reuse the chat dice message component')
-  assert.equal(card.props.some((prop) => (
+  const toolbar = findElementByClass(diceTab as unknown as RootNode, 'dice-history-toolbar')
+  assert.ok(toolbar, 'the dice tab should contain the approved filter panel')
+  assert.ok(findElement(toolbar as unknown as RootNode, (element) => (
+    element.tag === 'input' && element.props.some((prop) => (
+      prop.type === NodeTypes.ATTRIBUTE
+        && prop.name === 'class'
+        && prop.value?.content.split(/\s+/).includes('dice-history-search')
+    ))
+  )), 'the dice tab should filter history by name')
+  assert.equal(Array.from({ length: 2 }, (_, index) => findElement(
+    toolbar as unknown as RootNode,
+    (element) => element.tag === 'select' && element.props.some((prop) => (
+      prop.type === NodeTypes.ATTRIBUTE
+        && prop.name === 'class'
+        && prop.value?.content.split(/\s+/).includes(index === 0
+          ? 'dice-history-category-filter'
+          : 'dice-history-result-filter')
+    )),
+  )).every(Boolean), true, 'the dice tab should filter by category and result')
+  assert.match(textContent(toolbar), /名称/)
+  assert.match(textContent(toolbar), /掷骰类别/)
+  assert.match(textContent(toolbar), /检定结果/)
+
+  assert.ok(findElementByClass(diceTab as unknown as RootNode, 'dice-history-filter-meta'),
+    'the result count and clear action should sit below the filter panel')
+  assert.ok(findElementByClass(diceTab as unknown as RootNode, 'dice-history-record'),
+    'tool history should use the dedicated compact record from the approved design')
+  assert.equal(findElement(diceTab as unknown as RootNode,
+    (element) => element.tag === 'DiceRollMessage'), undefined,
+  'the chat card structure should not dictate the tool history layout')
+})
+
+test('keeps the load-earlier action at the bottom of the scrollable dice record flow', async () => {
+  const source = await readFile(new URL('../../components/TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const root = baseParse(template)
+  const flow = findElementByClass(root, 'dice-history-scroll')
+  assert.ok(flow, 'dice records should have one scrollable flow')
+  const loadZone = findElementByClass(flow as unknown as RootNode, 'dice-history-load-zone')
+  assert.ok(loadZone, 'the load action should have the approved divider and explanatory hint')
+
+  const loadEarlier = findElement(loadZone as unknown as RootNode, (element) => (
+    element.tag === 'button' && element.props.some((prop) => (
+      prop.type === NodeTypes.ATTRIBUTE
+        && prop.name === 'class'
+        && prop.value?.content.split(/\s+/).includes('dice-history-load-more')
+    ))
+  ))
+  assert.ok(loadEarlier, 'the load-earlier button should be inside the dice record flow')
+  assert.ok(findElement(loadZone as unknown as RootNode, (element) => element.tag === 'p'),
+    'the load zone should explain whether older chat can still be searched')
+  assert.equal(loadEarlier.props.some((prop) => (
     prop.type === NodeTypes.DIRECTIVE
-      && prop.name === 'bind'
+      && prop.name === 'on'
       && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
-      && prop.arg.content === 'show-icon'
+      && prop.arg.content === 'click'
       && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
-      && prop.exp.content === 'false'
+      && prop.exp.content.includes("emit('loadEarlier')")
   )), true)
 })
 
@@ -186,6 +245,25 @@ test('wires tool dice location requests to the chat navigator', async () => {
   )), true)
 })
 
+test('wires the tools history loader to the existing group-chat pagination state', async () => {
+  const source = await readFile(new URL('../../App.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'App should contain a template')
+  const tools = findElement(baseParse(template), (element) => element.tag === 'TrpgToolsDialog')
+  assert.ok(tools, 'App should render the TRPG tools dialog')
+
+  const bindings = new Map(tools.props.flatMap((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      ? [[`${prop.name}:${prop.arg.content}`, prop.exp.content] as const]
+      : []
+  )))
+  assert.equal(bindings.get('bind:has-older-messages'), 'workspace.hasOlderGroupMessages.value')
+  assert.equal(bindings.get('bind:loading-older-messages'), 'workspace.loading.chat')
+  assert.equal(bindings.get('on:load-earlier'), 'workspace.loadOlderGroupMessages')
+})
+
 test('opens each new backend dice roll after its chat card is rendered', async () => {
   const appSource = await readFile(new URL('../../App.vue', import.meta.url), 'utf8')
   const workspaceSource = await readFile(new URL('../../composables/useWorkspace.ts', import.meta.url), 'utf8')
@@ -213,16 +291,39 @@ test('marks each chat message as a scroll target for tool navigation', async () 
   )), true)
 })
 
-test('reserves the card right edge for the tool locate control', async () => {
+test('matches the approved compact filter, record, category pill, and load-zone proportions', async () => {
   const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
-  const item = cssRule(styles, '.dice-history-item')
-  const card = cssRule(styles, '.dice-history-item .dice-message-card')
+  const toolbar = cssRule(styles, '.dice-history-toolbar')
+  const filterLabel = cssRule(styles, '.dice-history-toolbar label > span:first-child')
+  const filterMeta = cssRule(styles, '.dice-history-filter-meta')
+  const record = cssRule(styles, '.dice-history-record')
+  const recordTitle = cssRule(styles, '.dice-history-record-main strong')
+  const category = cssRule(styles, '.dice-history-category')
   const locate = cssRule(styles, '.dice-history-locate')
+  const loadZone = cssRule(styles, '.dice-history-load-zone')
 
-  assert.match(item, /position:\s*relative/)
-  assert.match(card, /padding-right:\s*58px/)
-  assert.match(locate, /position:\s*absolute/)
-  assert.match(locate, /right:\s*14px/)
+  assert.match(toolbar, /padding:\s*13px/)
+  assert.match(toolbar, /grid-template-columns:\s*minmax\(210px,\s*1fr\)\s+145px\s+135px/)
+  assert.match(toolbar, /background:\s*#f7f5ef/)
+  assert.match(filterLabel, /display:\s*block/)
+  assert.match(filterLabel, /margin:\s*0 0 6px 2px/)
+  assert.match(filterMeta, /min-height:\s*30px/)
+  assert.match(record, /min-height:\s*57px/)
+  assert.match(recordTitle, /font-size:\s*11px/)
+  assert.match(category, /border-radius:\s*999px/)
+  assert.match(category, /background:\s*#e4ece8/)
+  assert.doesNotMatch(locate, /position:\s*absolute/)
+  assert.match(loadZone, /margin-top:\s*13px/)
+  assert.match(loadZone, /padding-top:\s*13px/)
+  assert.match(loadZone, /border-top:\s*1px solid/)
+})
+
+test('keeps keyboard focus on tool tabs visible without the boxed browser outline', async () => {
+  const styles = await readFile(new URL('../../styles/index.css', import.meta.url), 'utf8')
+  const focus = cssRule(styles, '.trpg-tools .tabs-list button:focus-visible')
+
+  assert.match(focus, /outline:\s*none/)
+  assert.match(focus, /background:\s*rgba\(41,79,73,\.06\)/)
 })
 
 test('offers an explicit continue action below replay after the first player roll', async () => {

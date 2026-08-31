@@ -9,6 +9,8 @@ import {
   createDicePlayerSummary,
   createDicePlayerStatus,
   createGroupOutcomeVisibility,
+  type DiceHistoryEntry,
+  type DiceHistoryFilters,
   type DicePlaybackRequest,
 } from './dicePlayback.ts'
 import {
@@ -709,10 +711,167 @@ test('creates one tool history entry with its own locator for every dice round',
     messageId: entry.messageId,
     roundNo: entry.aggregate.results[0]?.roundNo,
   })), [
-    { messageId: 30, roundNo: 1 },
     { messageId: 30, roundNo: 2 },
+    { messageId: 30, roundNo: 1 },
     { messageId: 10, roundNo: 1 },
   ])
+})
+
+test('filters tool dice history by title, dice category, and result kind', () => {
+  const listDiceHistoryEntries = Reflect.get(diceState, 'listDiceHistoryEntriesNewestFirst') as
+    | ((messages: GroupMessage[]) => DiceHistoryEntry[])
+    | undefined
+  const filterDiceHistoryEntries = Reflect.get(diceState, 'filterDiceHistoryEntries') as
+    | ((entries: DiceHistoryEntry[], filters: DiceHistoryFilters) => DiceHistoryEntry[])
+    | undefined
+
+  const success = createDiceDebugAggregatePreset('multiplayer-check')
+  success.summary = {
+    ...success.summary,
+    id: 100,
+    reason: '林恩检查门锁',
+    toolName: 'requestCheck',
+  }
+  success.results = [{
+    ...success.results[0]!,
+    id: 101,
+    summaryId: 100,
+    reason: '林恩检查门锁',
+    resolvedAt: '2026-08-20T12:31:00Z',
+  }]
+
+  const failure = createDiceDebugAggregatePreset('multiplayer-check')
+  failure.summary = {
+    ...failure.summary,
+    id: 200,
+    reason: '陈默聆听走廊',
+    toolName: 'requestCheck',
+  }
+  failure.results = [{
+    ...failure.results[1]!,
+    id: 201,
+    summaryId: 200,
+    reason: '陈默聆听走廊',
+    resolvedAt: '2026-08-20T12:32:00Z',
+  }]
+
+  const damage = valueRollAggregate('rollDamage', 'DAMAGE', [{
+    name: '汤普森',
+    result: { formula: '1D6', modules: [], result: 5 },
+  }])
+  damage.summary = {
+    ...damage.summary,
+    id: 300,
+    reason: '短刀命中汤普森',
+  }
+  damage.results = damage.results.map((detail) => ({
+    ...detail,
+    id: 301,
+    summaryId: 300,
+    reason: '短刀命中汤普森',
+    resolvedAt: '2026-08-20T12:33:00Z',
+  }))
+
+  const messages: GroupMessage[] = [success, failure, damage].map((diceRoll, index) => ({
+    id: (index + 1) * 10,
+    conversationId: 1,
+    speakerType: 'kp',
+    messageKind: 'dice_roll',
+    content: '',
+    sequenceNo: index + 1,
+    status: 'completed',
+    diceRoll,
+  }))
+
+  assert.equal(typeof listDiceHistoryEntries, 'function')
+  assert.equal(typeof filterDiceHistoryEntries, 'function')
+  const entries = listDiceHistoryEntries?.(messages) || []
+  assert.deepEqual(
+    filterDiceHistoryEntries?.(entries, { query: '  汤普森 ' }).map((entry) => entry.messageId),
+    [30],
+  )
+  assert.deepEqual(
+    filterDiceHistoryEntries?.(entries, { category: '普通检定' }).map((entry) => entry.messageId),
+    [20, 10],
+  )
+  assert.deepEqual(
+    filterDiceHistoryEntries?.(entries, { resultKind: 'success' }).map((entry) => entry.messageId),
+    [10],
+  )
+  assert.deepEqual(
+    filterDiceHistoryEntries?.(entries, { resultKind: 'failure' }).map((entry) => entry.messageId),
+    [20],
+  )
+  assert.deepEqual(
+    filterDiceHistoryEntries?.(entries, { resultKind: 'numeric' }).map((entry) => entry.messageId),
+    [30],
+  )
+})
+
+test('labels a weapon follow-up round as damage instead of its parent attack category', () => {
+  const listDiceHistoryEntries = Reflect.get(diceState, 'listDiceHistoryEntriesNewestFirst') as
+    | ((messages: GroupMessage[]) => Array<{
+      category?: string
+      occurredAt?: string
+      statusLabel?: string
+      aggregate: DiceRollAggregate
+    }>)
+    | undefined
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  aggregate.summary.toolName = 'requestMeleeAttack'
+  aggregate.results = [
+    {
+      ...aggregate.results[0]!, id: 401, roundNo: 1, displayType: 'MELEE_ATTACK',
+      resolution: { ...aggregate.results[0]!.resolution, type: 'MELEE_ATTACK' },
+      resolvedAt: '2026-08-20T12:40:00Z',
+    },
+    {
+      ...aggregate.results[1]!, id: 402, roundNo: 2, displayType: 'DAMAGE',
+      resultData: { formula: '1D6', modules: [], result: 5 },
+      resolution: { type: 'DAMAGE', outcome: { characterName: '汤普森' } },
+      resolvedAt: '2026-08-20T12:41:00Z',
+    },
+  ]
+  const entries = listDiceHistoryEntries?.([{
+    id: 40, conversationId: 1, speakerType: 'kp', messageKind: 'dice_roll',
+    content: '', sequenceNo: 40, status: 'completed', diceRoll: aggregate,
+  }])
+
+  assert.deepEqual(entries?.map((entry) => ({
+    roundNo: entry.aggregate.results[0]?.roundNo,
+    category: entry.category,
+    occurredAt: entry.occurredAt,
+    statusLabel: entry.statusLabel,
+  })), [
+    { roundNo: 2, category: '伤害结算', occurredAt: '2026-08-20T12:41:00Z', statusLabel: '-5' },
+    { roundNo: 1, category: '对抗检定', occurredAt: '2026-08-20T12:40:00Z', statusLabel: '成功' },
+  ])
+})
+
+test('shows signed numeric values without a points suffix on value-roll cards', () => {
+  const damage = valueRollAggregate('rollDamage', 'DAMAGE', [{
+    name: '林恩', result: { formula: '5', modules: [], result: 5 },
+  }])
+  const healing = valueRollAggregate('rollHealing', 'HEALING', [{
+    name: '林恩', result: { formula: '3', modules: [], result: 3 },
+  }])
+  const zero = valueRollAggregate('rollHealing', 'HEALING', [{
+    name: '林恩', result: { formula: '0', modules: [], result: 0 },
+  }])
+
+  assert.equal(diceMessagePresentation(damage)?.statusLabel, '-5')
+  assert.equal(diceMessagePresentation(healing)?.statusLabel, '+3')
+  assert.equal(diceMessagePresentation(zero)?.statusLabel, '0')
+})
+
+test('formats dice history timestamps as local hours and minutes', () => {
+  const formatDiceHistoryTime = Reflect.get(diceState, 'formatDiceHistoryTime') as
+    | ((value?: string, timeZone?: string) => string)
+    | undefined
+
+  assert.equal(typeof formatDiceHistoryTime, 'function')
+  assert.equal(formatDiceHistoryTime?.('2026-08-20T12:34:00Z', 'Asia/Shanghai'), '20:34')
+  assert.equal(formatDiceHistoryTime?.(undefined, 'Asia/Shanghai'), '')
 })
 
 test('finds the chat element that owns a tool dice message id', () => {

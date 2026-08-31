@@ -5,7 +5,6 @@ import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
 import DiceDebugPanel from '@/dice/components/DiceDebugPanel.vue'
-import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import { api } from '@/api/client'
 import type {
   Character, CharacterCard, CocModule, ContextWindowOverview, ContextWindowUsage, Conversation, DiceRollAggregate,
@@ -13,7 +12,11 @@ import type {
   ModelApi, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave,
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
-import { hydrateDiceMessage, listDiceHistoryEntriesNewestFirst } from '@/dice/domain/dicePlayback'
+import {
+  DICE_HISTORY_CATEGORY_OPTIONS, filterDiceHistoryEntries, formatDiceHistoryTime,
+  hydrateDiceMessage, listDiceHistoryEntriesNewestFirst,
+} from '@/dice/domain/dicePlayback'
+import type { DiceHistoryCategory, DiceHistoryResultKind } from '@/dice/domain/dicePlayback'
 import {
   buildFetchedRollbackMessagePreview, buildSkillDisplayItems, buildToolCharacterTargets, buildToolRecoveryTimeline, buildToolRollbackActions, formatCheckRate, formatRollbackPreviewMessage, nextSkillGroup, preferredToolCharacterTargetKey, resolveRollbackMessagePreview, resolveToolRestoreInvestigators, resolveWeaponCheckValue, restoreInvestigatorCondition, shouldShowWeaponRisk, toolDialogContentClass,
   useToolRestoreConfirmation,
@@ -31,6 +34,8 @@ const props = defineProps<{
   actorRuntimes: GroupActorRuntime[]
   modelApis: ModelApi[]
   saveActorRuntime: (payload: GroupActorRuntimeSavePayload) => Promise<GroupActorRuntime | undefined>
+  hasOlderMessages: boolean
+  loadingOlderMessages: boolean
   requestedCardId?: number | null
 }>()
 const emit = defineEmits<{
@@ -38,6 +43,7 @@ const emit = defineEmits<{
   openDice: [aggregate: DiceRollAggregate]
   debugDice: [aggregate: DiceRollAggregate]
   locateDice: [messageId: number]
+  loadEarlier: []
 }>()
 
 const busy = ref(false)
@@ -55,6 +61,9 @@ const skillPanelExpanded = ref(false)
 const skillSearchQuery = ref('')
 const skillSortMode = ref<ToolSkillSortMode>('default')
 const skillSortDirection = ref<ToolSkillSortDirection>('asc')
+const diceSearchQuery = ref('')
+const diceCategoryFilter = ref<DiceHistoryCategory | ''>('')
+const diceResultFilter = ref<DiceHistoryResultKind | ''>('')
 const restoreConfirmation = useToolRestoreConfirmation(open, selectedToolTab)
 const rollbackMessagePreview = ref<ToolRollbackMessagePreview | null>(null)
 const rollbackPreviewLoading = ref(false)
@@ -120,7 +129,32 @@ const manualRuntimeCount = computed(() => runtimeActors.value.filter((actor) => 
 const selectedActorName = computed(() => selectedTarget.value?.name || props.username.trim() || '当前玩家')
 const completedCardCount = computed(() => characterTargets.value.filter((target) => target.cardId !== undefined).length)
 const dialogContentClass = computed(() => toolDialogContentClass(selectedToolTab.value))
-const diceHistoryEntries = computed(() => listDiceHistoryEntriesNewestFirst(props.messages))
+const allDiceHistoryEntries = computed(() => listDiceHistoryEntriesNewestFirst(props.messages))
+const diceHistoryEntries = computed(() => filterDiceHistoryEntries(allDiceHistoryEntries.value, {
+  query: diceSearchQuery.value,
+  category: diceCategoryFilter.value,
+  resultKind: diceResultFilter.value,
+}))
+const diceFiltersActive = computed(() => Boolean(
+  diceSearchQuery.value.trim() || diceCategoryFilter.value || diceResultFilter.value,
+))
+const diceHistoryMatchCopy = computed(() => diceFiltersActive.value
+  ? `找到 ${diceHistoryEntries.value.length} 条 · 已检索最近 ${allDiceHistoryEntries.value.length} 条骰子记录`
+  : `已显示 ${diceHistoryEntries.value.length} 条掷骰记录`)
+const diceHistoryLoadLabel = computed(() => {
+  if (props.loadingOlderMessages) return '正在加载…'
+  if (!props.hasOlderMessages) return '已显示全部聊天记录'
+  return diceFiltersActive.value ? '加载更早记录并继续筛选' : '加载更早的聊天记录'
+})
+const diceHistoryLoadHint = computed(() => props.hasOlderMessages
+  ? '将继续查找更早聊天中的骰子记录'
+  : '没有更多聊天记录了')
+const diceResultOptions: Array<{ value: DiceHistoryResultKind; label: string }> = [
+  { value: 'numeric', label: '数值' },
+  { value: 'success', label: '成功' },
+  { value: 'failure', label: '失败' },
+  { value: 'other', label: '其他' },
+]
 const rollbackActions = computed(() => buildToolRollbackActions(rollbackOverview.value))
 const recoveryTimeline = computed(() => buildToolRecoveryTimeline(save.value, rollbackOverview.value))
 const pendingRollback = computed(() => rollbackActions.value.find(
@@ -193,6 +227,11 @@ const characterStatuses = computed(() => {
 
 function time(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '暂无记录' }
 function shown(value?: string | number | null) { return value == null || value === '' ? '—' : value }
+function clearDiceFilters() {
+  diceSearchQuery.value = ''
+  diceCategoryFilter.value = ''
+  diceResultFilter.value = ''
+}
 function resourceStyle(current?: number, max?: number) {
   const ratio = current == null || !max ? 0 : Math.max(0, Math.min(100, Math.round(current / max * 100)))
   return { '--resource-ratio': `${ratio}%` }
@@ -438,6 +477,7 @@ watch(() => props.conversation.id, () => {
   skillSearchQuery.value = ''
   skillSortMode.value = 'default'
   skillSortDirection.value = 'asc'
+  clearDiceFilters()
   cards.value = []
   contextOverview.value = null
   expandedRuntimeKey.value = null
@@ -830,32 +870,89 @@ watch(selectedSheetTab, (tab) => {
       </TabsContent>
 
       <TabsContent value="dice" class="tabs-content tool-section">
-        <div v-if="diceHistoryEntries.length" class="dice-history-list">
-          <div
-            v-for="entry in diceHistoryEntries"
-            :key="`${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`"
-            class="dice-history-item"
-          >
-            <DiceRollMessage
-              :aggregate="entry.aggregate"
-              :show-icon="false"
-              @open="emit('openDice', $event)"
-            />
-            <button
-              type="button"
-              class="dice-history-locate"
-              aria-label="定位到聊天记录"
-              title="定位到聊天记录"
-              @click="emit('locateDice', entry.messageId)"
-            >
-              <LocateFixed :size="15" />
-            </button>
+        <div class="dice-history-panel">
+          <div class="dice-history-toolbar">
+            <label class="dice-history-search-wrap">
+              <span>名称</span>
+              <span class="dice-history-search-control">
+                <Search :size="14" />
+                <input
+                  v-model="diceSearchQuery"
+                  type="search"
+                  class="dice-history-search"
+                  aria-label="按名称筛选掷骰记录"
+                  placeholder="搜索掷骰名称"
+                />
+              </span>
+            </label>
+            <label class="dice-history-select-field">
+              <span>掷骰类别</span>
+              <select v-model="diceCategoryFilter" class="dice-history-category-filter" aria-label="按掷骰类别筛选">
+                <option value="">全部类别</option>
+                <option v-for="category in DICE_HISTORY_CATEGORY_OPTIONS" :key="category" :value="category">{{ category }}</option>
+              </select>
+            </label>
+            <label class="dice-history-select-field">
+              <span>检定结果</span>
+              <select v-model="diceResultFilter" class="dice-history-result-filter" aria-label="按检定结果筛选">
+                <option value="">全部结果</option>
+                <option v-for="option in diceResultOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
           </div>
-        </div>
-        <div v-else class="dice-history-empty">
-          <Dices :size="26" />
-          <strong>当前聊天还没有掷骰记录</strong>
-          <p>跑团中产生的掷骰会自动出现在这里。</p>
+          <div class="dice-history-filter-meta">
+            <span>{{ diceHistoryMatchCopy }}</span>
+            <button v-if="diceFiltersActive" type="button" class="dice-history-clear" @click="clearDiceFilters">清除筛选</button>
+          </div>
+
+          <div class="dice-history-scroll">
+            <div v-if="diceHistoryEntries.length" class="dice-history-list">
+              <article
+                v-for="entry in diceHistoryEntries"
+                :key="`${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`"
+                class="dice-history-item dice-history-record"
+                :class="[`is-${entry.tone}`, `is-result-${entry.resultKind}`]"
+              >
+                <button type="button" class="dice-history-record-open" @click="emit('openDice', entry.aggregate)">
+                  <span class="dice-history-record-main">
+                    <strong>{{ entry.title }}</strong>
+                    <small>
+                      <em class="dice-history-category">{{ entry.category }}</em>
+                      <time v-if="formatDiceHistoryTime(entry.occurredAt)">{{ formatDiceHistoryTime(entry.occurredAt) }}</time>
+                    </small>
+                  </span>
+                  <span class="dice-history-outcome"><i />{{ entry.statusLabel }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="dice-history-locate"
+                  aria-label="定位到聊天记录"
+                  title="定位到聊天记录"
+                  @click="emit('locateDice', entry.messageId)"
+                >
+                  <LocateFixed :size="15" />
+                </button>
+              </article>
+            </div>
+            <div v-else class="dice-history-empty">
+              <Dices :size="26" />
+              <strong>{{ allDiceHistoryEntries.length ? '没有符合条件的掷骰记录' : '当前聊天还没有掷骰记录' }}</strong>
+              <p>{{ allDiceHistoryEntries.length ? '可以调整筛选，或继续加载更早的聊天记录。' : '跑团中产生的掷骰会自动出现在这里。' }}</p>
+            </div>
+            <footer class="dice-history-load-zone">
+              <button
+                type="button"
+                class="dice-history-load-more"
+                :disabled="loadingOlderMessages || !hasOlderMessages"
+                @click="emit('loadEarlier')"
+              >
+                <LoaderCircle v-if="loadingOlderMessages" class="spin" :size="15" />
+                <ArrowDown v-else :size="15" />
+                {{ diceHistoryLoadLabel }}
+              </button>
+              <p>{{ diceHistoryLoadHint }}</p>
+            </footer>
+          </div>
         </div>
       </TabsContent>
 

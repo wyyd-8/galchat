@@ -186,6 +186,13 @@ const VALUE_ROLL_TYPES = new Set([
   'DAMAGE', 'STUN_DURATION', 'SAN_LOSS', 'HEALING',
 ])
 
+export const DICE_HISTORY_CATEGORY_OPTIONS = [
+  '普通检定', '群体检定', '对抗检定', '孤注一掷', '理智检定',
+  '理智损失', '伤害结算', '治疗恢复', '其他',
+] as const
+export type DiceHistoryCategory = typeof DICE_HISTORY_CATEGORY_OPTIONS[number]
+export type DiceHistoryResultKind = 'numeric' | 'success' | 'failure' | 'other'
+
 function checkOutcomeLabel(outcome: Record<string, unknown>): string {
   const category = typeof outcome.category === 'string' ? outcome.category : undefined
   if (!category) return '已结算'
@@ -349,7 +356,17 @@ export function createDiceMessagePresentation(
     }
   }
   let statusLabel = '已投掷'
-  if (opposed) {
+  const valueDetails = details.filter((detail) => VALUE_ROLL_TYPES.has(
+    detail.resolution?.type || detail.displayType || '',
+  ))
+  if (valueDetails.length === 1 && details.length === 1) {
+    statusLabel = signedValue(
+      valueDetails[0]!.resolution?.type || valueDetails[0]!.displayType,
+      valueDetails[0]!.resultData?.result,
+    )
+  } else if (valueDetails.length === details.length && details.length > 1) {
+    statusLabel = '分别结果'
+  } else if (opposed) {
     statusLabel = aggregateResult
   } else if (details.length === 1 && details[0]!.resolution?.outcome) {
     statusLabel = checkOutcomeLabel(details[0]!.resolution!.outcome!)
@@ -562,15 +579,126 @@ export function listDiceMessagesNewestFirst(messages: GroupMessage[]): GroupMess
 export interface DiceHistoryEntry {
   messageId: number
   aggregate: DiceRollAggregate
+  title: string
+  statusLabel: string
+  tone: DiceMessageTone
+  category: DiceHistoryCategory
+  resultKind: DiceHistoryResultKind
+  occurredAt?: string
+}
+
+export interface DiceHistoryFilters {
+  query?: string
+  category?: DiceHistoryCategory | ''
+  resultKind?: DiceHistoryResultKind | ''
+}
+
+function diceHistoryResolutionTypes(aggregate: DiceRollAggregate): string[] {
+  return latestDiceDetails(aggregate).map((detail) => (
+    detail.resolution?.type || detail.displayType || ''
+  )).filter(Boolean)
+}
+
+function diceHistoryCategory(aggregate: DiceRollAggregate): DiceHistoryCategory {
+  const types = diceHistoryResolutionTypes(aggregate)
+  if (types.length && types.every((type) => type === 'DAMAGE' || type === 'STUN_DURATION')) {
+    return '伤害结算'
+  }
+  if (types.length && types.every((type) => type === 'SAN_LOSS')) return '理智损失'
+  if (types.length && types.every((type) => type === 'HEALING')) return '治疗恢复'
+  if (types.length && types.every((type) => type === 'OPPOSED_CHECK' || type === 'MELEE_ATTACK')) {
+    return '对抗检定'
+  }
+  if (types.length && types.every((type) => type === 'SAN_CHECK')) return '理智检定'
+
+  const toolCategory: Partial<Record<string, DiceHistoryCategory>> = {
+    requestCheck: '普通检定',
+    requestGroupCheck: '群体检定',
+    requestOpposedCheck: '对抗检定',
+    requestPushedCheck: '孤注一掷',
+    requestSanCheck: '理智检定',
+    rollSanLoss: '理智损失',
+    rollDamage: '伤害结算',
+    rollHealing: '治疗恢复',
+    requestFirearmAttack: '普通检定',
+    requestMeleeAttack: '对抗检定',
+  }
+  const toolName = aggregate.summary.toolName
+  if (toolName && toolCategory[toolName]) return toolCategory[toolName]!
+  if (types.length && types.every((type) => type === 'CHECK' || type === 'FIREARM_ATTACK')) {
+    return '普通检定'
+  }
+  return '其他'
+}
+
+function diceHistoryResultKind(aggregate: DiceRollAggregate): DiceHistoryResultKind {
+  const types = diceHistoryResolutionTypes(aggregate)
+  if (types.length && types.every((type) => VALUE_ROLL_TYPES.has(type))) return 'numeric'
+  const tone = createDiceMessagePresentation(aggregate).tone
+  if (tone === 'critical-success' || tone === 'success') return 'success'
+  if (tone === 'failure' || tone === 'fumble') return 'failure'
+  return 'other'
+}
+
+function diceHistoryOccurredAt(aggregate: DiceRollAggregate, message: GroupMessage): string | undefined {
+  const detailTimes = aggregate.results.flatMap((detail) => [
+    detail.resolvedAt, detail.updatedAt, detail.createdAt,
+  ]).filter((value): value is string => Boolean(value))
+  return detailTimes.sort().at(-1)
+    || aggregate.summary.updatedAt
+    || aggregate.summary.createdAt
+    || message.createdAt
 }
 
 export function listDiceHistoryEntriesNewestFirst(messages: GroupMessage[]): DiceHistoryEntry[] {
   return listDiceMessagesNewestFirst(messages).flatMap((message) => (
-    splitDiceAggregateByRound(message.diceRoll!).map((aggregate) => ({
-      messageId: message.id,
-      aggregate,
-    }))
+    splitDiceAggregateByRound(message.diceRoll!).reverse().map((aggregate) => {
+      const presentation = createDiceMessagePresentation(aggregate)
+      return {
+        messageId: message.id,
+        aggregate,
+        title: presentation.title,
+        statusLabel: presentation.statusLabel,
+        tone: presentation.tone,
+        category: diceHistoryCategory(aggregate),
+        resultKind: diceHistoryResultKind(aggregate),
+        occurredAt: diceHistoryOccurredAt(aggregate, message),
+      }
+    })
   ))
+}
+
+function normalizedDiceHistoryQuery(value?: string): string {
+  return (value || '').normalize('NFKC').trim().toLocaleLowerCase('zh-CN')
+}
+
+export function filterDiceHistoryEntries(
+  entries: DiceHistoryEntry[],
+  filters: DiceHistoryFilters,
+): DiceHistoryEntry[] {
+  const query = normalizedDiceHistoryQuery(filters.query)
+  return entries.filter((entry) => (
+    (!query || normalizedDiceHistoryQuery(entry.title).includes(query))
+      && (!filters.category || entry.category === filters.category)
+      && (!filters.resultKind || entry.resultKind === filters.resultKind)
+  ))
+}
+
+export function formatDiceHistoryTime(
+  value?: string,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).filter((part) => part.type !== 'literal')
+    .map((part) => [part.type, part.value]))
+  return `${parts.hour}:${parts.minute}`
 }
 
 export function findDiceMessageElement<T extends { dataset: { messageId?: string } }>(

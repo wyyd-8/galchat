@@ -1,5 +1,5 @@
 import type {
-  ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
+  ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
@@ -145,10 +145,39 @@ export const api = {
   rollCharacterLuck: (id: number) => request<DiceResult>(`/character-cards/${id}/luck`, { method: 'POST' }),
   createAutoCharacterCardDraft: (payload: { runId: number; participantId: number; requestId: string }) =>
     request<CharacterCardCreationDraft>('/character-card-creation/drafts/auto', { method: 'POST', body: body(payload) }),
+  characterCardCreationRules: () => request<CharacterCardCreationRules>('/character-card-creation/rules'),
+  createStepCharacterCardDraft: (payload: {
+    runId: number; participantId?: number; name: string; occupation: string; age: number; sex: string; residence: string; birthplace: string
+  }) => request<CharacterCardCreationDraft>('/character-card-creation/drafts/step', { method: 'POST', body: body(payload) }),
   characterCardCreationDraft: (id: number) =>
     request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}`),
-  activeCharacterCardDraft: (runId: number, participantId: number) =>
-    request<CharacterCardCreationDraft | null>(`/character-card-creation/drafts/active?${new URLSearchParams({ runId: String(runId), participantId: String(participantId) })}`),
+  activeCharacterCardDraft: (runId: number, participantId?: number) =>
+    request<CharacterCardCreationDraft | null>(`/character-card-creation/drafts/active?${new URLSearchParams({ runId: String(runId), ...(participantId === undefined ? {} : { participantId: String(participantId) }) })}`),
+  abandonCharacterCardDraft: (id: number, expectedVersion: number) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}?${new URLSearchParams({ expectedVersion: String(expectedVersion) })}`, { method: 'DELETE' }),
+  updateCharacterCardDraftIdentity: (id: number, payload: {
+    name: string; occupation: string; age: number; sex: string; residence: string; birthplace: string; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/identity`, { method: 'PATCH', body: body(payload) }),
+  rollCharacterCardDraftAttributes: (id: number, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/attributes/roll`, { method: 'POST', body: body(payload) }),
+  saveCharacterCardDraftAgeAdjustment: (id: number, payload: {
+    strPenalty: number; conPenalty: number; sizPenalty: number; dexPenalty: number; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/age-adjustment`, { method: 'PUT', body: body(payload) }),
+  saveCharacterCardDraftOccupation: (id: number, payload: { occupation: string; confirmed: boolean; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/occupation`, { method: 'PUT', body: body(payload) }),
+  saveCharacterCardDraftSkills: (id: number, payload: {
+    allocations: Array<{ skillDefId: number; specialization?: string; allocatedPoints: number }>; confirmed: boolean; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/skills`, { method: 'PUT', body: body(payload) }),
+  rollCharacterCardDraftBackground: (id: number, category: string, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/background/${encodeURIComponent(category)}/roll`, { method: 'POST', body: body(payload) }),
+  saveCharacterCardDraftBackground: (id: number, payload: {
+    entries: Record<string, string>; keyConnectionCategory?: string; confirmed: boolean; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/background`, { method: 'PUT', body: body(payload) }),
+  saveCharacterCardDraftEquipment: (id: number, payload: {
+    era?: string; equipmentText?: string; assetsText?: string; spendingLevel?: string; cash?: string
+    weapons: Array<{ code: string }>
+    confirmed: boolean; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/equipment`, { method: 'PUT', body: body(payload) }),
   regenerateCharacterCardDraft: (id: number, payload: { requestId: string; expectedVersion: number }) =>
     request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/regenerate`, { method: 'POST', body: body(payload) }),
   rewriteCharacterCardBackground: (id: number, payload: { requestId: string; expectedVersion: number }) =>

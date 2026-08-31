@@ -26,13 +26,16 @@ class CharacterCardCreationControllerTest {
         when(service.createAuto(create)).thenReturn(view);
         when(service.rewriteBackground(3L, action)).thenReturn(view);
         when(service.getActive(1L, 2L)).thenReturn(view);
+        when(service.abandon(3L, 2)).thenReturn(view);
 
         assertThat(controller.createAuto(create).getData()).isSameAs(view);
         assertThat(controller.rewriteBackground(3L, action).getData()).isSameAs(view);
         assertThat(controller.getActive(1L, 2L).getData()).isSameAs(view);
+        assertThat(controller.abandon(3L, 2).getData()).isSameAs(view);
         verify(service).createAuto(create);
         verify(service).rewriteBackground(3L, action);
         verify(service).getActive(1L, 2L);
+        verify(service).abandon(3L, 2);
     }
 
     @Test

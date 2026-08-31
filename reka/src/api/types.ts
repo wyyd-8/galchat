@@ -205,7 +205,7 @@ export interface CocCharacter {
   dying?: boolean; dead?: boolean; temporaryInsanity?: boolean; temporaryInsanityPhase?: string
 }
 export interface CocSkill { id: number; characterId: number; displayName: string; category?: string; specialization?: string; baseValue?: number; value: number; isCustom?: boolean }
-export interface CocWeapon { id: number; characterId: number; name: string; skillName?: string; damage?: string; range?: string; attacksPerRound?: string; ammoCapacity?: number; remainingAmmo?: number; malfunction?: string; isBroken?: boolean; abnormal?: boolean; riskTags?: string[]; notes?: string }
+export interface CocWeapon { id: number; characterId: number; name: string; skillName?: string; damage?: string; range?: string; attacksPerRound?: string; ammoCapacity?: number; remainingAmmo?: number; malfunction?: string; canImpale?: boolean; isBroken?: boolean; abnormal?: boolean; riskTags?: string[]; notes?: string }
 export interface CocProfile {
   appearance?: string; ideology?: string; significantPeople?: string; meaningfulLocations?: string; treasuredPossessions?: string
   traits?: string; keyConnectionCategory?: string; keyConnectionText?: string
@@ -232,15 +232,70 @@ export interface CharacterCardBackgroundPlan {
   treasuredPossessions?: string; traits?: string; keyConnectionCategory?: string; keyConnectionText?: string
   weaponCode?: string; equipment?: string[]
 }
+export interface CharacterCardCreationIdentity {
+  runId: number; participantId?: number; actorType: 'PLAYER' | 'BOT'; name: string; playerName?: string; image?: string
+  occupation: string; age: number; sex: string; residence: string; birthplace: string
+}
+export interface CharacterCardCreationDiceRoll { code: string; formula: string; dice: number[]; result: number }
+export interface CharacterCardEducationGrowth { checkRoll: number; increaseRoll?: number; eduBefore: number; eduAfter: number }
+export interface CharacterCardDerivedValues { damageBonus?: string; build?: number; mov?: number; hp?: number; san?: number; mp?: number }
+export interface CharacterCardCreationAttributes {
+  raw: Record<string, number>; rolls: CharacterCardCreationDiceRoll[]; luckRolls: CharacterCardCreationDiceRoll[]; luck?: number
+  educationGrowths: CharacterCardEducationGrowth[]; ageAdjustment: Record<string, number>; finalValues: Record<string, number>
+  derived?: CharacterCardDerivedValues
+}
+export interface CharacterCardCreationSkillItem {
+  skillDefId: number; displayName: string; category?: string; specialization?: string; baseValue: number
+  allocatedPoints: number; finalValue: number; halfValue: number; fifthValue: number
+}
+export interface CharacterCardCreationSkills {
+  budget: number; spent: number; remaining: number; items: CharacterCardCreationSkillItem[]; confirmed: boolean
+}
+export interface CharacterCardBackgroundPrompt {
+  category: string; rolls: number[]; promptCodes: string[]; prompts: string[]
+}
+export interface CharacterCardCreationBackground {
+  entries: Record<string, string>; prompts: Record<string, CharacterCardBackgroundPrompt>
+  keyConnectionCategory?: string; keyConnectionText?: string; confirmed: boolean
+}
+export interface CharacterCardCreationEquipment {
+  era?: string; equipmentText?: string; assetsText?: string; spendingLevel?: string; cash?: string
+  weapons: CocWeapon[]; confirmed: boolean
+}
+export interface StepwiseCharacterCardState {
+  identity: CharacterCardCreationIdentity
+  attributes?: CharacterCardCreationAttributes
+  occupation?: { text: string; confirmed: boolean }
+  skills?: CharacterCardCreationSkills
+  background?: CharacterCardCreationBackground
+  equipment?: CharacterCardCreationEquipment
+}
+export interface CharacterCardCreationWeaponRule {
+  code: string; name: string; skillName: string; damage: string; range: string; attacksPerRound: string
+  ammoCapacity?: number; malfunction?: string; eras: string[]; kind: 'MELEE' | 'FIREARM' | 'OTHER_RANGED'
+  canImpale: boolean; abnormal: boolean; riskTags: string[]; notes?: string
+}
+export interface CharacterCardCreationRules {
+  rulesVersion: number
+  attributes: Array<{ code: string; formula: string }>
+  skills: Array<{ skillDefId: number; name: string; category?: string; baseValue?: number; baseFormula?: string; allowSpecialization: boolean; parentName?: string }>
+  backgroundCategories: Array<{ code: string; rollable: boolean }>
+  weapons: CharacterCardCreationWeaponRule[]
+  eras: string[]
+}
 export interface CharacterCardCreationDraft {
-  draftId: number; creationMode: string; status: string; currentStep: string; nextAction?: string; version: number
+  draftId: number; creationMode: 'AUTO_QUICK_START' | 'STEP_STANDARD' | string; status: string; currentStep: string; nextAction?: string; version: number; rulesVersion?: number
   state: {
     formatVersion: number
-    buildPlan: CharacterCardBuildPlan
-    buildRolls?: { luck?: number; educationChecks?: number[]; educationIncreases?: number[] }
+    buildPlan?: CharacterCardBuildPlan
+    buildRolls?: {
+      luck?: number; luckRolls?: number[][]; educationChecks?: number[]; educationIncreases?: number[]
+      educationGrowths?: Array<{ checkRoll: number; increaseRoll?: number }>
+    }
     backgroundRolls?: CharacterCardBackgroundRolls
     backgroundPlan?: CharacterCardBackgroundPlan
     preview: DraftCharacterCard
+    stepwise?: StepwiseCharacterCardState
   }
 }
 export interface InvestigatorCardSummary {

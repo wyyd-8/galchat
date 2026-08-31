@@ -23,6 +23,7 @@ import { useDirectChat } from '@/composables/useDirectChat'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
+import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
 import {
   DICE_SKIN_OPTIONS,
   createDicePostRollPlaybackPlan,
@@ -31,6 +32,7 @@ import {
   createDiceMessagePlaybackRequest,
   findDiceMessageElement,
   isDiceAggregatePending,
+  planIncomingDicePlayback,
   resolveDiceSkin,
   shouldOfferDiceContinue,
   shouldOfferDiceContinueOnOpen,
@@ -80,6 +82,9 @@ const diceMessageAggregate = ref<DiceRollAggregate | null>(null)
 const queuedDiceAggregates = ref<DiceRollAggregate[]>([])
 const diceShowContinue = ref(false)
 const trpgToolsCardId = ref<number | null>(null)
+const trpgBindingTargetKey = ref<string | null>(null)
+const trpgBindingCreationMethod = ref<CharacterCardCreationMethod | null>(null)
+const returnToTrpgToolsAfterBinding = ref(false)
 
 function createMessagePlaybackRequest(
   aggregate: DiceRollAggregate,
@@ -126,23 +131,43 @@ function openDiceDebug(aggregate: DiceRollAggregate) {
   }
 }
 
-function openIncomingDiceMessage(aggregate: DiceRollAggregate) {
+function openIncomingDiceMessages(incoming: DiceRollAggregate[]) {
   try {
-    const [firstRound, ...laterRounds] = splitDiceAggregateByRound(aggregate)
-    if (!firstRound) throw new Error('这条骰子消息没有可显示的轮次')
-    diceMessageAggregate.value = firstRound
-    queuedDiceAggregates.value = laterRounds
+    const current = dicePlayerOpen.value ? diceMessageAggregate.value : null
+    const plan = planIncomingDicePlayback(
+      current,
+      dicePlayerOpen.value ? queuedDiceAggregates.value : [],
+      incoming,
+    )
+    if (!plan.current) throw new Error('这些骰子消息没有可显示的轮次')
+    diceMessageAggregate.value = plan.current
+    queuedDiceAggregates.value = plan.queued
+    if (current) {
+      if (dicePlaybackRequest.value) {
+        dicePlaybackRequest.value = {
+          ...dicePlaybackRequest.value,
+          offerContinueAfterComplete: true,
+        }
+        diceShowContinue.value = shouldOfferDiceContinueOnOpen(
+          dicePlaybackRequest.value,
+          current.summary.status,
+          isDiceAggregatePending(current),
+          plan.queued.length > 0,
+        )
+      }
+      return
+    }
     const request = createIncomingDiceMessagePlaybackRequest(
       dicePlaybackRequest.value?.id || 0,
-      firstRound,
+      plan.current,
       workspace.userInfo.value?.diceSkin,
     )
     dicePlaybackRequest.value = request
     diceShowContinue.value = shouldOfferDiceContinueOnOpen(
       request,
-      firstRound.summary.status,
-      isDiceAggregatePending(firstRound),
-      laterRounds.length > 0,
+      plan.current.summary.status,
+      isDiceAggregatePending(plan.current),
+      plan.queued.length > 0,
     )
     dicePlayerOpen.value = true
   } catch (error) {
@@ -167,6 +192,25 @@ function openTrpgTools() {
   dialogs.trpgTools = true
 }
 
+async function openTrpgCharacterCardCreation(targetKey: string, method: CharacterCardCreationMethod) {
+  trpgToolsCardId.value = null
+  trpgBindingTargetKey.value = targetKey
+  trpgBindingCreationMethod.value = method
+  returnToTrpgToolsAfterBinding.value = true
+  dialogs.trpgTools = false
+  await nextTick()
+  dialogs.trpgBinding = true
+}
+
+async function handleTrpgBindingVisibility(visible: boolean) {
+  if (visible || !returnToTrpgToolsAfterBinding.value) return
+  returnToTrpgToolsAfterBinding.value = false
+  trpgBindingTargetKey.value = null
+  trpgBindingCreationMethod.value = null
+  await nextTick()
+  dialogs.trpgTools = true
+}
+
 function openTrpgCharacterCard(cardId: number) {
   trpgToolsCardId.value = cardId
   dialogs.trpgTools = true
@@ -187,10 +231,13 @@ async function rollDiceMessage() {
     const progress = await api.rollDiceResult(pendingResult.id)
     const refreshed = await workspace.refreshDiceRoll(aggregate.summary.id)
     const plan = createDicePostRollPlaybackPlan(refreshed, progress.rolledResult.id)
+    const queuedOtherMessages = queuedDiceAggregates.value.filter(
+      (queued) => queued.summary.id !== aggregate.summary.id,
+    )
     diceMessageAggregate.value = plan.playbackAggregate
     queuedDiceAggregates.value = plan.queuedAggregate
-      ? splitDiceAggregateByRound(plan.queuedAggregate)
-      : []
+      ? [...splitDiceAggregateByRound(plan.queuedAggregate), ...queuedOtherMessages]
+      : queuedOtherMessages
     const playbackRequest = createMessagePlaybackRequest(
       plan.playbackAggregate,
       'play',
@@ -294,8 +341,11 @@ watch(() => workspace.isLoggedIn.value, (loggedIn) => { authOpen.value = !logged
 watch(() => worldForm.thinkStatus, (thinking) => { if (thinking) worldForm.eotDetectionStatus = false; else worldForm.addSpecialPrompt = false })
 watch(settingsTab, (tab) => { if (tab !== 'lore') resetDetailComposer() })
 watch(
-  () => workspace.incomingDiceRoll.value,
-  (aggregate) => { if (aggregate) openIncomingDiceMessage(aggregate) },
+  () => workspace.incomingDiceRolls.value.length,
+  (count) => {
+    if (!count) return
+    openIncomingDiceMessages(workspace.incomingDiceRolls.value.splice(0, count))
+  },
   { flush: 'post' },
 )
 watch(() => dialogs.template, async (open, wasOpen) => {
@@ -318,6 +368,9 @@ async function selectWorld(id: number) { direct.close(); await workspace.selectW
 async function selectConversation(id: number) {
   direct.close()
   dialogs.trpgBinding = false
+  trpgBindingTargetKey.value = null
+  trpgBindingCreationMethod.value = null
+  returnToTrpgToolsAfterBinding.value = false
   const loadingConversation = workspace.selectConversation(id)
   view.value = 'group'
   await loadingConversation
@@ -397,6 +450,9 @@ async function createTrpgConversation() {
   }))
   if (!success) return
   dialogs.conversation = false
+  trpgBindingTargetKey.value = null
+  trpgBindingCreationMethod.value = null
+  returnToTrpgToolsAfterBinding.value = false
   dialogs.trpgBinding = true
 }
 function completeTrpgBinding() {
@@ -971,11 +1027,16 @@ async function changePassword() {
     v-if="workspace.selectedConversation.value?.mode === 'trpg'"
     v-model="dialogs.trpgBinding"
     :conversation="workspace.selectedConversation.value"
+    :module="selectedConversationModule"
     :characters="workspace.characters.value"
     :participant-ids="workspace.participantIds.value"
+    :dice-skin="workspace.userInfo.value?.diceSkin"
+    :requested-target-key="trpgBindingTargetKey"
+    :requested-creation-method="trpgBindingCreationMethod"
+    @update:model-value="handleTrpgBindingVisibility"
     @complete="completeTrpgBinding"
   />
-  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" @restored="restoreTrpg" @open-dice="openDiceMessage" @debug-dice="openDiceDebug" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" />
+  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" @restored="restoreTrpg" @open-dice="openDiceMessage" @debug-dice="openDiceDebug" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
   <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" />
   <NoticeToast />
 </template>

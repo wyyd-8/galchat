@@ -141,7 +141,7 @@ test('rebuilds the current generation from the replay stream after refresh', asy
       ],
     )
     assert.equal(workspace.latestDiceRoll.value?.summary.id, 501)
-    assert.equal(workspace.incomingDiceRoll.value, null)
+    assert.deepEqual(workspace.incomingDiceRolls.value, [])
   } finally {
     api.conversation = originalConversation
     api.groupMessages = originalMessages

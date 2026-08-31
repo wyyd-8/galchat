@@ -121,6 +121,24 @@ public class CharacterCardCreationService {
         return active == null || active.isEmpty() ? null : view(active.getFirst());
     }
 
+    public CharacterCardGenerationModels.DraftView abandon(
+            Long draftId, Integer expectedVersion) {
+        CocCharacterCreationDraft draft = requireOwnedDraft(draftId);
+        if (expectedVersion == null
+                || !Objects.equals(draft.getVersion(), expectedVersion)) {
+            throw failure("DRAFT_VERSION_CONFLICT",
+                    "人物卡草稿版本已变化，请刷新后重试", draft);
+        }
+        if (!List.of("IN_PROGRESS", "PREVIEW_READY").contains(draft.getStatus())) {
+            throw failure("COMPLETED".equals(draft.getStatus())
+                            ? "DRAFT_ALREADY_COMPLETED" : "VALIDATION_FAILED",
+                    "人物卡草稿当前不可修改", draft);
+        }
+        draft.setStatus("ABANDONED").setNextAction(null);
+        finishAction(draft, null, "ABANDON");
+        return view(draft);
+    }
+
     public CharacterCardGenerationModels.DraftView regenerate(
             Long draftId, CharacterCardGenerationModels.ActionRequest request) {
         CocCharacterCreationDraft draft = requireMutableDraft(draftId, request, "REGENERATE");
@@ -282,25 +300,37 @@ public class CharacterCardCreationService {
 
     private CharacterCardGenerationModels.BuildRolls buildRolls(
             CharacterCardGenerationModels.BuildPlan plan) {
-        int luck = roll3d6x5();
+        List<List<Integer>> luckRolls = new ArrayList<>();
+        List<Integer> firstLuckDice = roll3d6();
+        luckRolls.add(firstLuckDice);
+        int luck = firstLuckDice.stream().mapToInt(Integer::intValue).sum() * 5;
         if (plan.age() != null && plan.age() < 20) {
-            luck = Math.max(luck, roll3d6x5());
+            List<Integer> secondLuckDice = roll3d6();
+            luckRolls.add(secondLuckDice);
+            luck = Math.max(luck,
+                    secondLuckDice.stream().mapToInt(Integer::intValue).sum() * 5);
         }
         int checks = educationCheckCount(plan.age());
         int edu = initialEducation(plan);
         List<Integer> educationChecks = new ArrayList<>();
         List<Integer> increases = new ArrayList<>();
+        List<CharacterCardGenerationModels.EducationGrowthRoll> growths =
+                new ArrayList<>();
         for (int index = 0; index < checks; index++) {
             int check = random.roll(100);
             educationChecks.add(check);
+            Integer increase = null;
             if (check > edu) {
-                int increase = random.roll(10);
+                increase = random.roll(10);
                 increases.add(increase);
                 edu = Math.min(99, edu + increase);
             }
+            growths.add(new CharacterCardGenerationModels.EducationGrowthRoll(
+                    check, increase));
         }
         return new CharacterCardGenerationModels.BuildRolls(
-                luck, List.copyOf(educationChecks), List.copyOf(increases));
+                luck, List.copyOf(luckRolls), List.copyOf(educationChecks),
+                List.copyOf(increases), List.copyOf(growths));
     }
 
     private int initialEducation(CharacterCardGenerationModels.BuildPlan plan) {
@@ -320,8 +350,8 @@ public class CharacterCardCreationService {
         return 4;
     }
 
-    private int roll3d6x5() {
-        return (random.roll(6) + random.roll(6) + random.roll(6)) * 5;
+    private List<Integer> roll3d6() {
+        return List.of(random.roll(6), random.roll(6), random.roll(6));
     }
 
     private CharacterCardGenerationModels.BackgroundRolls backgroundRolls() {

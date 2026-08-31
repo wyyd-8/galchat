@@ -476,6 +476,22 @@ export function buildToolCharacterTargets(
   ]
 }
 
+export async function loadToolCharacterDrafts<TDraft>(
+  targets: ToolCharacterTarget[],
+  loadDraft: (participantId?: number) => Promise<TDraft | null>,
+): Promise<Record<string, TDraft>> {
+  const entries = await Promise.all(targets
+    .filter((target) => target.cardId === undefined)
+    .map((target) => loadDraft(target.participantId)
+      .then((draft) => [target.key, draft] as const)))
+
+  const drafts: Record<string, TDraft> = {}
+  for (const [key, draft] of entries) {
+    if (draft !== null) drafts[key] = draft
+  }
+  return drafts
+}
+
 export function preferredToolCharacterTargetKey(
   targets: ToolCharacterTarget[],
   cardId: number | null,

@@ -28,6 +28,18 @@ test('gives the tools character sheet enough desktop canvas to keep its panels t
   assert.ok(Number(sidebarWidth[1]) >= 250, 'the investigator sidebar should be wide enough to keep its heading copy together')
 })
 
+test('uses the same balanced sidebar width in setup binding and TRPG tools', async () => {
+  const css = await readFile(new URL('../styles/index.css', import.meta.url), 'utf8')
+  const creationLayout = declarations(css, '.trpg-character-creation-dialog .trpg-binding-layout')
+  const toolsLayout = declarations(css, '.trpg-tools-card-layout')
+  const creationSidebar = creationLayout.match(/grid-template-columns:\s*(\d+)px\s+minmax/)
+  const toolsSidebar = toolsLayout.match(/grid-template-columns:\s*(\d+)px\s+minmax/)
+
+  assert.ok(creationSidebar, 'the setup binding dialog should declare its investigator sidebar width')
+  assert.ok(toolsSidebar, 'the TRPG tools should declare its investigator sidebar width')
+  assert.equal(creationSidebar[1], toolsSidebar[1], 'both character-card surfaces should use the same sidebar width')
+})
+
 test('expands skills over the statistic rows while keeping the controls desktop-only', async () => {
   const css = await readFile(new URL('../styles/index.css', import.meta.url), 'utf8')
   const expanded = declarations(css, '.sheet-detail-tabs.skill-panel-expanded')

@@ -40,8 +40,17 @@ class CocCharacterCreationDraftMapperIntegrationTest {
                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """, -8801L, 7L, 101L, 12L, "STEP_STANDARD",
                 "IN_PROGRESS", "EQUIPMENT", "COMPLETE", "IDLE",
-                1, 1, "{\"formatVersion\":1}");
+                1, 1, """
+                        {"formatVersion":1,"preview":{"character":{"name":"锁定读取测试"},
+                        "skills":[],"weapons":[],"profile":{"ideology":"保持谨慎"}}}
+                        """);
         CocCharacterCreationDraft draft = mapper.selectByIdForUpdate(-8801L);
+        assertThat(draft.getState()).isNotNull();
+        assertThat(draft.getState().preview()).isNotNull();
+        assertThat(draft.getState().preview().getCharacter().getName())
+                .isEqualTo("锁定读取测试");
+        assertThat(draft.getState().preview().getProfile().getIdeology())
+                .isEqualTo("保持谨慎");
         var identity = new StepwiseCharacterCardModels.Identity(
                 101L, 12L, "BOT", "新姓名", "角色", null,
                 "记者", 42, "男", "纽约", "波士顿");

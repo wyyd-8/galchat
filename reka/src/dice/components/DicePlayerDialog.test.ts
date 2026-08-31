@@ -286,16 +286,6 @@ test('wires the tools history loader to the existing group-chat pagination state
   assert.equal(bindings.get('on:load-earlier'), 'workspace.loadOlderGroupMessages')
 })
 
-test('opens each new backend dice roll after its chat card is rendered', async () => {
-  const appSource = await readFile(new URL('../../App.vue', import.meta.url), 'utf8')
-  const workspaceSource = await readFile(new URL('../../composables/useWorkspace.ts', import.meta.url), 'utf8')
-
-  assert.match(workspaceSource, /event\.eventType === 'dice_roll\.created'[\s\S]*incomingDiceRoll\.value = aggregate/)
-  assert.match(appSource, /watch\(\s*\(\) => workspace\.incomingDiceRoll\.value/)
-  assert.match(appSource, /if \(aggregate\) openIncomingDiceMessage\(aggregate\)/)
-  assert.match(appSource, /\{ flush: 'post' \}/)
-})
-
 test('marks each chat message as a scroll target for tool navigation', async () => {
   const source = await readFile(new URL('../../components/GroupChatStage.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]

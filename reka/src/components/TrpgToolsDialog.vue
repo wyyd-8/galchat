@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, ArrowDown, ArrowUp, BookUser, Check, ChevronDown, ChevronUp, Dices, FlaskConical, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, Search, UserRound, X } from '@lucide/vue'
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BookUser, Check, ChevronDown, ChevronUp, ClipboardCheck, Dices, FlaskConical, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, Search, Sparkles, UserRound, X } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
 import DiceDebugPanel from '@/dice/components/DiceDebugPanel.vue'
 import { api } from '@/api/client'
 import type {
-  Character, CharacterCard, CocModule, ContextWindowOverview, ContextWindowUsage, Conversation, DiceRollAggregate,
+  Character, CharacterCard, CharacterCardCreationDraft, CocModule, ContextWindowOverview, ContextWindowUsage, Conversation, DiceRollAggregate,
   GroupActorControlMode, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupMessage, InvestigatorCardSummary,
   ModelApi, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave,
 } from '@/api/types'
@@ -18,10 +18,12 @@ import {
 } from '@/dice/domain/dicePlayback'
 import type { DiceHistoryCategory, DiceHistoryResultKind } from '@/dice/domain/dicePlayback'
 import {
-  buildFetchedRollbackMessagePreview, buildSkillDisplayItems, buildToolCharacterTargets, buildToolRecoveryTimeline, buildToolRollbackActions, formatCheckRate, formatRollbackPreviewMessage, nextSkillGroup, preferredToolCharacterTargetKey, resolveRollbackMessagePreview, resolveToolRestoreInvestigators, resolveWeaponCheckValue, restoreInvestigatorCondition, shouldShowWeaponRisk, toolDialogContentClass,
+  buildFetchedRollbackMessagePreview, buildSkillDisplayItems, buildToolCharacterTargets, buildToolRecoveryTimeline, buildToolRollbackActions, formatCheckRate, formatRollbackPreviewMessage, loadToolCharacterDrafts, nextSkillGroup, preferredToolCharacterTargetKey, resolveRollbackMessagePreview, resolveToolRestoreInvestigators, resolveWeaponCheckValue, restoreInvestigatorCondition, shouldShowWeaponRisk, toolDialogContentClass,
   useToolRestoreConfirmation,
 } from '@/components/trpgToolsState'
 import type { ToolRecoveryTimelineItem, ToolRestoreAction, ToolRollbackMessagePreview, ToolSkillSortDirection, ToolSkillSortMode } from '@/components/trpgToolsState'
+import { buildCharacterCardCreationMethods } from '@/components/trpgSetupState'
+import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{
@@ -44,6 +46,7 @@ const emit = defineEmits<{
   debugDice: [aggregate: DiceRollAggregate]
   locateDice: [messageId: number]
   loadEarlier: []
+  createCharacterCard: [targetKey: string, method: CharacterCardCreationMethod]
 }>()
 
 const busy = ref(false)
@@ -52,6 +55,7 @@ const save = ref<TrpgSave | null>(null)
 const rollbackOverview = ref<TrpgRollbackOverview | null>(null)
 const saveRemark = ref('')
 const cards = ref<InvestigatorCardSummary[]>([])
+const cardDrafts = ref<Record<string, CharacterCardCreationDraft>>({})
 const selectedKey = ref('player')
 const selectedToolTab = ref('status')
 const selectedSheetTab = ref('skills')
@@ -70,7 +74,6 @@ const rollbackPreviewLoading = ref(false)
 const rollbackPreviewFailed = ref(false)
 const saveEditorOpen = ref(false)
 const card = ref<CharacterCard | null>(null)
-const cardText = ref('')
 const expandedRuntimeKey = ref<string | null>(null)
 const runtimeControlMode = ref<GroupActorControlMode>('MODEL')
 const runtimeModelApiId = ref('')
@@ -93,7 +96,17 @@ const characterTargets = computed(() => buildToolCharacterTargets(
 ))
 const selectedTarget = computed(() => characterTargets.value.find((target) => target.key === selectedKey.value)
   || characterTargets.value[0])
-const selectedParticipantId = computed(() => selectedTarget.value?.participantId)
+const selectedDraft = computed(() => cardDrafts.value[selectedTarget.value?.key || ''])
+const creationMethods = computed(() => buildCharacterCardCreationMethods(selectedTarget.value?.actorType || 'PLAYER'))
+const selectedDraftMethod = computed<CharacterCardCreationMethod>(() => selectedDraft.value?.creationMode === 'AUTO_QUICK_START' ? 'AUTO' : 'STEP')
+const selectedDraftMethodLabel = computed(() => selectedDraftMethod.value === 'AUTO' ? 'AI 自动生成' : '标准步进建卡')
+const selectedDraftProgressLabel = computed(() => {
+  if (selectedDraft.value?.status === 'PREVIEW_READY') return '检查并绑定'
+  return {
+    IDENTITY: '身份资料', ATTRIBUTES: '属性生成', OCCUPATION: '职业选择', SKILLS: '技能分配',
+    BACKGROUND: '人物背景', EQUIPMENT: '装备确认', PREVIEW: '检查并绑定',
+  }[selectedDraft.value?.currentStep || ''] || '继续完善人物卡'
+})
 const runtimeActors = computed<RuntimeActorView[]>(() => {
   const kpRuntime = props.actorRuntimes.find((runtime) => runtime.actorType === 'kp') || {
     actorType: 'kp' as const,
@@ -323,6 +336,10 @@ async function refreshCards(requestedCardId: number | null = null) {
     requestedCardId,
     selectedKey.value,
   )
+  cardDrafts.value = await loadToolCharacterDrafts(
+    characterTargets.value,
+    (participantId) => api.activeCharacterCardDraft(props.conversation.id, participantId),
+  )
   await loadCard()
 }
 async function refreshOverview(requestedCardId: number | null = null) {
@@ -336,11 +353,6 @@ async function refreshOverview(requestedCardId: number | null = null) {
   rollbackOverview.value = rollbackResult
   saveRemark.value = saveResult?.remark || ''
   await refreshCards(requestedCardId)
-}
-async function createCard() {
-  if (!cardText.value.trim()) throw new Error('请先粘贴人物卡文本')
-  const createdCard = await api.createCharacterCard({ runId: props.conversation.id, participantId: selectedParticipantId.value, characterText: cardText.value.trim() })
-  cardText.value = ''; await refreshCards(); notify('人物卡已导入', createdCard.character.name, 'success')
 }
 async function saveSnapshot() {
   save.value = await api.saveTrpg(props.conversation.id, saveRemark.value)
@@ -449,11 +461,19 @@ async function selectTarget(key: string) {
   selectedProfileTab.value = 'background'
   selectedSkillGroup.value = null
   skillPanelExpanded.value = false
-  cardText.value = ''
   await execute(loadCard)
 }
 function toggleSkillGroup(group: string) {
   selectedSkillGroup.value = nextSkillGroup(selectedSkillGroup.value, group)
+}
+function requestCharacterCardCreation(method: CharacterCardCreationMethod) {
+  const option = creationMethods.value.find((item) => item.id === method)
+  if (!option?.enabled || !selectedTarget.value) return
+  emit('createCharacterCard', selectedTarget.value.key, method)
+}
+function resumeCharacterCardDraft() {
+  if (!selectedDraft.value || !selectedTarget.value) return
+  emit('createCharacterCard', selectedTarget.value.key, selectedDraftMethod.value)
 }
 watch(open, (visible) => {
   if (!visible) {
@@ -479,6 +499,7 @@ watch(() => props.conversation.id, () => {
   skillSortDirection.value = 'asc'
   clearDiceFilters()
   cards.value = []
+  cardDrafts.value = {}
   contextOverview.value = null
   expandedRuntimeKey.value = null
   card.value = null
@@ -660,8 +681,10 @@ watch(selectedSheetTab, (tab) => {
                   <template v-else>{{ target.image ? '' : target.name.slice(0, 1) }}</template>
                 </span>
                 <span><strong>{{ target.name }}</strong><small>{{ target.actorType === 'PLAYER' ? '由当前登录用户控制' : 'AI 控制' }}</small></span>
-                <span class="binding-state" :class="{ complete: target.cardId !== undefined }">
-                  <Check v-if="target.cardId !== undefined" :size="13" />{{ target.cardId !== undefined ? '已建立' : '待建立' }}
+                <span class="binding-state" :class="{ complete: target.cardId !== undefined, draft: target.cardId === undefined && cardDrafts[target.key] }">
+                  <Check v-if="target.cardId !== undefined" :size="13" />
+                  <ClipboardCheck v-else-if="cardDrafts[target.key]" :size="13" />
+                  {{ target.cardId !== undefined ? '已建立' : cardDrafts[target.key] ? '草稿中' : '待建立' }}
                 </span>
               </button>
             </div>
@@ -864,7 +887,49 @@ watch(selectedSheetTab, (tab) => {
                 </TabsContent>
               </TabsRoot>
             </section>
-            <section v-else class="tool-card import-card binding-import-card"><BookUser :size="25" /><strong>{{ selectedActorName }}尚未建立人物卡</strong><p>首行必须是“姓名, 职业, 性别, 年龄岁”，并包含 STR、CON、SIZ、DEX、APP、INT、POW、EDU 八项属性；年龄范围为 15–90。</p><label class="field"><span>人物卡文本</span><textarea v-model="cardText" rows="10" placeholder="调查员, 记者, 女, 27岁\n时代: 1920s\nSTR 50 CON 55 SIZ 60 DEX 65 APP 60 INT 70 POW 55 EDU 70\n——技能——\n侦查 60%" /></label><button class="button primary" :disabled="!cardText.trim() || busy" @click="execute(createCard)">导入人物卡</button></section>
+            <section v-else-if="selectedDraft" class="creation-method-picker tools-card-draft-summary">
+              <header class="tools-card-draft-heading">
+                <span class="tools-card-draft-icon"><ClipboardCheck :size="25" /></span>
+                <span><small>人物卡草稿</small><strong>{{ selectedActorName }}的建卡进度已保存</strong><p>可以从上次停下的位置继续，不会重新生成或覆盖已经填写的内容。</p></span>
+                <em>草稿中</em>
+              </header>
+              <div class="tools-card-draft-progress">
+                <span><small>建卡方式</small><strong>{{ selectedDraftMethodLabel }}</strong></span>
+                <ArrowRight :size="18" />
+                <span><small>当前进度</small><strong>{{ selectedDraftProgressLabel }}</strong></span>
+              </div>
+              <div class="tools-card-draft-note">
+                <strong>{{ selectedDraft.status === 'PREVIEW_READY' ? '人物卡已生成，等待确认绑定' : '草稿已与建卡工作台同步' }}</strong>
+                <p>{{ selectedDraft.status === 'PREVIEW_READY' ? '继续后可以检查完整人物卡，并确认绑定到当前调查员。' : '继续后会直接回到当前步骤；如需重新开始，可以在建卡工作台中放弃这份草稿。' }}</p>
+              </div>
+              <div class="tools-card-draft-actions">
+                <button type="button" class="button primary tools-card-draft-resume" @click="resumeCharacterCardDraft"><ArrowRight :size="15" />继续建卡</button>
+              </div>
+            </section>
+            <section v-else class="creation-method-picker tools-card-creation-picker">
+              <header class="creation-method-heading">
+                <span><small>建立人物卡</small><strong>为{{ selectedActorName }}选择建卡方式</strong><p>建卡完成后会自动返回人物卡列表，并在这里显示完整人物卡。</p></span>
+                <em>待建立</em>
+              </header>
+              <div class="creation-method-grid">
+                <button type="button" class="creation-method-card method-step" @click="requestCharacterCardCreation('STEP')">
+                  <span class="creation-method-icon"><Dices :size="23" /></span>
+                  <span class="creation-method-copy"><strong>标准步进建卡</strong><p>亲自掷骰并逐步完成属性、技能和人物背景。</p></span>
+                  <span class="creation-method-action">开始标准建卡</span>
+                </button>
+                <button type="button" class="creation-method-card method-auto" :class="{ disabled: !creationMethods.find((item) => item.id === 'AUTO')?.enabled }" :disabled="!creationMethods.find((item) => item.id === 'AUTO')?.enabled" @click="requestCharacterCardCreation('AUTO')">
+                  <span class="creation-method-icon"><Sparkles :size="23" /></span>
+                  <span class="creation-method-copy"><strong>AI 自动生成</strong><p>参考当前角色与模组，生成后检查并确认绑定。</p></span>
+                  <span class="creation-method-action">立即自动生成</span>
+                </button>
+                <button type="button" class="creation-method-card method-import" @click="requestCharacterCardCreation('IMPORT')">
+                  <span class="creation-method-icon"><ClipboardCheck :size="23" /></span>
+                  <span class="creation-method-copy"><strong>导入人物卡</strong><p>粘贴已有 CoC 人物卡文本，检查后完成绑定。</p></span>
+                  <span class="creation-method-action">打开文本导入</span>
+                </button>
+              </div>
+              <p v-if="selectedTarget?.actorType === 'PLAYER'" class="creation-method-footnote">玩家调查员支持步进建卡或导入；AI 自动生成仅用于已有角色设定的 AI 调查员。</p>
+            </section>
           </aside>
         </div>
       </TabsContent>

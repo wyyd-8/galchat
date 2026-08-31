@@ -9,6 +9,7 @@ import {
   createDicePlayerSummary,
   createDicePlayerStatus,
   createGroupOutcomeVisibility,
+  planIncomingDicePlayback,
   type DiceHistoryEntry,
   type DiceHistoryFilters,
   type DicePlaybackRequest,
@@ -846,6 +847,37 @@ test('creates one tool history entry with its own locator for every dice round',
     { messageId: 30, roundNo: 1 },
     { messageId: 10, roundNo: 1 },
   ])
+})
+
+test('queues every rapid incoming dice message without replacing the first one', () => {
+  const first = createDiceDebugAggregatePreset('multiplayer-check')
+  first.summary = { ...first.summary, id: 501 }
+  first.results = first.results.map((detail) => ({ ...detail, summaryId: 501, roundNo: 1 }))
+  const second = createDiceDebugAggregatePreset('opposed-check')
+  second.summary = { ...second.summary, id: 502 }
+  second.results = second.results.map((detail) => ({ ...detail, summaryId: 502, roundNo: 1 }))
+
+  const plan = planIncomingDicePlayback(null, [], [first, second])
+
+  assert.equal(plan.current?.summary.id, 501)
+  assert.deepEqual(plan.queued.map((aggregate) => aggregate.summary.id), [502])
+})
+
+test('keeps the active dice message visible when another roll arrives later', () => {
+  const active = createDiceDebugAggregatePreset('multiplayer-check')
+  active.summary = { ...active.summary, id: 501 }
+  active.results = active.results.map((detail) => ({ ...detail, summaryId: 501, roundNo: 1 }))
+  const alreadyQueued = createDiceDebugAggregatePreset('opposed-check')
+  alreadyQueued.summary = { ...alreadyQueued.summary, id: 502 }
+  alreadyQueued.results = alreadyQueued.results.map((detail) => ({ ...detail, summaryId: 502, roundNo: 1 }))
+  const later = createDiceDebugAggregatePreset('multiplayer-check')
+  later.summary = { ...later.summary, id: 503 }
+  later.results = later.results.map((detail) => ({ ...detail, summaryId: 503, roundNo: 1 }))
+
+  const plan = planIncomingDicePlayback(active, [alreadyQueued], [later])
+
+  assert.equal(plan.current?.summary.id, 501)
+  assert.deepEqual(plan.queued.map((aggregate) => aggregate.summary.id), [502, 503])
 })
 
 test('filters tool dice history by title, dice category, and result kind', () => {

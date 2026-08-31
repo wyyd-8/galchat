@@ -18,6 +18,8 @@ import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.UserInfoMapper;
 import com.me.galchat.mapper.UserWorldPrefixMapper;
 import com.me.galchat.utils.CurrentHolder;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -268,6 +270,77 @@ class StepwiseCharacterCardCreationServiceTest {
     }
 
     @Test
+    void exposesCanonicalAutomaticWeaponChoicesToStepwiseClients() {
+        JsonNode payload = new ObjectMapper().valueToTree(service.getRules());
+
+        assertThat(payload.path("weapons").isArray()).isTrue();
+        assertThat(payload.path("weapons")).anySatisfy(weapon -> {
+            assertThat(weapon.path("code").asText()).isEqualTo("GLOCK_17");
+            assertThat(weapon.path("name").asText()).isEqualTo("9mm 格洛克17");
+            assertThat(weapon.path("skillName").asText()).isEqualTo("射击:手枪");
+            assertThat(weapon.path("damage").asText()).isEqualTo("1D10");
+            assertThat(weapon.path("ammoCapacity").asInt()).isEqualTo(17);
+        });
+        assertThat(payload.path("weapons")).noneSatisfy(weapon ->
+                assertThat(weapon.path("code").asText()).isEqualTo("AK_47"));
+    }
+
+    @Test
+    void rejectsAnEquipmentWeaponOutsideTheAutomaticStartingCatalog() {
+        advanceDraftToEquipment();
+
+        assertThatThrownBy(() -> service.saveEquipment(501L,
+                new StepwiseCharacterCardModels.EquipmentRequest(
+                        "现代", null, null, null, null,
+                        List.of(new StepwiseCharacterCardModels.WeaponInput("AK_47")),
+                        true, 6)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("可选武器");
+    }
+
+    @Test
+    void buildsWeaponDetailsFromTheCanonicalCatalogCode() {
+        advanceDraftToEquipment();
+
+        var saved = service.saveEquipment(501L,
+                new StepwiseCharacterCardModels.EquipmentRequest(
+                        "现代", null, null, null, null,
+                        List.of(new StepwiseCharacterCardModels.WeaponInput("GLOCK_17")),
+                        true, 6));
+
+        assertThat(saved.state().stepwise().equipment().weapons())
+                .singleElement()
+                .satisfies(weapon -> {
+                    assertThat(weapon.getName()).isEqualTo("9mm 格洛克17");
+                    assertThat(weapon.getSkillName()).isEqualTo("射击:手枪");
+                    assertThat(weapon.getDamage()).isEqualTo("1D10");
+                    assertThat(weapon.getRange()).isEqualTo("15m");
+                    assertThat(weapon.getAmmoCapacity()).isEqualTo(17);
+                    assertThat(weapon.getRemainingAmmo()).isEqualTo(17);
+                    assertThat(weapon.getMalfunction()).isEqualTo("98");
+                    assertThat(weapon.getRiskTags()).containsExactly("高噪声");
+                    assertThat(weapon.getNotes()).isNull();
+                });
+    }
+
+    @Test
+    void rejectsMoreThanThreeStepwiseStartingWeapons() {
+        advanceDraftToEquipment();
+
+        assertThatThrownBy(() -> service.saveEquipment(501L,
+                new StepwiseCharacterCardModels.EquipmentRequest(
+                        "现代", null, null, null, null,
+                        List.of(
+                                new StepwiseCharacterCardModels.WeaponInput("GLOCK_17"),
+                                new StepwiseCharacterCardModels.WeaponInput("SMALL_KNIFE"),
+                                new StepwiseCharacterCardModels.WeaponInput("STUN_GUN"),
+                                new StepwiseCharacterCardModels.WeaponInput("CHAINSAW")),
+                        true, 6)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("至多选择3件武器");
+    }
+
+    @Test
     void rejectsAnUpdateThatLostTheOptimisticVersionRace() {
         service.create(new StepwiseCharacterCardModels.CreateRequest(
                 101L, 12L, "哈维·沃尔特斯", "记者", 42,
@@ -288,6 +361,31 @@ class StepwiseCharacterCardCreationServiceTest {
                 ArgumentCaptor.forClass(CocCharacterCreationDraft.class);
         verify(draftMapper).insert(captor.capture());
         return captor.getValue();
+    }
+
+    private void advanceDraftToEquipment() {
+        service.create(new StepwiseCharacterCardModels.CreateRequest(
+                101L, 12L, "哈维·沃尔特斯", "记者", 42,
+                "男", "纽约", "波士顿"));
+        CocCharacterCreationDraft persisted = capturedDraft();
+        when(draftMapper.selectById(501L)).thenReturn(persisted);
+        service.rollAttributes(501L,
+                new CharacterCardGenerationModels.ActionRequest("roll-1", 1));
+        service.applyAgeAdjustment(501L,
+                new StepwiseCharacterCardModels.AgeAdjustmentRequest(
+                        0, 5, null, 0, 2));
+        service.saveOccupation(501L,
+                new StepwiseCharacterCardModels.OccupationRequest(
+                        "自由记者", true, 3));
+        service.saveSkills(501L,
+                new StepwiseCharacterCardModels.SkillsRequest(List.of(), true, 4));
+        service.saveBackground(501L,
+                new StepwiseCharacterCardModels.BackgroundRequest(
+                        java.util.Map.of(
+                                "APPEARANCE", "衣着整洁",
+                                "IDEOLOGY", "相信命运",
+                                "TRAITS", "谨慎"),
+                        "IDEOLOGY", true, 5));
     }
 
     private List<CocSkillDef> skillDefinitions() {

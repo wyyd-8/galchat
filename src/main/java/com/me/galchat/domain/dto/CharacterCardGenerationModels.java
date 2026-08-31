@@ -36,8 +36,22 @@ public final class CharacterCardGenerationModels {
 
     public record BuildRolls(
             Integer luck,
+            List<List<Integer>> luckRolls,
             List<Integer> educationChecks,
-            List<Integer> educationIncreases) {
+            List<Integer> educationIncreases,
+            List<EducationGrowthRoll> educationGrowths) {
+
+        public BuildRolls(
+                Integer luck,
+                List<Integer> educationChecks,
+                List<Integer> educationIncreases) {
+            this(luck, null, educationChecks, educationIncreases, null);
+        }
+    }
+
+    public record EducationGrowthRoll(
+            Integer checkRoll,
+            Integer increaseRoll) {
     }
 
     public record BackgroundRolls(

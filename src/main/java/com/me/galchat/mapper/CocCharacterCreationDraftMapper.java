@@ -3,12 +3,18 @@ package com.me.galchat.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.me.galchat.domain.po.CocCharacterCreationDraft;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 public interface CocCharacterCreationDraftMapper
         extends BaseMapper<CocCharacterCreationDraft> {
 
+    @Results(id = "cocCharacterCreationDraftLockedResultMap", value = {
+            @Result(column = "state", property = "state",
+                    typeHandler = com.me.galchat.typehandler.JsonbTypeHandler.class)
+    })
     @Select("SELECT * FROM coc_character_creation_draft WHERE id = #{id} FOR UPDATE")
     CocCharacterCreationDraft selectByIdForUpdate(@Param("id") Long id);
 

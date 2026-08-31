@@ -103,6 +103,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private static final String KP_EXPLORATION_OUTPUT_RULES = """
 
             公开回复只输出当前步骤允许的场景叙述或裁定结果。
+            每次回复都尽量让当前场景发生有意义的变化：推进调查、揭示信息、产生后果、提供选择，或回应调查员的行动。
+            避免没有新信息、新选择或新变化的空转。
             公开回复必须使用无包裹的小说正文。
             任何段落不得以全角或半角圆括号、方括号开头或结尾；
             不得使用括号、星号、地点标签或角色标签充当舞台指示。

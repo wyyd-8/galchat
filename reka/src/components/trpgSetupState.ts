@@ -12,6 +12,51 @@ export interface BindingTarget {
   boundCardId?: number
 }
 
+export type CharacterCardCreationMethod = 'STEP' | 'AUTO' | 'IMPORT'
+
+export interface CharacterCardCreationMethodOption {
+  id: CharacterCardCreationMethod
+  enabled: boolean
+}
+
+export interface StepwiseBackgroundSubmission {
+  entries: Record<string, string>
+  keyConnectionCategory: string
+}
+
+const EMPTY_BACKGROUND_ENTRY = '（空）'
+
+export function prepareStepwiseBackgroundSubmission(
+  categories: readonly string[],
+  entries: Record<string, string>,
+  keyConnectionCategory?: string,
+): StepwiseBackgroundSubmission {
+  const normalizedEntries = Object.fromEntries(categories.map((category) => [
+    category,
+    entries[category]?.trim() || EMPTY_BACKGROUND_ENTRY,
+  ]))
+  const keyCategories = categories.filter((category) => category !== 'APPEARANCE')
+  const explicitKey = keyConnectionCategory && keyCategories.includes(keyConnectionCategory)
+    ? keyConnectionCategory
+    : undefined
+  const firstFilledKey = keyCategories.find((category) => Boolean(entries[category]?.trim()))
+
+  return {
+    entries: normalizedEntries,
+    keyConnectionCategory: explicitKey || firstFilledKey || keyCategories[0] || '',
+  }
+}
+
+export function buildCharacterCardCreationMethods(
+  actorType: BindingTarget['actorType'],
+): CharacterCardCreationMethodOption[] {
+  return [
+    { id: 'STEP', enabled: true },
+    { id: 'AUTO', enabled: actorType === 'BOT' },
+    { id: 'IMPORT', enabled: true },
+  ]
+}
+
 export function canCreateTrpgRun(
   title: string,
   moduleId: number,
@@ -29,13 +74,13 @@ export function canAutoGenerateCard(target: BindingTarget | undefined): boolean 
 export async function loadBindingTargetContent<TCard, TDraft>(
   target: BindingTarget | undefined,
   loadCard: (cardId: number) => Promise<TCard>,
-  loadActiveDraft: (participantId: number) => Promise<TDraft | null>,
+  loadActiveDraft: (participantId?: number) => Promise<TDraft | null>,
 ): Promise<{ card: TCard | null; draft: TDraft | null }> {
   if (target?.boundCardId !== undefined) {
     return { card: await loadCard(target.boundCardId), draft: null }
   }
-  if (target && canAutoGenerateCard(target)) {
-    return { card: null, draft: await loadActiveDraft(target.participantId!) }
+  if (target) {
+    return { card: null, draft: await loadActiveDraft(target.participantId) }
   }
   return { card: null, draft: null }
 }

@@ -150,6 +150,90 @@ test('keeps continued streaming output below the dice message from the same repl
   }
 })
 
+test('retains every dice event received in the same rendering batch', async () => {
+  const { api, streamTrpgTurn } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  const storage = new Map<string, string>()
+  const webStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    key: (index: number) => [...storage.keys()][index] ?? null,
+    get length() { return storage.size },
+  }
+  Object.assign(globalThis, {
+    window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: webStorage,
+    sessionStorage: webStorage,
+  })
+
+  const originalContinue = streamTrpgTurn.continue
+  const originalGroupMessages = api.groupMessages
+  const originalReplyPlan = api.replyPlan
+  const originalCurrentTurn = api.currentTurn
+  const originalCombatOverview = api.combatOverview
+  const originalInvestigatorCards = api.investigatorCards
+  try {
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+      createElement: () => ({}), createText: (text) => ({ text }),
+      createComment: (text) => ({ text }), setText(node, text) { node.text = text },
+      setElementText(node, text) { node.text = text },
+      parentNode: (node) => node.parent as Record<string, unknown> | null,
+      nextSibling: () => null,
+    })
+    renderer.createApp(defineComponent({
+      setup() { workspace = useWorkspace(); return () => h('div') },
+    })).mount({})
+    workspace.conversations.value = [{
+      id: 7, userWorldId: 3, worldId: 2,
+      mode: 'trpg', title: '旧宅调查', status: 'active',
+    }]
+    workspace.selectedConversationId.value = 7
+
+    streamTrpgTurn.continue = async (_id, _clientRequestId, onEvent) => {
+      onEvent({
+        eventType: 'dice_roll.created', conversationId: 7,
+        diceRoll: { summary: { id: 501, conversationId: 7, status: 'COMPLETED' }, results: [] },
+      })
+      onEvent({
+        eventType: 'dice_roll.created', conversationId: 7,
+        diceRoll: { summary: { id: 502, conversationId: 7, status: 'COMPLETED' }, results: [] },
+      })
+      onEvent({ eventType: 'turn.completed', conversationId: 7, turnId: 42 })
+    }
+    api.groupMessages = async () => []
+    api.replyPlan = async () => [{ source: 'USER', displayName: '群聊', items: [] }]
+    api.currentTurn = async () => null
+    api.combatOverview = async () => []
+    api.investigatorCards = async () => []
+
+    await workspace.startTrpgTurn()
+
+    assert.deepEqual(
+      workspace.incomingDiceRolls.value.map((aggregate) => aggregate.summary.id),
+      [501, 502],
+    )
+  } finally {
+    streamTrpgTurn.continue = originalContinue
+    api.groupMessages = originalGroupMessages
+    api.replyPlan = originalReplyPlan
+    api.currentTurn = originalCurrentTurn
+    api.combatOverview = originalCombatOverview
+    api.investigatorCards = originalInvestigatorCards
+    Object.assign(globalThis, {
+      window: previousWindow,
+      localStorage: previousLocalStorage,
+      sessionStorage: previousSessionStorage,
+    })
+  }
+})
+
 test('keeps reasoning isolated by message across a parent child parent sequence', async () => {
   const { api, streamTrpgTurn } = await import('../api/client.ts')
   const { useWorkspace } = await import('../composables/useWorkspace.ts')

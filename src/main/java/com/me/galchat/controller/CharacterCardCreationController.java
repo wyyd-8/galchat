@@ -53,7 +53,7 @@ public class CharacterCardCreationController {
     public Result abandon(
             @PathVariable Long id,
             @RequestParam Integer expectedVersion) {
-        return Result.success(stepService.abandon(id, expectedVersion));
+        return Result.success(service.abandon(id, expectedVersion));
     }
 
     @PatchMapping("/{id}/identity")

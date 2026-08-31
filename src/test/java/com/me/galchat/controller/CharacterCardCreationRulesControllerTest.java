@@ -17,7 +17,8 @@ class CharacterCardCreationRulesControllerTest {
         StepwiseCharacterCardCreationService service =
                 mock(StepwiseCharacterCardCreationService.class);
         var rules = new StepwiseCharacterCardModels.RulesView(
-                1, List.of(), List.of(), List.of(), List.of("1920S", "MODERN"));
+                1, List.of(), List.of(), List.of(), List.of(),
+                List.of("1920S", "MODERN"));
         when(service.getRules()).thenReturn(rules);
 
         var controller = new CharacterCardCreationRulesController(service);

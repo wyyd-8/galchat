@@ -80,19 +80,7 @@ public final class StepwiseCharacterCardModels {
             Integer expectedVersion) {
     }
 
-    public record WeaponInput(
-            String name,
-            String skillName,
-            String damage,
-            String range,
-            String attacksPerRound,
-            Integer ammoCapacity,
-            Integer remainingAmmo,
-            String malfunction,
-            Boolean canImpale,
-            Boolean abnormal,
-            List<String> riskTags,
-            String notes) {
+    public record WeaponInput(String code) {
     }
 
     public record Identity(
@@ -222,11 +210,29 @@ public final class StepwiseCharacterCardModels {
             Boolean rollable) {
     }
 
+    public record WeaponRule(
+            String code,
+            String name,
+            String skillName,
+            String damage,
+            String range,
+            String attacksPerRound,
+            Integer ammoCapacity,
+            String malfunction,
+            List<String> eras,
+            String kind,
+            Boolean canImpale,
+            Boolean abnormal,
+            List<String> riskTags,
+            String notes) {
+    }
+
     public record RulesView(
             Integer rulesVersion,
             List<AttributeRule> attributes,
             List<SkillRule> skills,
             List<BackgroundRule> backgroundCategories,
+            List<WeaponRule> weapons,
             List<String> eras) {
     }
 }

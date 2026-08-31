@@ -75,6 +75,8 @@ class CharacterCardCreationServiceTest {
         assertThat(result.version()).isEqualTo(1);
         assertThat(result.state().preview().getCharacter().getName()).isEqualTo("埃莉诺·克劳福德");
         assertThat(result.state().preview().getProfile().getIdeology()).isEqualTo("科学终将解释一切");
+        assertThat(result.state().buildRolls().luckRolls())
+                .containsExactly(List.of(4, 4, 4));
         assertThat(result.state().preview().getSkills())
                 .allSatisfy(skill -> assertThat(skill.getValue())
                         .isNotEqualTo(skill.getBaseValue()))
@@ -186,6 +188,25 @@ class CharacterCardCreationServiceTest {
         var restored = service.getActive(101L, null);
 
         assertThat(restored.draftId()).isEqualTo(777L);
+    }
+
+    @Test
+    void abandonsAnAutomaticDraftThroughTheSharedDraftLifecycle() {
+        CharacterCardCreationService service = service(new MutableGenerationModel(),
+                new SequenceRandom(4, 4, 4, 50, 3, 6, 2, 4, 4, 5));
+        var created = service.createAuto(new CharacterCardGenerationModels.CreateRequest(
+                101L, 12L, "create-to-abandon"));
+        CocCharacterCreationDraft persisted = capturedDraft();
+        when(draftMapper.selectById(persisted.getId())).thenReturn(persisted);
+
+        var abandoned = service.abandon(persisted.getId(), created.version());
+
+        assertThat(abandoned.creationMode()).isEqualTo("AUTO_QUICK_START");
+        assertThat(abandoned.status()).isEqualTo("ABANDONED");
+        assertThat(abandoned.nextAction()).isNull();
+        assertThat(abandoned.version()).isEqualTo(2);
+        verify(draftMapper).updateWithExpectedVersion(persisted, created.version());
+        verify(draftMapper, never()).deleteById(persisted.getId());
     }
 
     @Test

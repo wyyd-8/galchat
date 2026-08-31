@@ -88,6 +88,33 @@ test('excludes AI investigators that do not belong to the current TRPG run', () 
   ])
 })
 
+test('loads active drafts for every unbound tools character target', async () => {
+  const loadToolCharacterDrafts = (trpgToolsState as typeof trpgToolsState & {
+    loadToolCharacterDrafts?: <TDraft>(
+      targets: ReturnType<typeof buildToolCharacterTargets>,
+      loadDraft: (participantId?: number) => Promise<TDraft | null>,
+    ) => Promise<Record<string, TDraft>>
+  }).loadToolCharacterDrafts
+  assert.ok(loadToolCharacterDrafts, 'TRPG tools should synchronize active character-card drafts')
+
+  const requests: Array<number | undefined> = []
+  const drafts = await loadToolCharacterDrafts(
+    buildToolCharacterTargets(characters, cards.filter((card) => card.actorType === 'BOT'), [11, 22], '旅人甲'),
+    async (participantId) => {
+      requests.push(participantId)
+      if (participantId === undefined) return { draftId: 501, creationMode: 'STEP_STANDARD' }
+      if (participantId === 11) return { draftId: 502, creationMode: 'AUTO_QUICK_START' }
+      return null
+    },
+  )
+
+  assert.deepEqual(requests, [undefined, 11], 'bound targets must not request an active draft')
+  assert.deepEqual(drafts, {
+    player: { draftId: 501, creationMode: 'STEP_STANDARD' },
+    'character:11': { draftId: 502, creationMode: 'AUTO_QUICK_START' },
+  })
+})
+
 test('selects the tools character target that owns a requested card id', () => {
   const preferredTargetKey = (trpgToolsState as typeof trpgToolsState & {
     preferredToolCharacterTargetKey?: (

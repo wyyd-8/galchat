@@ -2,6 +2,7 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.CocBackgroundPromptConstant;
+import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.CharacterCardGenerationModels;
 import com.me.galchat.domain.dto.StepwiseCharacterCardModels;
@@ -46,6 +47,7 @@ public class StepwiseCharacterCardCreationService {
 
     static final String MODE = "STEP_STANDARD";
     private static final int RULES_VERSION = 1;
+    private static final int MAX_STARTING_WEAPONS = 3;
     private static final List<String> ATTRIBUTE_ORDER =
             List.of("STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU");
     private static final List<String> BACKGROUND_CATEGORIES = List.of(
@@ -436,8 +438,7 @@ public class StepwiseCharacterCardCreationService {
         StepContext context = requireContext(draft.getRunId(), draft.getParticipantId());
         String moduleEra = context.module() == null ? null : normalize(context.module().getEra());
         String era = moduleEra == null ? requireText(request.era(), "时代") : moduleEra;
-        List<CocCharacterWeapon> weapons = buildWeapons(
-                request.weapons(), state.skills());
+        List<CocCharacterWeapon> weapons = buildWeapons(request.weapons(), era);
         boolean confirmed = Boolean.TRUE.equals(request.confirmed());
         StepwiseCharacterCardModels.Equipment equipment =
                 new StepwiseCharacterCardModels.Equipment(
@@ -478,8 +479,15 @@ public class StepwiseCharacterCardCreationService {
                         .map(code -> new StepwiseCharacterCardModels.BackgroundRule(
                                 code, ROLLABLE_BACKGROUND.contains(code)))
                         .toList();
+        List<StepwiseCharacterCardModels.WeaponRule> weapons =
+                CocWeaponCatalogConstant.weapons().values().stream()
+                        .filter(CocWeaponCatalogConstant.WeaponDefinition::autoSelectable)
+                        .sorted(java.util.Comparator.comparing(
+                                CocWeaponCatalogConstant.WeaponDefinition::code))
+                        .map(this::weaponRule)
+                        .toList();
         return new StepwiseCharacterCardModels.RulesView(
-                RULES_VERSION, attributes, skills, backgrounds,
+                RULES_VERSION, attributes, skills, backgrounds, weapons,
                 List.of("1920S", "MODERN"));
     }
 
@@ -552,50 +560,65 @@ public class StepwiseCharacterCardCreationService {
 
     private List<CocCharacterWeapon> buildWeapons(
             List<StepwiseCharacterCardModels.WeaponInput> inputs,
-            StepwiseCharacterCardModels.Skills skills) {
-        Set<String> availableSkills = new LinkedHashSet<>();
-        if (skills != null) {
-            skills.items().forEach(item -> availableSkills.add(item.displayName()));
+            String era) {
+        List<StepwiseCharacterCardModels.WeaponInput> requested = safe(inputs);
+        if (requested.size() > MAX_STARTING_WEAPONS) {
+            throw new UserRequestException("至多选择3件武器");
         }
-        safe(skillDefMapper.selectList(null)).stream()
-                .filter(definition -> definition.getBaseValue() != null
-                        || definition.getBaseFormula() != null)
-                .map(CocSkillDef::getName)
-                .forEach(availableSkills::add);
+        Map<String, CocWeaponCatalogConstant.WeaponDefinition> available =
+                new LinkedHashMap<>();
+        CocWeaponCatalogConstant.autoSelectableForEra(era)
+                .forEach(definition -> available.put(definition.code(), definition));
+        Set<String> selected = new LinkedHashSet<>();
         List<CocCharacterWeapon> result = new ArrayList<>();
-        for (StepwiseCharacterCardModels.WeaponInput input : safe(inputs)) {
+        for (StepwiseCharacterCardModels.WeaponInput input : requested) {
             if (input == null) {
                 throw new UserRequestException("武器不能为空");
             }
-            String skillName = normalize(input.skillName());
-            if (skillName != null && !availableSkills.contains(skillName)) {
-                throw new UserRequestException("武器引用了不存在的技能：" + skillName);
+            String code = normalizeCode(input.code());
+            CocWeaponCatalogConstant.WeaponDefinition definition = available.get(code);
+            if (definition == null) {
+                throw new UserRequestException("武器不在当前时代的可选武器表中");
             }
-            if (input.ammoCapacity() != null && input.ammoCapacity() < 0
-                    || input.remainingAmmo() != null && input.remainingAmmo() < 0) {
-                throw new UserRequestException("武器弹药不能为负数");
+            if (!selected.add(definition.code())) {
+                throw new UserRequestException("不能重复选择武器：" + definition.name());
             }
-            if (input.ammoCapacity() != null && input.remainingAmmo() != null
-                    && input.remainingAmmo() > input.ammoCapacity()) {
-                throw new UserRequestException("武器剩余弹药不能超过容量");
-            }
-            result.add(new CocCharacterWeapon()
-                    .setName(requireText(input.name(), "武器名称"))
-                    .setSkillName(skillName)
-                    .setDamage(normalize(input.damage()))
-                    .setRange(normalize(input.range()))
-                    .setAttacksPerRound(normalize(input.attacksPerRound()))
-                    .setAmmoCapacity(input.ammoCapacity())
-                    .setRemainingAmmo(input.remainingAmmo())
-                    .setMalfunction(normalize(input.malfunction()))
-                    .setCanImpale(Boolean.TRUE.equals(input.canImpale()))
-                    .setIsBroken(false)
-                    .setAbnormal(Boolean.TRUE.equals(input.abnormal()))
-                    .setRiskTags(input.riskTags() == null
-                            ? List.of() : List.copyOf(input.riskTags()))
-                    .setNotes(normalize(input.notes())));
+            result.add(canonicalWeapon(definition));
         }
         return List.copyOf(result);
+    }
+
+    private StepwiseCharacterCardModels.WeaponRule weaponRule(
+            CocWeaponCatalogConstant.WeaponDefinition definition) {
+        List<String> eras = switch (definition.era()) {
+            case TWENTIES -> List.of("1920S");
+            case MODERN -> List.of("MODERN");
+            case BOTH -> List.of("1920S", "MODERN");
+        };
+        return new StepwiseCharacterCardModels.WeaponRule(
+                definition.code(), definition.name(), definition.requiredSkillName(),
+                definition.damage(), definition.range(), definition.attacksPerRound(),
+                definition.ammoCapacity(), definition.malfunction(), eras,
+                definition.kind().name(), definition.canImpale(),
+                definition.abnormal(), definition.riskTags(), definition.notes());
+    }
+
+    private CocCharacterWeapon canonicalWeapon(
+            CocWeaponCatalogConstant.WeaponDefinition definition) {
+        return new CocCharacterWeapon()
+                .setName(definition.name())
+                .setSkillName(definition.requiredSkillName())
+                .setDamage(definition.damage())
+                .setRange(definition.range())
+                .setAttacksPerRound(definition.attacksPerRound())
+                .setAmmoCapacity(definition.ammoCapacity())
+                .setRemainingAmmo(definition.ammoCapacity())
+                .setMalfunction(definition.malfunction())
+                .setCanImpale(definition.canImpale())
+                .setIsBroken(false)
+                .setAbnormal(definition.abnormal())
+                .setRiskTags(definition.riskTags())
+                .setNotes(definition.notes());
     }
 
     private CharacterCardVO buildPreview(StepwiseCharacterCardModels.State state) {

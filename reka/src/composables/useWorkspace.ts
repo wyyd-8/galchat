@@ -48,7 +48,7 @@ export function useWorkspace() {
   const generationFailure = ref<GenerationFailureState | null>(null)
   const generationFailureOpen = ref(false)
   const latestDiceRoll = ref<DiceRollAggregate | null>(null)
-  const incomingDiceRoll = ref<DiceRollAggregate | null>(null)
+  const incomingDiceRolls = ref<DiceRollAggregate[]>([])
   const hasOlderGroupMessages = ref(false)
   const diceRollCache = new Map<number, Promise<DiceRollAggregate>>()
   let catchingUpGenerationId: string | null = null
@@ -93,7 +93,7 @@ export function useWorkspace() {
   function resetWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
     conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; modules.value = []
-    latestDiceRoll.value = null; incomingDiceRoll.value = null; hasOlderGroupMessages.value = false; diceRollCache.clear()
+    latestDiceRoll.value = null; incomingDiceRolls.value = []; hasOlderGroupMessages.value = false; diceRollCache.clear()
   }
 
   function setReplyPlans(plans: ReplyPlan[]) {
@@ -277,7 +277,7 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
-    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRoll.value = null; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRolls.value = []; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
       const [conversationDetail, history, plans, turn, runtimes, models, overview, cards] = await Promise.all([
         api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), api.actorRuntimes(id), api.modelApis(), loadCombatOverview(id), loadInvestigatorCards(id),
@@ -412,7 +412,9 @@ export function useWorkspace() {
         summary: { ...event.diceRoll.summary, toolName: event.toolName },
       }
       latestDiceRoll.value = aggregate
-      if (!catchingUpGenerationId) incomingDiceRoll.value = aggregate
+      if (!catchingUpGenerationId) {
+        incomingDiceRolls.value.push(aggregate)
+      }
       diceRollCache.set(aggregate.summary.id, Promise.resolve(aggregate))
       const message = findEventMessage(event)
       if (message) Object.assign(message, {
@@ -812,7 +814,7 @@ export function useWorkspace() {
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
     conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, actorRuntimes, modelApis, combatOverview, investigatorCards, replyTurnState,
-    latestDiceRoll, incomingDiceRoll, hasOlderGroupMessages, generationFailure, generationFailureOpen,
+    latestDiceRoll, incomingDiceRolls, hasOlderGroupMessages, generationFailure, generationFailureOpen,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,

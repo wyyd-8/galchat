@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { InvestigatorCardSummary } from '../api/types.ts'
+import * as setupState from './trpgSetupState.ts'
 import {
   buildBindingTargets,
   canCreateTrpgRun,
@@ -62,6 +63,73 @@ test('offers automatic generation only for an unbound AI investigator', () => {
   assert.equal(canAutoGenerateCard({ key: 'character:11', actorType: 'BOT', participantId: 11, boundCardId: 101 }), false)
 })
 
+test('presents three distinct creation methods while disabling AI generation for players', () => {
+  const buildOptions = (setupState as unknown as {
+    buildCharacterCardCreationMethods?: (actorType: 'PLAYER' | 'BOT') => unknown
+  }).buildCharacterCardCreationMethods
+
+  assert.deepEqual(buildOptions?.('BOT'), [
+    { id: 'STEP', enabled: true },
+    { id: 'AUTO', enabled: true },
+    { id: 'IMPORT', enabled: true },
+  ])
+  assert.deepEqual(buildOptions?.('PLAYER'), [
+    { id: 'STEP', enabled: true },
+    { id: 'AUTO', enabled: false },
+    { id: 'IMPORT', enabled: true },
+  ])
+})
+
+test('fills every omitted stepwise background entry when preparing the frontend request', () => {
+  const prepareBackground = (setupState as unknown as {
+    prepareStepwiseBackgroundSubmission?: (
+      categories: readonly string[],
+      entries: Record<string, string>,
+      keyConnectionCategory?: string,
+    ) => { entries: Record<string, string>, keyConnectionCategory: string }
+  }).prepareStepwiseBackgroundSubmission
+
+  assert.equal(typeof prepareBackground, 'function')
+  assert.deepEqual(prepareBackground?.(
+    ['APPEARANCE', 'IDEOLOGY', 'SIGNIFICANT_PEOPLE', 'MEANINGFUL_LOCATIONS', 'TREASURED_POSSESSIONS', 'TRAITS'],
+    {},
+  ), {
+    entries: {
+      APPEARANCE: '（空）',
+      IDEOLOGY: '（空）',
+      SIGNIFICANT_PEOPLE: '（空）',
+      MEANINGFUL_LOCATIONS: '（空）',
+      TREASURED_POSSESSIONS: '（空）',
+      TRAITS: '（空）',
+    },
+    keyConnectionCategory: 'IDEOLOGY',
+  })
+})
+
+test('keeps an explicit key connection while filling other omitted background entries', () => {
+  const prepareBackground = (setupState as unknown as {
+    prepareStepwiseBackgroundSubmission?: (
+      categories: readonly string[],
+      entries: Record<string, string>,
+      keyConnectionCategory?: string,
+    ) => { entries: Record<string, string>, keyConnectionCategory: string }
+  }).prepareStepwiseBackgroundSubmission
+
+  assert.deepEqual(prepareBackground?.(
+    ['APPEARANCE', 'IDEOLOGY', 'SIGNIFICANT_PEOPLE', 'TRAITS'],
+    { SIGNIFICANT_PEOPLE: '老友艾伦' },
+    'SIGNIFICANT_PEOPLE',
+  ), {
+    entries: {
+      APPEARANCE: '（空）',
+      IDEOLOGY: '（空）',
+      SIGNIFICANT_PEOPLE: '老友艾伦',
+      TRAITS: '（空）',
+    },
+    keyConnectionCategory: 'SIGNIFICANT_PEOPLE',
+  })
+})
+
 test('loads an active draft when reopening an unbound AI investigator', async () => {
   const restoredDraft = { draftId: 501, status: 'PREVIEW_READY' }
 
@@ -69,6 +137,21 @@ test('loads an active draft when reopening an unbound AI investigator', async ()
     { key: 'character:11', actorType: 'BOT', participantId: 11 },
     async () => ({ cardId: 999 }),
     async () => restoredDraft,
+  )
+
+  assert.deepEqual(result, { card: null, draft: restoredDraft })
+})
+
+test('loads an active draft when reopening the unbound player investigator', async () => {
+  const restoredDraft = { draftId: 502, status: 'IN_PROGRESS' }
+
+  const result = await loadBindingTargetContent(
+    { key: 'player', actorType: 'PLAYER' },
+    async () => ({ cardId: 999 }),
+    async (participantId) => {
+      assert.equal(participantId, undefined)
+      return restoredDraft
+    },
   )
 
   assert.deepEqual(result, { card: null, draft: restoredDraft })

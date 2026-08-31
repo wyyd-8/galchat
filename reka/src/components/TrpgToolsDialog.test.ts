@@ -20,6 +20,21 @@ function findElement(root: RootNode, predicate: (element: ElementNode) => boolea
   return visit(root)
 }
 
+function findElements(root: RootNode, predicate: (element: ElementNode) => boolean): ElementNode[] {
+  const matches: ElementNode[] = []
+  const visit = (node: unknown) => {
+    if (!node || typeof node !== 'object') return
+    const candidate = node as { type?: number, children?: unknown[] }
+    if (candidate.type === NodeTypes.ELEMENT) {
+      const element = node as ElementNode
+      if (predicate(element)) matches.push(element)
+    }
+    for (const child of candidate.children || []) visit(child)
+  }
+  visit(root)
+  return matches
+}
+
 function hasClass(element: ElementNode, className: string): boolean {
   return element.props.some((prop) => prop.type === NodeTypes.ATTRIBUTE
     && prop.name === 'class'
@@ -70,6 +85,42 @@ test('keeps an established character card read-only in the TRPG tools dialog', a
     || (element.tag === 'button' && ![
       'sheet-skill-category-button', 'sheet-skill-expand-toggle', 'sheet-skill-direction-toggle', 'sheet-skill-clear',
     ].some((className) => hasClass(element, className)))), undefined)
+})
+
+test('offers all character-card creation choices for an unbound investigator', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const root = baseParse(template)
+  const picker = findElement(root, (element) => hasClass(element, 'tools-card-creation-picker'))
+  assert.ok(picker, 'an unbound investigator should see creation choices inside the character-card tool')
+
+  const methodButtons = findElements(picker as unknown as RootNode, (element) => element.tag === 'button'
+    && hasClass(element, 'creation-method-card'))
+  assert.deepEqual(methodButtons.map((button) => textContent(button).trim()), [
+    '标准步进建卡亲自掷骰并逐步完成属性、技能和人物背景。开始标准建卡',
+    'AI 自动生成参考当前角色与模组，生成后检查并确认绑定。立即自动生成',
+    '导入人物卡粘贴已有 CoC 人物卡文本，检查后完成绑定。打开文本导入',
+  ])
+})
+
+test('shows and resumes the synchronized draft instead of offering a second new card', async () => {
+  const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  const root = baseParse(template)
+  const summary = findElement(root, (element) => hasClass(element, 'tools-card-draft-summary'))
+  assert.ok(summary, 'an investigator with an active draft should see its current draft')
+  assert.equal(hasDirectiveExpression(summary, 'else-if', 'selectedDraft'), true)
+
+  const resume = findElement(summary as unknown as RootNode, (element) => element.tag === 'button'
+    && hasClass(element, 'tools-card-draft-resume'))
+  assert.ok(resume, 'the active draft should expose one continue action')
+  assert.match(textContent(resume), /继续建卡/)
+
+  const draftState = findElement(root, (element) => hasClass(element, 'binding-state')
+    && textContent(element).includes('草稿中'))
+  assert.ok(draftState, 'the investigator list should distinguish an active draft from a new card')
 })
 
 test('organizes the read-only character sheet into practical data panels', async () => {

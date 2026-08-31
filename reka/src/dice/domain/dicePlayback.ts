@@ -288,6 +288,22 @@ export function splitDiceAggregateByRound(
   ))
 }
 
+export function planIncomingDicePlayback(
+  current: DiceRollAggregate | null,
+  queued: DiceRollAggregate[],
+  incoming: DiceRollAggregate[],
+): { current: DiceRollAggregate | null; queued: DiceRollAggregate[] } {
+  const incomingRounds = incoming.flatMap(splitDiceAggregateByRound)
+  if (current) {
+    return { current, queued: [...queued, ...incomingRounds] }
+  }
+  const [first, ...remaining] = incomingRounds
+  return {
+    current: first || null,
+    queued: [...queued, ...remaining],
+  }
+}
+
 export interface DicePostRollPlaybackPlan {
   playbackAggregate: DiceRollAggregate
   queuedAggregate: DiceRollAggregate | null

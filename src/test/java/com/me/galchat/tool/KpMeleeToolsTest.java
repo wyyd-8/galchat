@@ -9,6 +9,7 @@ import com.me.galchat.domain.dto.KpMeleeRequestDTOs;
 import com.me.galchat.service.ICocDiceOrchestrationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.annotation.Tool;
 
 import java.util.Map;
@@ -18,6 +19,15 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 class KpMeleeToolsTest {
+
+    @Test
+    void schemaAsksKpToExplainAttackerAndDefenderModifiers() {
+        String schema = ToolCallbacks.from(
+                        new KpMeleeTools(null))[0]
+                .getToolDefinition().inputSchema();
+
+        assertThat(schema).contains("\"modifierReason\"");
+    }
 
     @Test
     void exposesDedicatedReturnDirectMeleeToolAndForwardsKpContext() {

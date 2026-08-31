@@ -106,7 +106,7 @@
 #### 近战通用示例
 
 - **调用前考虑：** 确认是造成武器伤害的普通近战；核对人物卡、武器、防守方式和双方修正。寡不敌众、护甲、伤害、贯穿和武器眩晕由后端处理。
-- **调用顺序：** `{"request":{"reason":"用折刀刺击邪教徒","attacker":{"characterName":"林恩","weaponName":"折刀","modifier":"BONUS_1"},"defender":{"characterName":"邪教徒","defenseMode":"COUNTERATTACK","counterWeaponName":null,"modifier":"NORMAL"}}}`
+- **调用顺序：** `{"request":{"reason":"用折刀刺击邪教徒","attacker":{"characterName":"林恩","weaponName":"折刀","modifier":"BONUS_1","modifierReason":"林恩占据有利位置"},"defender":{"characterName":"邪教徒","defenseMode":"COUNTERATTACK","counterWeaponName":null,"modifier":"NORMAL"}}}`
 - **结果处理与解释：** 采用工具确认的胜者、伤害和状态；专用工具已结算伤害，不再调用 `rollDamage`。
 
 ### 远程
@@ -150,7 +150,7 @@
 #### 战技通用示例
 
 - **调用前考虑：** 检定前明确击晕、控制、推开等唯一目标，并根据双方体格与防守选择确定检定项和修正。
-- **调用顺序：** `{"request":{"reason":"抓住并控制邪教徒","targets":[{"characterName":"林恩","checkNames":["斗殴"],"modifier":"PENALTY_1"},{"characterName":"邪教徒","checkNames":["闪避"],"modifier":"NORMAL"}],"tieWinnerCharacterName":"邪教徒"}}`
+- **调用顺序：** `{"request":{"reason":"抓住并控制邪教徒","targets":[{"characterName":"林恩","checkNames":["斗殴"],"modifier":"PENALTY_1","modifierReason":"林恩体格比邪教徒低1点"},{"characterName":"邪教徒","checkNames":["闪避"],"modifier":"NORMAL"}],"tieWinnerCharacterName":"邪教徒"}}`
 - **结果处理与解释：** 只有施展者获胜才应用声明效果。击晕调用 `rollDamage` 并提交 `{"targetCharacterName":"邪教徒","formula":"眩晕"}`；控制调用 `updateCombatStates` 并提交 `{"characterName":"邪教徒","restrainedByCharacterName":"林恩"}`。被钳制者声明挣脱时重新调用 `requestOpposedCheck`，成功后提交 `{"characterName":"邪教徒","restrainedByCharacterName":""}`，失败维持钳制。钳制者主动松开、无法继续压制或受到重伤时也清空该值。其他战技按场景处理；环境明确致伤时才另行调用 `rollDamage`。
 
 ## 4. 伤害与状态

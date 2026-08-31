@@ -34,6 +34,15 @@ class KpFirearmToolsTest {
     }
 
     @Test
+    void schemaAsksKpToExplainTargetBaseModifiers() {
+        String schema = ToolCallbacks.from(
+                        new KpFirearmTools(null))[0]
+                .getToolDefinition().inputSchema();
+
+        assertThat(schema).contains("\"baseModifierReason\"");
+    }
+
+    @Test
     void exposesDedicatedReturnDirectFirearmToolAndForwardsKpContext() {
         ICocDiceOrchestrationService orchestration =
                 mock(ICocDiceOrchestrationService.class);

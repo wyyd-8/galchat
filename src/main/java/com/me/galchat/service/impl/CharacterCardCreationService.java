@@ -1,7 +1,6 @@
 package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.CocBackgroundPromptConstant;
 import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.constant.GroupChatConstant;
@@ -17,6 +16,7 @@ import com.me.galchat.domain.po.CocSkillDef;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.CharacterCardVO;
+import com.me.galchat.exception.CharacterCardCreationException;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CharacterTemplateMapper;
@@ -100,21 +100,31 @@ public class CharacterCardCreationService {
 
     public CharacterCardGenerationModels.DraftView getActive(
             Long runId, Long participantId) {
-        requireContext(runId, participantId);
-        List<CocCharacterCreationDraft> active = draftMapper.selectList(
+        if (participantId == null) {
+            requireRunAccess(runId);
+        } else {
+            requireContext(runId, participantId);
+        }
+        LambdaQueryWrapper<CocCharacterCreationDraft> query =
                 new LambdaQueryWrapper<CocCharacterCreationDraft>()
                         .eq(CocCharacterCreationDraft::getOwnerUserId, currentUserId())
                         .eq(CocCharacterCreationDraft::getRunId, runId)
-                        .eq(CocCharacterCreationDraft::getParticipantId, participantId)
                         .in(CocCharacterCreationDraft::getStatus,
                                 List.of("IN_PROGRESS", "PREVIEW_READY"))
-                        .orderByDesc(CocCharacterCreationDraft::getId));
+                        .orderByDesc(CocCharacterCreationDraft::getId);
+        if (participantId == null) {
+            query.isNull(CocCharacterCreationDraft::getParticipantId);
+        } else {
+            query.eq(CocCharacterCreationDraft::getParticipantId, participantId);
+        }
+        List<CocCharacterCreationDraft> active = draftMapper.selectList(query);
         return active == null || active.isEmpty() ? null : view(active.getFirst());
     }
 
     public CharacterCardGenerationModels.DraftView regenerate(
             Long draftId, CharacterCardGenerationModels.ActionRequest request) {
         CocCharacterCreationDraft draft = requireMutableDraft(draftId, request, "REGENERATE");
+        requireAutoMode(draft);
         if (isReplay(draft, request, "REGENERATE")) {
             return view(draft);
         }
@@ -128,6 +138,7 @@ public class CharacterCardCreationService {
             Long draftId, CharacterCardGenerationModels.ActionRequest request) {
         CocCharacterCreationDraft draft = requireMutableDraft(
                 draftId, request, "REWRITE_BACKGROUND");
+        requireAutoMode(draft);
         if (isReplay(draft, request, "REWRITE_BACKGROUND")) {
             return view(draft);
         }
@@ -155,7 +166,7 @@ public class CharacterCardCreationService {
     public CharacterCardVO complete(
             Long draftId, CharacterCardGenerationModels.ActionRequest request) {
         CocCharacterCreationDraft draft = requireMutableDraft(
-                draftId, request, "COMPLETE");
+                draftId, request, "COMPLETE", true);
         if (isReplay(draft, request, "COMPLETE")) {
             return normalizeState(
                     draft.getState(), skillDefMapper.selectList(null)).preview();
@@ -169,12 +180,20 @@ public class CharacterCardCreationService {
                 || preview.getProfile() == null) {
             throw new UserRequestException("人物卡预览尚未完成");
         }
+        if (draft.getParticipantId() == null) {
+            requireRunAccess(draft.getRunId());
+        } else {
+            requireContext(draft.getRunId(), draft.getParticipantId());
+        }
         requireUniqueFormalCard(draft);
         CocCharacter character = new CocCharacter();
         BeanUtils.copyProperties(preview.getCharacter(), character);
         character.setId(null).setRunId(draft.getRunId())
                 .setParticipantId(draft.getParticipantId())
-                .setActorType("BOT").setCreationMethod(AUTO)
+                .setActorType(character.getActorType() == null
+                        ? "BOT" : character.getActorType())
+                .setCreationMethod(StepwiseCharacterCardCreationService.MODE
+                        .equals(draft.getCreationMode()) ? "STEP" : AUTO)
                 .setCreatedAt(LocalDateTime.now()).setUpdatedAt(LocalDateTime.now());
         characterMapper.insert(character);
         List<CocCharacterSkill> completedSkills = new ArrayList<>();
@@ -203,8 +222,11 @@ public class CharacterCardCreationService {
         CharacterCardGenerationModels.DraftState oldState = canonicalState;
         draft.setState(new CharacterCardGenerationModels.DraftState(
                 oldState.formatVersion(), oldState.buildPlan(), oldState.buildRolls(),
-                oldState.backgroundRolls(), oldState.backgroundPlan(), completedCard));
-        draft.setStatus("COMPLETED").setCurrentStep("PREVIEW")
+                oldState.backgroundRolls(), oldState.backgroundPlan(), completedCard,
+                oldState.stepwise()));
+        draft.setStatus("COMPLETED")
+                .setCurrentStep(StepwiseCharacterCardCreationService.MODE
+                        .equals(draft.getCreationMode()) ? "EQUIPMENT" : "PREVIEW")
                 .setNextAction(null).setResultCharacterId(character.getId());
         finishAction(draft, request.requestId(), "COMPLETE");
         return completedCard;
@@ -254,7 +276,8 @@ public class CharacterCardCreationService {
                         preview.getCharacter(), preview.getSkills(), definitions));
         return new CharacterCardGenerationModels.DraftState(
                 state.formatVersion(), state.buildPlan(), state.buildRolls(),
-                state.backgroundRolls(), state.backgroundPlan(), normalizedPreview);
+                state.backgroundRolls(), state.backgroundPlan(), normalizedPreview,
+                state.stepwise());
     }
 
     private CharacterCardGenerationModels.BuildRolls buildRolls(
@@ -326,7 +349,16 @@ public class CharacterCardCreationService {
             Long draftId,
             CharacterCardGenerationModels.ActionRequest request,
             String action) {
-        CocCharacterCreationDraft draft = requireOwnedDraft(draftId);
+        return requireMutableDraft(draftId, request, action, false);
+    }
+
+    private CocCharacterCreationDraft requireMutableDraft(
+            Long draftId,
+            CharacterCardGenerationModels.ActionRequest request,
+            String action,
+            boolean forUpdate) {
+        CocCharacterCreationDraft draft = forUpdate
+                ? requireOwnedDraftForUpdate(draftId) : requireOwnedDraft(draftId);
         if (request == null) {
             throw new UserRequestException("请求不能为空");
         }
@@ -335,14 +367,28 @@ public class CharacterCardCreationService {
                 && action.equals(draft.getLastAction())) {
             return draft;
         }
+        if (Objects.equals(draft.getLastRequestId(), request.requestId())) {
+            throw failure("IDEMPOTENCY_KEY_REUSED",
+                    "requestId已被其他操作使用", draft);
+        }
         if (request.expectedVersion() == null
                 || !Objects.equals(draft.getVersion(), request.expectedVersion())) {
-            throw new UserRequestException("人物卡草稿版本已变化，请刷新后重试");
+            throw failure("DRAFT_VERSION_CONFLICT",
+                    "人物卡草稿版本已变化，请刷新后重试", draft);
         }
         if (!"PREVIEW_READY".equals(draft.getStatus())) {
-            throw new UserRequestException("人物卡草稿当前不可修改");
+            throw failure("COMPLETED".equals(draft.getStatus())
+                    ? "DRAFT_ALREADY_COMPLETED" : "STEP_ORDER_CONFLICT",
+                    "人物卡草稿当前不可修改", draft);
         }
         return draft;
+    }
+
+    private void requireAutoMode(CocCharacterCreationDraft draft) {
+        if (!AUTO.equals(draft.getCreationMode())) {
+            throw failure("DRAFT_MODE_MISMATCH",
+                    "该接口只适用于自动人物卡草稿", draft);
+        }
     }
 
     private boolean isReplay(
@@ -356,23 +402,14 @@ public class CharacterCardCreationService {
 
     private void finishAction(
             CocCharacterCreationDraft draft, String requestId, String action) {
+        int expectedVersion = draft.getVersion();
         draft.setLastRequestId(requestId).setLastAction(action)
                 .setOperationStatus("IDLE")
-                .setVersion(draft.getVersion() + 1)
+                .setVersion(expectedVersion + 1)
                 .setUpdatedAt(LocalDateTime.now());
-        if (draftMapper.updateById(draft) == 0) {
-            throw new UserRequestException("人物卡草稿更新失败");
-        }
-        if (draft.getNextAction() == null) {
-            int cleared = draftMapper.update(null,
-                    new LambdaUpdateWrapper<CocCharacterCreationDraft>()
-                            .eq(CocCharacterCreationDraft::getId,
-                                    draft.getId())
-                            .set(CocCharacterCreationDraft::getNextAction,
-                                    null));
-            if (cleared == 0) {
-                throw new UserRequestException("人物卡草稿更新失败");
-            }
+        if (draftMapper.updateWithExpectedVersion(draft, expectedVersion) == 0) {
+            throw failure("DRAFT_VERSION_CONFLICT",
+                    "人物卡草稿版本已变化，请刷新后重试", draft);
         }
     }
 
@@ -382,7 +419,23 @@ public class CharacterCardCreationService {
         }
         CocCharacterCreationDraft draft = draftMapper.selectById(id);
         if (draft == null) {
-            throw new UserRequestException("人物卡草稿不存在");
+            throw new CharacterCardCreationException(
+                    "DRAFT_NOT_FOUND", "人物卡草稿不存在", null, null, null);
+        }
+        if (!Objects.equals(draft.getOwnerUserId(), (long) currentUserId())) {
+            throw new UserAuthException("无权访问该人物卡草稿");
+        }
+        return draft;
+    }
+
+    private CocCharacterCreationDraft requireOwnedDraftForUpdate(Long id) {
+        if (id == null) {
+            throw new UserRequestException("草稿id不能为空");
+        }
+        CocCharacterCreationDraft draft = draftMapper.selectByIdForUpdate(id);
+        if (draft == null) {
+            throw new CharacterCardCreationException(
+                    "DRAFT_NOT_FOUND", "人物卡草稿不存在", null, null, null);
         }
         if (!Objects.equals(draft.getOwnerUserId(), (long) currentUserId())) {
             throw new UserAuthException("无权访问该人物卡草稿");
@@ -394,14 +447,7 @@ public class CharacterCardCreationService {
         if (runId == null || participantId == null) {
             throw new UserRequestException("runId和participantId不能为空");
         }
-        GroupConversation conversation = conversationMapper.selectById(runId);
-        if (conversation == null || !GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) {
-            throw new UserRequestException("runId必须是TRPG群聊id");
-        }
-        UserWorldPrefix world = worldMapper.selectById(conversation.getUserWorldId());
-        if (world == null || !Objects.equals(world.getUserId(), (long) currentUserId())) {
-            throw new UserAuthException("无权访问该跑团");
-        }
+        GroupConversation conversation = requireRunAccess(runId);
         CharacterTemplate template = templateMapper.selectById(participantId);
         if (template == null || !Objects.equals(template.getWorldId(), conversation.getWorldId())) {
             throw new UserRequestException("角色模板不属于当前跑团世界");
@@ -414,13 +460,31 @@ public class CharacterCardCreationService {
         return new Context(conversation, template, module);
     }
 
+    private GroupConversation requireRunAccess(Long runId) {
+        if (runId == null) {
+            throw new UserRequestException("runId不能为空");
+        }
+        GroupConversation conversation = conversationMapper.selectById(runId);
+        if (conversation == null
+                || !GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) {
+            throw new UserRequestException("runId必须是TRPG群聊id");
+        }
+        UserWorldPrefix world = worldMapper.selectById(conversation.getUserWorldId());
+        if (world == null
+                || !Objects.equals(world.getUserId(), (long) currentUserId())) {
+            throw new UserAuthException("无权访问该跑团");
+        }
+        return conversation;
+    }
+
     private void requireUniqueFormalCard(CocCharacterCreationDraft draft) {
         List<CocCharacter> matches = characterMapper.selectList(
                 new LambdaQueryWrapper<CocCharacter>()
                         .eq(CocCharacter::getRunId, draft.getRunId())
                         .eq(CocCharacter::getParticipantId, draft.getParticipantId()));
         if (matches != null && !matches.isEmpty()) {
-            throw new UserRequestException("该调查员已绑定人物卡");
+            throw failure("FORMAL_CARD_ALREADY_EXISTS",
+                    "该调查员已绑定人物卡", draft);
         }
     }
 
@@ -438,6 +502,15 @@ public class CharacterCardCreationService {
         return userId;
     }
 
+    private CharacterCardCreationException failure(
+            String code, String message, CocCharacterCreationDraft draft) {
+        return new CharacterCardCreationException(
+                code, message,
+                draft == null ? null : draft.getVersion(),
+                draft == null ? null : draft.getCurrentStep(),
+                draft == null ? null : draft.getNextAction());
+    }
+
     private CharacterCardGenerationModels.DraftView view(
             CocCharacterCreationDraft draft) {
         CharacterCardGenerationModels.DraftState state = normalizeState(
@@ -445,7 +518,7 @@ public class CharacterCardCreationService {
         return new CharacterCardGenerationModels.DraftView(
                 draft.getId(), draft.getCreationMode(), draft.getStatus(),
                 draft.getCurrentStep(), draft.getNextAction(),
-                draft.getVersion(), state);
+                draft.getVersion(), draft.getRulesVersion(), state);
     }
 
     private <T> List<T> safe(List<T> values) {

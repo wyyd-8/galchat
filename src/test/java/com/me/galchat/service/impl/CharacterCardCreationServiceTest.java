@@ -171,6 +171,24 @@ class CharacterCardCreationServiceTest {
     }
 
     @Test
+    void findsTheActivePlayerDraftWhenParticipantIsMissing() {
+        CharacterCardCreationService service = service(new MutableGenerationModel(),
+                new SequenceRandom(4, 4, 4, 50, 3, 6, 2, 4, 4, 5));
+        CocCharacterCreationDraft playerDraft = new CocCharacterCreationDraft()
+                .setId(777L).setOwnerUserId(7L).setRunId(101L)
+                .setParticipantId(null).setCreationMode("STEP_STANDARD")
+                .setStatus("IN_PROGRESS").setCurrentStep("ATTRIBUTES")
+                .setNextAction("ROLL_ATTRIBUTES").setVersion(1)
+                .setState(new CharacterCardGenerationModels.DraftState(
+                        1, null, null, null, null, null));
+        when(draftMapper.selectList(any())).thenReturn(List.of(playerDraft));
+
+        var restored = service.getActive(101L, null);
+
+        assertThat(restored.draftId()).isEqualTo(777L);
+    }
+
+    @Test
     void restoringAnOlderDraftHidesRowsThatOnlyRepeatSkillDefaults() {
         CharacterCardCreationService service = service(new MutableGenerationModel(),
                 new SequenceRandom(4, 4, 4, 50, 3, 6, 2, 4, 4, 5));
@@ -233,9 +251,40 @@ class CharacterCardCreationServiceTest {
         assertThat(persisted.getStatus()).isEqualTo("COMPLETED");
         assertThat(persisted.getResultCharacterId()).isEqualTo(900L);
         assertThat(persisted.getNextAction()).isNull();
-        verify(draftMapper).update(
-                org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.any());
+        verify(draftMapper).updateWithExpectedVersion(
+                org.mockito.ArgumentMatchers.same(persisted),
+                org.mockito.ArgumentMatchers.eq(created.version()));
+    }
+
+    @Test
+    void completeStepDraftPreservesItsActorTypeAndCreationMethod() {
+        CharacterCardCreationService service = service(new MutableGenerationModel(),
+                new SequenceRandom(4, 4, 4, 50, 3, 6, 2, 4, 4, 5));
+        var created = service.createAuto(new CharacterCardGenerationModels.CreateRequest(
+                101L, 12L, "create-1"));
+        CocCharacterCreationDraft persisted = capturedDraft();
+        persisted.setCreationMode("STEP_STANDARD");
+        persisted.getState().preview().getCharacter()
+                .setActorType("PLAYER").setCreationMethod("STEP");
+        var stepState = new com.me.galchat.domain.dto.StepwiseCharacterCardModels.State(
+                null, null, null, null, null, null);
+        var old = persisted.getState();
+        persisted.setState(new CharacterCardGenerationModels.DraftState(
+                old.formatVersion(), old.buildPlan(), old.buildRolls(),
+                old.backgroundRolls(), old.backgroundPlan(), old.preview(), stepState));
+        when(draftMapper.selectById(persisted.getId())).thenReturn(persisted);
+        doAnswer(invocation -> {
+            invocation.<com.me.galchat.domain.po.CocCharacter>getArgument(0).setId(901L);
+            return 1;
+        }).when(characterMapper).insert(any(com.me.galchat.domain.po.CocCharacter.class));
+
+        var card = service.complete(persisted.getId(),
+                new CharacterCardGenerationModels.ActionRequest(
+                        "complete-step-1", created.version()));
+
+        assertThat(card.getCharacter().getActorType()).isEqualTo("PLAYER");
+        assertThat(card.getCharacter().getCreationMethod()).isEqualTo("STEP");
+        assertThat(persisted.getState().stepwise()).isSameAs(stepState);
     }
 
     private CocCharacterCreationDraft capturedDraft() {
@@ -280,6 +329,9 @@ class CharacterCardCreationServiceTest {
             return 1;
         }).when(draftMapper).insert(any(CocCharacterCreationDraft.class));
         when(draftMapper.updateById(any(CocCharacterCreationDraft.class))).thenReturn(1);
+        when(draftMapper.updateWithExpectedVersion(any(), any())).thenReturn(1);
+        when(draftMapper.selectByIdForUpdate(any())).thenAnswer(invocation ->
+                draftMapper.selectById(invocation.getArgument(0)));
         when(draftMapper.update(
                 org.mockito.ArgumentMatchers.isNull(),
                 org.mockito.ArgumentMatchers.any())).thenReturn(1);

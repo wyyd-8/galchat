@@ -4,7 +4,9 @@ import com.me.galchat.constant.CocCheckDifficulty;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Data
@@ -31,6 +33,8 @@ public class DiceResolutionDataVO {
         Object savedCheckName = rule == null ? null : rule.get("checkName");
         Object savedDifficulty = rule == null ? null : rule.get("difficulty");
         Object savedTargetValue = rule == null ? null : rule.get("targetValue");
+        List<Map<String, Object>> savedModifierFactors = publicModifierFactors(
+                rule == null ? null : rule.get("modifierFactors"));
         return new DiceResolutionVO(
                 type,
                 sourceResultId,
@@ -42,8 +46,25 @@ public class DiceResolutionDataVO {
                         savedTargetValue,
                         savedDifficulty,
                         rule == null ? null : rule.get("difficultyIncrease")),
+                savedModifierFactors,
                 outcome,
                 effect);
+    }
+
+    private static List<Map<String, Object>> publicModifierFactors(Object savedFactors) {
+        if (!(savedFactors instanceof List<?> factors)) {
+            return null;
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object savedFactor : factors) {
+            if (!(savedFactor instanceof Map<?, ?> factor)) {
+                continue;
+            }
+            Map<String, Object> copy = new LinkedHashMap<>();
+            factor.forEach((key, value) -> copy.put(String.valueOf(key), value));
+            result.add(copy);
+        }
+        return result.isEmpty() ? null : result;
     }
 
     private static Integer effectiveTargetValue(

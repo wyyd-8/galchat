@@ -27,7 +27,16 @@ public final class KpMeleeRequestDTOs {
             @ToolParam(description = "人物卡中的准确武器名称；省略表示徒手", required = false)
             String weaponName,
             @ToolParam(description = "攻击检定的基础奖惩骰；省略时为NORMAL", required = false)
-            CocPercentileModifier modifier) {
+            CocPercentileModifier modifier,
+            @ToolParam(description = "使用奖励骰或惩罚骰时必须填写，简短说明产生该奖惩骰的场景或裁定原因；NORMAL时省略", required = false)
+            String modifierReason) {
+
+        public Attacker(
+                String characterName,
+                String weaponName,
+                CocPercentileModifier modifier) {
+            this(characterName, weaponName, modifier, null);
+        }
     }
 
     public record Defender(
@@ -38,6 +47,16 @@ public final class KpMeleeRequestDTOs {
             @ToolParam(description = "反击使用的人物卡武器；仅COUNTERATTACK可填，省略表示徒手", required = false)
             String counterWeaponName,
             @ToolParam(description = "闪避或反击检定的基础奖惩骰；省略时为NORMAL", required = false)
-            CocPercentileModifier modifier) {
+            CocPercentileModifier modifier,
+            @ToolParam(description = "使用奖励骰或惩罚骰时必须填写，简短说明产生该奖惩骰的场景或裁定原因；NORMAL时省略", required = false)
+            String modifierReason) {
+
+        public Defender(
+                String characterName,
+                MeleeDefenseMode defenseMode,
+                String counterWeaponName,
+                CocPercentileModifier modifier) {
+            this(characterName, defenseMode, counterWeaponName, modifier, null);
+        }
     }
 }

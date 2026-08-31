@@ -52,6 +52,8 @@ public final class KpFirearmRequestDTOs {
             int bulletCount,
             @ToolParam(description = "仅包含射程、瞄准、光线等尚未结构化的场景因素；不要包含掩护、高速移动、小型目标、射击姿势受限或射击模式自动产生的惩罚骰；省略时为NORMAL", required = false)
             CocPercentileModifier baseModifier,
+            @ToolParam(description = "使用基础奖励骰或惩罚骰时必须填写，简短说明尚未结构化的场景或裁定原因；NORMAL时省略", required = false)
+            String baseModifierReason,
             @ToolParam(description = "距离档：NEAR近、MEDIUM中、FAR远；仅当武器伤害为A/B/C三档霰弹枪表达式时用于选择对应伤害，其他枪械静默忽略", required = false)
             FirearmDistance distance,
             @ToolParam(description = "目标本次是否处于高速移动中；true时后端自动增加一颗惩罚骰，省略时为false", required = false)
@@ -61,9 +63,19 @@ public final class KpFirearmRequestDTOs {
                 String targetCharacterName,
                 int bulletCount,
                 CocPercentileModifier baseModifier,
+                FirearmDistance distance,
                 Boolean targetMovingFast) {
             this(targetCharacterName, bulletCount, baseModifier,
-                    null, targetMovingFast);
+                    null, distance, targetMovingFast);
+        }
+
+        public Target(
+                String targetCharacterName,
+                int bulletCount,
+                CocPercentileModifier baseModifier,
+                Boolean targetMovingFast) {
+            this(targetCharacterName, bulletCount, baseModifier,
+                    null, null, targetMovingFast);
         }
 
         public Target(
@@ -71,7 +83,7 @@ public final class KpFirearmRequestDTOs {
                 int bulletCount,
                 CocPercentileModifier baseModifier) {
             this(targetCharacterName, bulletCount, baseModifier,
-                    null, false);
+                    null, null, false);
         }
     }
 }

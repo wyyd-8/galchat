@@ -47,7 +47,8 @@ class KpDiceRequestDTOsTest {
     void checkTargetAcceptsMultipleCandidateCheckNames() {
         assertThat(KpDiceRequestDTOs.CheckTarget.class.getRecordComponents())
                 .extracting(component -> component.getName())
-                .containsExactly("characterName", "checkNames", "modifier");
+                .containsExactly(
+                        "characterName", "checkNames", "modifier", "modifierReason");
     }
 
     private boolean lacksDescription(Field field) {

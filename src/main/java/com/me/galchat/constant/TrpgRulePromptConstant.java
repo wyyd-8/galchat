@@ -50,6 +50,7 @@ public final class TrpgRulePromptConstant {
             - 非战斗中有明确对手但不需要双方同时掷骰时，按其最高合理抵抗值设难度：低于 50 为常规，50–89 为困难，90 以上为极难。NPC 没有准确人物卡数值时不得临时编造。
             - NPC 倾向同意时可直接成功；无明显倾向时按其最高合理社交能力设难度；强烈反对可提高一至两级，真实有力的筹码可降低一级。社交成功只改变对方可能妥协的部分。
             - 显著优势或劣势才使用奖惩骰，通常一颗、极端时最多两颗；两者逐颗抵消。难度表示任务要求，奖惩骰表示当前条件，同一因素不能重复计算。理智检定不用奖惩骰。
+            - 通用单人、群体、对抗及孤注一掷检定中，某个目标使用奖励骰或惩罚骰时必须填写该目标的 `modifierReason`，简短写明产生修正的场景或裁定因素；`NORMAL` 时省略。`modifierReason` 只解释该目标的奖惩骰，不替代整次检定的顶层 `reason`。
 
             ## 4. 结果与孤注一掷
 
@@ -241,7 +242,7 @@ public final class TrpgRulePromptConstant {
 
             - **调用前考虑：** 确认这是以造成武器伤害为目标的普通近战，而不是战技；核对双方准确人物卡、攻击武器、防守方式、反击武器以及各自独立的场景修正。寡不敌众、护甲、伤害、贯穿和武器自带眩晕由后端处理，不得重复写入 `modifier` 或另算伤害。
             - **调用顺序：** 一次调用 `requestMeleeAttack`，把攻击者和防守者放入同一个请求：
-              `{"request":{"reason":"用折刀刺击邪教徒","attacker":{"characterName":"林恩","weaponName":"折刀","modifier":"BONUS_1"},"defender":{"characterName":"邪教徒","defenseMode":"COUNTERATTACK","counterWeaponName":null,"modifier":"NORMAL"}}}`
+              `{"request":{"reason":"用折刀刺击邪教徒","attacker":{"characterName":"林恩","weaponName":"折刀","modifier":"BONUS_1","modifierReason":"林恩占据有利位置"},"defender":{"characterName":"邪教徒","defenseMode":"COUNTERATTACK","counterWeaponName":null,"modifier":"NORMAL"}}}`
             - **结果处理与解释：** 等待工具返回后，以工具确认的胜者、命中者、伤害、护甲减免和状态变化为事实。攻击者获胜则解释原攻击如何命中；反击者获胜则解释原攻击如何被化解并由反击命中；双方失败则说明交锋落空且没有伤害。专用工具已经结算有效命中的伤害，禁止再调用 `rollDamage`，最后只把结果自然写成公开叙事。
 
             ### 远程
@@ -284,7 +285,7 @@ public final class TrpgRulePromptConstant {
             `{"characterName":"林恩","weaponName":"左轮手枪","update":{"remainingAmmo":6}}`
             若当前没有弹药而声明只装填一发并立即射击，先把剩余弹药更新为1，返回后再发起单发射击，并把这一颗惩罚骰与射程、瞄准等手动因素合并后写入 `baseModifier`；不得把后端自动因素重复计入：
             `{"characterName":"林恩","weaponName":"左轮手枪","update":{"remainingAmmo":1}}`
-            `{"request":{"reason":"装填一发后立即射击邪教徒","characterName":"林恩","weaponName":"左轮手枪","firingMode":"SINGLE","fumbleBreaksWeapon":true,"shooterMovingFast":false,"firingPostureRestricted":false,"targets":[{"targetCharacterName":"邪教徒","bulletCount":1,"baseModifier":"PENALTY_1","targetMovingFast":false}]}}`
+            `{"request":{"reason":"装填一发后立即射击邪教徒","characterName":"林恩","weaponName":"左轮手枪","firingMode":"SINGLE","fumbleBreaksWeapon":true,"shooterMovingFast":false,"firingPostureRestricted":false,"targets":[{"targetCharacterName":"邪教徒","bulletCount":1,"baseModifier":"PENALTY_1","baseModifierReason":"装填一发并立即射击","targetMovingFast":false}]}}`
 
             ### 战技
 
@@ -299,7 +300,7 @@ public final class TrpgRulePromptConstant {
 
             - **调用前考虑：** 先确认“控制”是检定前明确的唯一目标；体格差1使林恩获得一颗惩罚骰；再核对防守选择与其他场景修正。体格差达到3时直接说明不可行，不提供虚假检定。
             - **调用顺序：** 调用 `requestOpposedCheck`，分别提交林恩的斗殴和邪教徒的闪避：
-              `{"request":{"reason":"抓住并控制邪教徒","targets":[{"characterName":"林恩","checkNames":["斗殴"],"modifier":"PENALTY_1"},{"characterName":"邪教徒","checkNames":["闪避"],"modifier":"NORMAL"}],"tieWinnerCharacterName":"邪教徒"}}`
+              `{"request":{"reason":"抓住并控制邪教徒","targets":[{"characterName":"林恩","checkNames":["斗殴"],"modifier":"PENALTY_1","modifierReason":"林恩体格比邪教徒低1点"},{"characterName":"邪教徒","checkNames":["闪避"],"modifier":"NORMAL"}],"tieWinnerCharacterName":"邪教徒"}}`
               等待对抗结果；只有林恩获胜才进入声明效果的后续调用。
             - **结果处理与解释：** 若声明击晕且施展者获胜，调用 `rollDamage`，只提交独立眩晕表达式：
               `{"request":{"reason":"战技击晕邪教徒","targets":[{"targetCharacterName":"邪教徒","formula":"眩晕"}]}}`

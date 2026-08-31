@@ -258,7 +258,8 @@ export interface TrpgCombatParticipantOverview {
 export interface DiceValue { sides: number; value?: number; role?: string; selected: boolean }
 export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number; placeholder?: boolean }
 export interface DiceResult { formula: string; modules: DiceModule[]; result?: number }
-export interface DiceResolution { type?: string; sourceResultId?: number; groupRule?: 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'; characterName?: string; checkName?: string; difficulty?: 'REGULAR' | 'HARD' | 'EXTREME'; targetValue?: number; rule?: Record<string, unknown>; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
+export interface DiceModifierFactor { source?: 'KP' | 'BACKEND'; kind: 'BONUS' | 'PENALTY'; diceCount?: number; code?: string; reason: string }
+export interface DiceResolution { type?: string; sourceResultId?: number; groupRule?: 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'; characterName?: string; checkName?: string; difficulty?: 'REGULAR' | 'HARD' | 'EXTREME'; targetValue?: number; modifierFactors?: DiceModifierFactor[]; rule?: Record<string, unknown>; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
 export interface DiceRollSummary { id: number; conversationId: number; reason?: string; totalResult?: string; roundCount?: number; status: string; toolName?: string; createdAt?: string; updatedAt?: string }
 export interface DiceRollDetail { id: number; summaryId: number; characterId?: number; roundNo?: number; displayOrder?: number; displayType?: string; reason?: string; resultData?: DiceResult; resolution?: DiceResolution; resolvedAt?: string; createdAt?: string; updatedAt?: string }
 export interface DiceRollProgress { summary: DiceRollSummary; rolledResult: DiceRollDetail; createdResults: DiceRollDetail[] }

@@ -55,7 +55,18 @@ public final class KpDiceRequestDTOs {
             @ToolParam(
                     description = "百分骰修正：NORMAL无修正，BONUS_1/BONUS_2奖励骰，PENALTY_1/PENALTY_2惩罚骰；省略时为NORMAL",
                     required = false)
-            CocPercentileModifier modifier) {
+            CocPercentileModifier modifier,
+            @ToolParam(
+                    description = "使用奖励骰或惩罚骰时必须填写，简短说明产生该奖惩骰的场景或裁定原因；NORMAL时省略",
+                    required = false)
+            String modifierReason) {
+
+        public CheckTarget(
+                String characterName,
+                List<String> checkNames,
+                CocPercentileModifier modifier) {
+            this(characterName, checkNames, modifier, null);
+        }
 
         public CheckTarget(
                 String characterName,
@@ -63,7 +74,19 @@ public final class KpDiceRequestDTOs {
                 CocPercentileModifier modifier) {
             this(characterName,
                     checkName == null ? null : List.of(checkName),
-                    modifier);
+                    modifier,
+                    null);
+        }
+
+        public CheckTarget(
+                String characterName,
+                String checkName,
+                CocPercentileModifier modifier,
+                String modifierReason) {
+            this(characterName,
+                    checkName == null ? null : List.of(checkName),
+                    modifier,
+                    modifierReason);
         }
     }
 

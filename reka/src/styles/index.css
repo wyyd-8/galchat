@@ -1156,6 +1156,26 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-player-surface::before { position: absolute; z-index: -2; inset: 0; content: ''; background-image: linear-gradient(rgba(50,58,53,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(50,58,53,.04) 1px, transparent 1px); background-size: 40px 40px; mask-image: radial-gradient(ellipse at center, #000 20%, transparent 76%); }
 .dice-player-surface::after { position: absolute; z-index: -1; right: 8%; bottom: 54px; left: 8%; height: 92px; border: 1px solid rgba(var(--dice-accent-rgb),.16); border-top-color: rgba(255,255,255,.34); border-radius: 50%; content: ''; background: radial-gradient(ellipse at center, rgba(var(--dice-accent-rgb),.12), transparent 67%); filter: blur(.2px); transform: perspective(290px) rotateX(69deg); transform-origin: center bottom; }
 .dice-player-stage-bar { position: absolute; z-index: 4; top: 18px; right: 20px; left: 20px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; pointer-events: none; }
+.dice-player-stage-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.dice-modifier-notice-badge { min-height: 24px; padding: 6px 9px; border: 1px solid rgba(var(--dice-accent-rgb),.18); border-radius: 999px; display: inline-flex; align-items: center; gap: 4px; color: var(--dice-accent); background: rgba(255,255,255,.7); box-shadow: 0 7px 20px rgba(36,51,45,.07); cursor: help; font-size: 9px; font-weight: 700; letter-spacing: .04em; line-height: 1; pointer-events: auto; backdrop-filter: blur(12px); }
+.dice-modifier-notice-badge svg { stroke-width: 2; }
+.dice-modifier-notice-badge:hover { border-color: rgba(var(--dice-accent-rgb),.34); background: rgba(255,255,255,.86); }
+.dice-modifier-notice-badge:focus-visible { outline: 2px solid rgba(var(--dice-accent-rgb),.25); outline-offset: 2px; }
+.tooltip.dice-modifier-notice-tooltip { width: min(320px, calc(100vw - 32px)); max-width: none; padding: 11px 12px; border: 1px solid #d8d3c6; border-radius: 10px; color: var(--ink); background: #fffdf8; box-shadow: 0 14px 36px rgba(46,44,38,.18); font-size: 10px; line-height: 1.5; }
+.dice-modifier-notice-tooltip header { padding-bottom: 8px; border-bottom: 1px solid #e4dfd3; display: flex; align-items: center; gap: 7px; }
+.dice-modifier-notice-tooltip header svg { flex: 0 0 auto; color: #8a6b2f; }
+.dice-modifier-notice-tooltip header strong { color: var(--ink); font-size: 11px; }
+.dice-modifier-notice-participants { margin-top: 8px; display: grid; gap: 9px; }
+.dice-modifier-notice-participant { display: grid; gap: 6px; }
+.dice-modifier-notice-participant + .dice-modifier-notice-participant { padding-top: 8px; border-top: 1px solid #ebe6db; }
+.dice-modifier-notice-participant h3, .dice-modifier-notice-participant h4 { margin: 0; }
+.dice-modifier-notice-participant h3 { color: #4c514c; font-size: 10px; }
+.dice-modifier-notice-participant > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 7px; align-items: start; }
+.dice-modifier-notice-participant h4 { font-size: 9px; line-height: 1.6; }
+.dice-modifier-notice-participant .is-bonus h4 { color: #3f7258; }
+.dice-modifier-notice-participant .is-penalty h4 { color: #9a4b42; }
+.dice-modifier-notice-participant ul { margin: 0; padding-left: 14px; color: #55564f; display: grid; gap: 3px; }
+.dice-modifier-notice-participant li::marker { color: #a69b7f; }
 .dice-outcome-vfx-layer { position: absolute; z-index: 3; inset: 0; overflow: hidden; pointer-events: none; }
 .dice-render-layer { position: absolute; z-index: 2; inset: 0; overflow: hidden; pointer-events: none; }
 .dice-outcome-vfx-burst { width: var(--vfx-size); height: var(--vfx-size); position: absolute; top: var(--vfx-top); left: var(--vfx-left); transform: translate(-50%, -50%); }

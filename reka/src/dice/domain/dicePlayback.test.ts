@@ -201,6 +201,137 @@ test('opens melee attack and defense rolls as an opposed combat check', () => {
   )
 })
 
+test('groups modifier reasons by participant and deduplicates within each kind', () => {
+  const aggregate: DiceRollAggregate = {
+    summary: {
+      id: 26,
+      conversationId: 4,
+      reason: '协同调查',
+      totalResult: '分别结果',
+      roundCount: 1,
+      status: 'COMPLETED',
+      toolName: 'requestGroupCheck',
+    },
+    results: [
+      {
+        id: 41,
+        summaryId: 26,
+        roundNo: 1,
+        displayOrder: 1,
+        displayType: 'CHECK',
+        resultData: combatCheckResult(31),
+        resolution: {
+          type: 'CHECK',
+          characterName: '林恩',
+          checkName: '侦查',
+          modifierFactors: [
+            { source: 'KP', kind: 'BONUS', diceCount: 1, code: 'KP_MODIFIER', reason: ' 提前瞄准 ' },
+            { source: 'BACKEND', kind: 'PENALTY', diceCount: 1, code: 'TARGET_IN_COVER', reason: '目标处于掩护中' },
+          ],
+          outcome: { characterName: '林恩', category: 'SUCCESS', rank: 'REGULAR' },
+        },
+        resolvedAt: '2026-08-31T12:00:00',
+      },
+      {
+        id: 42,
+        summaryId: 26,
+        roundNo: 1,
+        displayOrder: 2,
+        displayType: 'CHECK',
+        resultData: combatCheckResult(44),
+        resolution: {
+          type: 'CHECK',
+          characterName: '林恩',
+          checkName: '侦查',
+          modifierFactors: [
+            { source: 'KP', kind: 'BONUS', diceCount: 2, code: 'KP_MODIFIER', reason: '提前瞄准' },
+            { source: 'BACKEND', kind: 'PENALTY', diceCount: 1, code: 'TARGET_IN_COVER', reason: '目标处于掩护中' },
+            { source: 'BACKEND', kind: 'PENALTY', diceCount: 1, code: 'FIRING_MODE', reason: '全自动射击进入后续弹组' },
+          ],
+          outcome: { characterName: '林恩', category: 'SUCCESS', rank: 'REGULAR' },
+        },
+        resolvedAt: '2026-08-31T12:00:00',
+      },
+      {
+        id: 43,
+        summaryId: 26,
+        roundNo: 1,
+        displayOrder: 3,
+        displayType: 'CHECK',
+        resultData: combatCheckResult(70),
+        resolution: {
+          type: 'CHECK',
+          characterName: '陈默',
+          checkName: '聆听',
+          modifierFactors: [
+            { source: 'KP', kind: 'BONUS', diceCount: 1, code: 'KP_MODIFIER', reason: '队友协助' },
+            { source: 'KP', kind: 'PENALTY', diceCount: 1, code: 'KP_MODIFIER', reason: '队友协助' },
+            { source: 'KP', kind: 'BONUS', diceCount: 1, code: 'KP_MODIFIER', reason: '   ' },
+          ],
+          outcome: { characterName: '陈默', category: 'FAILURE', rank: 'FAILURE' },
+        },
+        resolvedAt: '2026-08-31T12:00:00',
+      },
+    ],
+  }
+  const createNotice = Reflect.get(diceState, 'createDiceModifierNotice') as
+    | ((presentation: ReturnType<typeof createDiceAggregatePlaybackRequest>['presentation']) => unknown)
+    | undefined
+
+  assert.ok(createNotice, 'dice playback should expose modifier notice presentation')
+  const request = createDiceAggregatePlaybackRequest(0, aggregate, 'classic')
+  assert.deepEqual(createNotice(request.presentation), {
+    participants: [
+      {
+        label: '林恩',
+        bonusReasons: ['提前瞄准'],
+        penaltyReasons: ['目标处于掩护中', '全自动射击进入后续弹组'],
+      },
+      {
+        label: '陈默',
+        bonusReasons: ['队友协助'],
+        penaltyReasons: ['队友协助'],
+      },
+    ],
+  })
+})
+
+test('does not create a modifier notice when a check has no explained factors', () => {
+  const createNotice = Reflect.get(diceState, 'createDiceModifierNotice') as
+    | ((presentation: ReturnType<typeof createDiceAggregatePlaybackRequest>['presentation']) => unknown)
+    | undefined
+  assert.ok(createNotice, 'dice playback should expose modifier notice presentation')
+
+  const request = createDiceAggregatePlaybackRequest(0, {
+    summary: {
+      id: 27,
+      conversationId: 4,
+      reason: '普通调查',
+      totalResult: '成功',
+      roundCount: 1,
+      status: 'COMPLETED',
+      toolName: 'requestCheck',
+    },
+    results: [{
+      id: 44,
+      summaryId: 27,
+      roundNo: 1,
+      displayOrder: 1,
+      displayType: 'CHECK',
+      resultData: combatCheckResult(20),
+      resolution: {
+        type: 'CHECK',
+        characterName: '林恩',
+        checkName: '侦查',
+        outcome: { characterName: '林恩', category: 'SUCCESS', rank: 'HARD' },
+      },
+      resolvedAt: '2026-08-31T12:00:00',
+    }],
+  }, 'classic')
+
+  assert.equal(createNotice(request.presentation), undefined)
+})
+
 test('keeps the completed attack visible before offering its newly-created damage roll', () => {
   const createPostRollPlan = Reflect.get(diceState, 'createDicePostRollPlaybackPlan') as
     | ((aggregate: DiceRollAggregate, rolledResultId: number) => {

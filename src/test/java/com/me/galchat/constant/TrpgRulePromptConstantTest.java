@@ -7,10 +7,21 @@ import com.me.galchat.tool.KpCombatTools;
 import com.me.galchat.tool.KpModuleTools;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.support.ToolCallbacks;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TrpgRulePromptConstantTest {
+
+    private static final Pattern JSON_CODE_SPAN = Pattern.compile(
+            "`(\\{[^`]+})`");
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Test
     void diceReasonsUseDistinctiveShortNamesForActorActionDescriptions() {
@@ -141,6 +152,20 @@ class TrpgRulePromptConstantTest {
                         "`requestCheck`",
                         "`updateCombatStates`",
                         "`requestFirearmAttack`");
+    }
+
+    @Test
+    void combatJsonExamplesExplainEveryNonNormalModifier() {
+        assertThat(nonNormalModifiersMissingReasons(
+                TrpgRulePromptConstant.KP_COMBAT_RULES)).isEmpty();
+    }
+
+    @Test
+    void explorationRulesExplainReasonsForKpProvidedModifiers() {
+        assertThat(TrpgRulePromptConstant.KP_RESIDENT_RULES)
+                .contains("`modifierReason`")
+                .contains("使用奖励骰或惩罚骰时必须填写")
+                .contains("`NORMAL` 时省略");
     }
 
     @Test
@@ -276,5 +301,54 @@ class TrpgRulePromptConstantTest {
                 .orElseThrow()
                 .getToolDefinition()
                 .description();
+    }
+
+    private List<String> nonNormalModifiersMissingReasons(String prompt) {
+        List<String> violations = new ArrayList<>();
+        Matcher matcher = JSON_CODE_SPAN.matcher(prompt);
+        while (matcher.find()) {
+            JsonNode example = OBJECT_MAPPER.readTree(matcher.group(1));
+            collectMissingModifierReasons(example, "$", violations);
+        }
+        return violations;
+    }
+
+    private void collectMissingModifierReasons(
+            JsonNode node,
+            String path,
+            List<String> violations) {
+        if (node.isObject()) {
+            requireReasonForNonNormalModifier(
+                    node, path, "modifier", "modifierReason", violations);
+            requireReasonForNonNormalModifier(
+                    node, path, "baseModifier", "baseModifierReason",
+                    violations);
+            node.forEachEntry((name, child) -> collectMissingModifierReasons(
+                    child, path + "." + name, violations));
+            return;
+        }
+        if (node.isArray()) {
+            for (int index = 0; index < node.size(); index++) {
+                collectMissingModifierReasons(
+                        node.get(index), path + "[" + index + "]", violations);
+            }
+        }
+    }
+
+    private void requireReasonForNonNormalModifier(
+            JsonNode node,
+            String path,
+            String modifierField,
+            String reasonField,
+            List<String> violations) {
+        JsonNode modifier = node.get(modifierField);
+        if (modifier == null || "NORMAL".equals(modifier.asString())) {
+            return;
+        }
+        JsonNode reason = node.get(reasonField);
+        if (reason == null || reason.asString().isBlank()) {
+            violations.add(path + "." + modifierField + "="
+                    + modifier.asString());
+        }
     }
 }

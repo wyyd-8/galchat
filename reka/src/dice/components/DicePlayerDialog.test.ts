@@ -101,6 +101,28 @@ test('renders the opposed-check separator as an accessible crossed-swords icon',
   )), false)
 })
 
+test('places the modifier reason notice in the upper-right stage controls', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+  const root = baseParse(template)
+  const stageBar = findElementByClass(root, 'dice-player-stage-bar')
+  assert.ok(stageBar, 'the player should have upper stage controls')
+
+  const notice = findElement(stageBar as unknown as RootNode, (element) => (
+    element.tag === 'DiceModifierNotice'
+  ))
+  assert.ok(notice, 'explained check modifiers should use a dedicated notice')
+  assert.equal(notice.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'bind'
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.content === 'notice'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content === 'modifierNotice'
+  )), true)
+})
+
 test('renders structured dice messages with the dedicated compact component', async () => {
   const source = await readFile(new URL('../../components/GroupChatStage.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]

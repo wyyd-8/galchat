@@ -14,8 +14,10 @@ class CharacterCardCreationControllerTest {
     @Test
     void exposesAutoCreationAndBackgroundRewrite() {
         CharacterCardCreationService service = mock(CharacterCardCreationService.class);
+        com.me.galchat.service.impl.StepwiseCharacterCardCreationService stepService =
+                mock(com.me.galchat.service.impl.StepwiseCharacterCardCreationService.class);
         CharacterCardCreationController controller =
-                new CharacterCardCreationController(service);
+                new CharacterCardCreationController(service, stepService);
         var create = new CharacterCardGenerationModels.CreateRequest(1L, 2L, "c-1");
         var action = new CharacterCardGenerationModels.ActionRequest("r-1", 1);
         var view = new CharacterCardGenerationModels.DraftView(
@@ -31,5 +33,27 @@ class CharacterCardCreationControllerTest {
         verify(service).createAuto(create);
         verify(service).rewriteBackground(3L, action);
         verify(service).getActive(1L, 2L);
+    }
+
+    @Test
+    void exposesTheCompleteStepwiseCreationApi() {
+        CharacterCardCreationService autoService = mock(CharacterCardCreationService.class);
+        com.me.galchat.service.impl.StepwiseCharacterCardCreationService stepService =
+                mock(com.me.galchat.service.impl.StepwiseCharacterCardCreationService.class);
+        CharacterCardCreationController controller =
+                new CharacterCardCreationController(autoService, stepService);
+        var create = new com.me.galchat.domain.dto.StepwiseCharacterCardModels.CreateRequest(
+                1L, 2L, "调查员", "记者", 42, "男", "纽约", "波士顿");
+        var action = new CharacterCardGenerationModels.ActionRequest("roll-1", 1);
+        var view = new CharacterCardGenerationModels.DraftView(
+                3L, "STEP_STANDARD", "IN_PROGRESS", "ATTRIBUTES",
+                "ROLL_ATTRIBUTES", 1, null);
+        when(stepService.create(create)).thenReturn(view);
+        when(stepService.rollAttributes(3L, action)).thenReturn(view);
+
+        assertThat(controller.createStep(create).getData()).isSameAs(view);
+        assertThat(controller.rollAttributes(3L, action).getData()).isSameAs(view);
+        verify(stepService).create(create);
+        verify(stepService).rollAttributes(3L, action);
     }
 }

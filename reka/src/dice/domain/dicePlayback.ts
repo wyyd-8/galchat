@@ -1,4 +1,6 @@
-import type { DiceResult, DiceRollAggregate, DiceRollDetail, GroupMessage } from '../../api/types'
+import type {
+  DiceModifierFactor, DiceResult, DiceRollAggregate, DiceRollDetail, GroupMessage,
+} from '../../api/types'
 
 export const DICE_SKIN_OPTIONS = [
   { value: 'classic', label: '经典' },
@@ -37,6 +39,15 @@ export interface DicePlaybackGroupPresentation {
   moduleStart: number
   moduleCount: number
   rollResult?: number
+  modifierFactors?: DiceModifierFactor[]
+}
+export interface DiceModifierNoticeParticipant {
+  label: string
+  bonusReasons: string[]
+  penaltyReasons: string[]
+}
+export interface DiceModifierNoticePresentation {
+  participants: DiceModifierNoticeParticipant[]
 }
 export interface DiceGroupResultDisplay {
   label?: string
@@ -754,6 +765,48 @@ function aggregateGroup(
     moduleStart,
     moduleCount: detail.resultData.modules.length,
     rollResult: detail.resultData.result,
+    modifierFactors: Array.isArray(detail.resolution?.modifierFactors)
+      ? detail.resolution.modifierFactors
+      : undefined,
+  }
+}
+
+export function createDiceModifierNotice(
+  presentation?: DicePlaybackPresentation,
+): DiceModifierNoticePresentation | undefined {
+  if (!presentation || presentation.kind === 'value-roll') return undefined
+  const participants = new Map<string, {
+    label: string
+    bonusReasons: Set<string>
+    penaltyReasons: Set<string>
+  }>()
+  presentation.groups.forEach((group) => {
+    group.modifierFactors?.forEach((factor) => {
+      if (factor?.kind !== 'BONUS' && factor?.kind !== 'PENALTY') return
+      const reason = typeof factor.reason === 'string' ? factor.reason.trim() : ''
+      if (!reason) return
+      let participant = participants.get(group.label)
+      if (!participant) {
+        participant = {
+          label: group.label,
+          bonusReasons: new Set<string>(),
+          penaltyReasons: new Set<string>(),
+        }
+        participants.set(group.label, participant)
+      }
+      const reasons = factor.kind === 'BONUS'
+        ? participant.bonusReasons
+        : participant.penaltyReasons
+      reasons.add(reason)
+    })
+  })
+  if (!participants.size) return undefined
+  return {
+    participants: [...participants.values()].map((participant) => ({
+      label: participant.label,
+      bonusReasons: [...participant.bonusReasons],
+      penaltyReasons: [...participant.penaltyReasons],
+    })),
   }
 }
 

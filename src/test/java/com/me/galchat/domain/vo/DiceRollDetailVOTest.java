@@ -6,6 +6,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,5 +79,42 @@ class DiceRollDetailVOTest {
         assertThat(DiceRollDetailVO.class.getDeclaredFields())
                 .extracting(Field::getName)
                 .doesNotContain("resolutionData");
+    }
+
+    @Test
+    void detailExposesStructuredModifierFactorsWithoutExposingTheRuleSnapshot()
+            throws Exception {
+        DiceResolutionDataVO resolution = DiceResolutionDataVO.pending(
+                "CHECK",
+                null,
+                Map.of(
+                        "cardId", 77L,
+                        "modifierFactors", List.of(
+                                Map.of(
+                                        "source", "KP",
+                                        "kind", "BONUS",
+                                        "diceCount", 1,
+                                        "code", "KP_MODIFIER",
+                                        "reason", "提前瞄准"),
+                                Map.of(
+                                        "source", "BACKEND",
+                                        "kind", "PENALTY",
+                                        "diceCount", 1,
+                                        "code", "TARGET_IN_COVER",
+                                        "reason", "目标处于掩护中"))));
+        DiceRollResult entity = new DiceRollResult()
+                .setId(1L)
+                .setResolutionData(resolution);
+
+        String json = JsonMapper.builder().build()
+                .writeValueAsString(DiceRollDetailVO.from(entity));
+
+        assertThat(json)
+                .contains("\"modifierFactors\"")
+                .contains("\"kind\":\"BONUS\"")
+                .contains("\"reason\":\"提前瞄准\"")
+                .contains("\"source\":\"BACKEND\"")
+                .contains("\"diceCount\":1")
+                .doesNotContain("cardId");
     }
 }

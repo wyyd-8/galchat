@@ -171,13 +171,60 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             remaining -= allocated;
             for (int groupSize : CocFirearmRules.groupSizes(
                     request.firingMode(), skillValue, allocated)) {
+                int groupIndex = globalGroupIndex++;
                 CocFirearmRules.AttackAdjustment adjustment =
                         CocFirearmRules.adjustment(
-                                request.firingMode(), globalGroupIndex++,
+                                request.firingMode(), groupIndex,
                                 target.baseModifier(),
                                 automaticSituationPenaltyDice);
                 if (adjustment.impossible()) {
                     continue;
+                }
+                List<Map<String, Object>> modifierFactors = kpModifierFactors(
+                        target.baseModifier(), target.baseModifierReason());
+                if (Boolean.TRUE.equals(request.shooterMovingFast())) {
+                    modifierFactors.add(modifierFactor(
+                            "BACKEND", "PENALTY", 1,
+                            "SHOOTER_MOVING_FAST", "射手正在高速移动"));
+                }
+                if (Boolean.TRUE.equals(request.firingPostureRestricted())) {
+                    modifierFactors.add(modifierFactor(
+                            "BACKEND", "PENALTY", 1,
+                            "FIRING_POSTURE_RESTRICTED", "射击姿势明显受限"));
+                }
+                if (targetInCover) {
+                    modifierFactors.add(modifierFactor(
+                            "BACKEND", "PENALTY", 1,
+                            "TARGET_IN_COVER",
+                            "目标“" + targetCard.name() + "”处于掩护中"));
+                }
+                if (targetMovingFast) {
+                    modifierFactors.add(modifierFactor(
+                            "BACKEND", "PENALTY", 1,
+                            "TARGET_MOVING_FAST",
+                            "目标“" + targetCard.name() + "”正在高速移动"));
+                }
+                if (smallTarget) {
+                    modifierFactors.add(modifierFactor(
+                            "BACKEND", "PENALTY", 1,
+                            "SMALL_TARGET",
+                            "目标“" + targetCard.name() + "”体型过小"));
+                }
+                int firingModePenaltyDice = switch (request.firingMode()) {
+                    case HANDGUN_MULTIPLE, SEMI_AUTO -> 1;
+                    case FULL_AUTO -> groupIndex;
+                    default -> 0;
+                };
+                if (firingModePenaltyDice > 0) {
+                    String firingModeReason = switch (request.firingMode()) {
+                        case HANDGUN_MULTIPLE -> "本轮使用手枪连射";
+                        case SEMI_AUTO -> "本轮使用半自动多次射击";
+                        case FULL_AUTO -> "全自动射击进入后续弹组";
+                        default -> throw new IllegalStateException("射击模式没有惩罚骰");
+                    };
+                    modifierFactors.add(modifierFactor(
+                            "BACKEND", "PENALTY", firingModePenaltyDice,
+                            "FIRING_MODE", firingModeReason));
                 }
                 Map<String, Object> rule = new LinkedHashMap<>();
                 rule.put("runId", runId);
@@ -209,6 +256,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 rule.put("canImpale", Boolean.TRUE.equals(
                         weapon.getCanImpale()));
                 rule.put("damageFormula", damageFormula);
+                putModifierFactors(rule, modifierFactors);
 
                 DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
                 draft.setCharacterId(automaticRoller(attacker));
@@ -275,8 +323,15 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 defenderEntity.getMeleeAttackedThisRound());
         CocPercentileModifier attackModifier = normalizeModifier(
                 request.attacker().modifier());
+        List<Map<String, Object>> attackModifierFactors = kpModifierFactors(
+                request.attacker().modifier(),
+                request.attacker().modifierReason());
         if (defenderAlreadyAttacked) {
             attackModifier = addBonusDie(attackModifier);
+            attackModifierFactors.add(modifierFactor(
+                    "BACKEND", "BONUS", 1,
+                    "DEFENDER_ALREADY_ATTACKED",
+                    "防守者本轮已经遭受过近战攻击"));
         }
 
         List<DiceRollResultCreateDTO> drafts = new ArrayList<>();
@@ -289,6 +344,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 attackerEntity.getDamageBonus(),
                 attackValue,
                 attackModifier,
+                attackModifierFactors,
                 defenseMode,
                 request.reason(),
                 1));
@@ -315,6 +371,9 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     defenderEntity.getDamageBonus(),
                     defenseValue,
                     normalizeModifier(request.defender().modifier()),
+                    kpModifierFactors(
+                            request.defender().modifier(),
+                            request.defender().modifierReason()),
                     defenseMode,
                     request.reason(),
                     2));
@@ -408,6 +467,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             String damageBonus,
             int targetValue,
             CocPercentileModifier modifier,
+            List<Map<String, Object>> modifierFactors,
             MeleeDefenseMode defenseMode,
             String reason,
             int displayOrder) {
@@ -419,6 +479,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         rule.put("checkName", weapon == null ? "闪避" : weapon.skillName());
         rule.put("targetValue", targetValue);
         rule.put("modifier", modifier.name());
+        putModifierFactors(rule, modifierFactors);
         rule.put("defenseMode", defenseMode.name());
         rule.put("opponentCardId", opponent.cardId());
         rule.put("opponentCharacterName", opponent.name());
@@ -461,6 +522,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     check.value(),
                     difficulty,
                     modifier,
+                    kpModifierFactors(modifier, target.modifierReason()),
                     false,
                     DiceRollConstant.TYPE_CHECK,
                     reason,
@@ -503,6 +565,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     check.value(),
                     CocCheckDifficulty.REGULAR,
                     normalizeModifier(target.modifier()),
+                    kpModifierFactors(
+                            target.modifier(), target.modifierReason()),
                     false,
                     DiceRollConstant.TYPE_OPPOSED_CHECK,
                     request.reason(),
@@ -556,6 +620,8 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     check.value(),
                     difficulty,
                     normalizeModifier(target.modifier()),
+                    kpModifierFactors(
+                            target.modifier(), target.modifierReason()),
                     true,
                     DiceRollConstant.TYPE_CHECK,
                     request.reason(),
@@ -603,6 +669,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     card.sanCurrent(),
                     CocCheckDifficulty.REGULAR,
                     CocPercentileModifier.NORMAL,
+                    List.of(),
                     false,
                     DiceRollConstant.TYPE_SAN_CHECK,
                     request.reason(),
@@ -2110,6 +2177,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             int targetValue,
             CocCheckDifficulty difficulty,
             CocPercentileModifier modifier,
+            List<Map<String, Object>> modifierFactors,
             boolean pushed,
             String type,
             String reason,
@@ -2122,6 +2190,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         rule.put("targetValue", targetValue);
         rule.put("difficulty", difficulty.name());
         rule.put("modifier", modifier.name());
+        putModifierFactors(rule, modifierFactors);
         rule.put("pushed", pushed);
         if (DiceRollConstant.TYPE_OPPOSED_CHECK.equals(type)) {
             rule.put("tieWinnerCharacterName", tieWinnerCharacterName);
@@ -2134,6 +2203,50 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         draft.setFormula(modifier.formula());
         draft.setResolutionData(DiceResolutionDataVO.pending(type, null, rule));
         return draft;
+    }
+
+    private List<Map<String, Object>> kpModifierFactors(
+            CocPercentileModifier requestedModifier,
+            String reason) {
+        CocPercentileModifier modifier = normalizeModifier(requestedModifier);
+        List<Map<String, Object>> factors = new ArrayList<>();
+        if (modifier == CocPercentileModifier.NORMAL) {
+            return factors;
+        }
+        if (!StringUtils.hasText(reason)) {
+            throw new UserRequestException("使用奖励骰或惩罚骰时必须填写奖惩骰原因");
+        }
+        boolean bonus = modifier == CocPercentileModifier.BONUS_1
+                || modifier == CocPercentileModifier.BONUS_2;
+        int diceCount = modifier == CocPercentileModifier.BONUS_2
+                || modifier == CocPercentileModifier.PENALTY_2 ? 2 : 1;
+        factors.add(modifierFactor(
+                "KP", bonus ? "BONUS" : "PENALTY", diceCount,
+                "KP_MODIFIER", reason.trim()));
+        return factors;
+    }
+
+    private Map<String, Object> modifierFactor(
+            String source,
+            String kind,
+            int diceCount,
+            String code,
+            String reason) {
+        Map<String, Object> factor = new LinkedHashMap<>();
+        factor.put("source", source);
+        factor.put("kind", kind);
+        factor.put("diceCount", diceCount);
+        factor.put("code", code);
+        factor.put("reason", reason);
+        return factor;
+    }
+
+    private void putModifierFactors(
+            Map<String, Object> rule,
+            List<Map<String, Object>> modifierFactors) {
+        if (modifierFactors != null && !modifierFactors.isEmpty()) {
+            rule.put("modifierFactors", List.copyOf(modifierFactors));
+        }
     }
 
     private List<KpDiceRequestDTOs.CheckTarget> requireTargets(

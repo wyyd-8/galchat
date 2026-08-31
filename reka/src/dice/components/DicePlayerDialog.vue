@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowRight, CircleAlert, Dices, LoaderCircle, RotateCcw, Swords } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import DiceModifierNotice from '@/dice/components/DiceModifierNotice.vue'
 import diceCriticalSuccessUrl from '@/dice/assets/audio/dice_superwin.mp3'
 import diceFailureUrl from '@/dice/assets/audio/dice_lose.mp3'
 import diceRollUrl from '@/dice/assets/audio/dice_roll.mp3'
@@ -17,6 +18,7 @@ import {
   createDicePlayerInitialState,
   createDiceAutoPlayPlan,
   createDiceModuleOutcomeToneMap,
+  createDiceModifierNotice,
   createDiceOutcomeVfxPlan,
   createDicePlayerPreparedResult,
   createGroupOutcomeVisibility,
@@ -121,6 +123,9 @@ const stageStyle = computed(() => ({ minHeight: `${playerLayout.value.stageMinHe
 const dialogDescription = computed(() => summary.value
   ? `${summary.value.modifierLabel} · ${summary.value.diceLabel}`
   : '准备这次掷骰判定')
+const modifierNotice = computed(() => createDiceModifierNotice(
+  props.request?.presentation,
+))
 const isMultiplayerCheck = computed(() => props.request?.presentation?.kind === 'multiplayer-check')
 const isOpposedCheck = computed(() => props.request?.presentation?.kind === 'opposed-check')
 const isValueRoll = computed(() => props.request?.presentation?.kind === 'value-roll')
@@ -618,7 +623,10 @@ onBeforeUnmount(() => {
               <small>{{ presentation.hint }}</small>
             </span>
           </div>
-          <span class="dice-player-modifier">{{ summary.modifierLabel }}</span>
+          <div class="dice-player-stage-actions">
+            <DiceModifierNotice v-if="modifierNotice" :notice="modifierNotice" />
+            <span class="dice-player-modifier">{{ summary.modifierLabel }}</span>
+          </div>
         </div>
         <div v-if="outcomeEffects.length" class="dice-outcome-vfx-layer" aria-hidden="true">
           <div

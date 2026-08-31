@@ -3,6 +3,7 @@ package com.me.galchat.domain.vo;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
+import java.util.List;
 import java.util.Map;
 
 @Data
@@ -15,6 +16,7 @@ public class DiceResolutionVO {
     private String checkName;
     private String difficulty;
     private Integer targetValue;
+    private List<Map<String, Object>> modifierFactors;
     private Map<String, Object> outcome;
     private Map<String, Object> effect;
 }

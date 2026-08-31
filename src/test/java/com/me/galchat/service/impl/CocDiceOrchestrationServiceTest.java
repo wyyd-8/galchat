@@ -128,7 +128,8 @@ class CocDiceOrchestrationServiceTest {
                         "调查书房",
                         CocCheckDifficulty.HARD,
                         new KpDiceRequestDTOs.CheckTarget(
-                                "林恩", "侦查", CocPercentileModifier.BONUS_1)));
+                                "林恩", "侦查", CocPercentileModifier.BONUS_1,
+                                "提前瞄准并观察书房")));
 
         @SuppressWarnings("unchecked")
         List<DiceRollResultCreateDTO> drafts =
@@ -148,8 +149,30 @@ class CocDiceOrchestrationServiceTest {
                             "targetValue", 70,
                             "difficulty", "HARD",
                             "modifier", "BONUS_1",
-                            "pushed", false));
+                            "pushed", false,
+                            "modifierFactors", List.of(Map.of(
+                                    "source", "KP",
+                                    "kind", "BONUS",
+                                    "diceCount", 1,
+                                    "code", "KP_MODIFIER",
+                                    "reason", "提前瞄准并观察书房"))));
         });
+    }
+
+    @Test
+    void checkRejectsKpModifierWithoutAnExplanation() {
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(player("林恩", 70));
+
+        assertThatThrownBy(() -> service.requestCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Check(
+                        "调查书房",
+                        CocCheckDifficulty.REGULAR,
+                        new KpDiceRequestDTOs.CheckTarget(
+                                "林恩", "侦查", CocPercentileModifier.BONUS_1))))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessageContaining("奖惩骰原因");
     }
 
     @Test
@@ -209,6 +232,15 @@ class CocDiceOrchestrationServiceTest {
                 .allSatisfy(draft -> assertThat(
                         draft.getResolutionData().getRule())
                         .doesNotContainKey("rollBundleKey"));
+        assertThat(createdDrafts().get(0).getResolutionData().getRule())
+                .doesNotContainKey("modifierFactors");
+        assertThat(createdDrafts().get(1).getResolutionData().getRule())
+                .containsEntry("modifierFactors", List.of(Map.of(
+                        "source", "BACKEND",
+                        "kind", "PENALTY",
+                        "diceCount", 1,
+                        "code", "FIRING_MODE",
+                        "reason", "全自动射击进入后续弹组")));
     }
 
     @Test
@@ -469,7 +501,13 @@ class CocDiceOrchestrationServiceTest {
         assertThat(createdDrafts()).singleElement().satisfies(draft -> {
             assertThat(draft.getFormula()).isEqualTo("1D100$");
             assertThat(draft.getResolutionData().getRule())
-                    .containsEntry("automaticSituationPenaltyDice", 1);
+                    .containsEntry("automaticSituationPenaltyDice", 1)
+                    .containsEntry("modifierFactors", List.of(Map.of(
+                            "source", "BACKEND",
+                            "kind", "PENALTY",
+                            "diceCount", 1,
+                            "code", "TARGET_IN_COVER",
+                            "reason", "目标“掩护中的目标”处于掩护中")));
         });
     }
 
@@ -506,13 +544,46 @@ class CocDiceOrchestrationServiceTest {
                                 "快速移动的小型目标",
                                 1,
                                 CocPercentileModifier.BONUS_1,
+                                "已经提前瞄准",
+                                null,
                                 true))));
 
         assertThat(createdDrafts()).singleElement().satisfies(draft -> {
             assertThat(draft.getFormula()).isEqualTo("1D100$$");
             assertThat(draft.getResolutionData().getRule())
                     .containsEntry("automaticSituationPenaltyDice", 4)
-                    .containsEntry("difficultyIncrease", 1);
+                    .containsEntry("difficultyIncrease", 1)
+                    .containsEntry("modifierFactors", List.of(
+                            Map.of(
+                                    "source", "KP",
+                                    "kind", "BONUS",
+                                    "diceCount", 1,
+                                    "code", "KP_MODIFIER",
+                                    "reason", "已经提前瞄准"),
+                            Map.of(
+                                    "source", "BACKEND",
+                                    "kind", "PENALTY",
+                                    "diceCount", 1,
+                                    "code", "SHOOTER_MOVING_FAST",
+                                    "reason", "射手正在高速移动"),
+                            Map.of(
+                                    "source", "BACKEND",
+                                    "kind", "PENALTY",
+                                    "diceCount", 1,
+                                    "code", "FIRING_POSTURE_RESTRICTED",
+                                    "reason", "射击姿势明显受限"),
+                            Map.of(
+                                    "source", "BACKEND",
+                                    "kind", "PENALTY",
+                                    "diceCount", 1,
+                                    "code", "TARGET_MOVING_FAST",
+                                    "reason", "目标“快速移动的小型目标”正在高速移动"),
+                            Map.of(
+                                    "source", "BACKEND",
+                                    "kind", "PENALTY",
+                                    "diceCount", 1,
+                                    "code", "SMALL_TARGET",
+                                    "reason", "目标“快速移动的小型目标”体型过小")));
         });
     }
 
@@ -970,10 +1041,12 @@ class CocDiceOrchestrationServiceTest {
         KpMeleeRequestDTOs.Attack request = new KpMeleeRequestDTOs.Attack(
                 "连续围攻",
                 new KpMeleeRequestDTOs.Attacker(
-                        "林恩", null, CocPercentileModifier.NORMAL),
+                        "林恩", null, CocPercentileModifier.BONUS_1,
+                        "队友正在牵制防守者"),
                 new KpMeleeRequestDTOs.Defender(
-                        "邪教徒", MeleeDefenseMode.NONE,
-                        null, CocPercentileModifier.NORMAL));
+                        "邪教徒", MeleeDefenseMode.DODGE,
+                        null, CocPercentileModifier.PENALTY_1,
+                        "防守者视线受阻"));
 
         service.requestMeleeAttack(7L, 5L, request);
         service.requestMeleeAttack(7L, 5L, request);
@@ -992,7 +1065,37 @@ class CocDiceOrchestrationServiceTest {
                 })
                 .toList();
         assertThat(attackerFormulas)
-                .containsExactly("1D100", "1D100#");
+                .containsExactly("1D100#", "1D100##");
+        @SuppressWarnings("unchecked")
+        List<DiceRollResultCreateDTO> secondDrafts =
+                (List<DiceRollResultCreateDTO>) org.mockito.Mockito
+                        .mockingDetails(internal).getInvocations().stream()
+                        .filter(invocation -> invocation.getMethod().getName()
+                                .equals("createDiceRoll"))
+                        .skip(1)
+                        .findFirst().orElseThrow().getArgument(2);
+        assertThat(secondDrafts).hasSize(2);
+        assertThat(secondDrafts.get(0).getResolutionData().getRule())
+                .containsEntry("modifierFactors", List.of(
+                        Map.of(
+                                "source", "KP",
+                                "kind", "BONUS",
+                                "diceCount", 1,
+                                "code", "KP_MODIFIER",
+                                "reason", "队友正在牵制防守者"),
+                        Map.of(
+                                "source", "BACKEND",
+                                "kind", "BONUS",
+                                "diceCount", 1,
+                                "code", "DEFENDER_ALREADY_ATTACKED",
+                                "reason", "防守者本轮已经遭受过近战攻击")));
+        assertThat(secondDrafts.get(1).getResolutionData().getRule())
+                .containsEntry("modifierFactors", List.of(Map.of(
+                        "source", "KP",
+                        "kind", "PENALTY",
+                        "diceCount", 1,
+                        "code", "KP_MODIFIER",
+                        "reason", "防守者视线受阻")));
     }
 
     @Test
@@ -1301,7 +1404,8 @@ class CocDiceOrchestrationServiceTest {
                         List.of(new KpDiceRequestDTOs.CheckTarget(
                                 "陈默",
                                 List.of("急救", "医学"),
-                                CocPercentileModifier.BONUS_1))));
+                                CocPercentileModifier.BONUS_1,
+                                "改用更合适的医学方法"))));
 
         assertThat(result.results()).singleElement().satisfies(pushed -> {
             assertThat(pushed.getResolution().getCharacterName()).isEqualTo("陈默");
@@ -1342,7 +1446,8 @@ class CocDiceOrchestrationServiceTest {
                         List.of(
                                 target("林恩", "侦查"),
                                 new KpDiceRequestDTOs.CheckTarget(
-                                        "陈默", "医学", CocPercentileModifier.PENALTY_1))));
+                                        "陈默", "医学", CocPercentileModifier.PENALTY_1,
+                                        "现场医疗条件不足"))));
 
         assertThat(result.results()).hasSize(2).allSatisfy(pushed ->
                 assertThat(pushed.getResolution().getGroupRule())

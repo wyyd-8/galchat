@@ -77,14 +77,33 @@ public final class CharacterCardGenerationModels {
             BuildRolls buildRolls,
             BackgroundRolls backgroundRolls,
             BackgroundPlan backgroundPlan,
-            CharacterCardVO preview) {
+            CharacterCardVO preview,
+            StepwiseCharacterCardModels.State stepwise) {
+
+        public DraftState(
+                Integer formatVersion,
+                BuildPlan buildPlan,
+                BuildRolls buildRolls,
+                BackgroundRolls backgroundRolls,
+                BackgroundPlan backgroundPlan,
+                CharacterCardVO preview) {
+            this(formatVersion, buildPlan, buildRolls, backgroundRolls,
+                    backgroundPlan, preview, null);
+        }
 
         public DraftState withBackground(
                 BackgroundRolls rolls,
                 BackgroundPlan plan,
                 CharacterCardVO card) {
             return new DraftState(formatVersion, buildPlan, buildRolls,
-                    rolls, plan, card);
+                    rolls, plan, card, stepwise);
+        }
+
+        public DraftState withStepwise(
+                StepwiseCharacterCardModels.State state,
+                CharacterCardVO card) {
+            return new DraftState(formatVersion, buildPlan, buildRolls,
+                    backgroundRolls, backgroundPlan, card, state);
         }
     }
 
@@ -95,6 +114,19 @@ public final class CharacterCardGenerationModels {
             String currentStep,
             String nextAction,
             Integer version,
+            Integer rulesVersion,
             DraftState state) {
+
+        public DraftView(
+                Long draftId,
+                String creationMode,
+                String status,
+                String currentStep,
+                String nextAction,
+                Integer version,
+                DraftState state) {
+            this(draftId, creationMode, status, currentStep, nextAction,
+                    version, null, state);
+        }
     }
 }

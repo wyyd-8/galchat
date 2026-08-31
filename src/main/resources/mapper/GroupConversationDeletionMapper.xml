@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.me.galchat.mapper.GroupConversationDeletionMapper">
+
+    <delete id="deleteConversationData">
+        WITH
+        target_turns AS MATERIALIZED (
+            SELECT id
+            FROM group_chat_turn
+            WHERE conversation_id = #{conversationId}
+        ),
+        target_steps AS MATERIALIZED (
+            SELECT id
+            FROM group_chat_reply_step
+            WHERE turn_id IN (SELECT id FROM target_turns)
+        ),
+        target_rolls AS MATERIALIZED (
+            SELECT id
+            FROM dice_roll_summary
+            WHERE conversation_id = #{conversationId}
+        ),
+        target_plans AS MATERIALIZED (
+            SELECT id
+            FROM group_reply_plan
+            WHERE conversation_id = #{conversationId}
+        ),
+        target_cards AS MATERIALIZED (
+            SELECT id
+            FROM coc_character
+            WHERE run_id = #{conversationId}
+        ),
+        deleted_favor_logs AS (
+            DELETE FROM user_character_favor_log
+            WHERE binding_type = 'GROUP_REPLY_STEP'
+              AND binding_chat IN (SELECT id FROM target_steps)
+        ),
+        deleted_agent_decisions AS (
+            DELETE FROM group_chat_agent_decision
+            WHERE reply_step_id IN (SELECT id FROM target_steps)
+        ),
+        deleted_tool_calls AS (
+            DELETE FROM group_chat_tool_call
+            WHERE reply_step_id IN (SELECT id FROM target_steps)
+        ),
+        deleted_messages AS (
+            DELETE FROM group_chat_message
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_checkpoints AS (
+            DELETE FROM group_turn_checkpoint
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_steps AS (
+            DELETE FROM group_chat_reply_step
+            WHERE id IN (SELECT id FROM target_steps)
+        ),
+        deleted_turns AS (
+            DELETE FROM group_chat_turn
+            WHERE id IN (SELECT id FROM target_turns)
+        ),
+        deleted_dice_results AS (
+            DELETE FROM dice_roll_result
+            WHERE summary_id IN (SELECT id FROM target_rolls)
+        ),
+        deleted_dice_summaries AS (
+            DELETE FROM dice_roll_summary
+            WHERE id IN (SELECT id FROM target_rolls)
+        ),
+        deleted_summaries AS (
+            DELETE FROM group_context_summary
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_topics AS (
+            DELETE FROM group_chat_topic
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_suspensions AS (
+            DELETE FROM trpg_investigator_suspension
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_combats AS (
+            DELETE FROM trpg_combat
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_saves AS (
+            DELETE FROM trpg_save
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_auto_saves AS (
+            DELETE FROM trpg_auto_save
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_drafts AS (
+            DELETE FROM coc_character_creation_draft
+            WHERE run_id = #{conversationId}
+        ),
+        deleted_stashed_weapons AS (
+            DELETE FROM trpg_weapon_stash
+            WHERE run_id = #{conversationId}
+        ),
+        deleted_card_profiles AS (
+            DELETE FROM coc_character_profile
+            WHERE character_id IN (SELECT id FROM target_cards)
+        ),
+        deleted_card_skills AS (
+            DELETE FROM coc_character_skill
+            WHERE character_id IN (SELECT id FROM target_cards)
+        ),
+        deleted_card_weapons AS (
+            DELETE FROM coc_character_weapon
+            WHERE character_id IN (SELECT id FROM target_cards)
+        ),
+        deleted_cards AS (
+            DELETE FROM coc_character
+            WHERE id IN (SELECT id FROM target_cards)
+        ),
+        deleted_child_scenes AS (
+            DELETE FROM trpg_runtime_child_scene
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_plan_items AS (
+            DELETE FROM group_reply_plan_item
+            WHERE plan_id IN (SELECT id FROM target_plans)
+        ),
+        deleted_plans AS (
+            DELETE FROM group_reply_plan
+            WHERE id IN (SELECT id FROM target_plans)
+        ),
+        deleted_actor_runtime AS (
+            DELETE FROM group_actor_runtime_config
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_members AS (
+            DELETE FROM group_chat_member
+            WHERE conversation_id = #{conversationId}
+        ),
+        deleted_world_events AS (
+            DELETE FROM world_event_log
+            WHERE conversation_id = #{conversationId}
+        )
+        DELETE FROM group_conversation
+        WHERE id = #{conversationId}
+    </delete>
+</mapper>

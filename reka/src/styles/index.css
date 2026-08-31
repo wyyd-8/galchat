@@ -292,6 +292,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .empty-chat h2 { margin: 12px 0 2px; color: var(--ink); font-family: var(--font-display); }
 .empty-chat p { font-size: 12px; }
 .composer { margin: 0 max(24px, calc((100% - 820px) / 2)) 20px; padding: 8px 8px 8px 13px; border: 1px solid var(--line-strong); border-radius: 13px; display: grid; grid-template-columns: 1fr auto; align-items: end; background: var(--surface-strong); box-shadow: 0 12px 35px rgba(43,42,37,.08); }
+.composer.has-withdraw { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 8px; }
 .composer.has-intent-toggle { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 8px; }
 .composer textarea { max-height: 130px; min-height: 41px; padding: 10px 4px; border: 0; resize: none; outline: none; background: transparent; line-height: 1.5; }
 .composer-intent-toggle { align-self: center; padding: 3px; border: 1px solid #d6d1c5; border-radius: 9px; display: grid; grid-template-columns: repeat(2, auto); background: #efede7; box-shadow: inset 0 1px 2px rgba(56,52,43,.04); }
@@ -412,6 +413,10 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .reply-avatar { width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; color: #fff; background: #647c75; background-size: cover; background-position: center; font-size: 10px; }
 .reply-name { min-width: 0; overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .reply-name small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; font-weight: 400; }
+.reply-model-picker { min-width: 0; grid-column: 4 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; cursor: default; }
+.reply-model-picker > span { color: var(--muted); font-size: 8px; white-space: nowrap; }
+.reply-model-picker select { min-width: 0; height: 29px; padding: 0 7px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface-strong); font-size: 9px; }
+.reply-model-picker select:disabled { opacity: .58; }
 .remove-plan { width: 27px; height: 27px; color: #999; }
 .remove-plan:hover { color: var(--wine); }
 .plan-empty { padding: 20px; border: 1px dashed var(--line-strong); border-radius: 9px; color: var(--muted); text-align: center; font-size: 10px; }

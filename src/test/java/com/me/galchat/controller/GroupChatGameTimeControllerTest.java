@@ -7,6 +7,7 @@ import com.me.galchat.service.impl.GroupChatService;
 import com.me.galchat.service.impl.GroupGenerationStreamRegistry;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
+import com.me.galchat.service.impl.GroupConversationDeletionService;
 import com.me.galchat.service.impl.GroupConversationService;
 import com.me.galchat.service.impl.GroupReplyPlanService;
 import com.me.galchat.service.impl.TrpgContextWindowService;
@@ -43,7 +44,8 @@ class GroupChatGameTimeControllerTest {
                 mock(GroupReplyPlanService.class),
                 mock(TrpgContextWindowService.class),
                 mock(TrpgTurnExecutionService.class),
-                gameTimeService);
+                gameTimeService,
+                mock(GroupConversationDeletionService.class));
         CurrentHolder.setCurrentId(12);
         TrpgGameTimeUpdateDTO request =
                 new TrpgGameTimeUpdateDTO(

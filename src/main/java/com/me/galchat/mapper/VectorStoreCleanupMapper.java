@@ -35,6 +35,9 @@ public interface VectorStoreCleanupMapper {
     int deleteWorldEventByLogId(@Param("userWorldId") Long userWorldId,
                                 @Param("worldEventLogId") Long worldEventLogId);
 
+    int deleteWorldEventByConversation(
+            @Param("conversationId") Long conversationId);
+
     int deleteWorldEventByConversationAfterLogId(
             @Param("conversationId") Long conversationId,
             @Param("maxWorldEventLogId") Long maxWorldEventLogId);

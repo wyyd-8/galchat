@@ -10,6 +10,7 @@ import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.service.impl.GroupChatService;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
+import com.me.galchat.service.impl.GroupConversationDeletionService;
 import com.me.galchat.service.impl.GroupConversationService;
 import com.me.galchat.service.impl.GroupGenerationStreamRegistry;
 import com.me.galchat.service.impl.GroupReplyPlanService;
@@ -46,7 +47,8 @@ class GroupChatGenerationControllerTest {
                 mock(GroupReplyPlanService.class),
                 mock(TrpgContextWindowService.class),
                 mock(TrpgTurnExecutionService.class),
-                mock(TrpgGameTimeService.class));
+                mock(TrpgGameTimeService.class),
+                mock(GroupConversationDeletionService.class));
         GroupChatRequestDTO request = new GroupChatRequestDTO();
         request.setClientRequestId("generation-7");
         request.setContent("继续调查");
@@ -82,7 +84,8 @@ class GroupChatGenerationControllerTest {
                 mock(GroupReplyPlanService.class),
                 mock(TrpgContextWindowService.class),
                 turnExecutionService,
-                mock(TrpgGameTimeService.class));
+                mock(TrpgGameTimeService.class),
+                mock(GroupConversationDeletionService.class));
         UserAuthException unauthorized =
                 new UserAuthException("用户未登录");
         doThrow(unauthorized).when(conversationService)
@@ -126,7 +129,8 @@ class GroupChatGenerationControllerTest {
                 mock(GroupChatWithdrawalService.class),
                 mock(GroupReplyPlanService.class),
                 mock(TrpgContextWindowService.class), turns,
-                mock(TrpgGameTimeService.class));
+                mock(TrpgGameTimeService.class),
+                mock(GroupConversationDeletionService.class));
         TrpgInvestigatorInquiryDTO request =
                 new TrpgInvestigatorInquiryDTO();
         request.setClientRequestId("ask-1");
@@ -162,7 +166,8 @@ class GroupChatGenerationControllerTest {
                 mock(GroupChatWithdrawalService.class),
                 mock(GroupReplyPlanService.class),
                 mock(TrpgContextWindowService.class), turns,
-                mock(TrpgGameTimeService.class));
+                mock(TrpgGameTimeService.class),
+                mock(GroupConversationDeletionService.class));
         GroupTurnContinueDTO request = new GroupTurnContinueDTO();
         request.setClientRequestId("continue-7");
         when(turns.continueTurn(7L, request)).thenReturn(

@@ -45,5 +45,26 @@ public interface WorldEventLogMapper extends BaseMapper<WorldEventLog> {
             """)
     WorldEventLog selectLastRestorable(@Param("userWorldId") Long userWorldId);
 
+    @Results(value = {
+            @Result(column = "visible_characters",
+                    property = "visibleCharacters",
+                    typeHandler = ArrayTypeHandler.class)
+    })
+    @Select("""
+            SELECT event.*
+            FROM world_event_log event
+            LEFT JOIN group_conversation conversation
+              ON conversation.id = event.conversation_id
+            WHERE event.user_world_id = #{userWorldId}
+              AND (event.conversation_id IS NULL OR conversation.mode = 'chat')
+              AND (event.conversation_id IS NULL
+                   OR event.conversation_id <> #{conversationId})
+            ORDER BY event.id DESC
+            LIMIT 1
+            """)
+    WorldEventLog selectLastRestorableExcludingConversation(
+            @Param("userWorldId") Long userWorldId,
+            @Param("conversationId") Long conversationId);
+
     int deleteByUserWorldId(@Param("userWorldId") Long userWorldId);
 }

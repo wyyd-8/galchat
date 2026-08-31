@@ -92,6 +92,16 @@
         )::jsonb
     </delete>
 
+    <delete id="deleteWorldEventByConversation">
+        DELETE FROM public.world_event_vector_store vector
+        WHERE EXISTS (
+            SELECT 1
+            FROM world_event_log event
+            WHERE event.id = (vector.metadata::jsonb -&gt;&gt; 'worldEventLogId')::bigint
+              AND event.conversation_id = #{conversationId}
+        )
+    </delete>
+
     <delete id="deleteWorldEventByConversationAfterLogId">
         DELETE FROM public.world_event_vector_store vector
         WHERE EXISTS (

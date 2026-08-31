@@ -123,6 +123,14 @@ public class GroupGenerationStreamRegistry {
         return entry.events(false);
     }
 
+    public void evict(Long conversationId) {
+        if (conversationId == null) {
+            return;
+        }
+        entries.keySet().removeIf(key ->
+                conversationId.equals(key.conversationId()));
+    }
+
     private void scheduleRemoval(
             GenerationKey key, GenerationEntry completed) {
         Mono.delay(retention).subscribe(

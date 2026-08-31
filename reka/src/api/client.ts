@@ -124,6 +124,7 @@ export const api = {
   conversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}`),
   createConversation: (payload: { userWorldId: number; moduleId?: number; mode: string; title: string; characterIds: number[] }) => request<Conversation>('/group-chat/conversations', { method: 'POST', body: body(payload) }),
   closeConversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}/close`, { method: 'POST' }),
+  deleteConversation: (id: number) => request<void>(`/group-chat/conversations/${id}`, { method: 'DELETE' }),
   contextWindow: (id: number) => request<ContextWindowOverview | null>(`/group-chat/conversations/${id}/context-window`),
   updateGameTime: (id: number, payload: { dayNo: number; period: TrpgGameTimePeriod; revision: number }) =>
     request<TrpgGameTime>(`/group-chat/conversations/${id}/game-time`, { method: 'PUT', body: body(payload) }),

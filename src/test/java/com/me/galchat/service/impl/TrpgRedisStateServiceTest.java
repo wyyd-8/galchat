@@ -41,13 +41,13 @@ class TrpgRedisStateServiceTest {
     @BeforeEach
     void setUp() {
         service = new TrpgRedisStateService(redisTemplate);
-        when(redisTemplate.opsForSet()).thenReturn(setOperations);
-        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     }
 
     @Test
     void captureIncludesMaterialsSelectionProgressAndRunFinishRequest() {
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(setOperations.members(
                 RedisConstant.TRPG_SHOWN_MATERIALS_PREFIX + "51"))
                 .thenReturn(Set.of("9", "10"));
@@ -89,6 +89,9 @@ class TrpgRedisStateServiceTest {
 
     @Test
     void restoreDeletesEveryRunScopedTransientKeyBeforeRebuildingState() {
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.scan(any())).thenReturn(cursor);
         when(cursor.hasNext()).thenReturn(true, true, false);
         when(cursor.next()).thenReturn(
@@ -132,5 +135,25 @@ class TrpgRedisStateServiceTest {
         verify(valueOperations).set(
                 RedisConstant.TRPG_RUN_FINISH_PREFIX + "51",
                 "1", TrpgRedisStateService.TRANSIENT_TTL);
+    }
+
+    @Test
+    void clearDeletesEveryRunScopedTransientKeyWithoutRestoringAnything() {
+        when(redisTemplate.scan(any())).thenReturn(cursor);
+        when(cursor.hasNext()).thenReturn(true, true, false);
+        when(cursor.next()).thenReturn(
+                RedisConstant.TRPG_PROPOSAL_ORDER_PREFIX + "51:88",
+                RedisConstant.TRPG_SCENE_PROGRESS_PREFIX + "51:999:ready");
+
+        service.clear(51L);
+
+        verify(redisTemplate).delete(List.of(
+                RedisConstant.TRPG_PROPOSAL_ORDER_PREFIX + "51:88",
+                RedisConstant.TRPG_SCENE_PROGRESS_PREFIX + "51:999:ready"));
+        verify(redisTemplate).delete(List.of(
+                RedisConstant.TRPG_SHOWN_MATERIALS_PREFIX + "51",
+                RedisConstant.TRPG_SCENE_SELECTION_PREFIX + "51:active",
+                RedisConstant.TRPG_CONTEXT_WINDOW_PREFIX + "51",
+                RedisConstant.TRPG_RUN_FINISH_PREFIX + "51"));
     }
 }

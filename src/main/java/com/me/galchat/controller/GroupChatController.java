@@ -16,6 +16,7 @@ import com.me.galchat.service.impl.GenerationRequestContext;
 import com.me.galchat.service.impl.GroupChatWithdrawalService;
 import com.me.galchat.service.impl.GroupConversationService;
 import com.me.galchat.service.impl.GroupConversationLifecycleService;
+import com.me.galchat.service.impl.GroupConversationDeletionService;
 import com.me.galchat.service.impl.GroupReplyPlanService;
 import com.me.galchat.service.impl.TrpgContextWindowService;
 import com.me.galchat.service.impl.TrpgTurnExecutionService;
@@ -52,6 +53,7 @@ public class GroupChatController {
     private final TrpgContextWindowService contextWindowService;
     private final TrpgTurnExecutionService turnExecutionService;
     private final TrpgGameTimeService gameTimeService;
+    private final GroupConversationDeletionService deletionService;
 
     @PostMapping("/conversations")
     public Result createConversation(@RequestBody GroupConversationCreateDTO dto) {
@@ -90,6 +92,12 @@ public class GroupChatController {
     @PostMapping("/conversations/{conversationId}/close")
     public Result closeConversation(@PathVariable Long conversationId) {
         return Result.success(lifecycleService.close(conversationId));
+    }
+
+    @DeleteMapping("/conversations/{conversationId}")
+    public Result deleteConversation(@PathVariable Long conversationId) {
+        deletionService.delete(conversationId);
+        return Result.success();
     }
 
     @PostMapping(value = "/conversations/{conversationId}/messages",

@@ -12,4 +12,6 @@ public interface ITrpgRedisStateService {
     void restore(
             Long conversationId,
             TrpgSaveSnapshotDTO.RedisStateSnapshot snapshot);
+
+    void clear(Long conversationId);
 }

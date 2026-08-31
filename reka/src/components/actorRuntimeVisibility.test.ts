@@ -20,7 +20,7 @@ async function componentLoader(context: test.TestContext) {
   return vite
 }
 
-test('normal group chat does not expose actor runtime configuration', async (context) => {
+test('normal group chat exposes each reply actor model inside the reply order', async (context) => {
   const vite = await componentLoader(context)
   const { default: GroupChatStage } = await vite.ssrLoadModule(
     '/src/components/GroupChatStage.vue',
@@ -71,10 +71,24 @@ test('normal group chat does not expose actor runtime configuration', async (con
       actorRuntimes: [{
         actorType: 'character',
         actorId: 12,
-        controlMode: 'MANUAL',
+        controlMode: 'MODEL',
+        modelApiId: 7,
+        modelApiName: '月影',
         modelApiAvailable: true,
       }],
-      modelApis: [],
+      modelApis: [{
+        id: 7,
+        name: '月影',
+        baseUrl: 'https://example.com/v1',
+        modelName: 'moon-chat',
+        requestOverrides: {},
+        apiKeyHint: '...test',
+        status: 'SUCCESS',
+        chatCapability: 'SUPPORTED',
+        streamingCapability: 'SUPPORTED',
+        toolCallingCapability: 'SUPPORTED',
+        reasoningOutputStatus: 'NOT_DETECTED',
+      }],
       replyTurnState: null,
       sending: false,
       loading: true,
@@ -85,7 +99,10 @@ test('normal group chat does not expose actor runtime configuration', async (con
   assert.match(html, /placeholder="输入群聊消息…"/)
   assert.doesNotMatch(html, /以\s*艾琳\s*的身份输入/)
   assert.doesNotMatch(html, /人工接管/)
-  assert.doesNotMatch(html, /设置\s*艾琳\s*的发言方式/)
+  assert.match(html, /aria-label="选择艾琳的回复模型"/)
+  assert.match(html, /<option value="">默认模型<\/option>/)
+  assert.match(html, /<select value="7" aria-label="选择艾琳的回复模型">/)
+  assert.match(html, /<option value="7">月影<\/option>/)
 })
 
 test('trpg roster does not expose actor runtime configuration', async (context) => {

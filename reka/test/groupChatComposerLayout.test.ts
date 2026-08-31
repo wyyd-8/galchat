@@ -124,3 +124,53 @@ test('renders the tabletop action and inquiry choices when KP can be asked', asy
   assert.ok(html.includes('告诉 KP，你的调查员现在要做什么。比如走近查看、打开抽屉、与人交谈或发动攻击。'))
   assert.ok(html.includes('请 KP 补充你此刻本就能知道的事。比如眼前有什么、距离多远，或确认刚才提到的细节。得到回答后，再决定怎么做。'))
 })
+
+test('places normal group withdrawal immediately before the message input', async (context) => {
+  const vite = await createServer({
+    appType: 'custom',
+    configFile: false,
+    root: fileURLToPath(new URL('..', import.meta.url)),
+    plugins: [vue()],
+    resolve: { alias: { '@': fileURLToPath(new URL('../src', import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  })
+  context.after(() => vite.close())
+  const { default: GroupChatStage } = await vite.ssrLoadModule('/src/components/GroupChatStage.vue')
+
+  const html = await renderToString(createSSRApp({
+    render: () => h(GroupChatStage, {
+      input: '大家好',
+      scroller: null,
+      conversation: {
+        id: 1,
+        userWorldId: 2,
+        worldId: 3,
+        mode: 'chat',
+        title: '测试群聊',
+        status: 'active',
+      },
+      username: '用户',
+      messages: [],
+      reasoning: {},
+      characters: [],
+      replyPlan: { source: 'USER', displayName: '群聊', items: [] },
+      replyPlans: [],
+      availableCharacters: [],
+      currentTurn: null,
+      replyTurnState: null,
+      sending: false,
+      loading: true,
+      hasOlderMessages: false,
+    }),
+  }))
+
+  const headerStart = html.indexOf('class="chat-header"')
+  const headerEnd = html.indexOf('</header>', headerStart)
+  assert.equal(html.slice(headerStart, headerEnd).includes('撤回一轮'), false)
+
+  const composerStart = html.indexOf(' composer"')
+  const withdraw = html.indexOf('title="撤回上一轮"', composerStart)
+  const textarea = html.indexOf('<textarea', composerStart)
+  assert.ok(withdraw > composerStart, 'withdraw should be rendered inside the composer')
+  assert.ok(withdraw < textarea, 'withdraw should be immediately before the message input')
+})

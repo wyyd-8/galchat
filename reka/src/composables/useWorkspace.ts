@@ -320,6 +320,38 @@ export function useWorkspace() {
     if (!selectedConversationId.value || !selectedWorldId.value) return
     await api.closeConversation(selectedConversationId.value); conversations.value = await api.conversations(selectedWorldId.value); notify('会话已关闭并生成总结', '', 'success')
   }
+  async function deleteConversation() {
+    if (!selectedConversationId.value || !selectedWorldId.value) return
+    const conversationId = selectedConversationId.value
+    await api.deleteConversation(conversationId)
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(generationStorageKey(conversationId))
+    localStorage.removeItem(`galchat:trpg-participants:${conversationId}`)
+    conversations.value = await api.conversations(selectedWorldId.value)
+    selectedConversationId.value = null
+    messages.value = []
+    Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
+    replyPlans.value = []
+    replyPlan.value = freshPlan()
+    participantIds.value = []
+    messageInput.value = ''
+    inquiryInput.value = ''
+    composerIntent.value = 'action'
+    currentTurn.value = null
+    actorRuntimes.value = []
+    modelApis.value = []
+    combatOverview.value = []
+    investigatorCards.value = []
+    replyTurnState.value = null
+    generationFailure.value = null
+    generationFailureOpen.value = false
+    latestDiceRoll.value = null
+    incomingDiceRolls.value = []
+    hasOlderGroupMessages.value = false
+    diceRollCache.clear()
+    catchingUpGenerationId = null
+    acceptedPlanRefreshTurnId = null
+    notify('会话已永久删除', '', 'success')
+  }
   async function loadOlderGroupMessages() {
     if (!selectedConversationId.value || !hasOlderGroupMessages.value || loading.chat) return
     const conversationId = selectedConversationId.value
@@ -817,7 +849,7 @@ export function useWorkspace() {
     latestDiceRoll, incomingDiceRolls, hasOlderGroupMessages, generationFailure, generationFailureOpen,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
-    reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation,
+    reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation, deleteConversation,
     loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, saveActorRuntime, askKp, startTrpgTurn, retryGenerationFailure, selectSceneOption, endExploration, retryStep, correctGameTime, refreshDiceRoll,
   }
 }

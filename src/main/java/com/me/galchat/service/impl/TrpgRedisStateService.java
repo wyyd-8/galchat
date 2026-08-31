@@ -72,7 +72,7 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
     public void restore(
             Long conversationId,
             TrpgSaveSnapshotDTO.RedisStateSnapshot snapshot) {
-        clearConversationState(conversationId);
+        clear(conversationId);
         if (snapshot == null) {
             return;
         }
@@ -85,7 +85,8 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
         }
     }
 
-    private void clearConversationState(Long conversationId) {
+    @Override
+    public void clear(Long conversationId) {
         List<String> dynamicKeys = new ArrayList<>();
         ScanOptions options = ScanOptions.scanOptions()
                 .match("trpg:group:*:" + conversationId + ":*")

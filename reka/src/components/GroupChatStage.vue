@@ -5,7 +5,7 @@ import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
-import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupActorRuntime, GroupMessage, InvestigatorCardSummary, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod } from '@/api/types'
+import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupMessage, InvestigatorCardSummary, ModelApi, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod } from '@/api/types'
 import DiceRollMessage from '@/dice/components/DiceRollMessage.vue'
 import CombatResultMessage from './CombatResultMessage.vue'
 import EpilogueMessage from './EpilogueMessage.vue'
@@ -21,12 +21,13 @@ const input = defineModel<string>('input', { required: true })
 const inquiryInput = defineModel<string>('inquiryInput', { default: '' })
 const composerIntent = defineModel<TrpgComposerIntent>('composerIntent', { default: 'action' })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; actorRuntimes?: GroupActorRuntime[]; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
+const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; actorRuntimes?: GroupActorRuntime[]; modelApis?: ModelApi[]; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
   actorRuntimes: () => [],
+  modelApis: () => [],
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
@@ -123,6 +124,23 @@ function syncReasoningState() {
 function character(id?: number) { return props.characters.find((item) => item.characterId === id) }
 function planCharacter(item: ReplyPlanItem) { return item.actorType === 'character' ? character(item.actorId) : undefined }
 function planActorName(item: ReplyPlanItem) { return replyPlanActorName(item, props.username, planCharacter(item)?.characterName) }
+function actorRuntime(item: ReplyPlanItem) {
+  return props.actorRuntimes.find((runtime) => runtime.actorType === item.actorType && runtime.actorId === item.actorId)
+}
+function actorModelValue(item: ReplyPlanItem) {
+  const runtime = actorRuntime(item)
+  return runtime?.modelApiAvailable && runtime.modelApiId != null ? String(runtime.modelApiId) : ''
+}
+function selectActorModel(item: ReplyPlanItem, event: Event) {
+  if (item.actorType !== 'character' || item.actorId == null) return
+  const value = (event.target as HTMLSelectElement).value
+  emit('saveActorRuntime', {
+    actorType: 'character',
+    actorId: item.actorId,
+    controlMode: 'MODEL',
+    modelApiId: value ? Number(value) : undefined,
+  })
+}
 function drop(index: number) { if (draggedIndex.value !== null) emit('movePlanItem', draggedIndex.value, index); draggedIndex.value = null }
 function addActor() { const id = Number(addActorId.value); if (id) { emit('addPlanItem', id); addActorId.value = '' } }
 function beginTimeEdit() {
@@ -180,7 +198,7 @@ function handleReasoningScroll(event: Event) {
 
 <template>
   <main class="chat-page">
-    <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已关闭' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button v-if="conversation.mode === 'chat' && conversation.status === 'active'" class="button ghost" :disabled="sending" @click="emit('withdraw')"><RotateCcw :size="16" />撤回一轮</button><button v-if="conversation.status === 'active'" class="button ghost danger-text" @click="emit('end')"><CircleStop :size="16" />关闭会话</button></div></header>
+    <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已关闭' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button class="button ghost" :disabled="sending" @click="emit('end')"><CircleStop :size="16" />{{ conversation.status === 'active' ? '关闭会话' : '会话操作' }}</button></div></header>
     <div class="chat-layout">
       <section class="chat-main">
         <div class="message-scroll"><div :ref="bindScroller" class="message-viewport" @scroll="handleScroll"><div>
@@ -232,8 +250,9 @@ function handleReasoningScroll(event: Event) {
           </span>
           <span class="clarification-prompt-status"><i />等待回复</span>
         </div>
-        <div class="composer" :class="{ disabled: conversation.status !== 'active', 'has-intent-toggle': canAskKp }">
+        <div class="composer" :class="{ disabled: conversation.status !== 'active', 'has-intent-toggle': canAskKp, 'has-withdraw': conversation.mode === 'chat' }">
           <button v-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="emit('startTurn')"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
+          <button v-if="conversation.mode === 'chat'" class="icon-button withdraw-button" :disabled="sending || conversation.status !== 'active'" title="撤回上一轮" @click="emit('withdraw')"><RotateCcw :size="17" /></button>
           <TooltipProvider v-if="canAskKp">
             <div class="composer-intent-toggle" role="group" aria-label="选择发言方式">
               <TooltipRoot>
@@ -289,6 +308,13 @@ function handleReasoningScroll(event: Event) {
           <template v-else>
             <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}-${item.subjectCharacterId}`" class="reply-plan-item" :draggable="canEditPlan" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
               <GripVertical v-if="canEditPlan" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="planCharacter(item)?.characterImage ? { backgroundImage: `url(${planCharacter(item)?.characterImage})` } : {}">{{ planCharacter(item)?.characterImage ? '' : planActorName(item).slice(0, 1) }}</span><span class="reply-name">{{ planActorName(item) }}<small>第 {{ index + 1 }} 位回复</small></span><button v-if="canEditPlan" class="icon-button remove-plan" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
+              <label class="reply-model-picker" @mousedown.stop @click.stop>
+                <span>回复模型</span>
+                <select :value="actorModelValue(item)" :aria-label="`选择${planActorName(item)}的回复模型`" :disabled="sending || conversation.status !== 'active'" @change="selectActorModel(item, $event)">
+                  <option value="">默认模型</option>
+                  <option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option>
+                </select>
+              </label>
             </div>
             <div v-if="!items.length" class="plan-empty">暂无回复角色</div>
           </template>

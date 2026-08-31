@@ -21,12 +21,36 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GroupGenerationStreamRegistryTest {
+
+    @Test
+    void evictsEveryRetainedGenerationForDeletedConversation() {
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
+        registry.start(7L, "first", Flux.just(event("message.delta")))
+                .collectList().block();
+        registry.start(7L, "second", Flux.just(event("message.delta")))
+                .collectList().block();
+        registry.start(8L, "other", Flux.just(event("message.delta")))
+                .collectList().block();
+
+        registry.evict(7L);
+
+        assertThatThrownBy(() -> registry.resume(7L, "first")
+                .collectList().block())
+                .hasMessageContaining("生成流不存在或已过期");
+        assertThatThrownBy(() -> registry.resume(7L, "second")
+                .collectList().block())
+                .hasMessageContaining("生成流不存在或已过期");
+        assertThat(registry.resume(8L, "other").collectList().block())
+                .isNotEmpty();
+    }
 
     @Test
     void replaysAllEventsAfterTheFirstClientDisconnectsWithoutCancellingUpstream() {

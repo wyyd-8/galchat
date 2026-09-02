@@ -38,6 +38,52 @@ import static org.mockito.Mockito.when;
 class GroupConversationServiceTest {
 
     @Test
+    void createTrpgConversationRejectsPrivateModuleOwnedByAnotherUser() {
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        IUserWorldPrefixService worldService =
+                mock(IUserWorldPrefixService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
+        CocModuleLockService moduleLockService =
+                mock(CocModuleLockService.class);
+        GroupConversationService service = new GroupConversationService(
+                conversationMapper,
+                mock(GroupChatMemberMapper.class),
+                mock(GroupChatMessageMapper.class),
+                mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class), worldService,
+                mock(IUserCharacterInfoService.class), lockService,
+                moduleMapper, moduleLockService,
+                mock(CocModuleCharacterInstantiationService.class));
+        when(worldService.checkUserWorldAuth(1L, true)).thenReturn(
+                new UserWorldPrefix().setId(1L).setWorldId(10L));
+        when(lockService.tryWorldLock(1L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(moduleLockService.tryReadLock(3L)).thenReturn(
+                new CocModuleLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(moduleMapper.selectById(3L)).thenReturn(new CocModule()
+                .setId(3L).setVisible(true).setOwnerUserId(8L));
+        GroupConversationCreateDTO request = new GroupConversationCreateDTO();
+        request.setUserWorldId(1L);
+        request.setMode(GroupChatConstant.MODE_TRPG);
+        request.setModuleId(3L);
+        com.me.galchat.utils.CurrentHolder.setCurrentId(7);
+        try {
+            assertThatThrownBy(() -> service.create(request))
+                    .isInstanceOf(UserRequestException.class)
+                    .hasMessage("模组不存在或不可选");
+        } finally {
+            com.me.galchat.utils.CurrentHolder.remove();
+        }
+        verify(conversationMapper, never())
+                .insert(any(GroupConversation.class));
+    }
+
+    @Test
     void createTrpgConversationAllowsNoAiInvestigators() {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupChatMemberMapper memberMapper = mock(GroupChatMemberMapper.class);

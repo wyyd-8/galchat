@@ -69,6 +69,13 @@ public class TrpgTurnExecutionService {
             unconsciousRecoveryService;
     private final ITrpgSaveService trpgSaveService;
     private TrpgStepInteractionService stepInteractionService;
+    private CocModuleRuntimeService moduleRuntimeService;
+
+    @Autowired
+    void setModuleRuntimeService(
+            CocModuleRuntimeService moduleRuntimeService) {
+        this.moduleRuntimeService = moduleRuntimeService;
+    }
 
     public Flux<GroupChatEvent> continueTurn(
             Long conversationId,
@@ -111,6 +118,10 @@ public class TrpgTurnExecutionService {
                     PreparedTurn prepared =
                             transactionTemplate.execute(status -> {
                                 trpgSaveService.saveBeforeTurn(conversation);
+                                if (moduleRuntimeService != null) {
+                                    moduleRuntimeService.lockForStartedRun(
+                                            conversation);
+                                }
                                 if (previousTurn != null
                                         && GroupChatConstant
                                         .PLAN_SOURCE_COMBAT.equals(

@@ -1728,7 +1728,7 @@ class TrpgTurnExecutionServiceTest {
     }
 
     @Test
-    void newCombatTurnSavesBeforeAdvancingRoundAndCreatingTurn() {
+    void newCombatTurnSavesAndLocksModuleBeforeCreatingTurn() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupConversationLockService lockService =
@@ -1745,6 +1745,8 @@ class TrpgTurnExecutionServiceTest {
         com.me.galchat.mapper.GroupReplyPlanMapper replyPlanMapper =
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class);
         ITrpgSaveService saveService = mock(ITrpgSaveService.class);
+        CocModuleRuntimeService moduleRuntimeService =
+                mock(CocModuleRuntimeService.class);
         TrpgParticipantService participantService =
                 mock(TrpgParticipantService.class);
         GroupConversation conversation = new GroupConversation()
@@ -1803,13 +1805,16 @@ class TrpgTurnExecutionServiceTest {
                 mock(GroupTurnCheckpointService.class),
                 mock(TrpgUnconsciousRecoveryService.class),
                 saveService);
+        service.setModuleRuntimeService(moduleRuntimeService);
 
         service.continueTurn(7L, new GroupTurnContinueDTO())
                 .collectList().block();
 
         var order = org.mockito.Mockito.inOrder(
-                saveService, combatLifecycleService, turnMapper);
+                saveService, moduleRuntimeService,
+                combatLifecycleService, turnMapper);
         order.verify(saveService).saveBeforeTurn(conversation);
+        order.verify(moduleRuntimeService).lockForStartedRun(conversation);
         order.verify(combatLifecycleService)
                 .startNextRoundUnderLock(conversation);
         order.verify(turnMapper).insert(any(GroupChatTurn.class));

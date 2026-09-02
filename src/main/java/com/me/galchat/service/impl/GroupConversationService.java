@@ -20,6 +20,7 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.CocModuleMapper;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +33,7 @@ import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -87,7 +89,10 @@ public class GroupConversationService {
                 unlockModuleAfterTransaction = registerUnlockAfterTransaction(moduleLock);
                 var module = moduleMapper.selectById(dto.getModuleId());
                 if (module == null
-                        || !Boolean.TRUE.equals(module.getVisible())) {
+                        || !Boolean.TRUE.equals(module.getVisible())
+                        || module.getOwnerUserId() != null
+                        && !Objects.equals(module.getOwnerUserId(),
+                        currentUserId())) {
                     throw new UserRequestException("模组不存在或不可选");
                 }
             }
@@ -107,6 +112,11 @@ public class GroupConversationService {
                 lockService.unlock(worldLock);
             }
         }
+    }
+
+    private Long currentUserId() {
+        Integer userId = CurrentHolder.getCurrentId();
+        return userId == null ? null : Long.valueOf(userId);
     }
 
     private boolean registerUnlockAfterTransaction(GroupConversationLockService.OwnedLock worldLock) {

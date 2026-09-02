@@ -154,9 +154,13 @@ CREATE TABLE coc_module (
     player_count VARCHAR(100),
     estimated_duration VARCHAR(100),
     visible BOOLEAN NOT NULL DEFAULT TRUE,
+    owner_user_id BIGINT,
+    edit_locked BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_coc_module_owner_visible
+    ON coc_module (owner_user_id, visible, id);
 
 CREATE TABLE coc_module_context (
     id BIGSERIAL PRIMARY KEY,

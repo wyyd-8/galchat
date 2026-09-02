@@ -25,6 +25,8 @@ public class CocModule implements Serializable {
     private String playerCount;
     private String estimatedDuration;
     private Boolean visible;
+    private Long ownerUserId;
+    private Boolean editLocked;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

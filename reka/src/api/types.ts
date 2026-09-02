@@ -87,8 +87,35 @@ export interface CharacterTemplate {
 
 export interface CocModule {
   id: number; name: string; author?: string; era?: string; introduction: string; investigatorCreation?: string
-  coverUrl?: string; playerCount?: string; estimatedDuration?: string; visible: boolean; createdAt?: string; updatedAt?: string
+  coverUrl?: string; playerCount?: string; estimatedDuration?: string; visible: boolean; ownerUserId?: number | null; editLocked?: boolean
+  createdAt?: string; updatedAt?: string
 }
+export interface CocModuleContext {
+  id?: number; moduleId?: number; truthBackground?: string; investigatorIntro?: string; timeline?: string
+  specialRules?: string; keeperGuidance?: string; endingContent?: string; extraContent?: string
+}
+export interface CocModuleLocation { id?: number; moduleId?: number; name: string; summary: string; content: string }
+export interface CocModuleClue { id?: number; moduleId?: number; title: string; content: string; important?: boolean }
+export interface CocModuleMaterial { id?: number; moduleId?: number; title: string; description: string; imageUrl: string }
+export interface CocModuleCharacter { id?: number; moduleId?: number; sortOrder?: number; cardData: DraftCharacterCard }
+export interface CocModuleDetail {
+  module: CocModule
+  context?: CocModuleContext
+  locations: CocModuleLocation[]
+  clues: CocModuleClue[]
+  materials: CocModuleMaterial[]
+  characters: CocModuleCharacter[]
+}
+export interface CocModuleSavePayload {
+  name: string; author?: string; era?: string; introduction: string; investigatorCreation?: string
+  coverUrl?: string; playerCount?: string; estimatedDuration?: string; visible: boolean
+  context: CocModuleContext
+  locations: CocModuleLocation[]
+  clues: CocModuleClue[]
+  materials: CocModuleMaterial[]
+  characters: DraftCharacterCard[]
+}
+export interface CocModuleArchive { formatVersion: number; module: CocModuleSavePayload }
 
 export interface ChatHistory {
   id?: number; userWorldId?: number; characterId?: number; content?: string; type?: string

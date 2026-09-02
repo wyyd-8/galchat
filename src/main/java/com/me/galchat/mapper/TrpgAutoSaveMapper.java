@@ -60,4 +60,11 @@ public interface TrpgAutoSaveMapper {
     int deleteAfter(
             @Param("conversationId") Long conversationId,
             @Param("savedAt") java.time.LocalDateTime savedAt);
+
+    @Delete("""
+            DELETE FROM trpg_auto_save
+            WHERE conversation_id = #{conversationId}
+              AND checkpoint_type <> 'INITIAL'
+            """)
+    int deleteNonInitial(@Param("conversationId") Long conversationId);
 }

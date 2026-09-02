@@ -7,8 +7,8 @@ import {
 } from 'reka-ui'
 import type { Character, Conversation, Session, UserWorld } from '@/api/types'
 
-const props = defineProps<{ session: Session; worlds: UserWorld[]; characters: Character[]; conversations: Conversation[]; selectedWorldId: number | null; selectedCharacterId: number | null; selectedConversationId: number | null; loading: boolean }>()
-const emit = defineEmits<{ selectWorld: [id: number]; selectDirect: [id: number]; selectConversation: [id: number]; home: []; newWorld: []; account: []; password: []; models: []; logout: [] }>()
+const props = defineProps<{ session: Session; worlds: UserWorld[]; characters: Character[]; conversations: Conversation[]; selectedWorldId: number | null; selectedCharacterId: number | null; selectedConversationId: number | null; moduleLibraryActive?: boolean; loading: boolean }>()
+const emit = defineEmits<{ selectWorld: [id: number]; selectDirect: [id: number]; selectConversation: [id: number]; home: []; modules: []; newWorld: []; account: []; password: []; models: []; logout: [] }>()
 
 const recentDirect = computed(() => latestItem(props.characters, (item) => item.lastChatTime))
 const recentGroup = computed(() => latestItem(props.conversations.filter((item) => item.mode === 'chat'), (item) => item.lastChatTime || item.updatedAt))
@@ -43,6 +43,7 @@ function activityLabel(value?: string) {
 <template>
   <aside class="sidebar">
     <button class="brand" @click="emit('home')"><span class="brand-glyph"><Sparkles :size="18" /></span><span><strong>GalChat</strong><small>群像叙事工作台</small></span></button>
+    <button class="sidebar-module-entry" :class="{ active: moduleLibraryActive }" @click="emit('modules')"><span class="recent-entry-icon recent-trpg"><BookOpen :size="16" /></span><span><strong>模组库</strong><small>管理 CoC 跑团内容</small></span></button>
     <div class="sidebar-heading"><span>我的世界</span><button class="icon-button subtle" title="新建世界" @click="emit('newWorld')"><Plus :size="16" /></button></div>
     <ScrollAreaRoot class="sidebar-scroll">
       <ScrollAreaViewport class="sidebar-viewport">

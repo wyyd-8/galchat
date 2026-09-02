@@ -3,6 +3,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { Database, Download, ImageUp, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import AppSidebar from '@/components/AppSidebar.vue'
+import CocModuleLibrary from '@/components/CocModuleLibrary.vue'
 import AuthDialog from '@/components/AuthDialog.vue'
 import DirectChatStage from '@/components/DirectChatStage.vue'
 import GroupChatStage from '@/components/GroupChatStage.vue'
@@ -47,7 +48,7 @@ interface FavorabilityRow { id: string; threshold?: number; prompt: string }
 const workspace = useWorkspace()
 const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters })
 const authOpen = ref(!workspace.isLoggedIn.value)
-const view = ref<'library' | 'world' | 'group' | 'direct'>('library')
+const view = ref<'library' | 'modules' | 'world' | 'group' | 'direct'>('library')
 const dialogs = reactive({ world: false, template: false, templatePreview: false, templateDelete: false, templateReplaceConfirm: false, conversation: false, trpgBinding: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, modelApis: false, end: false, deleteConversation: false, trpgTools: false })
 const busy = ref(false)
 const canRetryGenerationFailure = computed(() => {
@@ -372,6 +373,7 @@ async function permanentlyDeleteConversation() {
 async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) { await run(async () => { await workspace.authenticate(payload); authOpen.value = false }) }
 function logout() { direct.close(); workspace.logout() }
 function home() { direct.close(); workspace.selectedWorldId.value = null; workspace.selectedConversationId.value = null; view.value = 'library' }
+function openModuleLibrary() { direct.close(); workspace.selectedConversationId.value = null; view.value = 'modules' }
 async function selectWorld(id: number) { direct.close(); await workspace.selectWorld(id); view.value = 'world' }
 async function selectConversation(id: number) {
   direct.close()
@@ -691,9 +693,10 @@ async function changePassword() {
 
 <template>
   <div v-if="workspace.isLoggedIn.value" class="app-shell">
-    <AppSidebar :session="workspace.session" :worlds="workspace.worlds.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :selected-world-id="workspace.selectedWorldId.value" :selected-character-id="view === 'direct' ? direct.selectedCharacter.value?.characterId || null : null" :selected-conversation-id="view === 'group' ? workspace.selectedConversationId.value : null" :loading="workspace.loading.worlds" @home="home" @select-world="selectWorld" @select-direct="openDirectChat" @select-conversation="selectConversation" @new-world="openNewWorld" @account="openAccount" @password="openPassword" @models="dialogs.modelApis = true" @logout="logout" />
+    <AppSidebar :session="workspace.session" :worlds="workspace.worlds.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :selected-world-id="workspace.selectedWorldId.value" :selected-character-id="view === 'direct' ? direct.selectedCharacter.value?.characterId || null : null" :selected-conversation-id="view === 'group' ? workspace.selectedConversationId.value : null" :module-library-active="view === 'modules'" :loading="workspace.loading.worlds" @home="home" @modules="openModuleLibrary" @select-world="selectWorld" @select-direct="openDirectChat" @select-conversation="selectConversation" @new-world="openNewWorld" @account="openAccount" @password="openPassword" @models="dialogs.modelApis = true" @logout="logout" />
     <div class="app-content">
       <WorldLibrary v-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
+      <CocModuleLibrary v-else-if="view === 'modules'" @changed="workspace.loadModules" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
       <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="workspace.startTrpgTurn" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />

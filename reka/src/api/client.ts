@@ -1,5 +1,5 @@
 import type {
-  ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
+  ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
@@ -116,6 +116,20 @@ export const api = {
 
   cocModules: () => request<CocModule[]>('/coc-modules'),
   cocModule: (id: number) => request<CocModule>(`/coc-modules/${id}`),
+  myCocModules: () => request<CocModule[]>('/coc-modules/mine'),
+  manageCocModule: (id: number) => request<CocModuleDetail>(`/coc-modules/${id}/manage`),
+  createCocModule: (payload: CocModuleSavePayload) => request<CocModule>('/coc-modules', { method: 'POST', body: body(payload) }),
+  updateCocModule: (id: number, payload: CocModuleSavePayload) => request<CocModule>(`/coc-modules/${id}`, { method: 'PUT', body: body(payload) }),
+  deleteCocModule: (id: number) => request<void>(`/coc-modules/${id}`, { method: 'DELETE' }),
+  exportCocModule: (id: number) => raw(`/coc-modules/${id}/export`).then((response) => response.blob()),
+  importCocModule: (archive: CocModuleArchive) => request<CocModule>('/coc-modules/import', { method: 'POST', body: body(archive) }),
+  updateCocModuleLocationContent: (moduleId: number, locationId: number, content: string) =>
+    request<CocModuleLocation>(`/coc-modules/${moduleId}/locations/${locationId}/content`, { method: 'PUT', body: body({ content }) }),
+  addCocModuleClue: (moduleId: number, clue: CocModuleClue) =>
+    request<CocModuleClue>(`/coc-modules/${moduleId}/clues`, { method: 'POST', body: body(clue) }),
+  updateCocModuleClueContent: (moduleId: number, clueId: number, content: string) =>
+    request<CocModuleClue>(`/coc-modules/${moduleId}/clues/${clueId}/content`, { method: 'PUT', body: body({ content }) }),
+  unlockCocModule: (id: number) => request<void>(`/coc-modules/${id}/unlock`, { method: 'POST' }),
 
   history: (worldId: number, characterId: number, size = 30, beforeId?: number) => request<ChatHistory[]>(`/history?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId), size: String(size), ...(beforeId ? { id: String(beforeId) } : {}) })}`),
   withdrawMessage: (worldId: number, characterId: number) => request<void>(`/history/withdraw?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId) })}`, { method: 'POST' }),

@@ -63,6 +63,12 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .sidebar-recent-item.recent-empty { opacity: .58; }
 .sidebar-recent-item.recent-empty strong { font-weight: 500; }
 .profile-dock { width: 100%; padding: 9px 8px; border: 1px solid var(--line); border-radius: 9px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; background: var(--surface); text-align: left; cursor: pointer; }
+.sidebar-module-entry { width: 100%; margin-bottom: 7px; padding: 8px; border: 1px solid transparent; border-radius: 9px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 9px; background: transparent; text-align: left; cursor: pointer; }
+.sidebar-module-entry:hover { background: #efede6; }
+.sidebar-module-entry.active { border-color: #d5d2c9; background: var(--surface-strong); box-shadow: 0 5px 16px rgba(48,47,41,.05); }
+.sidebar-module-entry strong, .sidebar-module-entry small { display: block; }
+.sidebar-module-entry strong { font-size: 13px; }
+.sidebar-module-entry small { margin-top: 2px; color: var(--muted); font-size: 10px; }
 .profile-dock strong { font-size: 13px; }
 .avatar { width: 31px; height: 31px; border-radius: 50%; display: grid; place-items: center; }
 .avatar-user { color: var(--pine); background: var(--pine-soft); }

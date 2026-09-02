@@ -27,6 +27,7 @@ import {
   createDiceGroupResultDisplay,
   resolveDicePlayerMode,
   resolveDiceAnimationGroups,
+  shouldShowDiceContinueAction,
   shouldShowDiceRollAction,
   type DicePlaybackRequest,
   type DiceGroupOutcomePhase,
@@ -133,8 +134,13 @@ const hasAggregateOutcome = computed(() => isMultiplayerCheck.value || isOpposed
 const isSeparateGroupCheck = computed(() => (isMultiplayerCheck.value || isValueRoll.value)
   && props.request?.presentation?.groupRule === 'SEPARATE')
 const showRollAction = computed(() => props.request
-  ? shouldShowDiceRollAction(status.value, props.request.result)
+  ? shouldShowDiceRollAction(status.value, props.request.result, props.request.completionAction)
   : false)
+const showContinueAction = computed(() => shouldShowDiceContinueAction(
+  status.value,
+  props.request?.completionAction,
+  props.showContinue === true,
+))
 const hasOpposedWinner = computed(() => props.request?.presentation?.groups.some((group) => group.winner) === true)
 const groupOutcomeVisibility = computed(() => createGroupOutcomeVisibility(
   groupOutcomePhase.value,
@@ -570,6 +576,11 @@ function handleRollAction() {
   void roll()
 }
 
+function handleContinueAction() {
+  if (props.request?.completionAction === 'CLOSE') open.value = false
+  emit('continue')
+}
+
 watch(() => props.request?.id, () => {
   if (props.request) void prepare(props.request)
 }, { immediate: true })
@@ -790,7 +801,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
-      <div v-if="showRollAction || showContinue" class="dice-player-actions" :class="{ 'has-continue': showContinue }">
+      <div v-if="showRollAction || showContinueAction" class="dice-player-actions" :class="{ 'has-continue': showContinueAction }">
         <button
           v-if="showRollAction"
           class="button secondary dice-player-replay"
@@ -803,7 +814,7 @@ onBeforeUnmount(() => {
           <Dices v-else :size="15" />
           {{ presentation.actionLabel }}
         </button>
-        <button v-if="showContinue" class="button primary dice-player-continue" type="button" @click="emit('continue')">继续</button>
+        <button v-if="showContinueAction" class="button primary dice-player-continue" type="button" @click="handleContinueAction">继续</button>
       </div>
     </footer>
   </BaseDialog>

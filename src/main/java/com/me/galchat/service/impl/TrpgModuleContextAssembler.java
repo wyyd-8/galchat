@@ -119,8 +119,13 @@ public class TrpgModuleContextAssembler {
 
         result.append("<location-title-index>\n");
         for (CocModuleLocation location : locations) {
-            result.append("- ").append(location.getName())
-                    .append("：").append(location.getSummary()).append('\n');
+            result.append("<location>\n")
+                    .append("<name>").append(escape(location.getName()))
+                    .append("</name>\n")
+                    .append("<summary>")
+                    .append(escape(location.getSummary()))
+                    .append("</summary>\n")
+                    .append("</location>\n");
         }
         result.append("</location-title-index>\n");
 

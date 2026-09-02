@@ -1455,6 +1455,22 @@ test('never offers a roll action when every value result is a constant placehold
   assert.equal(diceState.shouldShowDiceRollAction('complete', mixed.result), true)
 })
 
+test('replaces replay with continue after a close-on-completion roll', () => {
+  const mixed = diceState.createDiceMessagePlaybackRequest(
+    0,
+    valueRollAggregate('rollSanLoss', 'SAN_LOSS', [
+      { name: '林恩', result: createDiceDebugPreset('group') },
+    ]),
+    'classic',
+  )
+
+  assert.equal(diceState.shouldShowDiceRollAction('ready', mixed.result, 'CLOSE'), true)
+  assert.equal(diceState.shouldShowDiceRollAction('complete', mixed.result, 'CLOSE'), false)
+  assert.equal(diceState.shouldShowDiceContinueAction('playing', 'CLOSE', false), false)
+  assert.equal(diceState.shouldShowDiceContinueAction('complete', 'CLOSE', false), true)
+  assert.equal(diceState.shouldShowDiceContinueAction('complete', undefined, true), true)
+})
+
 test('opens single and multiplayer constant values as settled results', () => {
   const single = diceState.createDiceMessagePlaybackRequest(
     0,

@@ -438,7 +438,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         现在轮到KP开始选景。先读取current-game-time，并根据上一批场景判断是否需要推进时间。
                         首次选景必须同时提供targetDay和targetPeriod来初始化当前时间；后续选景可以同时省略它们以保持当前时间，或同时提供任意严格晚于当前时间的目标值。
                         根据最终采用的时间、地点标题索引、模组时间线、NPC作息和当前剧情，在内部判断此刻合理开放的地点。
-                        调用publishExplorationScenes提交当天能够探索的准确地点名称列表和可选目标时间；不得输出地点ID，不要输出时间推进原因、内部判断或额外自然语言。
+                        调用publishExplorationScenes提交当天能够探索的准确地点名称列表和可选目标时间；locationNames只提交<name>元素中的地点名称，必须原样复制，不得包含<summary>或其他说明；不得输出地点ID，不要输出时间推进原因、内部判断或额外自然语言。
                         不强制限制地点数量或探索时长。
                         工具是returnDirect；调用后立即结束响应，不要再输出自然语言或JSON。
                         如果模组已经完整结束，可调用finishRun；系统会在本轮后自动生成每位调查员的人物后传，KP不要自行输出后传。

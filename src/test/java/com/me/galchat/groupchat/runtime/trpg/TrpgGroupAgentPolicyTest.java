@@ -862,6 +862,8 @@ class TrpgGroupAgentPolicyTest {
                 .contains("targetPeriod")
                 .contains("保持当前时间")
                 .contains("内部判断")
+                .contains("只提交<name>元素中的地点名称")
+                .contains("不得包含<summary>")
                 .contains("不要输出时间推进原因");
         assertThat(invocation.tools())
                 .containsExactly(

@@ -156,3 +156,87 @@ test('replays only luck and education growth dice from automatic creation', asyn
     '教育成长 2 · 判定',
   ])
 })
+
+test('builds autoplay playback from the luck result returned after text import', async () => {
+  const diceModule = await import('./characterCardCreationDice.ts') as {
+    buildImportedCharacterLuckDicePlayback?: (result: unknown, name: string, skin: string, previousId: number) => unknown
+  }
+
+  const request = diceModule.buildImportedCharacterLuckDicePlayback?.({
+    formula: '3D6 * 5',
+    modules: [{
+      expression: '3D6 * 5',
+      diceCount: 3,
+      diceSides: 6,
+      modifier: 'NORMAL',
+      dice: [
+        { sides: 6, value: 4, selected: true },
+        { sides: 6, value: 5, selected: true },
+        { sides: 6, value: 3, selected: true },
+      ],
+      result: 60,
+    }],
+    result: 60,
+  }, '周宁', 'cinnabar', 20) as {
+    id?: number
+    autoPlay?: boolean
+    reason?: string
+    result?: { result?: number }
+    initialAnimation?: { groups: Array<{ moduleStart: number, moduleCount: number, startDelayMs: number }> }
+    presentation?: { resultLabel?: string, resultValue?: string, groups?: Array<{ label: string, outcomeLabel: string }> }
+  } | undefined
+
+  assert.equal(request?.id, 21)
+  assert.equal(request?.autoPlay, true)
+  assert.equal(request?.reason, '周宁的幸运')
+  assert.equal(request?.result?.result, 60)
+  assert.deepEqual(request?.initialAnimation?.groups, [{ moduleStart: 0, moduleCount: 1, startDelayMs: 0 }])
+  assert.equal(request?.presentation?.resultLabel, '幸运生成')
+  assert.equal(request?.presentation?.resultValue, '60')
+  assert.deepEqual(request?.presentation?.groups, [{
+    label: '幸运 LUCK',
+    checkName: '3D6 * 5',
+    outcomeLabel: '60',
+    outcomeTone: 'none',
+    success: false,
+    moduleStart: 0,
+    moduleCount: 1,
+    rollResult: 60,
+  }])
+})
+
+test('closes instead of offering replay after every character-card roll', async () => {
+  const diceModule = await import('./characterCardCreationDice.ts') as Record<string, (...args: any[]) => {
+    completionAction?: string
+  }>
+  const diceResult = {
+    formula: '3D6 * 5',
+    modules: [{
+      expression: '3D6 * 5', diceCount: 3, diceSides: 6, modifier: 'NORMAL',
+      dice: [
+        { sides: 6, value: 3, selected: true },
+        { sides: 6, value: 4, selected: true },
+        { sides: 6, value: 5, selected: true },
+      ],
+      result: 60,
+    }],
+    result: 60,
+  }
+  const requests = [
+    diceModule.buildAttributeDicePlayback({
+      rolls: [{ code: 'STR', formula: '3D6 * 5', dice: [3, 4, 5], result: 60 }],
+      luckRolls: [],
+    }, 'classic', 0),
+    diceModule.buildBackgroundPromptDicePlayback({
+      category: 'IDEOLOGY', rolls: [4], promptCodes: ['IDEOLOGY_04'], prompts: ['信念'],
+    }, 'classic', 1),
+    diceModule.buildImportedCharacterLuckDicePlayback(diceResult, '周宁', 'classic', 2),
+    diceModule.buildAutoCharacterCardDicePlayback({
+      buildRolls: { luck: 60, luckRolls: [[3, 4, 5]] },
+    }, 'classic', 3),
+  ]
+
+  assert.deepEqual(requests.map((request) => request.completionAction), [
+    'CLOSE', 'CLOSE', 'CLOSE', 'CLOSE',
+  ])
+})

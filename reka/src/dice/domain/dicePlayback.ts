@@ -85,6 +85,7 @@ export interface DicePlaybackRequest {
   autoPlayDelayMs?: number
   initialAnimation?: DiceInitialAnimationPlan
   offerContinueAfterComplete?: boolean
+  completionAction?: 'REPLAY' | 'CLOSE'
   windowTone?: DicePlayerWindowTone
 }
 export interface DicePlayerSummary {
@@ -1206,6 +1207,19 @@ export function createDicePlayerStatus(phase: DicePlayerPhase): DicePlayerStatus
   }[phase]
 }
 
-export function shouldShowDiceRollAction(_phase: DicePlayerPhase, result: DiceResult): boolean {
-  return result.modules.some((module) => module.dice.length > 0)
+export function shouldShowDiceRollAction(
+  phase: DicePlayerPhase,
+  result: DiceResult,
+  completionAction: DicePlaybackRequest['completionAction'] = 'REPLAY',
+): boolean {
+  return !(phase === 'complete' && completionAction === 'CLOSE')
+    && result.modules.some((module) => module.dice.length > 0)
+}
+
+export function shouldShowDiceContinueAction(
+  phase: DicePlayerPhase,
+  completionAction: DicePlaybackRequest['completionAction'],
+  externallyOffered: boolean,
+): boolean {
+  return externallyOffered || (phase === 'complete' && completionAction === 'CLOSE')
 }

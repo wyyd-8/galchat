@@ -351,6 +351,24 @@ test('offers an explicit continue action below replay after the first player rol
   )), true)
 })
 
+test('uses the continue action to close close-on-completion dice windows', async () => {
+  const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
+  const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(template, 'DicePlayerDialog should contain a template')
+
+  const action = findElementByClass(baseParse(template), 'dice-player-continue')
+  assert.ok(action)
+  assert.equal(action.props.some((prop) => (
+    prop.type === NodeTypes.DIRECTIVE
+      && prop.name === 'on'
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.arg.content === 'click'
+      && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      && prop.exp.content === 'handleContinueAction'
+  )), true)
+  assert.match(source, /if \(props\.request\?\.completionAction === 'CLOSE'\) open\.value = false/)
+})
+
 test('removes the replay action after an all-placeholder result completes', async () => {
   const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]

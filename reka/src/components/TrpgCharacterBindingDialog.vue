@@ -13,7 +13,10 @@ import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
 import { api } from '@/api/client'
 import type { Character, CharacterCard, CharacterCardCreationDraft, CocModule, Conversation, InvestigatorCardSummary } from '@/api/types'
 import type { DicePlaybackRequest } from '@/dice/domain/dicePlayback'
-import { buildAutoCharacterCardDicePlayback } from '@/components/characterCardCreationDice'
+import {
+  buildAutoCharacterCardDicePlayback,
+  buildImportedCharacterLuckDicePlayback,
+} from '@/components/characterCardCreationDice'
 import { analyzeCharacterCardImport } from '@/components/characterCardImportPreview'
 import {
   buildBindingTargets, buildCharacterCardCreationMethods, loadBindingTargetContent,
@@ -288,14 +291,24 @@ async function selectTarget(key: string) {
 
 async function bindCard() {
   if (!props.conversation || !selectedTarget.value || !cardText.value.trim()) return
-  await api.createCharacterCard({
+  const importedCard = await api.createCharacterCard({
     runId: props.conversation.id,
     participantId: selectedTarget.value.participantId,
     characterText: cardText.value.trim(),
   })
+  const luckResult = await api.rollCharacterLuck(importedCard.character.id)
+  const playback = buildImportedCharacterLuckDicePlayback(
+    luckResult,
+    importedCard.character.name,
+    props.diceSkin,
+    diceRequestId.value,
+  )
+  diceRequestId.value = playback.id
+  diceRequest.value = playback
+  diceOpen.value = true
   await refreshCards()
   selectedCreationMethod.value = null
-  notify('人物卡已绑定', selectedName.value, 'success')
+  notify('人物卡已绑定并生成幸运', selectedName.value, 'success')
 }
 
 async function completeStepwiseCard() {
@@ -314,13 +327,6 @@ async function removeCard() {
   await api.deleteCharacterCard(card.value.character.id)
   await refreshCards()
   notify('人物卡已解除绑定', selectedName.value, 'success')
-}
-
-async function rollLuck() {
-  if (!card.value) return
-  await api.rollCharacterLuck(card.value.character.id)
-  await loadSelectedCard()
-  notify('幸运值已生成', String(card.value?.character.luckCurrent ?? ''), 'success')
 }
 
 function finish() {
@@ -616,7 +622,6 @@ watch(() => props.conversation?.id, () => {
           </TabsRoot>
 
           <div class="binding-established-actions">
-            <button class="button secondary" :disabled="card.character.luckCurrent != null || busy" @click="execute(rollLuck)"><Dices :size="15" />{{ card.character.luckCurrent == null ? '投掷幸运' : `幸运 ${card.character.luckCurrent}` }}</button>
             <button class="button" :class="confirmDelete ? 'danger' : 'ghost'" :disabled="busy" @click="execute(removeCard)"><Trash2 :size="15" />{{ confirmDelete ? '确认解除绑定' : '解除并重新绑定' }}</button>
           </div>
         </section>

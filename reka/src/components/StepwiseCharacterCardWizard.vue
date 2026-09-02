@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   ArrowLeft, Check, Dices, FileCheck2, LoaderCircle, Minus, Plus, RotateCw, Search,
+  TriangleAlert,
 } from '@lucide/vue'
 import { api } from '@/api/client'
 import type {
@@ -274,18 +275,20 @@ async function confirmBackground() {
 
 async function confirmEquipment() {
   if (!draft.value) return
-  draft.value = await api.saveCharacterCardDraftEquipment(draft.value.draftId, {
+  const completedDraft = await api.saveCharacterCardDraftEquipment(draft.value.draftId, {
     era: equipment.era, equipmentText: equipment.equipmentText, assetsText: equipment.assetsText,
     spendingLevel: equipment.spendingLevel, cash: equipment.cash,
     weapons: stepwiseWeaponSelectionPayload(selectedWeaponCodes.value),
     confirmed: true, expectedVersion: draft.value.version,
   })
+  draft.value = completedDraft
+  await completeDraft(completedDraft)
 }
 
-async function completeDraft() {
-  if (!draft.value) return
-  const card = await api.completeCharacterCardDraft(draft.value.draftId, {
-    requestId: requestId(), expectedVersion: draft.value.version,
+async function completeDraft(completedDraft = draft.value) {
+  if (!completedDraft) return
+  const card = await api.completeCharacterCardDraft(completedDraft.draftId, {
+    requestId: requestId(), expectedVersion: completedDraft.version,
   })
   draft.value = null
   emit('complete', card)
@@ -311,6 +314,7 @@ watch(() => equipment.era, () => {
 onMounted(() => execute(async () => {
   rules.value = await api.characterCardCreationRules()
   syncFromDraft(draft.value)
+  if (draft.value?.status === 'PREVIEW_READY') await completeDraft(draft.value)
 }))
 </script>
 
@@ -402,7 +406,7 @@ onMounted(() => execute(async () => {
 
         <section v-else-if="currentStep === 'EQUIPMENT' && draft.status !== 'PREVIEW_READY'" class="creation-equipment-step">
           <div class="creation-form-grid">
-            <label class="field"><span>时代</span><select v-model="equipment.era" :disabled="Boolean(props.defaultEra)"><option v-for="era in rules?.eras || ['1920S', 'MODERN']" :key="era" :value="era">{{ era === '1920S' ? '1920年代' : era === 'MODERN' ? '现代' : era }}</option></select><small v-if="props.defaultEra">由当前模组决定</small></label>
+            <label class="field field-wide"><span>时代</span><select v-model="equipment.era" :disabled="Boolean(props.defaultEra)"><option v-for="era in rules?.eras || ['1920S', 'MODERN']" :key="era" :value="era">{{ era === '1920S' ? '1920年代' : era === 'MODERN' ? '现代' : era }}</option></select><small v-if="props.defaultEra">由当前模组决定</small></label>
             <label class="field"><span>消费水平</span><input v-model.trim="equipment.spendingLevel" placeholder="例如：每天 10 美元" /></label>
             <label class="field"><span>现金</span><input v-model.trim="equipment.cash" /></label>
             <label class="field field-wide"><span>随身装备</span><textarea v-model="equipment.equipmentText" rows="4" /></label>
@@ -425,11 +429,15 @@ onMounted(() => execute(async () => {
             </label>
             <p v-if="!availableWeapons.length" class="weapon-option-empty">当前筛选条件下没有可选武器。</p>
           </div>
-          <div class="creation-primary-action"><button class="button primary" :disabled="busy" @click="execute(confirmEquipment)"><FileCheck2 :size="15" />生成完整人物卡预览</button></div>
+          <div class="creation-primary-action"><button class="button primary" :disabled="busy" @click="execute(confirmEquipment)"><FileCheck2 :size="15" />保存装备并完成绑定</button></div>
         </section>
 
-        <section v-else-if="draft.status === 'PREVIEW_READY'" class="creation-complete-step">
-          <FileCheck2 :size="38" /><strong>人物卡内容已完成</strong><p>请检查右侧预览；确认后会立即绑定到当前调查员。</p><button class="button primary" :disabled="busy" @click="execute(completeDraft)"><Check :size="15" />确认并绑定人物卡</button>
+        <section v-else-if="draft.status === 'PREVIEW_READY'" class="creation-binding-retry">
+          <LoaderCircle v-if="busy" class="spin" :size="28" />
+          <TriangleAlert v-else :size="28" />
+          <strong>{{ busy ? '正在绑定人物卡' : '人物卡尚未完成绑定' }}</strong>
+          <p>{{ busy ? '第六步已保存，正在完成最后的绑定。' : '上次自动绑定没有完成，可以直接重试。' }}</p>
+          <button v-if="!busy" class="button primary" @click="execute(() => completeDraft(draft))">重试绑定</button>
         </section>
 
         <p v-if="failure" class="creation-error">{{ failure }}</p>

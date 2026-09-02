@@ -64,7 +64,7 @@ function textContent(node: unknown): string {
   return (candidate.children || []).map(textContent).join('')
 }
 
-test('offers luck rolling while reviewing a bound card in the third setup stage', async () => {
+test('rolls imported-card luck automatically and removes the bound-card manual luck action', async () => {
   const source = await readFile(new URL('./TrpgCharacterBindingDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgCharacterBindingDialog should contain a template')
@@ -73,9 +73,13 @@ test('offers luck rolling while reviewing a bound card in the third setup stage'
     && element.props.some((prop) => prop.type === NodeTypes.ATTRIBUTE
       && prop.name === 'class'
       && prop.value?.content.split(/\s+/).includes('binding-sheet')))
-  const luckIcon = sheet && findElement(sheet as unknown as RootNode, (element) => element.tag === 'Dices')
+  const manualLuckAction = sheet && findElement(sheet as unknown as RootNode, (element) => element.tag === 'button'
+    && textContent(element).includes('投掷幸运'))
 
-  assert.ok(luckIcon, 'the third setup stage should offer luck rolling for a bound card')
+  assert.equal(manualLuckAction, undefined, 'a bound card should not retain a manual luck action')
+  assert.match(source, /const importedCard = await api\.createCharacterCard/)
+  assert.match(source, /await api\.rollCharacterLuck\(importedCard\.character\.id\)/)
+  assert.match(source, /buildImportedCharacterLuckDicePlayback/)
 })
 
 test('uses the same full character-sheet panels as the TRPG tools after binding', async () => {

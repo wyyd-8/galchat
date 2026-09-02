@@ -157,6 +157,7 @@ export function buildAttributeDicePlayback(
     toolName: 'characterCreationAttributes',
     mode: 'play',
     autoPlay: true,
+    completionAction: 'CLOSE',
     initialAnimation: { groups: animationGroups },
     presentation: {
       kind: 'value-roll',
@@ -208,6 +209,7 @@ export function buildBackgroundPromptDicePlayback(
     toolName: 'characterCreationBackground',
     mode: 'play',
     autoPlay: true,
+    completionAction: 'CLOSE',
     initialAnimation: {
       groups: groups.map((_, index) => ({ moduleStart: index, moduleCount: 1, startDelayMs: index * 500 })),
     },
@@ -218,6 +220,46 @@ export function buildBackgroundPromptDicePlayback(
       formulaLabel: '随机表',
       formulaValue: `${prompt.rolls.length} 组 D10`,
       groups,
+      groupRule: 'SEPARATE',
+    },
+  }
+}
+
+export function buildImportedCharacterLuckDicePlayback(
+  result: DiceResult,
+  characterName: string,
+  skin: unknown,
+  previousId: number,
+): DicePlaybackRequest {
+  const rollResult = result.result ?? result.modules.reduce((sum, module) => sum + (module.result || 0), 0)
+  return {
+    id: previousId + 1,
+    result,
+    skin: resolveDiceSkin(skin),
+    reason: `${characterName}的幸运`,
+    toolName: 'characterCreationLuck',
+    mode: 'play',
+    autoPlay: true,
+    completionAction: 'CLOSE',
+    initialAnimation: {
+      groups: [{ moduleStart: 0, moduleCount: result.modules.length, startDelayMs: 0 }],
+    },
+    presentation: {
+      kind: 'value-roll',
+      resultLabel: '幸运生成',
+      resultValue: String(rollResult),
+      formulaLabel: '创建规则',
+      formulaValue: result.formula,
+      groups: [{
+        label: '幸运 LUCK',
+        checkName: result.formula,
+        outcomeLabel: String(rollResult),
+        outcomeTone: 'none',
+        success: false,
+        moduleStart: 0,
+        moduleCount: result.modules.length,
+        rollResult,
+      }],
       groupRule: 'SEPARATE',
     },
   }
@@ -318,6 +360,7 @@ export function buildAutoCharacterCardDicePlayback(
     toolName: 'autoCharacterCreation',
     mode: 'play',
     autoPlay: true,
+    completionAction: 'CLOSE',
     initialAnimation: {
       groups: Array.from({ length: Math.ceil(modules.length / 3) }, (_, index) => ({
         moduleStart: index * 3,

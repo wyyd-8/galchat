@@ -136,7 +136,14 @@ class TrpgModuleContextAssemblerTest {
                 .contains("不代表相应事件已经发生")
                 .contains("不得把下一场景简介续写为当前场景事实")
                 .contains("选景阶段仍可自由选择模组场景")
-                .contains("</module-progress-boundary-rules>");
+                .contains("</module-progress-boundary-rules>")
+                .contains("""
+                        <location>
+                        <name>第一天－上午</name>
+                        <summary>通报会与出发准备</summary>
+                        </location>
+                        """)
+                .doesNotContain("- 第一天－上午：通报会与出发准备");
     }
 
     @Test
@@ -208,7 +215,7 @@ class TrpgModuleContextAssemblerTest {
 
         assertThat(result)
                 .contains("太阳与九英镑", "幕后真相")
-                .contains("医院", "医院阁楼：封闭区域", "酒店")
+                .contains("医院", "医院阁楼", "封闭区域", "酒店")
                 .contains("感染源", "普通传闻")
                 .contains("医院完整原文")
                 .contains("玛德琳的信", "信中提到酒店", "已展示")

@@ -826,7 +826,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .auto-review-workbench { display: grid; grid-template-columns: minmax(0, 1fr) 250px; }
 .auto-review-main { min-width: 0; padding: 22px 24px 24px; background: radial-gradient(circle at 2% 98%, rgba(185,133,66,.07), transparent 31%), #fffdf7; }
 .auto-review-main .auto-review-heading { margin: 0; padding: 0 0 14px; background: transparent; }
-.auto-review-main .auto-review-heading h3 { margin-top: 5px; font-size: 21px; }
+.auto-review-main .auto-review-heading h3 { margin-top: 5px; font-size: 18px; }
 .auto-review-main .auto-review-heading small { font-size: 10px; }
 .auto-review-heading-copy { display: block !important; }
 .auto-review-heading-actions { display: flex; align-items: flex-start; gap: 7px; }
@@ -839,7 +839,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .auto-review-identity { padding: 18px 0 16px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 18px; }
 .auto-review-identity > span, .auto-review-identity small, .auto-review-identity h3 { display: block; }
 .auto-review-identity small { color: var(--muted); font-size: 12px; }
-.auto-review-identity h3 { margin: 5px 0 6px; font-family: var(--font-display); font-size: 30px; }
+.auto-review-identity h3 { margin: 5px 0 6px; font-family: var(--font-display); font-size: 22px; }
 .auto-review-identity p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .auto-review-vitals { display: flex; gap: 6px; }
 .auto-review-vitals span { min-width: 57px; padding: 8px 6px; border: 1px solid #d8d1c2; border-radius: 8px; text-align: center; background: rgba(255,255,255,.55); }
@@ -851,13 +851,13 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .auto-review-attributes span:last-child { border-right: 0; }
 .auto-review-attributes small, .auto-review-attributes strong { display: block; }
 .auto-review-attributes small { color: #817a6e; font-size: 10px; }
-.auto-review-attributes strong { margin-top: 2px; color: var(--pine); font-size: 17px; }
+.auto-review-attributes strong { margin-top: 2px; color: var(--pine); font-size: 15px; }
 .auto-review-category-tabs { margin-top: 16px; padding: 4px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; border-radius: 9px; background: #ede9df; }
 .auto-review-category-tab { min-height: 38px; padding: 8px 10px; border: 0; border-radius: 7px; color: #777a71; background: transparent; font-size: 11px; font-weight: 700; cursor: pointer; }
 .auto-review-category-tab.active { color: var(--pine); background: #fffefa; box-shadow: 0 3px 9px rgba(55,51,41,.08); }
 .auto-review-section { min-height: 190px; padding-top: 16px; }
 .auto-review-section > header { margin-bottom: 10px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.auto-review-section > header strong { font-family: var(--font-display); font-size: 17px; }
+.auto-review-section > header strong { font-family: var(--font-display); font-size: 15px; }
 .auto-review-section > header small { color: #8a867c; font-size: 10px; }
 .auto-review-overview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .auto-review-overview-grid span { padding: 11px 12px; border: 1px solid #e0dbd0; border-radius: 8px; background: rgba(255,255,255,.5); }
@@ -1065,9 +1065,9 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .weapon-option-stats small { margin-top: 3px; overflow: hidden; color: #777269; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .weapon-option-risks { width: fit-content; padding: 2px 6px; border-radius: 999px; color: #89642e; background: #f3e6ce; font-size: 9px; font-weight: 700; }
 .weapon-option-empty { grid-column: 1 / -1; margin: 0; padding: 26px 12px; border: 1px dashed #d8d2c7; border-radius: 9px; color: var(--muted); font-size: 11px; text-align: center; }
-.creation-complete-step { min-height: 320px; display: grid; place-content: center; justify-items: center; color: var(--pine); text-align: center; }
-.creation-complete-step strong { margin-top: 12px; color: var(--ink); font-family: var(--font-display); font-size: 19px; }
-.creation-complete-step p { max-width: 360px; margin: 7px 0 18px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.creation-binding-retry { min-height: 320px; display: grid; place-content: center; justify-items: center; color: var(--pine); text-align: center; }
+.creation-binding-retry strong { margin-top: 12px; color: var(--ink); font-family: var(--font-display); font-size: 17px; }
+.creation-binding-retry p { max-width: 360px; margin: 7px 0 18px; color: var(--muted); font-size: 11px; line-height: 1.7; }
 .creation-error { margin: 12px 0 0; padding: 9px 11px; border: 1px solid #ead1d5; border-radius: 7px; color: var(--wine); background: #fbf3f4; font-size: 10px; }
 .creation-busy { position: absolute; right: 22px; bottom: 15px; display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
 .creation-live-sheet { min-width: 0; padding: 20px 17px; border-left: 1px solid #d8d1c2; display: flex; flex-direction: column; background: linear-gradient(155deg, #f3eee2, #e9e2d4); box-shadow: inset 11px 0 22px rgba(76,65,45,.035); }

@@ -25,6 +25,7 @@ import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
 import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
+import { mergeGenerationResponseEvents } from '@/components/generationErrorFormatting'
 import {
   DICE_SKIN_OPTIONS,
   createDicePostRollPlaybackPlan,
@@ -1034,7 +1035,7 @@ async function changePassword() {
       </details>
       <details>
         <summary>Response</summary>
-        <pre>{{ formatDebugValue(workspace.generationFailure.value.detail.response) }}</pre>
+        <pre>{{ formatDebugValue(mergeGenerationResponseEvents(workspace.generationFailure.value.detail.response)) }}</pre>
       </details>
       <details>
         <summary>Stack trace</summary>

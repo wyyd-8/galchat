@@ -4,7 +4,7 @@ import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
-import com.me.galchat.domain.po.WorldEventLog;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
@@ -17,6 +17,7 @@ import lombok.experimental.Accessors;
 
 @Data
 @Accessors(chain = true)
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class UserWorldSaveSnapshotDTO {
 
     private Integer formatVersion;
@@ -32,8 +33,6 @@ public class UserWorldSaveSnapshotDTO {
     private Long maxFavorLogId;
 
     private Long maxUserEventLogId;
-
-    private Long maxWorldEventLogId;
 
     private Long maxGroupConversationId;
 
@@ -56,8 +55,6 @@ public class UserWorldSaveSnapshotDTO {
     private List<GroupConversationTurnsSnapshot> recentGroupTurnsByConversation;
 
     private List<GroupConversationPlanSnapshot> conversationPlans;
-
-    private WorldEventLog lastWorldEventLog;
 
     @Data
     @Accessors(chain = true)

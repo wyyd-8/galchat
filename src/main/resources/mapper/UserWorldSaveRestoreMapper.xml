@@ -40,21 +40,6 @@
           AND id &gt; #{maxUserEventLogId}
     </delete>
 
-    <delete id="deleteWorldEventsAfter">
-        DELETE FROM world_event_log
-        WHERE user_world_id = #{userWorldId}
-          AND id &gt; #{maxWorldEventLogId}
-          AND (
-              conversation_id IS NULL
-              OR EXISTS (
-                  SELECT 1
-                  FROM group_conversation conversation
-                  WHERE conversation.id = world_event_log.conversation_id
-                    AND conversation.mode = 'chat'
-              )
-          )
-    </delete>
-
     <delete id="deleteGroupMessagesAfter">
         DELETE FROM group_chat_message message
         USING group_conversation conversation
@@ -253,31 +238,4 @@
         )
     </insert>
 
-    <insert id="upsertWorldEventLogWithId">
-        INSERT INTO world_event_log (
-            id,
-            user_world_id,
-            event_description,
-            visible_characters,
-            timestamp,
-            title,
-            conversation_id
-        )
-        VALUES (
-            #{worldEventLog.id},
-            #{worldEventLog.userWorldId},
-            #{worldEventLog.eventDescription},
-            #{worldEventLog.visibleCharacters,jdbcType=ARRAY,typeHandler=org.apache.ibatis.type.ArrayTypeHandler},
-            #{worldEventLog.timestamp},
-            #{worldEventLog.title},
-            #{worldEventLog.conversationId}
-        )
-        ON CONFLICT (id) DO UPDATE SET
-            user_world_id = EXCLUDED.user_world_id,
-            event_description = EXCLUDED.event_description,
-            visible_characters = EXCLUDED.visible_characters,
-            timestamp = EXCLUDED.timestamp,
-            title = EXCLUDED.title,
-            conversation_id = EXCLUDED.conversation_id
-    </insert>
 </mapper>

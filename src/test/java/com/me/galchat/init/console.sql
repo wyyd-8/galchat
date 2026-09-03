@@ -554,25 +554,6 @@ CREATE INDEX idx_user_character_favor_log_binding
     ON user_character_favor_log
        (user_world_id, character_id, binding_type, binding_chat);
 
-CREATE TABLE world_event_log (
-    id BIGSERIAL PRIMARY KEY,
-    user_world_id BIGINT NOT NULL,
-    event_description TEXT,
-    visible_characters BIGINT[] DEFAULT '{}',
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    title VARCHAR(255),
-    conversation_id BIGINT
-);
-
-CREATE INDEX idx_world_event_log_user_world_timestamp
-    ON world_event_log (user_world_id, timestamp, id);
-
-CREATE INDEX idx_world_event_log_conversation_id
-    ON world_event_log (conversation_id);
-
-CREATE INDEX idx_world_event_log_visible_characters
-    ON world_event_log USING GIN (visible_characters);
-
 CREATE TABLE user_event_log (
     id BIGSERIAL PRIMARY KEY,
     user_world_id BIGINT NOT NULL,

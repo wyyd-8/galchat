@@ -3,11 +3,9 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.UserWorldSave;
-import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.mapper.GroupConversationDeletionMapper;
 import com.me.galchat.mapper.UserWorldSaveMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
-import com.me.galchat.mapper.WorldEventLogMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,7 +18,6 @@ public class DatabaseGroupConversationDeletionStore
     private final GroupConversationDeletionMapper deletionMapper;
     private final UserWorldSaveMapper userWorldSaveMapper;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
-    private final WorldEventLogMapper worldEventLogMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -30,8 +27,6 @@ public class DatabaseGroupConversationDeletionStore
         vectorStoreCleanupMapper.deleteGroupTopicsByConversation(
                 conversationId);
         vectorStoreCleanupMapper.deleteTrpgTurnsByConversation(
-                conversationId);
-        vectorStoreCleanupMapper.deleteWorldEventByConversation(
                 conversationId);
         int deleted = deletionMapper.deleteConversationData(conversationId);
         if (deleted != 1) {
@@ -47,11 +42,8 @@ public class DatabaseGroupConversationDeletionStore
         if (save == null || save.getSnapshot() == null) {
             return;
         }
-        WorldEventLog replacement = worldEventLogMapper
-                .selectLastRestorableExcludingConversation(
-                        userWorldId, conversationId);
         if (GroupConversationSaveSnapshotPruner.prune(
-                save.getSnapshot(), conversationId, replacement)) {
+                save.getSnapshot(), conversationId)) {
             userWorldSaveMapper.updateById(save);
         }
     }

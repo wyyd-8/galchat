@@ -8,8 +8,6 @@ import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserWorldPrefixMapper;
-import com.me.galchat.mapper.VectorStoreCleanupMapper;
-import com.me.galchat.mapper.WorldEventLogMapper;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
@@ -42,8 +40,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     private final IWorldTemplateService worldTemplateService;
     private final StringRedisTemplate redisTemplate;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
-    private final WorldEventLogMapper worldEventLogMapper;
-    private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
 
     @Override
     public List<UserWorldPrefix> listBaseInfoByUserId(Long userId) {
@@ -102,8 +98,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
 
         Long userWorldId = userWorld.getId();
         checkNoCharacters(userWorldId);
-        worldEventLogMapper.deleteByUserWorldId(userWorldId);
-        vectorStoreCleanupMapper.deleteWorldEventByUserWorldId(userWorldId);
         int deleted = baseMapper.deleteByIdAndUserId(userWorldId, userId);
         if (deleted == 0) {
             throw new UserRequestException("当前世界存在角色，不能删除");

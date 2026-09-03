@@ -37,9 +37,7 @@ public interface TrpgSaveRestoreMapper {
               COALESCE((SELECT MAX(result.id)
                         FROM dice_roll_result result
                         JOIN dice_roll_summary summary ON summary.id = result.summary_id
-                        WHERE summary.conversation_id = #{conversationId}), 0) AS max_dice_result_id,
-              COALESCE((SELECT MAX(id) FROM world_event_log
-                        WHERE conversation_id = #{conversationId}), 0) AS max_world_event_log_id
+                        WHERE summary.conversation_id = #{conversationId}), 0) AS max_dice_result_id
             """)
     TrpgSaveSnapshotDTO.CursorSnapshot selectCursors(
             @Param("conversationId") Long conversationId);
@@ -81,7 +79,4 @@ public interface TrpgSaveRestoreMapper {
             @Param("conversationId") Long conversationId,
             @Param("maxId") Long maxId);
 
-    int deleteWorldEventsAfter(
-            @Param("conversationId") Long conversationId,
-            @Param("maxId") Long maxId);
 }

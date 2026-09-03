@@ -23,7 +23,6 @@ import com.me.galchat.domain.po.UserChatToolCall;
 import com.me.galchat.domain.po.UserEventLog;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.UserWorldSave;
-import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.domain.vo.UserWorldSaveOverviewVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.CharacterTemplateMapper;
@@ -43,10 +42,8 @@ import com.me.galchat.mapper.UserEventLogMapper;
 import com.me.galchat.mapper.UserWorldSaveMapper;
 import com.me.galchat.mapper.UserWorldSaveRestoreMapper;
 import com.me.galchat.mapper.VectorStoreCleanupMapper;
-import com.me.galchat.mapper.WorldEventLogMapper;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IUserWorldSaveService;
-import com.me.galchat.vector.WorldEventVectorService;
 import com.me.galchat.vector.GroupTopicVectorService;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -88,7 +85,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private final UserChatToolCallMapper userChatToolCallMapper;
     private final UserCharacterFavorLogMapper userCharacterFavorLogMapper;
     private final UserEventLogMapper userEventLogMapper;
-    private final WorldEventLogMapper worldEventLogMapper;
     private final GroupConversationMapper groupConversationMapper;
     private final GroupChatMessageMapper groupChatMessageMapper;
     private final GroupChatTurnMapper groupChatTurnMapper;
@@ -102,7 +98,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private final GroupConversationLockService groupConversationLockService;
     private final StringRedisTemplate redisTemplate;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
-    private final WorldEventVectorService worldEventVectorService;
     private final GroupTopicVectorService groupTopicVectorService;
     private final TransactionTemplate transactionTemplate;
 
@@ -193,7 +188,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         groupReplyPlanSnapshotService.restore(userWorldId, snapshot.getConversationPlans());
         restoreRecentChatRounds(userWorldId, snapshot);
         restoreRecentGroupTurns(userWorldId, snapshot);
-        restoreWorldEventLog(snapshot.getLastWorldEventLog());
         restoreCharacterStates(userWorldId, snapshot.getCharacterStates());
         return deletedUserMessageIds;
     }
@@ -208,7 +202,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .setMaxChatHistoryId(maxChatHistoryId(userWorldId))
                 .setMaxFavorLogId(maxFavorLogId(userWorldId))
                 .setMaxUserEventLogId(maxUserEventLogId(userWorldId))
-                .setMaxWorldEventLogId(maxWorldEventLogId(userWorldId))
                 .setMaxGroupConversationId(maxGroupConversationId(userWorldId))
                 .setMaxGroupMessageId(maxGroupMessageId(userWorldId))
                 .setMaxGroupTurnId(maxGroupTurnId(userWorldId))
@@ -219,8 +212,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .setTopicBoundaries(topicBoundaries(userWorldId, characters))
                 .setRecentChatRoundsByCharacter(recentChatRounds(userWorldId, characters))
                 .setRecentGroupTurnsByConversation(recentGroupTurns(userWorldId))
-                .setConversationPlans(groupReplyPlanSnapshotService.capture(userWorldId))
-                .setLastWorldEventLog(lastWorldEventLog(userWorldId));
+                .setConversationPlans(groupReplyPlanSnapshotService.capture(userWorldId));
     }
 
     private void validateSnapshot(UserWorldPrefix userWorld, UserWorldSaveSnapshotDTO snapshot) {
@@ -250,7 +242,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         userWorldSaveRestoreMapper.deleteChatAfter(userWorldId, safeMax(snapshot.getMaxChatHistoryId()));
         userWorldSaveRestoreMapper.deleteFavorLogsAfter(userWorldId, safeMax(snapshot.getMaxFavorLogId()));
         userWorldSaveRestoreMapper.deleteUserEventsAfter(userWorldId, safeMax(snapshot.getMaxUserEventLogId()));
-        userWorldSaveRestoreMapper.deleteWorldEventsAfter(userWorldId, safeMax(snapshot.getMaxWorldEventLogId()));
         if (snapshot.getMaxGroupConversationId() != null) {
             userWorldSaveRestoreMapper.deleteGroupToolCallsAfter(userWorldId,
                     safeMax(snapshot.getMaxGroupReplyStepId()));
@@ -356,13 +347,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         }
     }
 
-    private void restoreWorldEventLog(WorldEventLog worldEventLog) {
-        if (worldEventLog == null || worldEventLog.getId() == null) {
-            return;
-        }
-        userWorldSaveRestoreMapper.upsertWorldEventLogWithId(worldEventLog);
-    }
-
     private void restoreCharacterStates(Long userWorldId,
                                         List<UserWorldSaveSnapshotDTO.CharacterStateSnapshot> characterStates) {
         for (UserWorldSaveSnapshotDTO.CharacterStateSnapshot state : emptyIfNull(characterStates)) {
@@ -390,7 +374,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         restoreChatVectors(userWorldId, snapshot.getTopicBoundaries());
         vectorStoreCleanupMapper.deleteGroupTopicsAfterId(userWorldId, safeMax(snapshot.getMaxGroupTopicId()));
         restoreGroupTopicVectors(userWorldId, snapshot);
-        restoreWorldEventVectors(userWorldId, snapshot);
     }
 
     private void restoreChatVectors(Long userWorldId, List<UserWorldSaveSnapshotDTO.TopicBoundarySnapshot> boundaries) {
@@ -404,17 +387,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
             vectorStoreCleanupMapper.deleteChatHistoryByConversationAfterEnd(userWorldId, boundary.getCharacterId(),
                     hotStart);
         }
-    }
-
-    private void restoreWorldEventVectors(Long userWorldId, UserWorldSaveSnapshotDTO snapshot) {
-        vectorStoreCleanupMapper.deleteWorldEventByUserWorldIdAfterLogId(userWorldId,
-                safeMax(snapshot.getMaxWorldEventLogId()));
-        WorldEventLog lastWorldEventLog = snapshot.getLastWorldEventLog();
-        if (lastWorldEventLog == null || lastWorldEventLog.getId() == null) {
-            return;
-        }
-        vectorStoreCleanupMapper.deleteWorldEventByLogId(userWorldId, lastWorldEventLog.getId());
-        worldEventVectorService.addWorldEventLog(lastWorldEventLog);
     }
 
     private void restoreGroupTopicVectors(Long userWorldId, UserWorldSaveSnapshotDTO snapshot) {
@@ -714,10 +686,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         emptyIfNull(snapshot.getFavorLogs()).forEach(userCharacterFavorLogMapper::insert);
     }
 
-    private WorldEventLog lastWorldEventLog(Long userWorldId) {
-        return worldEventLogMapper.selectLastRestorable(userWorldId);
-    }
-
     private void evictRedisData(Long userWorldId, List<Long> deletedUserMessageIds, UserWorldSaveSnapshotDTO snapshot) {
         String worldFieldPrefix = userWorldId + ":";
         deleteHashFieldsByPattern(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, worldFieldPrefix + "*");
@@ -792,11 +760,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
                 .orderByDesc(UserEventLog::getId)
                 .last("limit 1"));
         return row == null ? 0L : row.getId();
-    }
-
-    private Long maxWorldEventLogId(Long userWorldId) {
-        return Objects.requireNonNullElse(
-                worldEventLogMapper.selectMaxRestorableId(userWorldId), 0L);
     }
 
     private Long maxGroupConversationId(Long userWorldId) {

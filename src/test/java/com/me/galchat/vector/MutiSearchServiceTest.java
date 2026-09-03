@@ -23,13 +23,12 @@ class MutiSearchServiceTest {
     void searchBeforeChatLimitsDocumentsBySourceAndSkipsRerank() {
         ChatHistoryVectorService chatHistoryVectorService = mock(ChatHistoryVectorService.class);
         WorldDetailVectorService worldDetailVectorService = mock(WorldDetailVectorService.class);
-        WorldEventVectorService worldEventVectorService = mock(WorldEventVectorService.class);
         GroupTopicVectorService groupTopicVectorService = mock(GroupTopicVectorService.class);
         RecentChatMemoryService recentChatMemoryService = mock(RecentChatMemoryService.class);
         IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
         DocumentReranker documentReranker = mock(DocumentReranker.class);
         MutiSearchService mutiSearchService = new MutiSearchService(chatHistoryVectorService,
-                worldDetailVectorService, worldEventVectorService, groupTopicVectorService,
+                worldDetailVectorService, groupTopicVectorService,
                 recentChatMemoryService, userWorldPrefixService, documentReranker);
 
         when(userWorldPrefixService.getById(1L)).thenReturn(new UserWorldPrefix().setWorldId(99L));
@@ -40,17 +39,14 @@ class MutiSearchServiceTest {
         when(chatHistoryVectorService.queryChatHistory(1L, 2L, "query")).thenReturn(List.of(
                 document("chat history 1"),
                 document("chat history 2")));
-        when(worldEventVectorService.queryWorldEvent(1L, 2L, "query")).thenReturn(List.of(
-                document("world event 1"),
-                document("world event 2")));
-
         String result = mutiSearchService.searchBeforeChat(1L, 2L, "query");
 
         assertThat(result).contains("来源: " + VectorConstant.WORLD_DETAIL_SOURCE);
         assertThat(result).contains("来源: " + VectorConstant.CHAT_HISTORY_SOURCE);
-        assertThat(result).contains("来源: " + VectorConstant.WORLD_EVENT_SOURCE);
-        assertThat(result).contains("world detail 1", "world detail 2", "chat history 1", "world event 1");
-        assertThat(result).doesNotContain("world detail 3", "chat history 2", "world event 2");
+        assertThat(result).contains("world detail 1", "world detail 2", "chat history 1");
+        assertThat(result).doesNotContain(
+                "world detail 3", "chat history 2",
+                "world event 1", "world event 2");
         verifyNoInteractions(documentReranker);
     }
 
@@ -58,13 +54,12 @@ class MutiSearchServiceTest {
     void searchInfoIncludesSingleAndGroupChatMemoriesForTheSameCharacter() {
         ChatHistoryVectorService chatHistoryVectorService = mock(ChatHistoryVectorService.class);
         WorldDetailVectorService worldDetailVectorService = mock(WorldDetailVectorService.class);
-        WorldEventVectorService worldEventVectorService = mock(WorldEventVectorService.class);
         GroupTopicVectorService groupTopicVectorService = mock(GroupTopicVectorService.class);
         RecentChatMemoryService recentChatMemoryService = mock(RecentChatMemoryService.class);
         IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
         DocumentReranker documentReranker = mock(DocumentReranker.class);
         MutiSearchService mutiSearchService = new MutiSearchService(chatHistoryVectorService,
-                worldDetailVectorService, worldEventVectorService, groupTopicVectorService,
+                worldDetailVectorService, groupTopicVectorService,
                 recentChatMemoryService, userWorldPrefixService, documentReranker);
 
         when(userWorldPrefixService.getById(1L)).thenReturn(new UserWorldPrefix().setWorldId(99L));
@@ -73,7 +68,6 @@ class MutiSearchServiceTest {
                 .thenReturn(List.of(document("single memory")));
         when(groupTopicVectorService.queryGroupTopics(1L, 2L, "query"))
                 .thenReturn(List.of(document("group memory")));
-        when(worldEventVectorService.queryWorldEvent(1L, 2L, "query")).thenReturn(List.of());
         when(recentChatMemoryService.queryRecentMemories(1L, 2L)).thenReturn(List.of(
                 sourcedDocument("recent single memory", VectorConstant.CHAT_HISTORY_SOURCE),
                 sourcedDocument("recent group memory", VectorConstant.GROUP_TOPIC_SOURCE)));

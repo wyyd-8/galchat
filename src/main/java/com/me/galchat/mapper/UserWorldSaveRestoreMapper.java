@@ -4,7 +4,6 @@ import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
-import com.me.galchat.domain.po.WorldEventLog;
 import org.apache.ibatis.annotations.Param;
 
 public interface UserWorldSaveRestoreMapper {
@@ -18,8 +17,6 @@ public interface UserWorldSaveRestoreMapper {
     int deleteFavorLogsAfter(@Param("userWorldId") Long userWorldId, @Param("maxFavorLogId") Long maxFavorLogId);
 
     int deleteUserEventsAfter(@Param("userWorldId") Long userWorldId, @Param("maxUserEventLogId") Long maxUserEventLogId);
-
-    int deleteWorldEventsAfter(@Param("userWorldId") Long userWorldId, @Param("maxWorldEventLogId") Long maxWorldEventLogId);
 
     int deleteGroupMessagesAfter(@Param("userWorldId") Long userWorldId,
                                  @Param("maxGroupMessageId") Long maxGroupMessageId);
@@ -70,5 +67,4 @@ public interface UserWorldSaveRestoreMapper {
 
     int insertFavorLogWithId(@Param("favorLog") UserCharacterFavorLog favorLog);
 
-    int upsertWorldEventLogWithId(@Param("worldEventLog") WorldEventLog worldEventLog);
 }

@@ -1,5 +1,6 @@
 package com.me.galchat.domain.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
@@ -28,6 +29,7 @@ import java.util.Set;
 
 @Data
 @Accessors(chain = true)
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class TrpgSaveSnapshotDTO {
 
     private Integer formatVersion;
@@ -54,6 +56,7 @@ public class TrpgSaveSnapshotDTO {
 
     @Data
     @Accessors(chain = true)
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class CursorSnapshot {
         private Long maxMessageId;
         private Long maxTurnId;
@@ -64,7 +67,6 @@ public class TrpgSaveSnapshotDTO {
         private Long maxTopicId;
         private Long maxDiceSummaryId;
         private Long maxDiceResultId;
-        private Long maxWorldEventLogId;
     }
 
     @Data

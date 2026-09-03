@@ -478,7 +478,6 @@ class TrpgSaveSnapshotServiceTest {
                 .deleteTrpgTurnsByConversationAfterTurnId(51L, 2L);
         verify(vectorCleanupMapper, never())
                 .deleteTrpgTurnsByConversation(51L);
-        verify(vectorCleanupMapper).deleteWorldEventByConversationAfterLogId(51L, 10L);
         verify(restoreMapper).deleteMessagesAfter(51L, 1L);
         verify(restoreMapper).deleteTurnsAfter(51L, 2L);
         verify(restoreMapper).deleteReplyStepsAfter(51L, 3L);
@@ -488,7 +487,6 @@ class TrpgSaveSnapshotServiceTest {
         verify(restoreMapper).deleteTopicsAfter(51L, 7L);
         verify(restoreMapper).deleteDiceSummariesAfter(51L, 8L);
         verify(restoreMapper).deleteDiceResultsAfter(51L, 8L, 9L);
-        verify(restoreMapper).deleteWorldEventsAfter(51L, 10L);
         assertThat(conversation.getTitle()).isEqualTo("存档标题");
         assertThat(conversation.getStatus()).isEqualTo(GroupChatConstant.STATUS_ACTIVE);
         assertThat(conversation.getActiveReplyPlanId()).isEqualTo(101L);
@@ -615,7 +613,6 @@ class TrpgSaveSnapshotServiceTest {
                 .setMaxContextSummaryId(6L)
                 .setMaxTopicId(7L)
                 .setMaxDiceSummaryId(8L)
-                .setMaxDiceResultId(9L)
-                .setMaxWorldEventLogId(10L);
+                .setMaxDiceResultId(9L);
     }
 }

@@ -154,8 +154,7 @@ class TrpgSaveSnapshotServiceIntegrationTest {
                         .setMaxContextSummaryId(0L)
                         .setMaxTopicId(0L)
                         .setMaxDiceSummaryId(0L)
-                        .setMaxDiceResultId(0L)
-                        .setMaxWorldEventLogId(0L))
+                        .setMaxDiceResultId(0L))
                 .setConversationState(
                         new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
                                 .setTitle("saved title")

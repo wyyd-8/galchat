@@ -218,8 +218,6 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
             vectorCleanupMapper.deleteTrpgTurnsByConversationAndTurnIds(
                     conversationId, restoredTurnIds);
         }
-        vectorCleanupMapper.deleteWorldEventByConversationAfterLogId(
-                conversationId, cursors.getMaxWorldEventLogId());
         restoreMapper.deleteAgentDecisionsAfter(
                 conversationId, cursors.getMaxAgentDecisionId());
         restoreMapper.deleteToolCallsAfter(
@@ -240,9 +238,6 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 cursors.getMaxDiceResultId());
         restoreMapper.deleteDiceSummariesAfter(
                 conversationId, cursors.getMaxDiceSummaryId());
-        restoreMapper.deleteWorldEventsAfter(
-                conversationId, cursors.getMaxWorldEventLogId());
-
         restoreRestorableTurns(snapshot.getRestorableTurns());
         restorePlans(conversationId, snapshot);
         restoreCharacters(conversationId, snapshot);
@@ -572,8 +567,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 cursors.getMaxContextSummaryId(),
                 cursors.getMaxTopicId(),
                 cursors.getMaxDiceSummaryId(),
-                cursors.getMaxDiceResultId(),
-                cursors.getMaxWorldEventLogId()
+                cursors.getMaxDiceResultId()
         };
         for (Long value : values) {
             if (value == null || value < 0) {
@@ -886,8 +880,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 .setMaxContextSummaryId(0L)
                 .setMaxTopicId(0L)
                 .setMaxDiceSummaryId(0L)
-                .setMaxDiceResultId(0L)
-                .setMaxWorldEventLogId(0L);
+                .setMaxDiceResultId(0L);
     }
 
     private void requireTrpgConversation(GroupConversation conversation) {

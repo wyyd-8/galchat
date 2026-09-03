@@ -169,7 +169,8 @@ psql -h localhost -U <username> -d <database> -f src/test/java/com/me/galchat/in
 
 - `world_detail_vector_store`
 - `chat_history_vector_store`
-- `world_event_vector_store`
+- `group_topic_vector_store`
+- `trpg_turn_vector_store`
 
 ### 2. 准备 Redis 和 Ollama
 
@@ -251,7 +252,6 @@ Vite 默认运行在 `http://localhost:5173`。开发环境中，`reka/vite.conf
 | 角色 | `/character/**` |
 | 聊天 | `POST /ai/chat` |
 | 聊天历史 | `GET /history`, `POST /history/withdraw` |
-| 世界事件 | `/worldevent/story/**` |
 | 图片上传 | `POST /upload` |
 | WebSocket | `/ws/{sid}` |
 

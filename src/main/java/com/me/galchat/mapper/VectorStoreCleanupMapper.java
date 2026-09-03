@@ -40,18 +40,4 @@ public interface VectorStoreCleanupMapper {
             @Param("conversationId") Long conversationId,
             @Param("turnIds") List<Long> turnIds);
 
-    int deleteWorldEventByUserWorldId(@Param("userWorldId") Long userWorldId);
-
-    int deleteWorldEventByUserWorldIdAfterLogId(@Param("userWorldId") Long userWorldId,
-                                                @Param("worldEventLogId") Long worldEventLogId);
-
-    int deleteWorldEventByLogId(@Param("userWorldId") Long userWorldId,
-                                @Param("worldEventLogId") Long worldEventLogId);
-
-    int deleteWorldEventByConversation(
-            @Param("conversationId") Long conversationId);
-
-    int deleteWorldEventByConversationAfterLogId(
-            @Param("conversationId") Long conversationId,
-            @Param("maxWorldEventLogId") Long maxWorldEventLogId);
 }

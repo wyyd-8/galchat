@@ -133,10 +133,6 @@
         deleted_members AS (
             DELETE FROM group_chat_member
             WHERE conversation_id = #{conversationId}
-        ),
-        deleted_world_events AS (
-            DELETE FROM world_event_log
-            WHERE conversation_id = #{conversationId}
         )
         DELETE FROM group_conversation
         WHERE id = #{conversationId}

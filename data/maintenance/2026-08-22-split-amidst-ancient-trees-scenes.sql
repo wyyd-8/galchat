@@ -76,19 +76,11 @@ BEGIN
 END
 $check$;
 
--- 清除主题与长期事件的向量派生数据。
+-- 清除主题向量派生数据。
 DELETE FROM group_topic_vector_store vector
 WHERE EXISTS (
     SELECT 1 FROM amidst_runs run
     WHERE vector.metadata::jsonb ->> 'conversationId' = run.id::text
-);
-
-DELETE FROM world_event_vector_store vector
-WHERE EXISTS (
-    SELECT 1
-    FROM world_event_log event
-    JOIN amidst_runs run ON run.id = event.conversation_id
-    WHERE vector.metadata::jsonb ->> 'worldEventLogId' = event.id::text
 );
 
 -- 先删除回复步骤和骰点的叶子记录，再清除行动轮与场景计划。
@@ -164,10 +156,6 @@ WHERE summary.conversation_id = run.id;
 DELETE FROM group_chat_topic topic
 USING amidst_runs run
 WHERE topic.conversation_id = run.id;
-
-DELETE FROM world_event_log event
-USING amidst_runs run
-WHERE event.conversation_id = run.id;
 
 DELETE FROM trpg_auto_save save
 USING amidst_runs run

@@ -67,9 +67,4 @@
           AND id &gt; #{maxId}
     </delete>
 
-    <delete id="deleteWorldEventsAfter">
-        DELETE FROM world_event_log
-        WHERE conversation_id = #{conversationId}
-          AND id &gt; #{maxId}
-    </delete>
 </mapper>

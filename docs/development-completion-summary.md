@@ -342,7 +342,8 @@ Spring AI 启动时还会初始化以下 pgvector 表：
 
 - `world_detail_vector_store`
 - `chat_history_vector_store`
-- `world_event_vector_store`
+- `group_topic_vector_store`
+- `trpg_turn_vector_store`
 
 ### 7.2 主要接口
 
@@ -386,7 +387,7 @@ Spring AI 启动时还会初始化以下 pgvector 表：
 3. **群聊 RAG 与工具**：群聊专属 `ChatClient` 尚未接入单聊的记忆 advisor、向量检索、好感工具和用户信息工具。
 4. **3D 骰子主应用集成**：`dice-lab` 目前是独立播放器，尚未嵌入 `reka`，也不负责随机判定。
 5. **角色卡 PDF 在线接口**：当前是离线 CLI，Java Controller 尚未提供生成或下载接口。
-6. **旧故事事件功能**：当前后端已经删除 `/worldevent/story/**` 及相关服务和表，不应继续按旧 README 视为已完成模块；群聊关闭后的世界事件归档是现行替代链路。
+6. **旧故事事件功能**：当前后端已经删除 `/worldevent/story/**`、跑团结束后的 WorldEvent 投影及相关服务和表；跨跑团回忆统一通过跑团记忆工具读取现有会话、摘要与轮次数据。
 
 ## 10. 已知集成边界与后续优先项
 

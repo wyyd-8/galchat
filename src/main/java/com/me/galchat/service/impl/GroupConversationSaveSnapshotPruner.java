@@ -1,8 +1,6 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.domain.dto.UserWorldSaveSnapshotDTO;
-import com.me.galchat.domain.po.WorldEventLog;
-
 import java.util.List;
 import java.util.Objects;
 
@@ -12,8 +10,7 @@ final class GroupConversationSaveSnapshotPruner {
     }
 
     static boolean prune(UserWorldSaveSnapshotDTO snapshot,
-                         Long conversationId,
-                         WorldEventLog replacementWorldEvent) {
+                         Long conversationId) {
         if (snapshot == null || conversationId == null) {
             return false;
         }
@@ -43,12 +40,6 @@ final class GroupConversationSaveSnapshotPruner {
                 snapshot.setConversationPlans(retainedPlans);
                 changed = true;
             }
-        }
-        WorldEventLog lastEvent = snapshot.getLastWorldEventLog();
-        if (lastEvent != null && Objects.equals(
-                conversationId, lastEvent.getConversationId())) {
-            snapshot.setLastWorldEventLog(replacementWorldEvent);
-            changed = true;
         }
         return changed;
     }

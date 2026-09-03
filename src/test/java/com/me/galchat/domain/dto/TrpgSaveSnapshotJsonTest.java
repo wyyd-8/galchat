@@ -27,6 +27,43 @@ import static org.mockito.Mockito.when;
 class TrpgSaveSnapshotJsonTest {
 
     @Test
+    void removedWorldEventFieldsRemainReadableAsLegacyJson() throws Exception {
+        JsonMapper mapper = JsonMapper.builder().build();
+
+        UserWorldSaveSnapshotDTO worldSnapshot = mapper.readValue("""
+                {
+                  "formatVersion": 2,
+                  "userWorldId": 7,
+                  "maxWorldEventLogId": 91,
+                  "lastWorldEventLog": {
+                    "id": 91,
+                    "eventDescription": "旧跑团摘要"
+                  }
+                }
+                """, UserWorldSaveSnapshotDTO.class);
+        TrpgSaveSnapshotDTO trpgSnapshot = mapper.readValue("""
+                {
+                  "formatVersion": 2,
+                  "conversationId": 8,
+                  "cursors": {
+                    "maxMessageId": 12,
+                    "maxWorldEventLogId": 92
+                  }
+                }
+                """, TrpgSaveSnapshotDTO.class);
+
+        assertThat(worldSnapshot.getUserWorldId()).isEqualTo(7L);
+        assertThat(trpgSnapshot.getCursors().getMaxMessageId()).isEqualTo(12L);
+        assertThat(Arrays.stream(UserWorldSaveSnapshotDTO.class.getMethods())
+                .map(java.lang.reflect.Method::getName))
+                .doesNotContain("getMaxWorldEventLogId", "getLastWorldEventLog");
+        assertThat(Arrays.stream(
+                        TrpgSaveSnapshotDTO.CursorSnapshot.class.getMethods())
+                .map(java.lang.reflect.Method::getName))
+                .doesNotContain("getMaxWorldEventLogId");
+    }
+
+    @Test
     void saveSnapshotExposesPersistentWeaponStashRows() {
         assertThat(Arrays.stream(TrpgSaveSnapshotDTO.class.getMethods())
                 .map(java.lang.reflect.Method::getName))

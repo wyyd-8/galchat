@@ -1,15 +1,10 @@
 package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
-import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
-import com.me.galchat.mapper.WorldEventLogMapper;
-import com.me.galchat.service.IWorldEventLogService;
-import com.me.galchat.vector.WorldEventVectorService;
 import com.me.galchat.exception.UserRequestException;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
@@ -45,9 +40,6 @@ class GroupConversationLifecycleServiceTest {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupReplyPlanService replyPlanService = mock(GroupReplyPlanService.class);
         GroupContextSummaryMapper summaryMapper = mock(GroupContextSummaryMapper.class);
-        IWorldEventLogService eventLogService = mock(IWorldEventLogService.class);
-        WorldEventLogMapper eventLogMapper = mock(WorldEventLogMapper.class);
-        WorldEventVectorService eventVectorService = mock(WorldEventVectorService.class);
         GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         DeepSeekChatModel summaryModel = mock(DeepSeekChatModel.class);
         when(summaryModel.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
@@ -55,8 +47,7 @@ class GroupConversationLifecycleServiceTest {
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         GroupConversationLifecycleService service = new GroupConversationLifecycleService(conversationService,
                 lockService, conversationMapper, replyPlanService, summaryMapper,
-                eventLogService, eventLogMapper,
-                eventVectorService, recoveryService, summaryClient,
+                recoveryService, summaryClient,
                 transactionTemplate, new TrpgSummaryIntervalSelector());
 
         GroupConversation conversation = new GroupConversation()
@@ -67,8 +58,6 @@ class GroupConversationLifecycleServiceTest {
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
         when(conversationService.requireActive(7L)).thenReturn(conversation);
-        when(conversationService.listMembers(7L)).thenReturn(List.of(
-                new GroupChatMember().setActorId(11L), new GroupChatMember().setActorId(12L)));
         when(lockService.tryLock(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         when(summaryMapper.selectList(any())).thenReturn(List.of(
@@ -88,7 +77,6 @@ class GroupConversationLifecycleServiceTest {
             return callback.doInTransaction(mock(TransactionStatus.class));
         });
         var summaryCaptor = org.mockito.ArgumentCaptor.forClass(GroupContextSummary.class);
-        var eventCaptor = org.mockito.ArgumentCaptor.forClass(WorldEventLog.class);
         var promptCaptor = org.mockito.ArgumentCaptor.forClass(Prompt.class);
 
         GroupConversation result = service.close(7L);
@@ -103,14 +91,11 @@ class GroupConversationLifecycleServiceTest {
         verify(summaryMapper).insert(summaryCaptor.capture());
         assertThat(summaryCaptor.getValue().getStartSequence()).isEqualTo(1L);
         assertThat(summaryCaptor.getValue().getEndSequence()).isEqualTo(2L);
-        verify(eventLogService).save(eventCaptor.capture());
-        assertThat(eventCaptor.getValue().getConversationId()).isEqualTo(7L);
-        verify(eventVectorService).addWorldEventLog(eventCaptor.getValue());
         verify(replyPlanService).clearConversationPlans(conversation);
     }
 
     @Test
-    void chatCloseDoesNotGenerateSummaryOrWorldEvent() {
+    void chatCloseDoesNotGenerateSummary() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupConversationLockService lockService =
@@ -121,12 +106,6 @@ class GroupConversationLifecycleServiceTest {
                 mock(GroupReplyPlanService.class);
         GroupContextSummaryMapper summaryMapper =
                 mock(GroupContextSummaryMapper.class);
-        IWorldEventLogService eventLogService =
-                mock(IWorldEventLogService.class);
-        WorldEventLogMapper eventLogMapper =
-                mock(WorldEventLogMapper.class);
-        WorldEventVectorService eventVectorService =
-                mock(WorldEventVectorService.class);
         GroupTurnRecoveryService recoveryService =
                 mock(GroupTurnRecoveryService.class);
         ChatClient summaryClient = mock(ChatClient.class);
@@ -149,8 +128,7 @@ class GroupConversationLifecycleServiceTest {
                 new GroupConversationLifecycleService(
                         conversationService, lockService,
                         conversationMapper, replyPlanService,
-                        summaryMapper, eventLogService,
-                        eventLogMapper, eventVectorService,
+                        summaryMapper,
                         recoveryService, summaryClient,
                         transactionTemplate,
                         new TrpgSummaryIntervalSelector());
@@ -164,8 +142,6 @@ class GroupConversationLifecycleServiceTest {
         verify(summaryMapper, never()).selectList(any());
         verify(summaryMapper, never()).insert(
                 any(GroupContextSummary.class));
-        verify(eventLogService, never()).save(any());
-        verify(eventVectorService, never()).addWorldEventLog(any());
     }
 
     @Test
@@ -180,9 +156,6 @@ class GroupConversationLifecycleServiceTest {
                 mock(GroupConversationMapper.class),
                 mock(GroupReplyPlanService.class),
                 mock(GroupContextSummaryMapper.class),
-                mock(IWorldEventLogService.class),
-                mock(WorldEventLogMapper.class),
-                mock(WorldEventVectorService.class),
                 recoveryService,
                 summaryClient,
                 mock(TransactionTemplate.class),
@@ -214,9 +187,6 @@ class GroupConversationLifecycleServiceTest {
                         mock(GroupConversationMapper.class),
                         mock(GroupReplyPlanService.class),
                         mock(GroupContextSummaryMapper.class),
-                        mock(IWorldEventLogService.class),
-                        mock(WorldEventLogMapper.class),
-                        mock(WorldEventVectorService.class),
                         recoveryService,
                         summaryClient,
                         mock(TransactionTemplate.class),

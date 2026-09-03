@@ -2,16 +2,11 @@ package com.me.galchat.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.domain.po.GroupChatMember;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
-import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
-import com.me.galchat.mapper.WorldEventLogMapper;
-import com.me.galchat.service.IWorldEventLogService;
-import com.me.galchat.vector.WorldEventVectorService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -32,9 +27,6 @@ public class GroupConversationLifecycleService {
     private final GroupConversationMapper conversationMapper;
     private final GroupReplyPlanService replyPlanService;
     private final GroupContextSummaryMapper summaryMapper;
-    private final IWorldEventLogService worldEventLogService;
-    private final WorldEventLogMapper worldEventLogMapper;
-    private final WorldEventVectorService worldEventVectorService;
     private final GroupTurnRecoveryService recoveryService;
     private final ChatClient summaryClient;
     private final TransactionTemplate transactionTemplate;
@@ -45,9 +37,6 @@ public class GroupConversationLifecycleService {
                                              GroupConversationMapper conversationMapper,
                                              GroupReplyPlanService replyPlanService,
                                              GroupContextSummaryMapper summaryMapper,
-                                             IWorldEventLogService worldEventLogService,
-                                             WorldEventLogMapper worldEventLogMapper,
-                                             WorldEventVectorService worldEventVectorService,
                                              GroupTurnRecoveryService recoveryService,
                                              @Qualifier("groupNonThinkingChatClient") ChatClient summaryClient,
                                              TransactionTemplate transactionTemplate,
@@ -57,9 +46,6 @@ public class GroupConversationLifecycleService {
         this.conversationMapper = conversationMapper;
         this.replyPlanService = replyPlanService;
         this.summaryMapper = summaryMapper;
-        this.worldEventLogService = worldEventLogService;
-        this.worldEventLogMapper = worldEventLogMapper;
-        this.worldEventVectorService = worldEventVectorService;
         this.recoveryService = recoveryService;
         this.summaryClient = summaryClient;
         this.transactionTemplate = transactionTemplate;
@@ -134,7 +120,6 @@ public class GroupConversationLifecycleService {
         if (result == null) {
             throw new IllegalStateException("结束群聊事务未返回结果");
         }
-        saveWorldEvent(result, summary);
         return result;
     }
 
@@ -173,30 +158,6 @@ public class GroupConversationLifecycleService {
                 .setUpdatedAt(now);
         conversationMapper.updateById(conversation);
         return conversation;
-    }
-
-    private void saveWorldEvent(GroupConversation conversation, String summary) {
-        List<GroupChatMember> members = conversationService.listMembers(conversation.getId());
-        WorldEventLog event = worldEventLogMapper.selectOne(new LambdaQueryWrapper<WorldEventLog>()
-                .eq(WorldEventLog::getConversationId, conversation.getId())
-                .last("limit 1"));
-        boolean isNew = event == null;
-        if (isNew) {
-            event = new WorldEventLog();
-        }
-        event
-                .setUserWorldId(conversation.getUserWorldId())
-                .setConversationId(conversation.getId())
-                .setTitle(conversation.getTitle())
-                .setEventDescription(summary)
-                .setVisibleCharacters(members.stream().map(GroupChatMember::getActorId).toArray(Long[]::new))
-                .setTimestamp(conversation.getClosedAt());
-        if (isNew) {
-            worldEventLogService.save(event);
-        } else {
-            worldEventLogMapper.updateById(event);
-        }
-        worldEventVectorService.addWorldEventLog(event);
     }
 
     private List<GroupContextSummary> completedSceneSummaries(

@@ -54,7 +54,6 @@ class GroupConversationDeletionMapperIntegrationTest {
                 "SELECT COUNT(*) FROM dice_roll_summary WHERE conversation_id = -97001",
                 "SELECT COUNT(*) FROM dice_roll_result WHERE summary_id = -97014",
                 "SELECT COUNT(*) FROM user_character_favor_log WHERE binding_chat = -97012",
-                "SELECT COUNT(*) FROM world_event_log WHERE conversation_id = -97001",
                 "SELECT COUNT(*) FROM coc_character WHERE run_id = -97001",
                 "SELECT COUNT(*) FROM coc_character_skill WHERE character_id = -97015",
                 "SELECT COUNT(*) FROM coc_character_weapon WHERE character_id = -97015",
@@ -180,11 +179,6 @@ class GroupConversationDeletionMapperIntegrationTest {
                 VALUES (-97029, -97003, -97004, 5,
                         'GROUP_REPLY_STEP', ?)
                 """, STEP_ID);
-        jdbcTemplate.update("""
-                INSERT INTO world_event_log
-                    (id, user_world_id, event_description, conversation_id)
-                VALUES (-97030, -97003, 'event', ?)
-                """, CONVERSATION_ID);
         insertTrpgFixture();
     }
 

@@ -49,14 +49,15 @@ import {
   mergeDiceOutcomeVfxRects,
 } from '@/dice/domain/dicePlayerLayout'
 import { formatDiceGroupLabel } from '@/dice/domain/diceGroupLabel'
+import { createCountdownController } from '@/components/trpgTurnExperiments'
 import type {
   DiceRollResult,
   ThreeDiceBoard,
 } from '@/dice/renderer/ThreeDice'
 
 const open = defineModel<boolean>({ required: true })
-const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean }>()
-const emit = defineEmits<{ roll: []; complete: []; continue: [] }>()
+const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean }>()
+const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: [] }>()
 
 const tray = ref<HTMLElement | null>(null)
 const surface = ref<HTMLElement | null>(null)
@@ -74,6 +75,13 @@ let valueMergeTimers: number[] = []
 let groupOutcomeTimers: number[] = []
 let outcomeVfxTimers: number[] = []
 let rowScrollPlayback: AbortController | undefined
+const continueCountdown = ref(0)
+let continuingFromAction = false
+const continueCountdownController = createCountdownController({
+  seconds: 3,
+  onTick: (remaining) => { continueCountdown.value = remaining },
+  onComplete: () => handleContinueAction(),
+})
 const diceAudio = new DiceRollAudioController({
   url: diceRollUrl,
 })
@@ -141,6 +149,9 @@ const showContinueAction = computed(() => shouldShowDiceContinueAction(
   props.request?.completionAction,
   props.showContinue === true,
 ))
+const continueActionLabel = computed(() => props.autoContinue && continueCountdown.value > 0
+  ? `继续（${continueCountdown.value}s）`
+  : '继续')
 const hasOpposedWinner = computed(() => props.request?.presentation?.groups.some((group) => group.winner) === true)
 const groupOutcomeVisibility = computed(() => createGroupOutcomeVisibility(
   groupOutcomePhase.value,
@@ -577,15 +588,35 @@ function handleRollAction() {
 }
 
 function handleContinueAction() {
+  continuingFromAction = true
+  continueCountdownController.cancel()
+  continueCountdown.value = 0
   if (props.request?.completionAction === 'CLOSE') open.value = false
   emit('continue')
+  void nextTick(() => { continuingFromAction = false })
 }
 
 watch(() => props.request?.id, () => {
   if (props.request) void prepare(props.request)
 }, { immediate: true })
-watch(open, (visible) => {
-  if (!visible) retireBoard()
+watch(
+  () => open.value && showContinueAction.value && props.autoContinue === true,
+  (eligible) => {
+    continueCountdownController.cancel()
+    continueCountdown.value = 0
+    if (eligible) continueCountdownController.start()
+  },
+)
+watch(open, (visible, wasVisible) => {
+  if (!visible) {
+    const cancelledByUser = wasVisible
+      && props.autoContinue === true
+      && !continuingFromAction
+    continueCountdownController.cancel()
+    continueCountdown.value = 0
+    retireBoard()
+    if (cancelledByUser) emit('cancelAutoContinue')
+  }
 })
 
 onBeforeUnmount(() => {
@@ -595,6 +626,7 @@ onBeforeUnmount(() => {
   clearDiceValueMergeTimers()
   clearGroupOutcomeTimers()
   clearOutcomeVfx()
+  continueCountdownController.cancel()
   disposeBoard()
   disposeSharedRenderer?.()
   disposeSharedRenderer = undefined
@@ -814,7 +846,7 @@ onBeforeUnmount(() => {
           <Dices v-else :size="15" />
           {{ presentation.actionLabel }}
         </button>
-        <button v-if="showContinueAction" class="button primary dice-player-continue" type="button" @click="handleContinueAction">继续</button>
+        <button v-if="showContinueAction" class="button primary dice-player-continue" type="button" @click="handleContinueAction">{{ continueActionLabel }}</button>
       </div>
     </footer>
   </BaseDialog>

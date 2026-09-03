@@ -32,6 +32,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,6 +50,41 @@ class TrpgTurnExecutionServiceTest {
     static void initMybatisPlusTableInfo() {
         com.me.galchat.support.MybatisPlusTestSupport.initialize(
                 GroupChatReplyStep.class);
+    }
+
+    @Test
+    void continueRejectsAnOversizedInvestigatorDirection() {
+        TrpgTurnExecutionService service = new TrpgTurnExecutionService(
+                mock(GroupConversationService.class),
+                mock(GroupConversationLockService.class),
+                mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class),
+                mock(GroupChatTurnMapper.class),
+                mock(GroupChatReplyStepMapper.class),
+                mock(GroupChatMessageMapper.class),
+                mock(GroupTurnRecoveryService.class),
+                mock(GroupChatService.class),
+                immediateTransactionTemplate(),
+                mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class),
+                mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class),
+                mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice
+                        .DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class),
+                mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+        GroupTurnContinueDTO request = new GroupTurnContinueDTO();
+        request.setInvestigatorDirection("方".repeat(1001));
+
+        assertThatThrownBy(() -> service.continueTurn(
+                7L, request).collectList().block())
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("修正方向不能超过1000个字符");
     }
 
     @Test
@@ -538,6 +574,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(GroupAgentDecisionStore.class);
         GroupTurnCheckpointService checkpointService =
                 mock(GroupTurnCheckpointService.class);
+        TrpgTurnDirectionStore directionStore =
+                mock(TrpgTurnDirectionStore.class);
         TrpgTurnExecutionService service =
                 new TrpgTurnExecutionService(
                         conversationService,
@@ -563,6 +601,7 @@ class TrpgTurnExecutionServiceTest {
                         checkpointService,
                         mock(TrpgUnconsciousRecoveryService.class),
                         mock(ITrpgSaveService.class));
+        service.setTurnDirectionStore(directionStore);
         GroupConversation conversation =
                 new GroupConversation()
                         .setId(7L)
@@ -636,6 +675,8 @@ class TrpgTurnExecutionServiceTest {
         verifyNoInteractions(messageMapper);
         verify(checkpointService).restore(turn, failed);
         verify(checkpointService).clear(7L);
+        verify(directionStore, org.mockito.Mockito.atLeastOnce())
+                .clear(7L);
         verify(groupChatService).streamPersistedStep(
                 conversation, turn, failed);
         verify(groupChatService).streamPersistedStep(
@@ -1047,6 +1088,8 @@ class TrpgTurnExecutionServiceTest {
         GroupChatMessageMapper messageMapper =
                 mock(GroupChatMessageMapper.class);
         GroupChatService groupChatService = mock(GroupChatService.class);
+        TrpgTurnDirectionStore directionStore =
+                mock(TrpgTurnDirectionStore.class);
         TrpgTurnExecutionService service = new TrpgTurnExecutionService(
                 conversationService,
                 lockService,
@@ -1071,6 +1114,7 @@ class TrpgTurnExecutionServiceTest {
                 mock(GroupTurnCheckpointService.class),
                 mock(TrpgUnconsciousRecoveryService.class),
                 mock(ITrpgSaveService.class));
+        service.setTurnDirectionStore(directionStore);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setUserWorldId(3L)
@@ -1115,10 +1159,13 @@ class TrpgTurnExecutionServiceTest {
                     invocation.<GroupChatMessage>getArgument(0).setId(104L);
                     return 1;
                 });
+        when(directionStore.find(7L, 101L))
+                .thenReturn(Optional.of("优先确认地下室入口。"));
         when(groupChatService.streamPersistedStep(
                 org.mockito.ArgumentMatchers.eq(conversation),
                 org.mockito.ArgumentMatchers.eq(turn),
-                org.mockito.ArgumentMatchers.eq(kpStep)))
+                org.mockito.ArgumentMatchers.eq(kpStep),
+                org.mockito.ArgumentMatchers.eq("优先确认地下室入口。")))
                 .thenReturn(Flux.empty());
 
         GroupChatRequestDTO request = new GroupChatRequestDTO();
@@ -1134,7 +1181,8 @@ class TrpgTurnExecutionServiceTest {
                         GroupChatConstant.EVENT_TURN_COMPLETED);
         verify(turnMapper, never()).insert(any(GroupChatTurn.class));
         verify(groupChatService).streamPersistedStep(
-                conversation, turn, kpStep);
+                conversation, turn, kpStep,
+                "优先确认地下室入口。");
         var messageCaptor =
                 org.mockito.ArgumentCaptor.forClass(GroupChatMessage.class);
         verify(messageMapper).insert(messageCaptor.capture());
@@ -1745,6 +1793,8 @@ class TrpgTurnExecutionServiceTest {
         com.me.galchat.mapper.GroupReplyPlanMapper replyPlanMapper =
                 mock(com.me.galchat.mapper.GroupReplyPlanMapper.class);
         ITrpgSaveService saveService = mock(ITrpgSaveService.class);
+        TrpgTurnDirectionStore directionStore =
+                mock(TrpgTurnDirectionStore.class);
         CocModuleRuntimeService moduleRuntimeService =
                 mock(CocModuleRuntimeService.class);
         TrpgParticipantService participantService =
@@ -1806,8 +1856,12 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgUnconsciousRecoveryService.class),
                 saveService);
         service.setModuleRuntimeService(moduleRuntimeService);
+        service.setTurnDirectionStore(directionStore);
 
-        service.continueTurn(7L, new GroupTurnContinueDTO())
+        GroupTurnContinueDTO request = new GroupTurnContinueDTO();
+        request.setInvestigatorDirection("优先压制持枪敌人。");
+
+        service.continueTurn(7L, request)
                 .collectList().block();
 
         var order = org.mockito.Mockito.inOrder(
@@ -1818,6 +1872,8 @@ class TrpgTurnExecutionServiceTest {
         order.verify(combatLifecycleService)
                 .startNextRoundUnderLock(conversation);
         order.verify(turnMapper).insert(any(GroupChatTurn.class));
+        verify(directionStore).bind(
+                7L, 102L, "优先压制持枪敌人。");
     }
 
     @Test

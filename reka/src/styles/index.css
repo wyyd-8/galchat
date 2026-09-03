@@ -300,6 +300,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .composer { margin: 0 max(24px, calc((100% - 820px) / 2)) 20px; padding: 8px 8px 8px 13px; border: 1px solid var(--line-strong); border-radius: 13px; display: grid; grid-template-columns: 1fr auto; align-items: end; background: var(--surface-strong); box-shadow: 0 12px 35px rgba(43,42,37,.08); }
 .composer.has-withdraw { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 8px; }
 .composer.has-intent-toggle { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 8px; }
+.composer.has-turn-experiments { grid-template-columns: minmax(0, 1fr) auto; column-gap: 7px; }
 .composer textarea { max-height: 130px; min-height: 41px; padding: 10px 4px; border: 0; resize: none; outline: none; background: transparent; line-height: 1.5; }
 .composer-intent-toggle { align-self: center; padding: 3px; border: 1px solid #d6d1c5; border-radius: 9px; display: grid; grid-template-columns: repeat(2, auto); background: #efede7; box-shadow: inset 0 1px 2px rgba(56,52,43,.04); }
 .composer-intent-toggle button { min-width: 51px; height: 31px; padding: 0 8px; border: 0; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 4px; color: #77766e; background: transparent; font-size: 10px; cursor: pointer; transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease; }
@@ -411,6 +412,25 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .clarification-prompt-status { padding: 5px 8px; border: 1px solid #d8d6cb; border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; color: #66736b; background: rgba(255,255,255,.62); font-size: 9px; font-weight: 650; white-space: nowrap; }
 .clarification-prompt-status i { width: 6px; height: 6px; border-radius: 50%; background: #5f8877; box-shadow: 0 0 0 3px rgba(95,136,119,.12); }
 .turn-start-button { flex: 1; justify-content: center; }
+.turn-auto-advance-actions { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.turn-auto-advance-start { min-width: 0; justify-content: center; }
+.turn-auto-advance-cancel { white-space: nowrap; }
+.turn-experiment-settings { width: 41px; height: 41px; align-self: center; color: var(--pine); background: #f3f1ea; }
+.turn-experiment-popover { z-index: 80; width: min(350px, calc(100vw - 24px)); padding: 14px; border: 1px solid #cbc5b8; border-radius: 12px; color: var(--ink); background: #fffdf8; box-shadow: 0 16px 42px rgba(43,42,37,.16); }
+.turn-experiment-popover > header { margin-bottom: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.turn-experiment-popover > header span { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.turn-experiment-popover > header strong { font-family: var(--font-display); font-size: 14px; }
+.turn-experiment-popover > header small { padding: 3px 7px; border-radius: 999px; color: #866536; background: #f4e8d4; font-size: 8px; font-weight: 750; letter-spacing: .08em; }
+.turn-experiment-option { min-height: 58px; padding: 10px 1px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.turn-experiment-option + .turn-experiment-option { border-top: 1px solid #ebe7dd; }
+.turn-experiment-option span, .turn-experiment-option strong, .turn-experiment-option small { display: block; }
+.turn-experiment-option strong { font-size: 11px; }
+.turn-experiment-option small { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.turn-experiment-option input { width: 35px; height: 18px; flex: 0 0 auto; accent-color: var(--pine); }
+.turn-direction-field { display: grid; gap: 5px; }
+.turn-direction-field textarea { width: 100%; min-height: 86px; padding: 9px 10px; border: 1px solid #d8d2c6; border-radius: 8px; resize: vertical; color: var(--ink); background: #fffefa; font-size: 11px; line-height: 1.6; }
+.turn-direction-field small { color: var(--muted); font-size: 8px; text-align: right; }
+.turn-experiment-popover > p { margin: 10px 0 0; padding-top: 9px; border-top: 1px solid var(--line); color: #8b806f; font-size: 8px; line-height: 1.55; }
 .reply-plan-item { padding: 8px 6px; border: 1px solid var(--line); border-radius: 9px; display: grid; grid-template-columns: auto auto auto 1fr auto; align-items: center; gap: 6px; background: var(--surface); cursor: grab; }
 .reply-plan-item.running { border-color: #8aaa9c; box-shadow: 0 0 0 2px #dfeae5; }
 .reply-plan-item.done { opacity: .62; }

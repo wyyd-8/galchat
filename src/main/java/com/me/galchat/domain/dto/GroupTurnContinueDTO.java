@@ -5,4 +5,5 @@ import lombok.Data;
 @Data
 public class GroupTurnContinueDTO {
     private String clientRequestId;
+    private String investigatorDirection;
 }

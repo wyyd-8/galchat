@@ -8,7 +8,8 @@ import java.util.Set;
 public record GroupContextMaterial(
         List<Message> messages,
         Set<Long> relevantCharacterIds,
-        Set<Long> currentSceneInvestigatorIds) {
+        Set<Long> currentSceneInvestigatorIds,
+        String investigatorDirection) {
 
     public GroupContextMaterial {
         messages = List.copyOf(messages);
@@ -21,10 +22,25 @@ public record GroupContextMaterial(
     public GroupContextMaterial(
             List<Message> messages,
             Set<Long> relevantCharacterIds) {
-        this(messages, relevantCharacterIds, Set.of());
+        this(messages, relevantCharacterIds, Set.of(), null);
+    }
+
+    public GroupContextMaterial(
+            List<Message> messages,
+            Set<Long> relevantCharacterIds,
+            Set<Long> currentSceneInvestigatorIds) {
+        this(messages, relevantCharacterIds,
+                currentSceneInvestigatorIds, null);
     }
 
     public GroupContextMaterial(List<Message> messages) {
-        this(messages, Set.of(), Set.of());
+        this(messages, Set.of(), Set.of(), null);
+    }
+
+    public GroupContextMaterial withInvestigatorDirection(
+            String direction) {
+        return new GroupContextMaterial(
+                messages, relevantCharacterIds,
+                currentSceneInvestigatorIds, direction);
     }
 }

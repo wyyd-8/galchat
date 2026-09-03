@@ -537,7 +537,10 @@ public class GroupChatService {
                     conversation.getMode())) {
                 checkpointService.initializeStep(turn, step);
             }
-            GroupContextMaterial context = runtime.contextPolicy().load(conversation, action);
+            GroupContextMaterial context = runtime.contextPolicy()
+                    .load(conversation, action)
+                    .withInvestigatorDirection(
+                            preparedAction.investigatorDirection());
             GroupModelInvocation invocation = runtime.agentPolicy().prepare(conversation, action, context);
             String speakerName = runtime.agentPolicy()
                     .actorName(conversation.getUserWorldId(),
@@ -896,6 +899,15 @@ public class GroupChatService {
             GroupConversation conversation,
             GroupChatTurn turn,
             GroupChatReplyStep step) {
+        return streamPersistedStep(
+                conversation, turn, step, null);
+    }
+
+    Flux<GroupChatEvent> streamPersistedStep(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step,
+            String investigatorDirection) {
         if (isManualStep(conversation, step)) {
             return waitForManualInput(conversation, turn, step);
         }
@@ -913,7 +925,8 @@ public class GroupChatService {
                 runtimeRegistry.require(conversation.getMode());
         return executeStep(
                 runtime, conversation, turn,
-                new PreparedAction(action, step));
+                new PreparedAction(
+                        action, step, investigatorDirection));
     }
 
     boolean isManualStep(
@@ -1525,7 +1538,16 @@ public class GroupChatService {
                                 List<PreparedAction> actions) {
     }
 
-    private record PreparedAction(GroupActionSpec action, GroupChatReplyStep step) {
+    private record PreparedAction(
+            GroupActionSpec action,
+            GroupChatReplyStep step,
+            String investigatorDirection) {
+
+        private PreparedAction(
+                GroupActionSpec action,
+                GroupChatReplyStep step) {
+            this(action, step, null);
+        }
     }
 
     private record BufferedSelectionOutput(

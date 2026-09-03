@@ -72,6 +72,7 @@ public class TrpgTurnExecutionService {
     private TrpgStepInteractionService stepInteractionService;
     private CocModuleRuntimeService moduleRuntimeService;
     private TrpgTurnVectorIndexQueue turnVectorIndexQueue;
+    private TrpgTurnDirectionStore turnDirectionStore;
 
     @Autowired
     void setModuleRuntimeService(
@@ -83,6 +84,12 @@ public class TrpgTurnExecutionService {
     void setTurnVectorIndexQueue(
             TrpgTurnVectorIndexQueue turnVectorIndexQueue) {
         this.turnVectorIndexQueue = turnVectorIndexQueue;
+    }
+
+    @Autowired
+    void setTurnDirectionStore(
+            TrpgTurnDirectionStore turnDirectionStore) {
+        this.turnDirectionStore = turnDirectionStore;
     }
 
     public Flux<GroupChatEvent> continueTurn(
@@ -141,12 +148,23 @@ public class TrpgTurnExecutionService {
                                             .startNextRoundUnderLock(
                                                     conversation);
                                 }
-                                return createTurn(
+                                PreparedTurn created = createTurn(
                                         conversation, request);
+                                bindTurnDirection(
+                                        conversation.getId(),
+                                        created.turn().getId(),
+                                        request.getInvestigatorDirection());
+                                return created;
                             });
                     turn = prepared.turn();
                 } else if (!GroupChatConstant.STATUS_RUNNING.equals(
                         turn.getStatus())) {
+                    if (GroupChatConstant.STATUS_FAILED.equals(
+                            turn.getStatus())
+                            || GroupChatConstant.STATUS_BLOCKED.equals(
+                            turn.getStatus())) {
+                        clearTurnDirection(conversationId);
+                    }
                     resumeTurn(turn);
                 }
                 GroupChatTurn selected = turn;
@@ -161,7 +179,7 @@ public class TrpgTurnExecutionService {
                                 executePendingSteps(
                                         conversation, selected))
                         .doOnError(error ->
-                                recoveryService.recoverInterrupted(
+                                recoverAfterExecutionError(
                                         conversationId))
                         .doFinally(signal ->
                                 lockService.unlock(lock));
@@ -238,6 +256,7 @@ public class TrpgTurnExecutionService {
                         conversationService.requireActive(
                                 conversationId);
                 requireTrpg(conversation);
+                clearTurnDirection(conversationId);
                 GroupChatTurn turn = requireFailedTurn(
                         conversationId, turnId);
                 GroupChatReplyStep failedStep =
@@ -832,7 +851,7 @@ public class TrpgTurnExecutionService {
                                 accepted,
                                 executePendingSteps(conversation, turn))
                         .doOnError(error ->
-                                recoveryService.recoverInterrupted(
+                                recoverAfterExecutionError(
                                         conversationId))
                         .doFinally(signal -> lockService.unlock(lock));
             } catch (RuntimeException exception) {
@@ -1080,7 +1099,7 @@ public class TrpgTurnExecutionService {
                                 : executeScheduledSteps(
                                         conversation, turn, remaining, 0))
                 .doOnError(error ->
-                        recoveryService.recoverInterrupted(
+                        recoverAfterExecutionError(
                                 conversation.getId()))
                 .doFinally(signal -> lockService.unlock(lock));
     }
@@ -1422,7 +1441,7 @@ public class TrpgTurnExecutionService {
             if (groupChatService.isManualStep(conversation, next)) {
                 return waitForUser(conversation, turn, next);
             }
-            return groupChatService.streamPersistedStep(
+            return streamPersistedStep(
                             conversation, turn, next)
                     .concatWith(Flux.defer(() ->
                             continueAfterModelStep(
@@ -1541,7 +1560,7 @@ public class TrpgTurnExecutionService {
         if (groupChatService.isManualStep(conversation, child)) {
             return waitForUser(conversation, turn, child);
         }
-        return groupChatService.streamPersistedStep(
+        return streamPersistedStep(
                         conversation, turn, child)
                 .concatWith(Flux.defer(() ->
                         continueAfterModelStep(
@@ -1644,7 +1663,7 @@ public class TrpgTurnExecutionService {
             Flux<GroupChatEvent> replies =
                     Flux.fromIterable(executable)
                             .concatMap(step ->
-                                    groupChatService.streamPersistedStep(
+                                    streamPersistedStep(
                                             conversation, turn, step));
             Flux<GroupChatEvent> tail = nextUser < 0
                     ? complete(conversation, turn)
@@ -1708,6 +1727,7 @@ public class TrpgTurnExecutionService {
             if (turnVectorIndexQueue != null) {
                 turnVectorIndexQueue.submitTurnAfterCommit(turn.getId());
             }
+            clearTurnDirection(conversation.getId());
             return Flux.just(GroupChatEvent.builder()
                     .eventType(GroupChatConstant.EVENT_TURN_COMPLETED)
                     .conversationId(conversation.getId())
@@ -1730,7 +1750,48 @@ public class TrpgTurnExecutionService {
         if (request == null) {
             throw new UserRequestException("行动轮请求不能为空");
         }
+        if (request.getInvestigatorDirection() != null
+                && request.getInvestigatorDirection().length() > 1000) {
+            throw new UserRequestException(
+                    "修正方向不能超过1000个字符");
+        }
         validateClientRequestId(request.getClientRequestId());
+    }
+
+    private Flux<GroupChatEvent> streamPersistedStep(
+            GroupConversation conversation,
+            GroupChatTurn turn,
+            GroupChatReplyStep step) {
+        String direction = turnDirectionStore == null
+                ? null : turnDirectionStore.find(
+                        conversation.getId(), turn.getId())
+                        .orElse(null);
+        return direction == null
+                ? groupChatService.streamPersistedStep(
+                        conversation, turn, step)
+                : groupChatService.streamPersistedStep(
+                        conversation, turn, step, direction);
+    }
+
+    private void bindTurnDirection(
+            Long conversationId,
+            Long turnId,
+            String direction) {
+        if (turnDirectionStore != null) {
+            turnDirectionStore.bind(
+                    conversationId, turnId, direction);
+        }
+    }
+
+    private void clearTurnDirection(Long conversationId) {
+        if (turnDirectionStore != null) {
+            turnDirectionStore.clear(conversationId);
+        }
+    }
+
+    private void recoverAfterExecutionError(Long conversationId) {
+        clearTurnDirection(conversationId);
+        recoveryService.recoverInterrupted(conversationId);
     }
 
     private void validateClientRequestId(String clientRequestId) {

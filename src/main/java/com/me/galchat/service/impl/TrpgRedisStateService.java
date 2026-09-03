@@ -104,7 +104,9 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
                 materialKey(conversationId),
                 selectionActiveKey(conversationId),
                 contextWindowKey(conversationId),
-                runFinishKey(conversationId)));
+                runFinishKey(conversationId),
+                RedisConstant.TRPG_TURN_DIRECTION_PREFIX
+                        + conversationId));
     }
 
     private void restoreMaterials(Long conversationId, Set<Long> materialIds) {

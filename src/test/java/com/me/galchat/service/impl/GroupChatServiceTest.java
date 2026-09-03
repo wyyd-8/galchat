@@ -130,10 +130,15 @@ class GroupChatServiceTest {
         when(runtime.agentPolicy()).thenReturn(agentPolicy);
         when(contextPolicy.load(conversation, action))
                 .thenReturn(new GroupContextMaterial(List.of()));
+        AtomicReference<GroupContextMaterial> preparedContext =
+                new AtomicReference<>();
         when(agentPolicy.prepare(eq(conversation), eq(action), any()))
-                .thenReturn(new GroupModelInvocation(
+                .thenAnswer(invocation -> {
+                    preparedContext.set(invocation.getArgument(2));
+                    return new GroupModelInvocation(
                         fallback, new Prompt(List.of(
-                        new UserMessage("回复"))), List.of()));
+                        new UserMessage("回复"))), List.of());
+                });
         when(agentPolicy.actorName(5L, action.actor()))
                 .thenReturn("爱丽丝");
         when(actorRuntime.chatClient(conversation, step, fallback))
@@ -154,10 +159,13 @@ class GroupChatServiceTest {
                         new AssistantMessage("自选模型回复"))))));
 
         List<GroupChatEvent> events = service.streamPersistedStep(
-                conversation, turn, step).collectList().block();
+                conversation, turn, step,
+                "优先确认地下室入口。").collectList().block();
 
         assertThat(events.getLast().getContent())
                 .isEqualTo("自选模型回复");
+        assertThat(preparedContext.get().investigatorDirection())
+                .isEqualTo("优先确认地下室入口。");
         verify(fallbackModel, never()).stream(any(Prompt.class));
     }
 

@@ -24,6 +24,8 @@ public final class RedisConstant {
     public static final String TRPG_RUN_FINISH_PREFIX = "trpg:group:run-finish:";
     public static final String TRPG_PROPOSAL_ORDER_PREFIX =
             "trpg:group:proposal-order:";
+    public static final String TRPG_TURN_DIRECTION_PREFIX =
+            "trpg:group:turn-direction:";
     public static final String EMAIL_VERIFY_CODE_KEY_PREFIX = "user:email:verify:code:";
     public static final String EMAIL_VERIFY_COOLDOWN_KEY_PREFIX = "user:email:verify:cooldown:";
     public static final String EMAIL_VERIFY_ATTEMPT_KEY_PREFIX = "user:email:verify:attempt:";

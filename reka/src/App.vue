@@ -25,6 +25,7 @@ import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
 import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
+import { mergeAutoAdvanceDiceSummaryIds } from '@/components/trpgTurnExperiments'
 import { mergeGenerationResponseEvents } from '@/components/generationErrorFormatting'
 import {
   DICE_SKIN_OPTIONS,
@@ -83,6 +84,16 @@ const dicePlaybackRequest = ref<DicePlaybackRequest | null>(null)
 const diceMessageAggregate = ref<DiceRollAggregate | null>(null)
 const queuedDiceAggregates = ref<DiceRollAggregate[]>([])
 const diceShowContinue = ref(false)
+const trpgAutoAdvance = ref(false)
+const trpgDirectionEnabled = ref(false)
+const trpgInvestigatorDirection = ref('')
+const autoAdvanceDiceSummaryIds = ref<Set<number>>(new Set())
+const diceAutoContinue = computed(() => {
+  const summaryId = diceMessageAggregate.value?.summary.id
+  return trpgAutoAdvance.value
+    && summaryId != null
+    && autoAdvanceDiceSummaryIds.value.has(summaryId)
+})
 const trpgToolsCardId = ref<number | null>(null)
 const trpgBindingTargetKey = ref<string | null>(null)
 const trpgBindingCreationMethod = ref<CharacterCardCreationMethod | null>(null)
@@ -135,6 +146,11 @@ function openDiceDebug(aggregate: DiceRollAggregate) {
 
 function openIncomingDiceMessages(incoming: DiceRollAggregate[]) {
   try {
+    autoAdvanceDiceSummaryIds.value = mergeAutoAdvanceDiceSummaryIds(
+      autoAdvanceDiceSummaryIds.value,
+      incoming,
+      trpgAutoAdvance.value,
+    )
     const current = dicePlayerOpen.value ? diceMessageAggregate.value : null
     const plan = planIncomingDicePlayback(
       current,
@@ -273,6 +289,12 @@ function completeDiceMessageRoll() {
 }
 
 async function continueAfterDice() {
+  const completedSummaryId = diceMessageAggregate.value?.summary.id
+  if (completedSummaryId != null) {
+    const remainingAutoDice = new Set(autoAdvanceDiceSummaryIds.value)
+    remainingAutoDice.delete(completedSummaryId)
+    autoAdvanceDiceSummaryIds.value = remainingAutoDice
+  }
   const [queued, ...remaining] = queuedDiceAggregates.value
   if (queued) {
     queuedDiceAggregates.value = remaining
@@ -297,6 +319,29 @@ async function continueAfterDice() {
   diceShowContinue.value = false
   await workspace.startTrpgTurn()
 }
+function cancelDiceAutoAdvance() {
+  trpgAutoAdvance.value = false
+  autoAdvanceDiceSummaryIds.value = new Set()
+}
+async function startTrpgTurnWithExperiments(direction?: string) {
+  const startedBetweenTurns = workspace.currentTurn.value == null
+    || workspace.currentTurn.value.status === 'completed'
+  const succeeded = await workspace.startTrpgTurn(direction)
+  if (!succeeded) {
+    trpgAutoAdvance.value = false
+    return
+  }
+  if (startedBetweenTurns) {
+    trpgDirectionEnabled.value = false
+    trpgInvestigatorDirection.value = ''
+  }
+}
+watch(() => workspace.selectedConversationId.value, () => {
+  trpgAutoAdvance.value = false
+  trpgDirectionEnabled.value = false
+  trpgInvestigatorDirection.value = ''
+  autoAdvanceDiceSummaryIds.value = new Set()
+})
 const characterPickerOpen = ref(false)
 const characterPickerPhase = ref<'closed' | 'moving' | 'expanded'>('closed')
 const characterTemplateForm = reactive<CharacterTemplate>({ name: '', image: '', background: '', personality: '', cocPlayStyle: '', initFavor: 0, favorability: {} })
@@ -700,7 +745,7 @@ async function changePassword() {
       <CocModuleLibrary v-else-if="view === 'modules'" @changed="workspace.loadModules" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
-      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="workspace.startTrpgTurn" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
+      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
   </div>
   <div v-else class="signed-out"><span class="brand-glyph large">✦</span><h1>GalChat</h1><p>一个安静的角色与群像叙事工作台。</p><button class="button primary" @click="authOpen = true">登录或注册</button></div>
@@ -1061,6 +1106,6 @@ async function changePassword() {
     @complete="completeTrpgBinding"
   />
   <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" @restored="restoreTrpg" @open-dice="openDiceMessage" @debug-dice="openDiceDebug" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
-  <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" />
+  <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" :auto-continue="diceAutoContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" @cancel-auto-continue="cancelDiceAutoAdvance" />
   <NoticeToast />
 </template>

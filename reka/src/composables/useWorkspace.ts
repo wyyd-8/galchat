@@ -614,9 +614,9 @@ export function useWorkspace() {
       : item)
     notify('游戏时间已校正', gameTime.displayText, 'success')
   }
-  async function startTrpgTurn() {
+  async function startTrpgTurn(investigatorDirection?: string): Promise<boolean> {
     const conversation = selectedConversation.value
-    if (!conversation || conversation.mode !== 'trpg' || conversation.status !== 'active' || loading.sending) return
+    if (!conversation || conversation.mode !== 'trpg' || conversation.status !== 'active' || loading.sending) return false
     loading.sending = true
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
@@ -624,12 +624,15 @@ export function useWorkspace() {
         conversation.id,
         clientRequestId,
         (onEvent) => streamTrpgTurn.continue(
-          conversation.id, clientRequestId, onEvent),
+          conversation.id, clientRequestId, onEvent,
+          investigatorDirection?.trim() || undefined),
       )
       await syncTrpgState(conversation)
+      return true
     } catch (error) {
       await syncTrpgState(conversation).catch(() => undefined)
       notify('行动轮启动失败', errorMessage(error), 'danger')
+      return false
     }
     finally { loading.sending = false; await scrollToBottom() }
   }

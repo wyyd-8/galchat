@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Component } from 'vue'
-import { Archive, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, GripVertical, History, LoaderCircle, MessageCircleQuestion, MessageSquareText, Pause, Pencil, Play, Plus, RotateCcw, Save, Send, Swords, Trash2, UsersRound, X } from '@lucide/vue'
+import { Archive, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, GripVertical, History, LoaderCircle, MessageCircleQuestion, MessageSquareText, Pause, Pencil, Play, Plus, RotateCcw, Save, Send, Settings2, Swords, Trash2, UsersRound, X } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
+  PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger,
   TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
 import type { Character, Conversation, CurrentTurn, DiceRollAggregate, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupMessage, InvestigatorCardSummary, ModelApi, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod } from '@/api/types'
@@ -16,18 +17,22 @@ import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './re
 import { syncReasoningDisclosure, type ReasoningPhase } from './reasoningDisclosure'
 import { resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
 import { buildTrpgExecutionState, trpgTurnActionLabel, type TrpgExecutionScene } from './trpgExecutionState'
+import { createCountdownController, isBetweenTrpgTurns } from './trpgTurnExperiments'
 
 const input = defineModel<string>('input', { required: true })
 const inquiryInput = defineModel<string>('inquiryInput', { default: '' })
 const composerIntent = defineModel<TrpgComposerIntent>('composerIntent', { default: 'action' })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
+const autoAdvance = defineModel<boolean>('autoAdvance', { default: false })
+const directionEnabled = defineModel<boolean>('directionEnabled', { default: false })
+const investigatorDirection = defineModel<string>('investigatorDirection', { default: '' })
 const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; actorRuntimes?: GroupActorRuntime[]; modelApis?: ModelApi[]; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
   actorRuntimes: () => [],
   modelApis: () => [],
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
@@ -82,6 +87,17 @@ const planDescription = computed(() => props.conversation.mode === 'trpg'
   ? `${trpgExecution.value.subtitle} · 由场景或战斗流程实时维护。`
   : '从上到下依次回复；拖动调整，点击移除后保存。')
 const turnButtonLabel = computed(() => trpgTurnActionLabel(props.currentTurn))
+const betweenTrpgTurns = computed(() => props.conversation.mode === 'trpg'
+  && props.conversation.status === 'active'
+  && !props.loading
+  && isBetweenTrpgTurns(props.currentTurn))
+const turnCountdownRemaining = ref(0)
+const turnCountdown = createCountdownController({
+  seconds: 3,
+  onTick: (remaining) => { turnCountdownRemaining.value = remaining },
+  onComplete: () => requestTurnStart(),
+})
+const autoStartLabel = computed(() => `${Math.max(1, turnCountdownRemaining.value)}s后开始行动轮`)
 const composerPlaceholder = computed(() => {
   if (props.conversation.status !== 'active') return '这个会话已经关闭'
   if (effectiveComposerIntent.value === 'inquiry') return '向 KP 询问公开事实或当前可见信息……'
@@ -110,7 +126,19 @@ watch(() => `${props.sending}:${props.messages.map((message) => `${message.id}:$
   if (props.sending) scrollToLatest()
 }, { flush: 'post' })
 watch(() => props.sending, (sending, wasSending) => { if (!sending && wasSending) scrollToLatest() }, { flush: 'post' })
-onBeforeUnmount(() => cancelAnimationFrame(latestScrollFrame))
+watch(
+  () => betweenTrpgTurns.value && autoAdvance.value && !props.sending,
+  (eligible) => {
+    turnCountdown.cancel()
+    turnCountdownRemaining.value = 0
+    if (eligible) turnCountdown.start()
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => {
+  cancelAnimationFrame(latestScrollFrame)
+  turnCountdown.cancel()
+})
 
 function syncReasoningState() {
   props.messages.forEach((message) => {
@@ -162,6 +190,20 @@ function submitComposer() {
   if (!composerValue.value.trim()) return
   if (effectiveComposerIntent.value === 'inquiry') emit('askKp')
   else emit('send')
+}
+function requestedInvestigatorDirection(): string | undefined {
+  if (!betweenTrpgTurns.value || !directionEnabled.value) return undefined
+  return investigatorDirection.value.trim() || undefined
+}
+function requestTurnStart() {
+  turnCountdown.cancel()
+  turnCountdownRemaining.value = 0
+  emit('startTurn', requestedInvestigatorDirection())
+}
+function cancelAutoAdvance() {
+  turnCountdown.cancel()
+  turnCountdownRemaining.value = 0
+  autoAdvance.value = false
 }
 function keydown(event: KeyboardEvent) { if (!event.isComposing && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitComposer() } }
 function scrollToLatest() {
@@ -250,8 +292,31 @@ function handleReasoningScroll(event: Event) {
           </span>
           <span class="clarification-prompt-status"><i />等待回复</span>
         </div>
-        <div class="composer" :class="{ disabled: conversation.status !== 'active', 'has-intent-toggle': canAskKp, 'has-withdraw': conversation.mode === 'chat' }">
-          <button v-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="emit('startTurn')"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
+        <div class="composer" :class="{ disabled: conversation.status !== 'active', 'has-intent-toggle': canAskKp, 'has-withdraw': conversation.mode === 'chat', 'has-turn-experiments': betweenTrpgTurns }">
+          <div v-if="betweenTrpgTurns && autoAdvance" class="turn-auto-advance-actions">
+            <button class="button secondary turn-auto-advance-start" :disabled="sending" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ autoStartLabel }}</button>
+            <button class="button ghost turn-auto-advance-cancel" :disabled="sending" @click="cancelAutoAdvance">取消自动推进</button>
+          </div>
+          <button v-else-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
+          <PopoverRoot v-if="betweenTrpgTurns && !autoAdvance">
+            <PopoverTrigger as-child><button class="icon-button bordered turn-experiment-settings" type="button" title="行动轮设置" aria-label="行动轮设置"><Settings2 :size="17" /></button></PopoverTrigger>
+            <PopoverPortal><PopoverContent class="turn-experiment-popover" side="top" align="end" :side-offset="10">
+              <header><span><strong>行动轮设置</strong><small>实验功能</small></span></header>
+              <label class="turn-experiment-option">
+                <span><strong>自动推进</strong><small>行动轮之间及非用户掷骰后，倒计时 3 秒继续。</small></span>
+                <input v-model="autoAdvance" type="checkbox" />
+              </label>
+              <label class="turn-experiment-option">
+                <span><strong>修正方向</strong><small>临时调整下一轮全部 AI 调查员的探索或战斗方向。</small></span>
+                <input v-model="directionEnabled" type="checkbox" />
+              </label>
+              <label v-if="directionEnabled" class="turn-direction-field">
+                <textarea v-model="investigatorDirection" maxlength="1000" rows="4" placeholder="例如：优先确认地下室入口，不要继续与门卫纠缠。" />
+                <small>{{ investigatorDirection.length }}/1000 · 仅下一行动轮的 AI 调查员可见</small>
+              </label>
+              <p>设置只在当前页面生效；刷新后重置，不写入存档或重试。</p>
+            </PopoverContent></PopoverPortal>
+          </PopoverRoot>
           <button v-if="conversation.mode === 'chat'" class="icon-button withdraw-button" :disabled="sending || conversation.status !== 'active'" title="撤回上一轮" @click="emit('withdraw')"><RotateCcw :size="17" /></button>
           <TooltipProvider v-if="canAskKp">
             <div class="composer-intent-toggle" role="group" aria-label="选择发言方式">

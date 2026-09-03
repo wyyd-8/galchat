@@ -106,7 +106,8 @@ class TrpgGroupAgentPolicyTest {
                                 <context-summary status="completed">
                                 已结束地点：本宁顿旗帜报报社
                                 场景参与者：沃尔顿·红莲
-                                </context-summary>"""))));
+                                </context-summary>""")), Set.of(), Set.of(),
+                        "不要进入地下室。"));
 
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("当前SCENE计划名称：“本宁顿图书馆”")
@@ -126,6 +127,9 @@ class TrpgGroupAgentPolicyTest {
                 .contains("推进调查、揭示信息、产生后果、提供选择，或回应调查员的行动")
                 .contains("避免没有新信息、新选择或新变化的空转")
                 .contains("完成当前叙述后立即结束回复");
+        assertThat(invocation.prompt().getInstructions())
+                .noneMatch(message -> message.getText()
+                        .contains("不要进入地下室。"));
     }
 
     @Test
@@ -948,10 +952,18 @@ class TrpgGroupAgentPolicyTest {
                         "场景",
                         1,
                         1),
-                new GroupContextMaterial(List.of()));
+                new GroupContextMaterial(
+                        List.of(), Set.of(), Set.of(),
+                        "优先确认地下室入口。"));
 
         assertThat(invocation.tools())
                 .containsExactly(sceneTools, inquiryTools);
+        assertThat(invocation.prompt().getInstructions())
+                .anyMatch(message -> message instanceof UserMessage
+                        && message.getText().contains(
+                                "优先确认地下室入口。")
+                        && message.getText().contains(
+                                "仅用于调整本行动轮的行动倾向"));
         String investigatorSystem = invocation.prompt().getInstructions()
                 .getFirst().getText();
         assertThat(investigatorSystem)

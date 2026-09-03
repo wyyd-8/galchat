@@ -338,7 +338,7 @@ test('keeps keyboard focus on tool tabs visible without the boxed browser outlin
   assert.match(focus, /background:\s*rgba\(41,79,73,\.06\)/)
 })
 
-test('offers an explicit continue action below replay after the first player roll', async () => {
+test('offers a countdown-aware continue action below replay after a roll', async () => {
   const source = await readFile(new URL('./DicePlayerDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'DicePlayerDialog should contain a template')
@@ -346,9 +346,7 @@ test('offers an explicit continue action below replay after the first player rol
   const action = findElementByClass(baseParse(template), 'dice-player-continue')
 
   assert.ok(action, 'the player should render a continue action')
-  assert.equal(action.children.some((child) => (
-    child.type === NodeTypes.TEXT && child.content.trim() === '继续'
-  )), true)
+  assert.equal(textContent(action).trim(), 'continueActionLabel')
 })
 
 test('uses the continue action to close close-on-completion dice windows', async () => {

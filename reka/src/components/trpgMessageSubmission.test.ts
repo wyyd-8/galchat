@@ -195,6 +195,73 @@ test('submits a KP inquiry and returns the composer to action mode', async () =>
   }
 })
 
+test('starts a new TRPG turn with the temporary investigator direction', async () => {
+  const { api, streamTrpgTurn } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  Object.assign(globalThis, {
+    window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: storage(),
+    sessionStorage: storage(),
+  })
+
+  const originalContinue = streamTrpgTurn.continue
+  const originalGroupMessages = api.groupMessages
+  const originalReplyPlan = api.replyPlan
+  const originalCurrentTurn = api.currentTurn
+  try {
+    let submittedDirection: unknown
+    streamTrpgTurn.continue = async (...args: any[]) => {
+      submittedDirection = args[3]
+      args[2]({ eventType: 'stream.caught_up', conversationId: args[0] })
+    }
+    api.groupMessages = async () => []
+    api.replyPlan = async () => [{ source: 'SCENE', displayName: '书房', items: [] }]
+    api.currentTurn = async () => null
+
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {},
+      insert(child, parent) { child.parent = parent },
+      remove() {},
+      createElement: () => ({}),
+      createText: (text) => ({ text }),
+      createComment: (text) => ({ text }),
+      setText(node, text) { node.text = text },
+      setElementText(node, text) { node.text = text },
+      parentNode: (node) => node.parent as Record<string, unknown> | null,
+      nextSibling: () => null,
+    })
+    renderer.createApp(defineComponent({
+      setup() { workspace = useWorkspace(); return () => h('div') },
+    })).mount({})
+
+    workspace.conversations.value = [{
+      id: 7, userWorldId: 3, worldId: 2,
+      mode: 'trpg', title: '旧宅调查', status: 'active',
+    }]
+    workspace.selectedConversationId.value = 7
+
+    const succeeded = await workspace.startTrpgTurn('优先确认地下室入口。')
+
+    assert.equal(submittedDirection, '优先确认地下室入口。')
+    assert.equal(succeeded, true)
+  } finally {
+    streamTrpgTurn.continue = originalContinue
+    api.groupMessages = originalGroupMessages
+    api.replyPlan = originalReplyPlan
+    api.currentTurn = originalCurrentTurn
+    Object.assign(globalThis, {
+      window: previousWindow,
+      localStorage: previousLocalStorage,
+      sessionStorage: previousSessionStorage,
+    })
+  }
+})
+
 function storage(): Storage {
   const values = new Map<string, string>()
   return {

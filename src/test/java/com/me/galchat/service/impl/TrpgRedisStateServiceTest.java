@@ -154,6 +154,7 @@ class TrpgRedisStateServiceTest {
                 RedisConstant.TRPG_SHOWN_MATERIALS_PREFIX + "51",
                 RedisConstant.TRPG_SCENE_SELECTION_PREFIX + "51:active",
                 RedisConstant.TRPG_CONTEXT_WINDOW_PREFIX + "51",
-                RedisConstant.TRPG_RUN_FINISH_PREFIX + "51"));
+                RedisConstant.TRPG_RUN_FINISH_PREFIX + "51",
+                RedisConstant.TRPG_TURN_DIRECTION_PREFIX + "51"));
     }
 }

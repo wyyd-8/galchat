@@ -289,8 +289,11 @@ export const streamGroupGeneration = {
 }
 
 export const streamTrpgTurn = {
-  continue: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/turns/continue`, { clientRequestId }, onEvent),
+  continue: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void, investigatorDirection?: string) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/continue`, {
+      clientRequestId,
+      ...(investigatorDirection ? { investigatorDirection } : {}),
+    }, onEvent),
   message: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) =>
     streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/message`, payload, onEvent),
   inquiry: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; question: string }, onEvent: (event: GroupChatEvent) => void) =>

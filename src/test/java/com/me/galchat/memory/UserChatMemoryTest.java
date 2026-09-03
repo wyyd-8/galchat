@@ -28,6 +28,7 @@ import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -97,6 +98,37 @@ class UserChatMemoryTest {
     }
 
     @Test
+    void toPromptMessagesNeverCarriesStoredReasoningIntoTheNextTurn() {
+        UserChatThinkingHistoryMapper thinkingMapper = mock(UserChatThinkingHistoryMapper.class);
+        when(thinkingMapper.selectList(any())).thenReturn(List.of(new UserChatThinkingHistory()
+                .setUserMessageId(1L)
+                .setStepNo(1)
+                .setReasoningContent("不应发送给下一轮的思考")));
+
+        UserChatMemory memory = UserChatMemory.builder(mock(UserChatHistoryMapper.class))
+                .thinkingHistoryMapper(thinkingMapper)
+                .includeToolCalls(true)
+                .build();
+
+        List<Message> messages = memory.toPromptMessages(List.of(
+                new UserChatHistory()
+                        .setId(1L)
+                        .setType(MessageType.USER.getValue())
+                        .setContent("上一轮问题"),
+                new UserChatHistory()
+                        .setId(2L)
+                        .setUserMessageId(1L)
+                        .setStepNo(2)
+                        .setType(MessageType.ASSISTANT.getValue())
+                        .setContent("上一轮答案")));
+
+        assertThat(messages).hasSize(2);
+        assertThat(messages.get(1)).isExactlyInstanceOf(AssistantMessage.class);
+        assertThat(messages.get(1).getMetadata()).doesNotContainKey("reasoningContent");
+        verifyNoInteractions(thinkingMapper);
+    }
+
+    @Test
     void saveAssistantMessagesTrimsAlreadySavedReasoningPrefix() {
         UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
         UserChatThinkingHistoryMapper thinkingMapper = mock(UserChatThinkingHistoryMapper.class);
@@ -123,6 +155,29 @@ class UserChatMemoryTest {
         verify(thinkingMapper).insert(thinkingCaptor.capture());
         assertThat(thinkingCaptor.getValue().getReasoningContent()).isEqualTo("工具成功后组织回复。");
         assertThat(thinkingCaptor.getValue().getStepNo()).isEqualTo(2);
+    }
+
+    @Test
+    void saveAssistantMessagesPersistsReasoningFromGenericMetadata() {
+        UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
+        UserChatThinkingHistoryMapper thinkingMapper = mock(UserChatThinkingHistoryMapper.class);
+        when(historyMapper.selectList(any())).thenReturn(List.of());
+        when(thinkingMapper.selectOne(any())).thenReturn(null);
+        when(thinkingMapper.selectList(any())).thenReturn(List.of());
+
+        UserChatMemory memory = UserChatMemory.builder(historyMapper)
+                .thinkingHistoryMapper(thinkingMapper)
+                .build();
+
+        memory.saveAssistantMessages(new ConversationInfo(1L, 2L, null), 1L, List.of(
+                AssistantMessage.builder()
+                        .content("通用模型答案")
+                        .properties(java.util.Map.of("reasoningContent", "通用模型思考"))
+                        .build()));
+
+        var thinkingCaptor = forClass(UserChatThinkingHistory.class);
+        verify(thinkingMapper).insert(thinkingCaptor.capture());
+        assertThat(thinkingCaptor.getValue().getReasoningContent()).isEqualTo("通用模型思考");
     }
 
     @Test

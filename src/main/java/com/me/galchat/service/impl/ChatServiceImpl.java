@@ -15,6 +15,7 @@ import com.me.galchat.domain.vo.ChatFluxVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.memory.AssistantReasoning;
 import com.me.galchat.service.ChatToolEventListener;
 import com.me.galchat.service.ChatUserMessageListener;
 import com.me.galchat.service.IChatService;
@@ -30,7 +31,6 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -51,8 +51,9 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class ChatServiceImpl implements IChatService {
 
-    private final ChatClient deepThinkChatClient;
-    private final ChatClient normalChatClient;
+    private final ChatClient singleChatThinkingClient;
+    private final ChatClient singleChatNonThinkingClient;
+    private final SingleChatRuntimeService singleChatRuntimeService;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final IUserWorldPrefixService userWorldPrefixService;
@@ -87,7 +88,10 @@ public class ChatServiceImpl implements IChatService {
                 toolContext.put(ChatToolContextConstant.TOOL_EVENT_LISTENER_KEY,
                         (ChatToolEventListener) () -> toolFlux.tryEmitNext(new ChatFluxVO(ChatConstant.TOOL_TYPE, null)));
 
-                Flux<ChatFluxVO> responseFlux = deepThinkChatClient.prompt()
+                ChatClient chatClient = singleChatRuntimeService.chatClient(
+                        chatMessageDTO.getUserWorldId(), chatMessageDTO.getCharacterId(),
+                        singleChatThinkingClient);
+                Flux<ChatFluxVO> responseFlux = chatClient.prompt()
                         .system(buildSystemPrompt(chatMessageDTO.getWorldId(), chatMessageDTO.getUserWorldId(),
                                 chatMessageDTO.getCharacterId()))
                         .user(chatMessageDTO.getMessage())
@@ -131,7 +135,9 @@ public class ChatServiceImpl implements IChatService {
             Map<String, Object> toolContext = buildToolContext(task.getUserWorldId(), task.getCharacterId(), false);
             toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
                     buildUserMessageListener(userMessageId, task.getUserWorldId(), task.getCharacterId()));
-            String content = normalChatClient.prompt()
+            ChatClient chatClient = singleChatRuntimeService.chatClient(
+                    task.getUserWorldId(), task.getCharacterId(), singleChatNonThinkingClient);
+            String content = chatClient.prompt()
                     .system(buildSystemPrompt(task.getWorldId(), task.getUserWorldId(), task.getCharacterId()))
                     .user(task.getMessage())
                     .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
@@ -171,9 +177,7 @@ public class ChatServiceImpl implements IChatService {
         List<ChatFluxVO> messages = new ArrayList<>();
         for (Generation generation : chatResponse.getResults()) {
             AssistantMessage output = generation.getOutput();
-            if (output instanceof DeepSeekAssistantMessage deepSeekAssistantMessage) {
-                addContent(messages, ChatConstant.THINKING_TYPE, deepSeekAssistantMessage.getReasoningContent());
-            }
+            addContent(messages, ChatConstant.THINKING_TYPE, AssistantReasoning.get(output));
             addContent(messages, ChatConstant.RESPONSE_TYPE, output.getText());
         }
         return Flux.fromIterable(messages);

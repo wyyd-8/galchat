@@ -19,7 +19,6 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
@@ -126,7 +125,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
                 .publishOn(getScheduler())
                 .map(request -> before(request, streamAdvisorChain))
                 .flatMapMany(streamAdvisorChain::nextStream)
-                .transform(flux -> new DeepSeekChatClientMessageAggregator()
+                .transform(flux -> new ChatClientMessageAggregator()
                         .aggregateChatClientResponse(flux, response -> after(response, streamAdvisorChain)));
     }
 
@@ -309,16 +308,6 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
     }
 
     private static Message copyWithText(Message message, String text) {
-        if (message instanceof DeepSeekAssistantMessage deepSeekAssistantMessage) {
-            return new DeepSeekAssistantMessage.Builder()
-                    .content(text)
-                    .reasoningContent(deepSeekAssistantMessage.getReasoningContent())
-                    .prefix(deepSeekAssistantMessage.getPrefix())
-                    .properties(deepSeekAssistantMessage.getMetadata())
-                    .toolCalls(deepSeekAssistantMessage.getToolCalls())
-                    .media(deepSeekAssistantMessage.getMedia())
-                    .build();
-        }
         if (message instanceof AssistantMessage assistantMessage) {
             return AssistantMessage.builder()
                     .content(text)

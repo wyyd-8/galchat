@@ -42,5 +42,7 @@ public class UserCharacterInfo implements Serializable {
 
     private String userInfoPrompt;
 
+    private Long modelApiId;
+
 
 }

@@ -1,7 +1,7 @@
 import type {
   ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
-  UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
+  SingleChatRuntime, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
 } from './types'
 
@@ -109,6 +109,7 @@ export const api = {
   addCharacter: (worldId: number, characterId: number) => request<void>(`/character/${worldId}/${characterId}`, { method: 'POST' }),
   deleteCharacter: (worldId: number, characterId: number) => request<void>(`/character/${worldId}/${characterId}`, { method: 'DELETE' }),
   updatePrompt: (worldId: number, characterId: number, userInfoPrompt: string) => request<void>(`/character/${worldId}/${characterId}/prompt`, { method: 'PUT', body: body({ userInfoPrompt }) }),
+  updateCharacterModel: (worldId: number, characterId: number, modelApiId?: number) => request<SingleChatRuntime>(`/character/${worldId}/${characterId}/model`, { method: 'PUT', body: body({ modelApiId }) }),
   updateFavor: (worldId: number, characterId: number, favorValue: number) => request<void>(`/character/my/${worldId}/${characterId}/favor`, { method: 'PUT', body: body({ favorValue }) }),
   createCharacterTemplate: (worldId: number, payload: CharacterTemplate) => request<void>(`/character/templates/${worldId}`, { method: 'POST', body: body(payload) }),
   myCharacterTemplate: (worldId: number, characterId: number) => request<CharacterTemplate>(`/character/templates/my/${worldId}/${characterId}`),

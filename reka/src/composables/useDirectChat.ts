@@ -1,6 +1,6 @@
 import { computed, nextTick, onUnmounted, reactive, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { api, createChatSocket, streamChat } from '@/api/client'
-import type { Character, ChatHistory, ChatMessagePayload, DirectMessage, UserWorld } from '@/api/types'
+import type { Character, ChatHistory, ChatMessagePayload, DirectMessage, ModelApi, UserWorld } from '@/api/types'
 import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/components/reasoningScroll'
 import { errorMessage, notify } from './useNotice'
 
@@ -21,7 +21,8 @@ export function useDirectChat(context: DirectChatContext) {
   const messages = ref<DirectMessage[]>([])
   const input = ref('')
   const scroller = ref<HTMLElement | null>(null)
-  const loading = reactive({ history: false, sending: false, withdrawing: false })
+  const modelApis = ref<ModelApi[]>([])
+  const loading = reactive({ history: false, sending: false, withdrawing: false, model: false })
   const hasOlderMessages = ref(false)
   const selectedCharacter = computed(() => context.characters.value.find((item) => item.characterId === selectedCharacterId.value) || null)
   const canWithdraw = computed(() => {
@@ -44,10 +45,60 @@ export function useDirectChat(context: DirectChatContext) {
     if (item.type === 'ASSISTANT' || item.type === 'assistant') return 'assistant'
     return 'user'
   }
-  function historyMessages(item: ChatHistory): DirectMessage[] {
-    const role = roleOf(item); const content = item.content || (role === 'tool' ? '调用了工具' : '')
-    const parts = context.world.value?.thinkStatus === false ? splitContent(content) : [content]
-    return parts.map((part, index) => ({ id: `history-${item.id || Date.now()}-${index}`, historyId: item.id, role, content: part, time: formatTime(item.timestamp) }))
+  function historyMessages(history: ChatHistory[]): DirectMessage[] {
+    const result: DirectMessage[] = []
+    let currentThinking: { message: DirectMessage; reasoning: string; toolCount: number } | null = null
+    history.forEach((item, itemIndex) => {
+      const role = roleOf(item)
+      if (role === 'tool') {
+        if (!currentThinking) {
+          const message: DirectMessage = {
+            id: `history-thinking-${item.userMessageId || item.id || Date.now()}-${item.stepNo ?? itemIndex}`,
+            role: 'thinking',
+            content: '',
+          }
+          result.push(message)
+          currentThinking = { message, reasoning: '', toolCount: 0 }
+        }
+        currentThinking.toolCount += 1
+        const summary = `调用了${currentThinking.toolCount}次工具`
+        currentThinking.message.content = currentThinking.reasoning ? `${summary}\n\n${currentThinking.reasoning}` : summary
+        return
+      }
+
+      const content = item.content || ''
+      if (role === 'thinking') {
+        if (currentThinking) {
+          currentThinking.reasoning += content
+          const summary = currentThinking.toolCount ? `调用了${currentThinking.toolCount}次工具` : ''
+          currentThinking.message.content = summary
+            ? `${summary}\n\n${currentThinking.reasoning}`
+            : currentThinking.reasoning
+          return
+        }
+        const message: DirectMessage = {
+          id: `history-${item.id || item.userMessageId || Date.now()}-${item.stepNo ?? itemIndex}`,
+          historyId: item.id,
+          role,
+          content,
+          time: formatTime(item.timestamp),
+        }
+        result.push(message)
+        currentThinking = { message, reasoning: content, toolCount: 0 }
+        return
+      }
+
+      currentThinking = null
+      const parts = context.world.value?.thinkStatus === false ? splitContent(content) : [content]
+      result.push(...parts.map((part, index) => ({
+        id: `history-${item.id || Date.now()}-${index}`,
+        historyId: item.id,
+        role,
+        content: part,
+        time: formatTime(item.timestamp),
+      })))
+    })
+    return result
   }
   function payload(message = ''): ChatMessagePayload | null {
     const world = context.world.value; const character = selectedCharacter.value
@@ -68,8 +119,12 @@ export function useDirectChat(context: DirectChatContext) {
     if (!world) return
     loading.history = true
     try {
-      const history = await api.history(world.id, id)
-      messages.value = history.flatMap(historyMessages)
+      const [history, models] = await Promise.all([
+        api.history(world.id, id),
+        api.modelApis(),
+      ])
+      messages.value = historyMessages(history)
+      modelApis.value = models
       hasOlderMessages.value = history.length === 30
       if (world.thinkStatus === false) void ensureSocket(world.id).catch(() => undefined)
       await scrollToBottom(true)
@@ -88,14 +143,14 @@ export function useDirectChat(context: DirectChatContext) {
       const history = await api.history(world.id, character.characterId, 30, beforeId)
       if (world.id !== context.world.value?.id || character.characterId !== selectedCharacterId.value) return
       const previousTop = viewport?.scrollTop ?? 0
-      messages.value = [...history.flatMap(historyMessages), ...messages.value]
+      messages.value = [...historyMessages(history), ...messages.value]
       hasOlderMessages.value = history.length === 30
       await nextTick()
       if (viewport && scroller.value === viewport) viewport.scrollTop = previousTop + viewport.scrollHeight - previousHeight
     } catch (error) { notify('更早记录加载失败', errorMessage(error), 'danger') }
     finally { loading.history = false }
   }
-  function close() { selectedCharacterId.value = null; messages.value = []; input.value = ''; hasOlderMessages.value = false; closeSocket() }
+  function close() { selectedCharacterId.value = null; messages.value = []; modelApis.value = []; input.value = ''; hasOlderMessages.value = false; closeSocket() }
   function closeSocket() {
     connecting = null; socketWorldId = null; lastTypingKey = null
     if (socket) { socket.close(); socket = null }
@@ -118,7 +173,7 @@ export function useDirectChat(context: DirectChatContext) {
     if (typeof item.type !== 'string' || typeof item.content !== 'string') return
     notifyPush(item)
     if (item.userWorldId !== context.world.value?.id || item.characterId !== selectedCharacterId.value) return
-    messages.value.push(...historyMessages(item)); void scrollToBottom()
+    messages.value.push(...historyMessages([item])); void scrollToBottom()
     if (roleOf(item) === 'assistant') void context.reloadCharacters()
   }
   function ensureSocket(worldId: number) {
@@ -170,14 +225,20 @@ export function useDirectChat(context: DirectChatContext) {
         current.send(JSON.stringify({ ...data, type: 'typing', message: '', isTyping: false }))
         lastTypingKey = null
       } else {
-        let assistant: DirectMessage | null = null; let received = false
+        let assistant: DirectMessage | null = null; let received = false; let thinkingNeedsSeparator = false
         await streamChat(data, (chunk) => {
           if (chunk.type === 'thinking') {
             const last = messages.value.at(-1); const value = chunk.content || '正在整理记忆'
-            if (last?.role === 'thinking') last.content += value
+            if (last?.role === 'thinking') last.content += `${thinkingNeedsSeparator ? '\n\n' : ''}${value}`
             else messages.value.push({ id: `thinking-${Date.now()}-${Math.random()}`, role: 'thinking', content: value })
+            thinkingNeedsSeparator = false
           } else if (chunk.type === 'tool') {
-            assistant = null; messages.value.push({ id: `tool-${Date.now()}-${Math.random()}`, role: 'tool', content: chunk.content || '调用了工具' })
+            assistant = null
+            const value = chunk.content || '调用了工具'
+            const last = messages.value.at(-1)
+            if (last?.role === 'thinking') last.content += `${last.content ? '\n\n' : ''}${value}`
+            else messages.value.push({ id: `thinking-${Date.now()}-${Math.random()}`, role: 'thinking', content: value })
+            thinkingNeedsSeparator = true
           } else if (chunk.type === 'response' || chunk.type === 'reponse') {
             if (!assistant) {
               messages.value.push({ id: `assistant-${Date.now()}-${Math.random()}`, role: 'assistant', content: '' })
@@ -204,6 +265,18 @@ export function useDirectChat(context: DirectChatContext) {
     finally { loading.withdrawing = false }
   }
 
+  async function selectModel(modelApiId?: number) {
+    const world = context.world.value; const character = selectedCharacter.value
+    if (!world || !character || loading.model || loading.sending) return
+    loading.model = true
+    try {
+      const runtime = await api.updateCharacterModel(world.id, character.characterId, modelApiId)
+      character.modelApiId = runtime.modelApiId
+      notify('回复模型已更新', runtime.modelApiName || '已恢复默认模型', 'success')
+    } catch (error) { notify('回复模型更新失败', errorMessage(error), 'danger') }
+    finally { loading.model = false }
+  }
+
   onUnmounted(closeSocket)
-  return { selectedCharacterId, selectedCharacter, messages, input, scroller, loading, canWithdraw, hasOlderMessages, selectCharacter, loadEarlier, close, send, withdraw, focus, setComposing }
+  return { selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, selectCharacter, selectModel, loadEarlier, close, send, withdraw, focus, setComposing }
 }

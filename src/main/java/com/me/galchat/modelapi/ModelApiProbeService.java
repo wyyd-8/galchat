@@ -1,6 +1,7 @@
 package com.me.galchat.modelapi;
 
 import com.openai.errors.OpenAIServiceException;
+import com.me.galchat.memory.AssistantReasoning;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.annotation.Tool;
@@ -98,10 +99,9 @@ public class ModelApiProbeService {
         return response.getResults().stream()
                 .filter(generation -> generation != null
                         && generation.getOutput() != null)
-                .map(generation -> generation.getOutput()
-                        .getMetadata().get("reasoningContent"))
-                .anyMatch(value -> value instanceof String text
-                        && !text.isBlank());
+                .map(generation -> AssistantReasoning.get(
+                        generation.getOutput()))
+                .anyMatch(text -> text != null && !text.isBlank());
     }
 
     private boolean explicitlyRejectsTools(Throwable exception) {

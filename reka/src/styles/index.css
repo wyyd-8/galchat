@@ -471,6 +471,10 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .favor-card progress { width: 100%; height: 6px; grid-column: 1 / -1; margin-top: 8px; accent-color: var(--pine); }
 .profile-note p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.65; white-space: pre-wrap; }
 .profile-note small { color: var(--muted); font-size: 8px; }
+.direct-model-picker { display: grid; gap: 8px; }
+.direct-model-picker select { width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface-strong); font-size: 10px; }
+.direct-model-picker select:disabled { opacity: .58; }
+.direct-model-picker small { line-height: 1.5; }
 .direct-character-panel > .button { width: 100%; margin-top: 15px; }
 .direct-composer { grid-template-columns: auto 1fr auto; }
 .withdraw-button { align-self: center; }

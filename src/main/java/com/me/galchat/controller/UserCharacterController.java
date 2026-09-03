@@ -4,6 +4,7 @@ package com.me.galchat.controller;
 import com.me.galchat.domain.Result;
 import com.me.galchat.domain.dto.UserCharacterFavorDTO;
 import com.me.galchat.domain.dto.UserCharacterPromptDTO;
+import com.me.galchat.domain.dto.UserCharacterModelDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.exception.UserAuthException;
@@ -11,6 +12,7 @@ import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.service.impl.SingleChatRuntimeService;
 import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -38,6 +40,7 @@ public class UserCharacterController {
     private final IUserCharacterInfoService userCharacterInfoService;
     private final ICharacterTemplateService characterTemplateService;
     private final IUserWorldPrefixService userWorldPrefixService;
+    private final SingleChatRuntimeService singleChatRuntimeService;
 
     @PostMapping("/templates/{worldId}")
     public Result createCharacterTemplate(@PathVariable Long worldId, @RequestBody CharacterTemplate characterTemplate) {
@@ -120,6 +123,21 @@ public class UserCharacterController {
         }
         userCharacterInfoService.updateUserInfoPrompt(userWorldId, characterId, promptDTO.getUserInfoPrompt());
         return Result.success();
+    }
+
+    @PutMapping("/{userWorldId}/{characterId}/model")
+    public Result updateSingleChatModel(
+            @PathVariable Long userWorldId,
+            @PathVariable Long characterId,
+            @RequestBody UserCharacterModelDTO modelDTO) {
+        checkUserWorldId(userWorldId);
+        checkCharacterId(characterId);
+        if (modelDTO == null) {
+            throw new UserRequestException("请求参数不能为空");
+        }
+        return Result.success(singleChatRuntimeService.saveModel(
+                currentUserId(), userWorldId, characterId,
+                modelDTO.getModelApiId()));
     }
 
     private void checkUserWorldId(Long userWorldId) {

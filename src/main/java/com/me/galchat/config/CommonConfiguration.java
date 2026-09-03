@@ -6,22 +6,14 @@ import com.me.galchat.groupchat.runtime.GroupChatClientFactory;
 import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.mapper.UserChatThinkingHistoryMapper;
 import com.me.galchat.mapper.UserChatToolCallMapper;
-import com.me.galchat.memory.TopicAwareMessageChatMemoryAdvisor;
-import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.memory.UserChatMemory;
-import com.me.galchat.tool.RecordingToolCallingManager;
-import com.me.galchat.tool.UserCharacterFavorTools;
-import com.me.galchat.tool.UserCharacterInfoTools;
-import com.me.galchat.tool.VectorTools;
-import com.me.galchat.tool.TrpgRunMemoryTools;
-import com.me.galchat.vector.MutiSearchService;
+import com.me.galchat.singlechat.SingleChatClientFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.client.advisor.ToolCallingAdvisor;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -31,49 +23,19 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Configuration
 public class CommonConfiguration {
     @Bean
-    public ChatClient deepThinkChatClient(DeepSeekChatModel model,
-                                          TopicBoundaryService topicBoundaryService,
-                                          @Qualifier("thinkChatMemory") UserChatMemory thinkChatMemory,
-                                          MutiSearchService mutiSearchService,
-                                          VectorTools vectorTools,
-                                          UserCharacterFavorTools userCharacterFavorTools,
-                                          UserCharacterInfoTools userCharacterInfoTools,
-                                          TrpgRunMemoryTools trpgRunMemoryTools,
-                                          ToolCallingManager toolCallingManager) {
-        return ChatClient
-                .builder(model)
-                .defaultOptions(DeepSeekChatOptions.builder().enableThinking())
-                .defaultAdvisors(new SimpleLoggerAdvisor())
-                .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(thinkChatMemory, topicBoundaryService,
-                        mutiSearchService).build())
-                .defaultAdvisors(toolCallingAdvisor(
-                        new RecordingToolCallingManager(toolCallingManager, thinkChatMemory)))
-                .defaultTools(vectorTools, userCharacterFavorTools,
-                        userCharacterInfoTools, trpgRunMemoryTools)
-                .build();
+    public ChatClient singleChatThinkingClient(
+            DeepSeekChatModel model,
+            SingleChatClientFactory clientFactory) {
+        return clientFactory.create(ChatClient.builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().enableThinking()));
     }
 
     @Bean
-    public ChatClient normalChatClient(DeepSeekChatModel model,
-                                       TopicBoundaryService topicBoundaryService,
-                                       @Qualifier("defaultChatMemory") UserChatMemory defaultChatMemory,
-                                       MutiSearchService mutiSearchService,
-                                       VectorTools vectorTools,
-                                       UserCharacterFavorTools userCharacterFavorTools,
-                                       UserCharacterInfoTools userCharacterInfoTools,
-                                       TrpgRunMemoryTools trpgRunMemoryTools,
-                                       ToolCallingManager toolCallingManager) {
-        return ChatClient
-                .builder(model)
-                .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
-                .defaultAdvisors(new SimpleLoggerAdvisor())
-                .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(defaultChatMemory, topicBoundaryService,
-                        mutiSearchService).build())
-                .defaultAdvisors(toolCallingAdvisor(
-                        new RecordingToolCallingManager(toolCallingManager, defaultChatMemory)))
-                .defaultTools(vectorTools, userCharacterFavorTools,
-                        userCharacterInfoTools, trpgRunMemoryTools)
-                .build();
+    public ChatClient singleChatNonThinkingClient(
+            DeepSeekChatModel model,
+            SingleChatClientFactory clientFactory) {
+        return clientFactory.create(ChatClient.builder(model)
+                .defaultOptions(DeepSeekChatOptions.builder().disableThinking()));
     }
 
     @Bean
@@ -181,20 +143,6 @@ public class CommonConfiguration {
     @Bean
     @Primary
     public UserChatMemory defaultChatMemory(UserChatHistoryMapper userChatHistoryMapper,
-                                            UserChatThinkingHistoryMapper userChatThinkingHistoryMapper,
-                                            UserChatToolCallMapper userChatToolCallMapper,
-                                            StringRedisTemplate redisTemplate) {
-        return UserChatMemory.builder(userChatHistoryMapper)
-                .thinkingHistoryMapper(userChatThinkingHistoryMapper)
-                .toolCallMapper(userChatToolCallMapper)
-                .redisTemplate(redisTemplate)
-                .includeToolCalls(true)
-                .readOnly(false)
-                .build();
-    }
-
-    @Bean
-    public UserChatMemory thinkChatMemory(UserChatHistoryMapper userChatHistoryMapper,
                                             UserChatThinkingHistoryMapper userChatThinkingHistoryMapper,
                                             UserChatToolCallMapper userChatToolCallMapper,
                                             StringRedisTemplate redisTemplate) {

@@ -1,9 +1,20 @@
 package com.me.galchat.service.impl;
 
+import com.me.galchat.constant.ChatConstant;
 import com.me.galchat.domain.po.UserWorldPrefix;
+import com.me.galchat.domain.vo.ChatFluxVO;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import reactor.core.publisher.Flux;
+
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -13,7 +24,7 @@ class ChatServiceImplTest {
 
     private final IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
     private final IUserCharacterInfoService userCharacterInfoService = mock(IUserCharacterInfoService.class);
-    private final ChatServiceImpl chatService = new ChatServiceImpl(null, null, null, null, userWorldPrefixService,
+    private final ChatServiceImpl chatService = new ChatServiceImpl(null, null, null, null, null, userWorldPrefixService,
             userCharacterInfoService, null, null, null);
 
     @Test
@@ -53,6 +64,25 @@ class ChatServiceImplTest {
         String prompt = chatService.buildWorldSystemPrompt(10L, 1L);
 
         assertThat(prompt).contains("世界背景").doesNotContain("Alice角色信息");
+    }
+
+    @Test
+    void streamsReasoningFromProviderNeutralAssistantMetadata() {
+        ChatResponse response = new ChatResponse(List.of(new Generation(
+                AssistantMessage.builder()
+                        .content("答案")
+                        .properties(Map.of("reasoningContent", "思考"))
+                        .build())));
+
+        @SuppressWarnings("unchecked")
+        Flux<ChatFluxVO> flux = ReflectionTestUtils.invokeMethod(
+                chatService, "toChatFlux", response);
+
+        assertThat(flux.collectList().block())
+                .extracting(ChatFluxVO::getType, ChatFluxVO::getContent)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(ChatConstant.THINKING_TYPE, "思考"),
+                        org.assertj.core.groups.Tuple.tuple(ChatConstant.RESPONSE_TYPE, "答案"));
     }
 
 }

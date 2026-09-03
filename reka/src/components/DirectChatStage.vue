@@ -2,13 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { ArrowLeft, BrainCircuit, History, LoaderCircle, RotateCcw, Send, Settings2 } from '@lucide/vue'
 import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger } from 'reka-ui'
-import type { Character, DirectMessage, UserWorld } from '@/api/types'
+import type { Character, DirectMessage, ModelApi, UserWorld } from '@/api/types'
 import { resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = defineProps<{ world: UserWorld; character: Character; messages: DirectMessage[]; loading: { history: boolean; sending: boolean; withdrawing: boolean }; canWithdraw: boolean; hasOlderMessages: boolean }>()
-const emit = defineEmits<{ back: []; send: []; withdraw: []; loadEarlier: []; edit: []; focus: []; composition: [value: boolean, input: string] }>()
+const props = defineProps<{ world: UserWorld; character: Character; messages: DirectMessage[]; modelApis: ModelApi[]; loading: { history: boolean; sending: boolean; withdrawing: boolean; model: boolean }; canWithdraw: boolean; hasOlderMessages: boolean }>()
+const emit = defineEmits<{ back: []; send: []; withdraw: []; loadEarlier: []; edit: []; selectModel: [modelApiId?: number]; focus: []; composition: [value: boolean, input: string] }>()
 const composing = ref(false)
 const thinkingOpen = reactive<Record<string, boolean>>({})
 const thinkingPhase = new Map<string, 'thinking' | 'main' | 'idle'>()
@@ -76,6 +76,10 @@ function composition(value: boolean, event: CompositionEvent) {
 function keydown(event: KeyboardEvent) {
   if (!composing.value && !event.isComposing && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); emit('send') }
 }
+function selectModel(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  emit('selectModel', value ? Number(value) : undefined)
+}
 </script>
 
 <template>
@@ -101,7 +105,7 @@ function keydown(event: KeyboardEvent) {
         </div></div></div>
         <div class="composer direct-composer"><button class="icon-button withdraw-button" :disabled="!canWithdraw" title="撤回上一轮" @click="emit('withdraw')"><LoaderCircle v-if="loading.withdrawing" class="spin" :size="17" /><RotateCcw v-else :size="17" /></button><textarea v-model="input" rows="1" placeholder="输入给角色的消息…" :disabled="loading.sending" @focus="emit('focus')" @compositionstart="composition(true, $event)" @compositionend="composition(false, $event)" @keydown="keydown" /><button class="send-button" :disabled="!input.trim() || loading.sending" @click="emit('send')"><LoaderCircle v-if="loading.sending" class="spin" :size="19" /><Send v-else :size="19" /></button></div>
       </section>
-      <aside class="direct-character-panel"><span class="character-avatar portrait" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</span><h2>{{ character.characterName }}</h2><small>{{ world.name }}</small><div class="favor-card"><span>好感度</span><strong>{{ character.favorValue ?? 0 }}</strong><progress :value="character.favorValue ?? 0" max="100" /></div><div class="profile-note"><strong>角色长期记住的用户信息</strong><p>{{ character.userInfoPrompt || '暂未记录' }}</p></div><div class="profile-note"><strong>最近对话</strong><p>{{ character.lastChatContent || `${conversationalMessages} 条对话消息` }}</p><small>{{ character.lastChatTime || '' }}</small></div><button class="button secondary" @click="emit('edit')"><Settings2 :size="16" />编辑角色资料</button></aside>
+      <aside class="direct-character-panel"><span class="character-avatar portrait" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</span><h2>{{ character.characterName }}</h2><small>{{ world.name }}</small><div class="favor-card"><span>好感度</span><strong>{{ character.favorValue ?? 0 }}</strong><progress :value="character.favorValue ?? 0" max="100" /></div><label class="profile-note direct-model-picker"><strong>回复模型</strong><select :value="character.modelApiId ? String(character.modelApiId) : ''" :disabled="loading.sending || loading.model" aria-label="选择单聊回复模型" @change="selectModel"><option value="">默认模型</option><option v-if="character.modelApiId && !modelApis.some((model) => model.id === character.modelApiId)" :value="String(character.modelApiId)">原配置不可用（使用默认）</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select><small>新消息将使用所选模型，历史工具调用保持通用格式。</small></label><div class="profile-note"><strong>角色长期记住的用户信息</strong><p>{{ character.userInfoPrompt || '暂未记录' }}</p></div><div class="profile-note"><strong>最近对话</strong><p>{{ character.lastChatContent || `${conversationalMessages} 条对话消息` }}</p><small>{{ character.lastChatTime || '' }}</small></div><button class="button secondary" @click="emit('edit')"><Settings2 :size="16" />编辑角色资料</button></aside>
     </div>
   </main>
 </template>

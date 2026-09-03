@@ -29,12 +29,12 @@ import com.me.galchat.groupchat.tool.GroupToolContextFactory;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.memory.AssistantReasoning;
 import com.me.galchat.service.IUserWorldPrefixService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -1067,15 +1067,7 @@ public class GroupChatService {
                         .build());
                 continue;
             }
-            String reasoning = output instanceof DeepSeekAssistantMessage
-                    deepSeekOutput
-                    ? deepSeekOutput.getReasoningContent() : null;
-            if (!StringUtils.hasText(reasoning)) {
-                Object reasoningValue = output.getMetadata()
-                        .get("reasoningContent");
-                reasoning = reasoningValue instanceof String value
-                        ? value : null;
-            }
+            String reasoning = AssistantReasoning.get(output);
             if (StringUtils.hasText(reasoning)) {
                 accumulator.reasoning.append(reasoning);
                 events.add(baseEvent(GroupChatConstant.EVENT_REASONING_DELTA,

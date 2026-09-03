@@ -78,8 +78,9 @@ export interface WorldArchiveReplaceResult {
 
 export interface Character {
   userWorldId: number; characterId: number; characterName: string; characterImage?: string
-  lastChatTime?: string; lastChatContent?: string; favorValue?: number; userInfoPrompt?: string
+  lastChatTime?: string; lastChatContent?: string; favorValue?: number; userInfoPrompt?: string; modelApiId?: number
 }
+export interface SingleChatRuntime { modelApiId?: number; modelApiName?: string; modelApiAvailable: boolean }
 export interface CharacterTemplate {
   id?: number; worldId?: number; name: string; image?: string; background?: string; personality?: string
   cocPlayStyle?: string; favorability?: Record<string, string>; initFavor?: number

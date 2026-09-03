@@ -26,12 +26,19 @@ public class TrpgExplorationContextAssembler {
     public List<Message> assemble(
             GroupConversation conversation,
             GroupActorRef currentActor) {
+        return assemble(conversation, currentActor, Long.MAX_VALUE);
+    }
+
+    public List<Message> assemble(
+            GroupConversation conversation,
+            GroupActorRef currentActor,
+            long endSequence) {
         List<Message> result = new ArrayList<>();
         Map<GroupActorRef, String> investigatorNames =
                 investigatorNames(conversation);
         for (TrpgExplorationRecordService.Part part :
                 recordService.assemble(
-                        conversation.getId(), 1L, Long.MAX_VALUE)) {
+                        conversation.getId(), 1L, endSequence)) {
             if (part.isSummary()) {
                 result.add(summaryMessage(part.summary()));
             } else {

@@ -75,6 +75,34 @@ class TrpgExplorationContextAssemblerTest {
     }
 
     @Test
+    void boundedAssemblyUsesTheSameHistoryShapeAsKpContext() {
+        TrpgExplorationRecordService recordService =
+                mock(TrpgExplorationRecordService.class);
+        GroupContextAssembler groupAssembler =
+                mock(GroupContextAssembler.class);
+        GroupConversation conversation =
+                new GroupConversation().setId(7L);
+        GroupActorRef kp = new GroupActorRef(
+                GroupChatConstant.ACTOR_KP, null);
+        GroupContextSummary summary = new GroupContextSummary()
+                .setStartSequence(1L)
+                .setEndSequence(8L)
+                .setSummary("压缩后的场景记录");
+        when(recordService.assemble(7L, 1L, 12L)).thenReturn(List.of(
+                TrpgExplorationRecordService.Part.summary(summary)));
+        TrpgExplorationContextAssembler assembler =
+                new TrpgExplorationContextAssembler(
+                        recordService, groupAssembler,
+                        mock(TrpgParticipantService.class));
+
+        assertThat(assembler.assemble(conversation, kp, 12L))
+                .extracting(message -> message.getText())
+                .singleElement()
+                .asString()
+                .contains("压缩后的场景记录");
+    }
+
+    @Test
     void rendersTrpgControllerMessagesWithCanonicalInvestigatorSpeakers() {
         TrpgExplorationRecordService recordService =
                 mock(TrpgExplorationRecordService.class);

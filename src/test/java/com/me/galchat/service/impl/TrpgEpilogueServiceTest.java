@@ -6,11 +6,13 @@ import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.messages.UserMessage;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -18,7 +20,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TrpgEpilogueServiceTest {
@@ -32,6 +36,8 @@ class TrpgEpilogueServiceTest {
                 mock(GroupChatMessageMapper.class);
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
+        TrpgExplorationContextAssembler explorationContextAssembler =
+                mock(TrpgExplorationContextAssembler.class);
         ObjectMapper objectMapper = JsonMapper.builder().build();
         RecordingGenerator generator = new RecordingGenerator();
         GroupConversation conversation = new GroupConversation()
@@ -49,23 +55,29 @@ class TrpgEpilogueServiceTest {
                 new CocCharacterProfile()
                         .setCharacterId(12L)
                         .setTreasuredPossessions("随身笔记")));
-        when(messageMapper.selectList(any())).thenReturn(List.of(
-                new GroupChatMessage()
-                        .setSpeakerType(GroupChatConstant.ACTOR_KP)
-                        .setMessageKind(GroupChatConstant.MESSAGE_NARRATION)
-                        .setContent("威廉没能离开燃烧的庄园。")
-                        .setSequenceNo(41L)
-                        .setStatus(GroupChatConstant.STATUS_COMPLETED)));
+        GroupChatMessage finalKpMessage = new GroupChatMessage()
+                .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setMessageKind(GroupChatConstant.MESSAGE_NARRATION)
+                .setContent("威廉没能离开燃烧的庄园。")
+                .setSequenceNo(41L)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        when(messageMapper.selectOne(any())).thenReturn(finalKpMessage);
+        when(explorationContextAssembler.assemble(
+                eq(conversation),
+                eq(new GroupActorRef(GroupChatConstant.ACTOR_KP, null)),
+                eq(40L))).thenReturn(List.of(
+                new UserMessage("<context-summary>庄园调查摘要</context-summary>"),
+                new UserMessage("<message>调查员决定留下断后</message>")));
         when(conversationService.nextSequence(7L)).thenReturn(42L);
         ArgumentCaptor<GroupChatMessage> inserted =
                 ArgumentCaptor.forClass(GroupChatMessage.class);
 
         TrpgEpilogueService service = new TrpgEpilogueService(
                 characterMapper, profileMapper, messageMapper,
-                conversationService, generator,
+                conversationService, explorationContextAssembler, generator,
                 new TrpgEpilogueMessageCodec(objectMapper));
 
-        service.generateAndPersist(conversation);
+        service.generateAndPersist(conversation, 99L);
 
         org.mockito.Mockito.verify(messageMapper).insert(inserted.capture());
         GroupChatMessage message = inserted.getValue();
@@ -93,7 +105,12 @@ class TrpgEpilogueServiceTest {
                         org.assertj.core.groups.Tuple.tuple(11L, false),
                         org.assertj.core.groups.Tuple.tuple(12L, true));
         assertThat(generator.history)
-                .contains("威廉没能离开燃烧的庄园。");
+                .contains("庄园调查摘要", "调查员决定留下断后")
+                .doesNotContain("威廉没能离开燃烧的庄园。");
+        verify(explorationContextAssembler).assemble(
+                conversation,
+                new GroupActorRef(GroupChatConstant.ACTOR_KP, null),
+                40L);
     }
 
     private CocCharacter investigator(

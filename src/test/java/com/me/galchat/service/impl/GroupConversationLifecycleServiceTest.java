@@ -2,12 +2,9 @@ package com.me.galchat.service.impl;
 
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatMember;
-import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.WorldEventLog;
-import com.me.galchat.groupchat.context.GroupTopicService;
-import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.WorldEventLogMapper;
@@ -42,31 +39,30 @@ import static org.mockito.Mockito.when;
 class GroupConversationLifecycleServiceTest {
 
     @Test
-    void endRewritesFullSummaryAndClosesConversation() {
+    void trpgEndRewritesSummaryFromSceneSummariesAndClosesConversation() {
         GroupConversationService conversationService = mock(GroupConversationService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupReplyPlanService replyPlanService = mock(GroupReplyPlanService.class);
-        GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupContextSummaryMapper summaryMapper = mock(GroupContextSummaryMapper.class);
         IWorldEventLogService eventLogService = mock(IWorldEventLogService.class);
         WorldEventLogMapper eventLogMapper = mock(WorldEventLogMapper.class);
         WorldEventVectorService eventVectorService = mock(WorldEventVectorService.class);
-        GroupTopicService topicService = mock(GroupTopicService.class);
         GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         DeepSeekChatModel summaryModel = mock(DeepSeekChatModel.class);
         when(summaryModel.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
         ChatClient summaryClient = ChatClient.builder(summaryModel).build();
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         GroupConversationLifecycleService service = new GroupConversationLifecycleService(conversationService,
-                lockService, conversationMapper, replyPlanService, messageMapper, summaryMapper,
+                lockService, conversationMapper, replyPlanService, summaryMapper,
                 eventLogService, eventLogMapper,
-                eventVectorService, topicService, recoveryService, summaryClient, transactionTemplate);
+                eventVectorService, recoveryService, summaryClient,
+                transactionTemplate, new TrpgSummaryIntervalSelector());
 
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setUserWorldId(1L)
-                .setMode(GroupChatConstant.MODE_CHAT)
+                .setMode(GroupChatConstant.MODE_TRPG)
                 .setTitle("地下医院")
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
@@ -75,9 +71,16 @@ class GroupConversationLifecycleServiceTest {
                 new GroupChatMember().setActorId(11L), new GroupChatMember().setActorId(12L)));
         when(lockService.tryLock(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
-        when(messageMapper.selectList(any())).thenReturn(List.of(
-                message(1L, GroupChatConstant.ACTOR_USER, null, "检查病房"),
-                message(2L, GroupChatConstant.ACTOR_CHARACTER, 11L, "发现钥匙")));
+        when(summaryMapper.selectList(any())).thenReturn(List.of(
+                new GroupContextSummary()
+                        .setId(31L)
+                        .setConversationId(7L)
+                        .setSceneId(21L)
+                        .setScenePlanId(11L)
+                        .setStartSequence(1L)
+                        .setEndSequence(2L)
+                        .setSummary("众人在医院病房中找到了钥匙。")
+                        .setVersion(1)));
         when(summaryModel.call(any(Prompt.class))).thenReturn(new ChatResponse(List.of(
                 new Generation(new AssistantMessage("众人在医院中发现了钥匙。")))));
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
@@ -86,12 +89,17 @@ class GroupConversationLifecycleServiceTest {
         });
         var summaryCaptor = org.mockito.ArgumentCaptor.forClass(GroupContextSummary.class);
         var eventCaptor = org.mockito.ArgumentCaptor.forClass(WorldEventLog.class);
+        var promptCaptor = org.mockito.ArgumentCaptor.forClass(Prompt.class);
 
         GroupConversation result = service.close(7L);
 
         assertThat(result.getStatus()).isEqualTo(GroupChatConstant.STATUS_CLOSED);
         assertThat(result.getClosedAt()).isNotNull();
         assertThat(result.getSummary()).isEqualTo("众人在医院中发现了钥匙。");
+        verify(summaryModel).call(promptCaptor.capture());
+        assertThat(promptCaptor.getValue().getInstructions().getLast().getText())
+                .contains("众人在医院病房中找到了钥匙。")
+                .doesNotContain("检查病房", "发现钥匙");
         verify(summaryMapper).insert(summaryCaptor.capture());
         assertThat(summaryCaptor.getValue().getStartSequence()).isEqualTo(1L);
         assertThat(summaryCaptor.getValue().getEndSequence()).isEqualTo(2L);
@@ -99,7 +107,65 @@ class GroupConversationLifecycleServiceTest {
         assertThat(eventCaptor.getValue().getConversationId()).isEqualTo(7L);
         verify(eventVectorService).addWorldEventLog(eventCaptor.getValue());
         verify(replyPlanService).clearConversationPlans(conversation);
-        verify(topicService).flushOpenTopics(conversation);
+    }
+
+    @Test
+    void chatCloseDoesNotGenerateSummaryOrWorldEvent() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupConversationMapper conversationMapper =
+                mock(GroupConversationMapper.class);
+        GroupReplyPlanService replyPlanService =
+                mock(GroupReplyPlanService.class);
+        GroupContextSummaryMapper summaryMapper =
+                mock(GroupContextSummaryMapper.class);
+        IWorldEventLogService eventLogService =
+                mock(IWorldEventLogService.class);
+        WorldEventLogMapper eventLogMapper =
+                mock(WorldEventLogMapper.class);
+        WorldEventVectorService eventVectorService =
+                mock(WorldEventVectorService.class);
+        GroupTurnRecoveryService recoveryService =
+                mock(GroupTurnRecoveryService.class);
+        ChatClient summaryClient = mock(ChatClient.class);
+        TransactionTemplate transactionTemplate =
+                mock(TransactionTemplate.class);
+        GroupConversation conversation = new GroupConversation()
+                .setId(8L)
+                .setMode(GroupChatConstant.MODE_CHAT)
+                .setTitle("普通闲聊")
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        when(conversationService.requireActive(8L)).thenReturn(conversation);
+        when(lockService.tryLock(8L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        GroupConversationLifecycleService service =
+                new GroupConversationLifecycleService(
+                        conversationService, lockService,
+                        conversationMapper, replyPlanService,
+                        summaryMapper, eventLogService,
+                        eventLogMapper, eventVectorService,
+                        recoveryService, summaryClient,
+                        transactionTemplate,
+                        new TrpgSummaryIntervalSelector());
+
+        GroupConversation result = service.close(8L);
+
+        assertThat(result.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_CLOSED);
+        assertThat(result.getSummary()).isNull();
+        verify(summaryClient, never()).prompt(any(Prompt.class));
+        verify(summaryMapper, never()).selectList(any());
+        verify(summaryMapper, never()).insert(
+                any(GroupContextSummary.class));
+        verify(eventLogService, never()).save(any());
+        verify(eventVectorService, never()).addWorldEventLog(any());
     }
 
     @Test
@@ -113,15 +179,14 @@ class GroupConversationLifecycleServiceTest {
                 lockService,
                 mock(GroupConversationMapper.class),
                 mock(GroupReplyPlanService.class),
-                mock(GroupChatMessageMapper.class),
                 mock(GroupContextSummaryMapper.class),
                 mock(IWorldEventLogService.class),
                 mock(WorldEventLogMapper.class),
                 mock(WorldEventVectorService.class),
-                mock(GroupTopicService.class),
                 recoveryService,
                 summaryClient,
-                mock(TransactionTemplate.class));
+                mock(TransactionTemplate.class),
+                new TrpgSummaryIntervalSelector());
         GroupConversation conversation =
                 new GroupConversation().setId(7L).setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireAuthorized(7L)).thenReturn(conversation);
@@ -148,15 +213,14 @@ class GroupConversationLifecycleServiceTest {
                         mock(GroupConversationLockService.class),
                         mock(GroupConversationMapper.class),
                         mock(GroupReplyPlanService.class),
-                        mock(GroupChatMessageMapper.class),
                         mock(GroupContextSummaryMapper.class),
                         mock(IWorldEventLogService.class),
                         mock(WorldEventLogMapper.class),
                         mock(WorldEventVectorService.class),
-                        mock(GroupTopicService.class),
                         recoveryService,
                         summaryClient,
-                        mock(TransactionTemplate.class));
+                        mock(TransactionTemplate.class),
+                        new TrpgSummaryIntervalSelector());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
@@ -173,13 +237,4 @@ class GroupConversationLifecycleServiceTest {
         verify(summaryClient, never()).prompt(any(Prompt.class));
     }
 
-    private GroupChatMessage message(Long sequence, String type, Long id, String content) {
-        return new GroupChatMessage()
-                .setConversationId(7L)
-                .setSequenceNo(sequence)
-                .setSpeakerType(type)
-                .setSpeakerId(id)
-                .setContent(content)
-                .setStatus(GroupChatConstant.STATUS_COMPLETED);
-    }
 }

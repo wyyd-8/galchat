@@ -3,13 +3,10 @@ package com.me.galchat.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatMember;
-import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupContextSummary;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.WorldEventLog;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.groupchat.context.GroupTopicService;
-import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.WorldEventLogMapper;
@@ -34,42 +31,39 @@ public class GroupConversationLifecycleService {
     private final GroupConversationLockService lockService;
     private final GroupConversationMapper conversationMapper;
     private final GroupReplyPlanService replyPlanService;
-    private final GroupChatMessageMapper messageMapper;
     private final GroupContextSummaryMapper summaryMapper;
     private final IWorldEventLogService worldEventLogService;
     private final WorldEventLogMapper worldEventLogMapper;
     private final WorldEventVectorService worldEventVectorService;
-    private final GroupTopicService topicService;
     private final GroupTurnRecoveryService recoveryService;
     private final ChatClient summaryClient;
     private final TransactionTemplate transactionTemplate;
+    private final TrpgSummaryIntervalSelector summaryIntervalSelector;
 
     public GroupConversationLifecycleService(GroupConversationService conversationService,
                                              GroupConversationLockService lockService,
                                              GroupConversationMapper conversationMapper,
                                              GroupReplyPlanService replyPlanService,
-                                             GroupChatMessageMapper messageMapper,
                                              GroupContextSummaryMapper summaryMapper,
                                              IWorldEventLogService worldEventLogService,
                                              WorldEventLogMapper worldEventLogMapper,
                                              WorldEventVectorService worldEventVectorService,
-                                             GroupTopicService topicService,
                                              GroupTurnRecoveryService recoveryService,
                                              @Qualifier("groupNonThinkingChatClient") ChatClient summaryClient,
-                                             TransactionTemplate transactionTemplate) {
+                                             TransactionTemplate transactionTemplate,
+                                             TrpgSummaryIntervalSelector summaryIntervalSelector) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.conversationMapper = conversationMapper;
         this.replyPlanService = replyPlanService;
-        this.messageMapper = messageMapper;
         this.summaryMapper = summaryMapper;
         this.worldEventLogService = worldEventLogService;
         this.worldEventLogMapper = worldEventLogMapper;
         this.worldEventVectorService = worldEventVectorService;
-        this.topicService = topicService;
         this.recoveryService = recoveryService;
         this.summaryClient = summaryClient;
         this.transactionTemplate = transactionTemplate;
+        this.summaryIntervalSelector = summaryIntervalSelector;
     }
 
     public GroupConversation close(Long conversationId) {
@@ -120,18 +114,23 @@ public class GroupConversationLifecycleService {
 
     private GroupConversation closeValidated(
             GroupConversation lockedConversation) {
-        Long conversationId = lockedConversation.getId();
-        List<GroupChatMessage> messages =
-                completedMessages(conversationId);
         if (GroupChatConstant.MODE_CHAT.equals(
                 lockedConversation.getMode())) {
-            topicService.flushOpenTopics(lockedConversation);
+            GroupConversation result = transactionTemplate.execute(
+                    status -> closeWithoutSummary(lockedConversation));
+            if (result == null) {
+                throw new IllegalStateException(
+                        "结束群聊事务未返回结果");
+            }
+            return result;
         }
+        List<GroupContextSummary> sceneSummaries =
+                completedSceneSummaries(lockedConversation.getId());
         String summary = generateSummary(
-                lockedConversation, messages);
+                lockedConversation, sceneSummaries);
         GroupConversation result = transactionTemplate.execute(status ->
                 saveFinalSummary(
-                        lockedConversation, messages, summary));
+                        lockedConversation, sceneSummaries, summary));
         if (result == null) {
             throw new IllegalStateException("结束群聊事务未返回结果");
         }
@@ -139,15 +138,29 @@ public class GroupConversationLifecycleService {
         return result;
     }
 
-    private GroupConversation saveFinalSummary(GroupConversation conversation, List<GroupChatMessage> messages,
+    private GroupConversation closeWithoutSummary(
+            GroupConversation conversation) {
+        LocalDateTime now = LocalDateTime.now();
+        replyPlanService.clearConversationPlans(conversation);
+        conversation.setSummary(null)
+                .setStatus(GroupChatConstant.STATUS_CLOSED)
+                .setClosedAt(now)
+                .setUpdatedAt(now);
+        conversationMapper.updateById(conversation);
+        return conversation;
+    }
+
+    private GroupConversation saveFinalSummary(GroupConversation conversation, List<GroupContextSummary> sceneSummaries,
                                                String summary) {
         summaryMapper.delete(new LambdaQueryWrapper<GroupContextSummary>()
                 .eq(GroupContextSummary::getConversationId, conversation.getId()));
-        if (!messages.isEmpty()) {
+        if (!sceneSummaries.isEmpty()) {
             summaryMapper.insert(new GroupContextSummary()
                     .setConversationId(conversation.getId())
-                    .setStartSequence(messages.getFirst().getSequenceNo())
-                    .setEndSequence(messages.getLast().getSequenceNo())
+                    .setStartSequence(sceneSummaries.getFirst()
+                            .getStartSequence())
+                    .setEndSequence(sceneSummaries.getLast()
+                            .getEndSequence())
                     .setSummary(summary)
                     .setVersion(1)
                     .setCreatedAt(LocalDateTime.now()));
@@ -186,29 +199,41 @@ public class GroupConversationLifecycleService {
         worldEventVectorService.addWorldEventLog(event);
     }
 
-    private List<GroupChatMessage> completedMessages(Long conversationId) {
-        return messageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
-                .eq(GroupChatMessage::getConversationId, conversationId)
-                .eq(GroupChatMessage::getStatus, GroupChatConstant.STATUS_COMPLETED)
-                .orderByAsc(GroupChatMessage::getSequenceNo));
+    private List<GroupContextSummary> completedSceneSummaries(
+            Long conversationId) {
+        List<GroupContextSummary> summaries = summaryMapper.selectList(
+                new LambdaQueryWrapper<GroupContextSummary>()
+                        .eq(GroupContextSummary::getConversationId,
+                                conversationId)
+                        .isNotNull(GroupContextSummary::getScenePlanId)
+                        .orderByAsc(
+                                GroupContextSummary::getStartSequence)
+                        .orderByDesc(
+                                GroupContextSummary::getEndSequence));
+        return summaryIntervalSelector.select(summaries);
     }
 
-    private String generateSummary(GroupConversation conversation, List<GroupChatMessage> messages) {
+    private String generateSummary(GroupConversation conversation, List<GroupContextSummary> sceneSummaries) {
+        if (sceneSummaries.isEmpty()) {
+            return conversation.getTitle();
+        }
         StringBuilder prompt = new StringBuilder();
         appendLine(prompt, "标题", conversation.getTitle());
-        prompt.append("群聊记录：\n");
-        for (GroupChatMessage message : messages) {
-            prompt.append('[').append(message.getSpeakerType());
-            if (message.getSpeakerId() != null) {
-                prompt.append(':').append(message.getSpeakerId());
-            }
-            prompt.append("] ").append(message.getContent()).append('\n');
+        prompt.append("已完成场景摘要：\n");
+        for (GroupContextSummary sceneSummary : sceneSummaries) {
+            prompt.append("[场景 ")
+                    .append(sceneSummary.getStartSequence())
+                    .append('-')
+                    .append(sceneSummary.getEndSequence())
+                    .append("] ")
+                    .append(sceneSummary.getSummary())
+                    .append('\n');
         }
         String summary = summaryClient.prompt(new Prompt(List.of(
                         new SystemMessage("""
-                                你负责重写一场多人群聊的最终概要。
+                                你负责将一场COC跑团的场景摘要合并为最终概要。
                                 概要应包含起因、重要行动、结果、状态变化和仍未解决的问题，适合后续长期检索。
-                                只能使用记录中已经出现的事实，不得把角色猜测写成事实，不得添加新事件。
+                                只能使用输入的场景摘要，不得把角色猜测写成事实，不得添加新事件。
                                 不要输出分析过程、Markdown 标题或其他说明，只输出简洁完整的中文概要。
                                 """),
                         new UserMessage(prompt.toString()))))

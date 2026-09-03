@@ -318,7 +318,7 @@ export function useWorkspace() {
   }
   async function closeConversation() {
     if (!selectedConversationId.value || !selectedWorldId.value) return
-    await api.closeConversation(selectedConversationId.value); conversations.value = await api.conversations(selectedWorldId.value); notify('会话已关闭并生成总结', '', 'success')
+    await api.closeConversation(selectedConversationId.value); conversations.value = await api.conversations(selectedWorldId.value); notify('会话已关闭', '', 'success')
   }
   async function deleteConversation() {
     if (!selectedConversationId.value || !selectedWorldId.value) return

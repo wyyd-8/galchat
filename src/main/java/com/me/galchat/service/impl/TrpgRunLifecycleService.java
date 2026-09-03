@@ -5,16 +5,20 @@ import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +34,8 @@ public class TrpgRunLifecycleService {
     private final GroupConversationLifecycleService conversationLifecycle;
     private final GroupTurnRecoveryService recoveryService;
     private final TrpgEpilogueService epilogueService;
+    private final GroupReplyPlanMapper planMapper;
+    private final TrpgSceneSummaryService sceneSummaryService;
 
     public void requestFinish(
             Long conversationId, Long replyStepId) {
@@ -68,11 +74,28 @@ public class TrpgRunLifecycleService {
                         .get(key(conversation.getId())))) {
             return false;
         }
-        epilogueService.generateAndPersist(conversation);
+        epilogueService.generateAndPersist(
+                conversation, completingTurnId);
+        summarizeActivePlanHierarchy(conversation);
         conversationLifecycle.closeAfterTurnUnderLock(
                 conversation, completingTurnId);
         redisTemplate.delete(key(conversation.getId()));
         return true;
+    }
+
+    private void summarizeActivePlanHierarchy(
+            GroupConversation conversation) {
+        Long planId = conversation.getActiveReplyPlanId();
+        Set<Long> visited = new HashSet<>();
+        while (planId != null && visited.add(planId)) {
+            GroupReplyPlan plan = planMapper.selectById(planId);
+            if (plan == null) {
+                return;
+            }
+            sceneSummaryService.summarize(
+                    conversation.getId(), plan.getContextId(), plan.getId());
+            planId = plan.getParentPlanId();
+        }
     }
 
     private String key(Long conversationId) {

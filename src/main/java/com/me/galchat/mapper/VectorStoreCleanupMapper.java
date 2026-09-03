@@ -3,6 +3,8 @@ package com.me.galchat.mapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.util.List;
+
 @Mapper
 public interface VectorStoreCleanupMapper {
 
@@ -26,6 +28,17 @@ public interface VectorStoreCleanupMapper {
     int deleteGroupTopicsByConversationAfterTopicId(
             @Param("conversationId") Long conversationId,
             @Param("maxGroupTopicId") Long maxGroupTopicId);
+
+    int deleteTrpgTurnsByConversation(
+            @Param("conversationId") Long conversationId);
+
+    int deleteTrpgTurnsByConversationAfterTurnId(
+            @Param("conversationId") Long conversationId,
+            @Param("maxTurnId") Long maxTurnId);
+
+    int deleteTrpgTurnsByConversationAndTurnIds(
+            @Param("conversationId") Long conversationId,
+            @Param("turnIds") List<Long> turnIds);
 
     int deleteWorldEventByUserWorldId(@Param("userWorldId") Long userWorldId);
 

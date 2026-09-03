@@ -62,6 +62,34 @@
               &gt; #{maxGroupTopicId}
     </delete>
 
+    <delete id="deleteTrpgTurnsByConversation">
+        DELETE FROM public.trpg_turn_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+    </delete>
+
+    <delete id="deleteTrpgTurnsByConversationAfterTurnId">
+        DELETE FROM public.trpg_turn_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+          AND (metadata::jsonb -&gt;&gt; 'turnId')::bigint
+              &gt; #{maxTurnId}
+    </delete>
+
+    <delete id="deleteTrpgTurnsByConversationAndTurnIds">
+        DELETE FROM public.trpg_turn_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+          AND (metadata::jsonb -&gt;&gt; 'turnId')::bigint IN
+        <foreach collection="turnIds" item="turnId"
+                 open="(" separator="," close=")">
+            #{turnId}
+        </foreach>
+    </delete>
+
     <delete id="deleteWorldEventByUserWorldId">
         DELETE FROM public.world_event_vector_store
         WHERE metadata::jsonb @> CONCAT(

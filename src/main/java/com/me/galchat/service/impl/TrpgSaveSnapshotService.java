@@ -207,6 +207,17 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
 
         vectorCleanupMapper.deleteGroupTopicsByConversationAfterTopicId(
                 conversationId, cursors.getMaxTopicId());
+        vectorCleanupMapper.deleteTrpgTurnsByConversationAfterTurnId(
+                conversationId, cursors.getMaxTurnId());
+        List<Long> restoredTurnIds = safe(snapshot.getRestorableTurns())
+                .stream()
+                .map(TrpgSaveSnapshotDTO.RestorableTurnSnapshot::getTurn)
+                .map(GroupChatTurn::getId)
+                .toList();
+        if (!restoredTurnIds.isEmpty()) {
+            vectorCleanupMapper.deleteTrpgTurnsByConversationAndTurnIds(
+                    conversationId, restoredTurnIds);
+        }
         vectorCleanupMapper.deleteWorldEventByConversationAfterLogId(
                 conversationId, cursors.getMaxWorldEventLogId());
         restoreMapper.deleteAgentDecisionsAfter(

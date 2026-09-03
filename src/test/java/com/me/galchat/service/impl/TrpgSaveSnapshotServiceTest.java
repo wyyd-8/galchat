@@ -474,6 +474,10 @@ class TrpgSaveSnapshotServiceTest {
         service.restoreDatabase(conversation, snapshot);
 
         verify(vectorCleanupMapper).deleteGroupTopicsByConversationAfterTopicId(51L, 7L);
+        verify(vectorCleanupMapper)
+                .deleteTrpgTurnsByConversationAfterTurnId(51L, 2L);
+        verify(vectorCleanupMapper, never())
+                .deleteTrpgTurnsByConversation(51L);
         verify(vectorCleanupMapper).deleteWorldEventByConversationAfterLogId(51L, 10L);
         verify(restoreMapper).deleteMessagesAfter(51L, 1L);
         verify(restoreMapper).deleteTurnsAfter(51L, 2L);
@@ -498,6 +502,15 @@ class TrpgSaveSnapshotServiceTest {
         verify(runtimeChildSceneMapper).insert(runtimeChildScene);
         verify(weaponStashMapper).delete(any());
         verify(weaponStashMapper).insert(any(TrpgWeaponStash.class));
+    }
+
+    @Test
+    void restoreDerivedStateRestoresRedisState() {
+        TrpgSaveSnapshotDTO snapshot = baseSnapshot();
+
+        service.restoreDerivedState(conversation(), snapshot);
+
+        verify(redisStateService).restore(51L, snapshot.getRedisState());
     }
 
     @Test
@@ -542,6 +555,8 @@ class TrpgSaveSnapshotServiceTest {
 
         service.restoreDatabase(conversation(), snapshot);
 
+        verify(vectorCleanupMapper)
+                .deleteTrpgTurnsByConversationAndTurnIds(51L, List.of(2L));
         verify(turnMapper).deleteById(2L);
         verify(turnMapper).insert(turn);
         verify(stepMapper).insert(step);

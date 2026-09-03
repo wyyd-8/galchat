@@ -13,6 +13,7 @@ import com.me.galchat.tool.RecordingToolCallingManager;
 import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
+import com.me.galchat.tool.TrpgRunMemoryTools;
 import com.me.galchat.vector.MutiSearchService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -37,6 +38,7 @@ public class CommonConfiguration {
                                           VectorTools vectorTools,
                                           UserCharacterFavorTools userCharacterFavorTools,
                                           UserCharacterInfoTools userCharacterInfoTools,
+                                          TrpgRunMemoryTools trpgRunMemoryTools,
                                           ToolCallingManager toolCallingManager) {
         return ChatClient
                 .builder(model)
@@ -46,7 +48,8 @@ public class CommonConfiguration {
                         mutiSearchService).build())
                 .defaultAdvisors(toolCallingAdvisor(
                         new RecordingToolCallingManager(toolCallingManager, thinkChatMemory)))
-                .defaultTools(vectorTools, userCharacterFavorTools, userCharacterInfoTools)
+                .defaultTools(vectorTools, userCharacterFavorTools,
+                        userCharacterInfoTools, trpgRunMemoryTools)
                 .build();
     }
 
@@ -58,6 +61,7 @@ public class CommonConfiguration {
                                        VectorTools vectorTools,
                                        UserCharacterFavorTools userCharacterFavorTools,
                                        UserCharacterInfoTools userCharacterInfoTools,
+                                       TrpgRunMemoryTools trpgRunMemoryTools,
                                        ToolCallingManager toolCallingManager) {
         return ChatClient
                 .builder(model)
@@ -67,7 +71,8 @@ public class CommonConfiguration {
                         mutiSearchService).build())
                 .defaultAdvisors(toolCallingAdvisor(
                         new RecordingToolCallingManager(toolCallingManager, defaultChatMemory)))
-                .defaultTools(vectorTools, userCharacterFavorTools, userCharacterInfoTools)
+                .defaultTools(vectorTools, userCharacterFavorTools,
+                        userCharacterInfoTools, trpgRunMemoryTools)
                 .build();
     }
 

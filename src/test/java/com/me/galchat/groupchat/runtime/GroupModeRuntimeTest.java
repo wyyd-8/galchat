@@ -17,6 +17,7 @@ import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
 import com.me.galchat.tool.KpDiceTools;
+import com.me.galchat.tool.TrpgRunMemoryTools;
 import com.me.galchat.vector.GroupTopicVectorService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -98,6 +99,7 @@ class GroupModeRuntimeTest {
         VectorTools vectorTools = mock(VectorTools.class);
         UserCharacterFavorTools favorTools = mock(UserCharacterFavorTools.class);
         UserCharacterInfoTools infoTools = mock(UserCharacterInfoTools.class);
+        TrpgRunMemoryTools runMemoryTools = mock(TrpgRunMemoryTools.class);
         GroupConversation conversation = new GroupConversation().setId(1L);
         GroupContextMaterial context = new GroupContextMaterial(List.of(new UserMessage("共享上下文")));
         GroupActorRef alice = new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 11L);
@@ -107,7 +109,8 @@ class GroupModeRuntimeTest {
         when(cardService.listDiceCharacters(conversation.getId())).thenReturn(List.of());
 
         GroupModelInvocation chat = new ChatGroupAgentPolicy(
-                client, assembler, vectorTools, favorTools).prepare(
+                client, assembler, vectorTools, favorTools,
+                runMemoryTools).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_CHAT_REPLY,
                         GroupChatConstant.ACTOR_CHARACTER, 11L, "default", "群聊", 1, 1),
@@ -143,7 +146,8 @@ class GroupModeRuntimeTest {
 
         assertThat(chat.prompt().getInstructions().getFirst().getText()).contains("多人群聊");
         assertThat(trpg.prompt().getInstructions().getFirst().getText()).contains("TRPG", "战斗");
-        assertThat(chat.tools()).containsExactly(vectorTools, favorTools);
+        assertThat(chat.tools()).containsExactly(
+                vectorTools, favorTools, runMemoryTools);
         assertThat(chat.tools()).doesNotContain(infoTools);
         assertThat(trpg.tools()).isEmpty();
     }

@@ -106,4 +106,20 @@ public class MessageThreadPoolConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean("trpgTurnVectorTaskExecutor")
+    public ThreadPoolTaskExecutor trpgTurnVectorTaskExecutor() {
+        log.info("初始化跑团轮次向量线程池...");
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("trpg-turn-vector-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.setAwaitTerminationSeconds(5);
+        executor.setRejectedExecutionHandler(
+                new ThreadPoolExecutor.AbortPolicy());
+        executor.initialize();
+        return executor;
+    }
 }

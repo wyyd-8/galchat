@@ -9,6 +9,7 @@ import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.service.impl.GroupContextAssembler;
 import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.VectorTools;
+import com.me.galchat.tool.TrpgRunMemoryTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -27,15 +28,18 @@ public class ChatGroupAgentPolicy implements GroupAgentPolicy {
     private final GroupContextAssembler contextAssembler;
     private final VectorTools vectorTools;
     private final UserCharacterFavorTools favorTools;
+    private final TrpgRunMemoryTools runMemoryTools;
 
     public ChatGroupAgentPolicy(@Qualifier("chatGroupChatClient") ChatClient chatClient,
                                 GroupContextAssembler contextAssembler,
                                 VectorTools vectorTools,
-                                UserCharacterFavorTools favorTools) {
+                                UserCharacterFavorTools favorTools,
+                                TrpgRunMemoryTools runMemoryTools) {
         this.chatClient = chatClient;
         this.contextAssembler = contextAssembler;
         this.vectorTools = vectorTools;
         this.favorTools = favorTools;
+        this.runMemoryTools = runMemoryTools;
     }
 
     @Override
@@ -52,7 +56,8 @@ public class ChatGroupAgentPolicy implements GroupAgentPolicy {
         messages.addAll(context.messages());
         messages.add(new UserMessage("现在轮到" + name + "回复。只生成" + name
                 + "本人的言语、动作或感受，不要代替用户或其他角色发言，不要输出发言者标签。"));
-        return new GroupModelInvocation(chatClient, new Prompt(messages), List.of(vectorTools, favorTools));
+        return new GroupModelInvocation(chatClient, new Prompt(messages),
+                List.of(vectorTools, favorTools, runMemoryTools));
     }
 
     @Override

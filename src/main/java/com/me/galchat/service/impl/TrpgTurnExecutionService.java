@@ -30,6 +30,7 @@ import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.service.ITrpgSaveService;
+import com.me.galchat.vector.TrpgTurnVectorIndexQueue;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -70,11 +71,18 @@ public class TrpgTurnExecutionService {
     private final ITrpgSaveService trpgSaveService;
     private TrpgStepInteractionService stepInteractionService;
     private CocModuleRuntimeService moduleRuntimeService;
+    private TrpgTurnVectorIndexQueue turnVectorIndexQueue;
 
     @Autowired
     void setModuleRuntimeService(
             CocModuleRuntimeService moduleRuntimeService) {
         this.moduleRuntimeService = moduleRuntimeService;
+    }
+
+    @Autowired(required = false)
+    void setTurnVectorIndexQueue(
+            TrpgTurnVectorIndexQueue turnVectorIndexQueue) {
+        this.turnVectorIndexQueue = turnVectorIndexQueue;
     }
 
     public Flux<GroupChatEvent> continueTurn(
@@ -1697,6 +1705,9 @@ public class TrpgTurnExecutionService {
                 turnMapper.updateById(turn);
                 checkpointService.clear(conversation.getId());
             });
+            if (turnVectorIndexQueue != null) {
+                turnVectorIndexQueue.submitTurnAfterCommit(turn.getId());
+            }
             return Flux.just(GroupChatEvent.builder()
                     .eventType(GroupChatConstant.EVENT_TURN_COMPLETED)
                     .conversationId(conversation.getId())

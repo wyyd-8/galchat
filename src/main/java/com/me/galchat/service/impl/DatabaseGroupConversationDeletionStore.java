@@ -29,6 +29,8 @@ public class DatabaseGroupConversationDeletionStore
         pruneWorldSave(conversation.getUserWorldId(), conversationId);
         vectorStoreCleanupMapper.deleteGroupTopicsByConversation(
                 conversationId);
+        vectorStoreCleanupMapper.deleteTrpgTurnsByConversation(
+                conversationId);
         vectorStoreCleanupMapper.deleteWorldEventByConversation(
                 conversationId);
         int deleted = deletionMapper.deleteConversationData(conversationId);

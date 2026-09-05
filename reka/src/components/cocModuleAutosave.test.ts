@@ -63,7 +63,7 @@ test('rejects a filled damage bonus unless it uses a legal CoC DB value', () => 
   for (const damageBonus of ['+0D6', '+1D8', '-1D4', 'DB', '火焰']) {
     const payload = validPayload()
     addCharacterWithDamageBonus(payload, damageBonus)
-    assert.equal(validateCocModulePayload(payload), '预设角色“林默”的伤害加值（DB）格式不合法', damageBonus)
+    assert.equal(validateCocModulePayload(payload), '模组角色卡“林默”的伤害加值（DB）格式不合法', damageBonus)
   }
 })
 

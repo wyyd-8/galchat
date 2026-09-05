@@ -132,18 +132,6 @@ function openDiceMessage(aggregate: DiceRollAggregate) {
   }
 }
 
-function openDiceDebug(aggregate: DiceRollAggregate) {
-  try {
-    diceMessageAggregate.value = null
-    queuedDiceAggregates.value = []
-    diceShowContinue.value = false
-    dicePlaybackRequest.value = createMessagePlaybackRequest(aggregate, 'play')
-    dicePlayerOpen.value = true
-  } catch (error) {
-    notify('无法打开骰子调试', errorMessage(error), 'danger')
-  }
-}
-
 function openIncomingDiceMessages(incoming: DiceRollAggregate[]) {
   try {
     autoAdvanceDiceSummaryIds.value = mergeAutoAdvanceDiceSummaryIds(
@@ -753,12 +741,12 @@ async function changePassword() {
   <AuthDialog v-model="authOpen" @submit="authenticate" />
 
   <BaseDialog v-model="dialogs.world" title="创建世界" description="从一个模板开始，并设定角色的陪伴方式。" size="lg">
-    <div class="form-stack"><label class="field"><span>世界模板</span><select v-model="worldForm.worldId"><option value="">请选择</option><option v-for="item in workspace.templates.value" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label><label class="field"><span>世界名称</span><input v-model.trim="worldForm.name" placeholder="留空则使用模板名称" /></label><div class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: worldForm.favorSystemStatus === item }" @click="worldForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div><label class="switch-row"><span><strong>主动消息偏好（预留）</strong><small>后端目前只保存此开关，尚未按它主动发消息</small></span><input v-model="worldForm.acitvePushStatus" type="checkbox" /></label><label class="switch-row"><span><strong>日常陪伴语气</strong><small>让单聊更侧重现实日常分享与陪伴</small></span><input v-model="worldForm.dailyCompanionMode" type="checkbox" /></label><label class="switch-row"><span><strong>流式思考模式</strong><small>发送消息后返回思考过程与角色回复</small></span><input v-model="worldForm.thinkStatus" type="checkbox" /></label><label v-if="worldForm.thinkStatus" class="switch-row"><span><strong>第一人称内心独白</strong><small>让角色的思考过程采用第一人称内心活动</small></span><input v-model="worldForm.addSpecialPrompt" type="checkbox" /></label><label v-else class="switch-row"><span><strong>输入结束识别</strong><small>停止输入后判断表达是否完整并自动回复</small></span><input v-model="worldForm.eotDetectionStatus" type="checkbox" /></label></div>
+    <div class="form-stack"><label class="field"><span>世界模板</span><select v-model="worldForm.worldId"><option value="">请选择</option><option v-for="item in workspace.templates.value" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label><label class="field"><span>世界名称</span><input v-model.trim="worldForm.name" placeholder="留空则使用模板名称" /></label><div class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: worldForm.favorSystemStatus === item }" @click="worldForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div><label class="switch-row"><span><strong>主动消息偏好</strong><small>允许角色围绕聊天中提到的事件发送提醒和当日关怀；晚间主动话题不受此开关影响</small></span><input v-model="worldForm.acitvePushStatus" type="checkbox" /></label><label class="switch-row"><span><strong>日常陪伴语气</strong><small>让单聊更侧重现实日常分享与陪伴</small></span><input v-model="worldForm.dailyCompanionMode" type="checkbox" /></label><label class="switch-row"><span><strong>逐步显示思考与回复</strong><small>发送后逐步展示角色思考和回复；关闭后可连续发送消息，等待角色回应</small></span><input v-model="worldForm.thinkStatus" type="checkbox" /></label><label v-if="worldForm.thinkStatus" class="switch-row"><span><strong>以第一人称展示角色思考</strong><small>例如：“我想先听听你的意见。”</small></span><input v-model="worldForm.addSpecialPrompt" type="checkbox" /></label><label v-else class="switch-row"><span><strong>输入结束识别</strong><small>停止输入后判断表达是否完整并自动回复</small></span><input v-model="worldForm.eotDetectionStatus" type="checkbox" /></label></div>
     <template #footer><button class="button ghost" @click="dialogs.world = false">取消</button><button class="button primary" :disabled="!worldForm.worldId || busy" @click="run(() => workspace.createWorld({ ...worldForm, worldId: Number(worldForm.worldId), eotDetectionStatus: worldForm.thinkStatus ? false : worldForm.eotDetectionStatus, addSpecialPrompt: worldForm.thinkStatus && worldForm.addSpecialPrompt }), 'world')">创建</button></template>
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.template" :title="templateDialogTitle" :description="templateDialogDescription" size="lg">
-    <div class="form-grid"><label class="field"><span>模板名称</span><input v-model.trim="templateForm.name" /></label><label class="field"><span>作者</span><input v-model.trim="templateForm.author" /></label><label class="field full"><span>封面</span><div class="upload-row"><input v-model.trim="templateForm.image" placeholder="仅支持本站上传后返回的图片地址" /><label class="button secondary file-button"><ImageUp :size="16" />{{ uploading === 'world' ? '上传中' : '上传图片' }}<input type="file" accept="image/*" :disabled="uploading !== null" @change="handleImage($event, 'world')" /></label></div></label><label class="field full"><span>世界背景</span><textarea v-model.trim="templateForm.background" rows="7" /></label><label class="switch-row full"><span><strong>公开模板</strong><small>其他用户可以发现并使用</small></span><input v-model="templateForm.visible" type="checkbox" /></label></div>
+    <div class="form-grid"><label class="field"><span>模板名称</span><input v-model.trim="templateForm.name" /></label><label class="field"><span>作者</span><input v-model.trim="templateForm.author" /></label><label class="field full"><span>封面</span><div class="upload-row"><small>{{ templateForm.image ? '已上传封面' : '尚未上传封面' }}</small><button v-if="templateForm.image" type="button" class="button ghost" :disabled="uploading !== null" @click="templateForm.image = ''">移除封面</button><label class="button secondary file-button"><ImageUp :size="16" />{{ uploading === 'world' ? '上传中' : '上传封面' }}<input type="file" accept="image/*" :disabled="uploading !== null" @change="handleImage($event, 'world')" /></label></div></label><label class="field full"><span>世界背景</span><textarea v-model.trim="templateForm.background" rows="7" /></label><label class="switch-row full"><span><strong>公开模板</strong><small>其他用户可以发现并使用</small></span><input v-model="templateForm.visible" type="checkbox" /></label></div>
     <template #footer><button class="button ghost" @click="dialogs.template = false">取消</button><button class="button primary" :disabled="!templateForm.name || !templateForm.background || busy" @click="run(saveTemplate, 'template')">{{ templateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
@@ -769,7 +757,7 @@ async function changePassword() {
         <span class="eyebrow">{{ selectedTemplatePreview.visible === false ? '私有模板' : '公开模板' }}</span>
         <p>{{ selectedTemplatePreview.background || '尚未填写世界背景。' }}</p>
         <small v-if="ownsSelectedTemplate && selectedTemplateUsage && !selectedTemplateUsage.deletable" class="template-usage-note">
-          已有 {{ selectedTemplateUsage.associatedWorldCount }} 个世界使用此模板，因此不能删除；仍可通过名称匹配安全替换。
+          已有 {{ selectedTemplateUsage.associatedWorldCount }} 个世界使用此模板，因此不能删除。可上传新版本，按角色名称匹配并更新。
         </small>
       </div>
     </div>
@@ -797,7 +785,7 @@ async function changePassword() {
   <BaseDialog
     v-model="dialogs.templateDelete"
     title="删除世界模板"
-    description="模板、世界设定、角色模板和世界设定向量都会被永久删除。"
+    description="此模板及其世界设定、角色模板都会被永久删除。"
   >
     <div class="destructive-confirmation">
       <strong>确认删除“{{ selectedTemplatePreview?.name }}”？</strong>
@@ -812,7 +800,7 @@ async function changePassword() {
   <BaseDialog
     v-model="dialogs.templateReplaceConfirm"
     title="角色匹配度过低"
-    description="后端没有修改任何数据。确认后才会执行替换。"
+    description="尚未替换。请核对下方角色匹配结果后再确认。"
     size="lg"
   >
     <div v-if="templateReplacementReport" class="replacement-report">
@@ -826,7 +814,7 @@ async function changePassword() {
         <section><strong>将新增 · {{ templateReplacementReport.addedCharacterCount }}</strong><p>{{ templateReplacementReport.addedCharacterNames.join('、') || '无' }}</p></section>
         <section><strong>保持不变 · {{ templateReplacementReport.unchangedCharacterCount }}</strong><p>{{ templateReplacementReport.unchangedCharacterNames.join('、') || '无' }}</p></section>
       </div>
-      <p class="replacement-warning">继续后会完整替换世界基本信息和世界设定；同名角色保留原 ID 并更新，缺失角色不会改变。</p>
+      <p class="replacement-warning">继续后会完整替换世界基本信息和世界设定；同名角色的模板资料会更新，未包含在新文件中的角色会保留。</p>
     </div>
     <template #footer>
       <button class="button ghost" :disabled="busy" @click="cancelTemplateReplacement">取消</button>
@@ -837,16 +825,16 @@ async function changePassword() {
   <BaseDialog
     v-model="dialogs.conversation"
     :title="conversationForm.mode === 'trpg' ? '建立 CoC 跑团' : '建立会话'"
-    :description="conversationForm.mode === 'trpg' ? `第 ${conversationStep} 阶段，共 3 阶段` : '普通群聊可自由编排回复。'"
+    :description="conversationForm.mode === 'trpg' ? `第 ${conversationStep} 阶段，共 3 阶段` : '选择参与角色，创建多人对话。'"
     size="lg"
     :content-class="conversationForm.mode === 'trpg' && conversationStep === 2 ? 'trpg-participant-dialog' : ''"
   >
     <div v-if="conversationForm.mode === 'trpg'" class="trpg-setup-steps" aria-label="跑团创建进度">
       <span :class="{ active: conversationStep === 1, complete: conversationStep > 1 }"><b>1</b>跑团信息</span>
       <i />
-      <span :class="{ active: conversationStep === 2 }"><b>2</b>选择人物</span>
+      <span :class="{ active: conversationStep === 2 }"><b>2</b>选择参与者</span>
       <i />
-      <span><b>3</b>绑定人物卡</span>
+      <span><b>3</b>分配调查员人物卡</span>
     </div>
 
     <div v-if="conversationStep === 1" class="form-stack">
@@ -886,7 +874,7 @@ async function changePassword() {
             <span class="character-preview-image" :style="conversationPreviewCharacter.characterImage ? { backgroundImage: `url(${conversationPreviewCharacter.characterImage})` } : {}">{{ conversationPreviewCharacter.characterImage ? '' : conversationPreviewCharacter.characterName.slice(0, 1) }}</span>
             <span><small>最近选择</small><strong>{{ conversationPreviewCharacter.characterName }}</strong></span>
           </div>
-          <section class="character-background-preview"><strong>当前世界中的角色资料</strong><p>{{ conversationPreviewCharacter.userInfoPrompt || '尚未填写需要长期记住的用户信息。' }}</p></section>
+          <section class="character-background-preview"><strong>当前世界中的角色资料</strong><p>{{ conversationPreviewCharacter.userInfoPrompt || '暂未记录希望角色记住的事。' }}</p></section>
           <div class="participant-preview-note"><strong>下一阶段</strong><span>跑团创建后，需要为该角色绑定一张独立的 AI 调查员人物卡。</span></div>
         </template>
         <div v-else class="binding-empty"><strong>单人团</strong><span>不选择 AI 调查员，将由玩家独自进入本次跑团。</span></div>
@@ -896,7 +884,7 @@ async function changePassword() {
     <template #footer>
       <button class="button ghost" :disabled="busy" @click="conversationStep === 2 ? (conversationStep = 1) : (dialogs.conversation = false)">{{ conversationStep === 2 ? '上一步' : '取消' }}</button>
       <button v-if="conversationForm.mode === 'chat'" class="button primary" :disabled="!conversationForm.title || !conversationForm.characterIds.length || busy" @click="createNormalConversation">创建并进入</button>
-      <button v-else-if="conversationStep === 1" class="button primary" :disabled="!conversationForm.title || !Number(conversationForm.moduleId) || busy" @click="conversationStep = 2">下一步：选择人物</button>
+      <button v-else-if="conversationStep === 1" class="button primary" :disabled="!conversationForm.title || !Number(conversationForm.moduleId) || busy" @click="conversationStep = 2">下一步：选择参与者</button>
       <button v-else class="button primary" :disabled="!canCreateTrpgRun(conversationForm.title, Number(conversationForm.moduleId), busy)" @click="createTrpgConversation">创建跑团并绑定人物卡</button>
     </template>
   </BaseDialog>
@@ -920,7 +908,7 @@ async function changePassword() {
             @click="toggleCharacterChoice(item)"
           >
             <span class="character-avatar small" :style="item.image ? { backgroundImage: `url(${item.image})` } : {}">{{ item.image ? '' : item.name.slice(0,1) }}</span>
-            <span><strong>{{ item.name }}</strong><small>{{ characterChoice === String(item.id) ? '已选择，再次点击取消' : '可加入当前世界' }}</small></span>
+            <span><strong>{{ item.name }}</strong><small v-if="characterChoice === String(item.id)">已选择，再次点击取消</small></span>
           </button>
         </div>
         <div v-else class="empty-panel compact"><p>没有可添加的角色模板。</p></div>
@@ -936,19 +924,19 @@ async function changePassword() {
           <p v-if="characterPreviewLoading">正在载入角色背景…</p>
           <p v-else>{{ characterChoicePreview.background || '尚未填写角色背景。' }}</p>
         </section>
-        <label class="field character-memory-field"><span>角色需要长期记住的用户信息</span><textarea v-model="characterPrompt" rows="6" placeholder="例如：称呼、偏好、共同经历…" /></label>
+        <label class="field character-memory-field"><span>希望角色记住的事</span><textarea v-model="characterPrompt" rows="6" placeholder="可以填写你的称呼、偏好或共同经历…" /></label>
       </aside>
     </div>
     <template #footer><button v-if="workspace.canEditSelectedWorld.value && !characterChoice" class="button ghost" @click="openCreateCharacterTemplate">新建角色模板</button><button class="button primary" :disabled="!characterChoice || characterPickerPhase === 'moving' || busy" @click="run(() => workspace.addCharacter(Number(characterChoice), characterPrompt), 'character')">添加</button></template>
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.characterTemplate" :title="characterTemplateDialogTitle" size="lg">
-    <div class="form-grid"><label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label><label class="field"><span>初始好感</span><input v-model.number="characterTemplateForm.initFavor" type="number" min="0" max="100" /></label><label class="field full"><span>角色图片</span><div class="upload-row"><input v-model.trim="characterTemplateForm.image" placeholder="仅支持本站上传后返回的图片地址" /><label class="button secondary file-button"><ImageUp :size="16" />{{ uploading === 'character' ? '上传中' : '上传图片' }}<input type="file" accept="image/*" :disabled="uploading !== null" @change="handleImage($event, 'character')" /></label></div></label><label class="field full"><span>背景</span><textarea v-model.trim="characterTemplateForm.background" rows="4" /></label><label class="field full"><span>性格</span><textarea v-model.trim="characterTemplateForm.personality" rows="4" /></label><label class="field full"><span>CoC 跑团偏好</span><textarea v-model.trim="characterTemplateForm.cocPlayStyle" rows="4" placeholder="例如：倾向优先调查无人探索的地点；遇到明显危险时更愿意与同伴结伴。" /></label><div class="field full"><span>好感度阶段提示词</span><div class="favorability-list"><div v-for="row in favorabilityRows" :key="row.id" class="favorability-row"><input v-model.number="row.threshold" type="number" min="0" max="100" placeholder="阈值" /><input v-model.trim="row.prompt" placeholder="达到该好感度时的角色表现" /><button class="icon-button" title="删除阶段" @click="removeFavorabilityRow(row.id)"><Trash2 :size="15" /></button></div></div><button class="button ghost add-row-button" @click="addFavorabilityRow"><Plus :size="15" />添加阶段</button></div></div>
+    <div class="form-grid"><label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label><label class="field"><span>初始好感</span><input v-model.number="characterTemplateForm.initFavor" type="number" min="0" max="100" /></label><label class="field full"><span>角色头像</span><div class="upload-row"><small>{{ characterTemplateForm.image ? '已上传角色头像' : '尚未上传角色头像' }}</small><button v-if="characterTemplateForm.image" type="button" class="button ghost" :disabled="uploading !== null" @click="characterTemplateForm.image = ''">移除头像</button><label class="button secondary file-button"><ImageUp :size="16" />{{ uploading === 'character' ? '上传中' : '上传角色头像' }}<input type="file" accept="image/*" :disabled="uploading !== null" @change="handleImage($event, 'character')" /></label></div></label><label class="field full"><span>背景</span><textarea v-model.trim="characterTemplateForm.background" rows="4" /></label><label class="field full"><span>性格</span><textarea v-model.trim="characterTemplateForm.personality" rows="4" /></label><label class="field full"><span>CoC 跑团偏好</span><textarea v-model.trim="characterTemplateForm.cocPlayStyle" rows="4" placeholder="例如：倾向优先调查无人探索的地点；遇到明显危险时更愿意与同伴结伴。" /></label><div class="field full"><span>好感阶段的角色表现</span><div class="favorability-list"><div v-for="row in favorabilityRows" :key="row.id" class="favorability-row"><input v-model.number="row.threshold" type="number" min="0" max="100" placeholder="好感度" /><input v-model.trim="row.prompt" placeholder="达到该好感度时的角色表现" /><button class="icon-button" title="删除阶段" @click="removeFavorabilityRow(row.id)"><Trash2 :size="15" /></button></div></div><button class="button ghost add-row-button" @click="addFavorabilityRow"><Plus :size="15" />添加阶段</button></div></div>
     <template #footer><button class="button ghost" @click="dialogs.characterTemplate = false">取消</button><button class="button primary" :disabled="!characterTemplateForm.name || busy" @click="run(saveCharacterTemplate, 'characterTemplate')">{{ characterTemplateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.characterEdit" :title="selectedCharacter?.characterName || '角色资料'" description="这些设置会影响角色在当前世界中的表现。">
-    <div class="form-stack"><label class="field"><span>好感度</span><input v-model.number="characterEditForm.favor" type="range" min="0" max="100" :disabled="!workspace.canEditSelectedWorld.value" /><output>{{ characterEditForm.favor }}</output><small v-if="!workspace.canEditSelectedWorld.value">只有原创世界允许手动设置好感度。</small></label><label class="field"><span>角色需要长期记住的用户信息</span><textarea v-model="characterEditForm.prompt" rows="6" placeholder="例如：称呼、偏好、共同经历…" /></label><button v-if="workspace.canEditSelectedWorld.value && selectedCharacterId" class="button secondary" @click="openEditCharacterTemplate(selectedCharacterId)"><Pencil :size="16" />编辑角色模板</button></div>
+  <BaseDialog v-model="dialogs.characterEdit" :title="selectedCharacter?.characterName ? `${selectedCharacter.characterName} · 角色设置` : '角色设置'" description="这些设置会影响角色在当前世界中的表现。">
+    <div class="form-stack"><label class="field"><span>好感度</span><input v-model.number="characterEditForm.favor" type="range" min="0" max="100" :disabled="!workspace.canEditSelectedWorld.value" /><output>{{ characterEditForm.favor }}</output><small v-if="!workspace.canEditSelectedWorld.value">只有世界模板的作者可以手动设置好感度。</small></label><label class="field"><span>希望角色记住的事</span><textarea v-model="characterEditForm.prompt" rows="6" placeholder="可以填写你的称呼、偏好或共同经历…" /></label><button v-if="workspace.canEditSelectedWorld.value && selectedCharacterId" class="button secondary" @click="openEditCharacterTemplate(selectedCharacterId)"><Pencil :size="16" />编辑角色模板</button></div>
     <template #footer><button class="button ghost danger-text" @click="run(removeSelectedCharacter, 'characterEdit')"><Trash2 :size="16" />移出当前世界</button><button class="button primary" :disabled="!selectedCharacterId || busy" @click="run(saveSelectedCharacter, 'characterEdit')">保存</button></template>
   </BaseDialog>
 
@@ -969,8 +957,8 @@ async function changePassword() {
         <div class="form-stack">
           <label class="field"><span>世界名称</span><input v-model.trim="settingsForm.name" /></label>
           <div class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: settingsForm.favorSystemStatus === item }" @click="settingsForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div>
-          <label class="switch-row"><span><strong>主动消息偏好（预留）</strong><small>后端目前只保存此开关，尚未按它主动发消息</small></span><input v-model="settingsForm.acitvePushStatus" type="checkbox" /></label>
-          <label class="switch-row"><span><strong>输入结束识别</strong><small>{{ workspace.selectedWorld.value?.thinkStatus === false ? '停止输入后判断表达是否完整并自动回复' : '当前世界使用流式思考模式，此开关不会参与回复' }}</small></span><input v-model="settingsForm.eotDetectionStatus" type="checkbox" /></label>
+          <label class="switch-row"><span><strong>主动消息偏好</strong><small>允许角色围绕聊天中提到的事件发送提醒和当日关怀；晚间主动话题不受此开关影响</small></span><input v-model="settingsForm.acitvePushStatus" type="checkbox" /></label>
+          <label v-if="workspace.selectedWorld.value?.thinkStatus === false" class="switch-row"><span><strong>输入结束识别</strong><small>停止输入后判断表达是否完整并自动回复</small></span><input v-model="settingsForm.eotDetectionStatus" type="checkbox" /></label>
         </div>
         <div class="dialog-inline-actions settings-general-actions"><button v-if="workspace.canEditSelectedWorld.value" class="button secondary" @click="openEditTemplate"><Pencil :size="16" />编辑世界模板</button><button class="button primary" @click="run(() => workspace.updateWorld({ ...settingsForm }))">保存设置</button></div>
       </TabsContent>
@@ -1014,7 +1002,7 @@ async function changePassword() {
         <div class="settings-data">
           <section class="data-world-summary">
             <span class="data-summary-icon"><Database :size="20" /></span>
-            <span class="data-summary-copy"><small>当前世界</small><strong>{{ workspace.selectedWorld.value?.name }}</strong><em>{{ workspace.canEditSelectedWorld.value ? '原创世界' : '模板世界' }}</em></span>
+            <span class="data-summary-copy"><small>当前世界</small><strong>{{ workspace.selectedWorld.value?.name }}</strong><em>{{ workspace.canEditSelectedWorld.value ? '自有模板' : '他人模板' }}</em></span>
             <dl><div><dt>世界设定</dt><dd>{{ workspace.details.value.length }}</dd></div><div><dt>当前角色</dt><dd>{{ workspace.characters.value.length }}</dd></div></dl>
           </section>
 
@@ -1035,7 +1023,7 @@ async function changePassword() {
     </TabsRoot>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.save" :title="workspace.worldSave.value ? '覆盖世界存档' : '创建世界存档'" description="每个用户世界只保留一个存档；再次保存会覆盖现有存档。"><label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="4" maxlength="200" placeholder="记录此刻发生了什么（最多 200 字）" /></label><template #footer><button class="button ghost" @click="dialogs.save = false">取消</button><button class="button primary" @click="run(() => workspace.saveSnapshot(saveRemark), 'save')">{{ workspace.worldSave.value ? '确认覆盖' : '创建存档' }}</button></template></BaseDialog>
+  <BaseDialog v-model="dialogs.save" :title="workspace.worldSave.value ? '覆盖世界存档' : '创建世界存档'" description="每个世界只保留一个存档；再次保存会覆盖现有存档。"><label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="4" maxlength="200" placeholder="记录此刻发生了什么（最多 200 字）" /></label><template #footer><button class="button ghost" @click="dialogs.save = false">取消</button><button class="button primary" @click="run(() => workspace.saveSnapshot(saveRemark), 'save')">{{ workspace.worldSave.value ? '确认覆盖' : '创建存档' }}</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.worldLoad" title="确认读取世界存档" description="读档会回滚角色、聊天、好感和世界事件，并删除存档点之后的进度。">
     <div class="restore-summary"><strong>{{ workspace.worldSave.value?.remark || '未填写存档备注' }}</strong><span>{{ workspace.worldSave.value?.savedAt || '未知存档时间' }}</span><p>这项操作不可撤销，请确认当前进度已不再需要。</p></div>
     <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.loadSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
@@ -1045,15 +1033,15 @@ async function changePassword() {
   <ModelApiManagerDialog v-model="dialogs.modelApis" />
   <BaseDialog
     v-model="dialogs.end"
-    :title="workspace.selectedConversation.value?.status === 'active' ? '结束会话' : '会话操作'"
+    :title="workspace.selectedConversation.value?.status === 'active' ? (workspace.selectedConversation.value?.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作'"
     :description="workspace.selectedConversation.value?.status === 'active'
-      ? '可以归档并关闭会话，或永久删除全部相关记录。'
+      ? '结束后会归档，保留记录供查看，不能继续发送消息。也可以选择永久删除记录。'
       : '该会话已经归档；如果记录不再需要，可以永久删除。'"
   >
-    <template #footer><button class="button ghost" @click="dialogs.end = false">取消</button><button class="button ghost danger-text" :disabled="busy" @click="openConversationDelete">永久删除</button><button v-if="workspace.selectedConversation.value?.status === 'active'" class="button primary" :disabled="busy" @click="run(workspace.closeConversation, 'end')">归档并关闭</button></template>
+    <template #footer><button class="button ghost" @click="dialogs.end = false">取消</button><button class="button ghost danger-text" :disabled="busy" @click="openConversationDelete">永久删除</button><button v-if="workspace.selectedConversation.value?.status === 'active'" class="button primary" :disabled="busy" @click="run(workspace.closeConversation, 'end')">确认结束并归档</button></template>
   </BaseDialog>
   <BaseDialog v-model="dialogs.deleteConversation" title="永久删除会话" description="此操作不可撤销。相关聊天记录、跑团人物卡、投骰、战斗与存档数据都会被删除。">
-    <div class="destructive-confirmation"><strong>确认删除“{{ workspace.selectedConversation.value?.title || '当前会话' }}”？</strong><p>普通群聊已经产生的好感度等业务效果会保留，但对应聊天记录与日志将被清除。</p></div>
+    <div class="destructive-confirmation"><strong>确认删除“{{ workspace.selectedConversation.value?.title || '当前会话' }}”？</strong><p>删除普通群聊不会撤销已经产生的好感度变化，但聊天记录会被清除。</p></div>
     <template #footer><button class="button ghost" :disabled="busy" @click="dialogs.deleteConversation = false">取消</button><button class="button danger" :disabled="busy" @click="permanentlyDeleteConversation"><Trash2 :size="16" />确认永久删除</button></template>
   </BaseDialog>
   <BaseDialog
@@ -1105,7 +1093,7 @@ async function changePassword() {
     @update:model-value="handleTrpgBindingVisibility"
     @complete="completeTrpgBinding"
   />
-  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" @restored="restoreTrpg" @open-dice="openDiceMessage" @debug-dice="openDiceDebug" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
+  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" @restored="restoreTrpg" @open-dice="openDiceMessage" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
   <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" :auto-continue="diceAutoContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" @cancel-auto-continue="cancelDiceAutoAdvance" />
   <NoticeToast />
 </template>

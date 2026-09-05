@@ -58,7 +58,7 @@ const canFullEdit = computed(() => creating.value || (!isDefault.value && !isLoc
 const canRestrictedEdit = computed(() => !isDefault.value && isLocked.value)
 const moduleForm = computed(() => editing.value)
 const selectedId = computed(() => selected.value?.module.id || 0)
-const characterDialogTitle = computed(() => editingCharacterIndex.value == null ? '新建预设角色' : (importedCard.value?.character.name || '预设角色'))
+const characterDialogTitle = computed(() => editingCharacterIndex.value == null ? '新建模组角色卡' : (importedCard.value?.character.name || '模组角色卡'))
 const characterDialogDescription = computed(() => editingCharacterIndex.value == null
   ? '手动录入数值，或从现有文本中提取人物资料。'
   : canFullEdit.value ? '修改人物资料、技能、武器与背景。' : '当前模组不可编辑，你可以查看完整人物资料。')
@@ -502,7 +502,7 @@ async function confirmImportedCharacter() {
   } else {
     editing.value.characters.splice(editingCharacterIndex.value!, 1, saved)
   }
-  if (await persistCurrentModule(creatingCharacter ? '预设角色已创建并保存' : '预设角色已更新并保存')) closeCharacterDialog()
+  if (await persistCurrentModule(creatingCharacter ? '模组角色卡已创建并保存' : '模组角色卡已更新并保存')) closeCharacterDialog()
 }
 
 function clearCharacterImport() {
@@ -549,7 +549,6 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
     <div class="module-workspace">
       <nav class="module-switcher" aria-label="选择模组">
         <div class="module-switcher-heading">
-          <span class="eyebrow">MODULE SHELF</span>
           <h1>模组库</h1>
           <small>{{ ownedModules.length }} 个自建 · {{ defaultModules.length }} 个默认</small>
         </div>
@@ -586,7 +585,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
               <strong>{{ moduleForm.name || '未命名模组' }}</strong>
             </div>
             <div v-if="!creating" class="module-tab-links">
-              <button v-for="tab in ([['overview','概览'],['context','主持人设定'],['locations','地点'],['clues','线索'],['materials','素材'],['characters','预设角色']] as const)" :key="tab[0]" :class="{ active: activeTab === tab[0] }" @click="switchTab(tab[0])">{{ tab[1] }}</button>
+              <button v-for="tab in ([['overview','概览'],['context','主持人设定'],['locations','地点'],['clues','线索'],['materials','素材'],['characters','模组角色卡']] as const)" :key="tab[0]" :class="{ active: activeTab === tab[0] }" @click="switchTab(tab[0])">{{ tab[1] }}</button>
             </div>
             <div class="module-editor-actions">
               <span v-if="canFullEdit && !creating" class="module-save-status" :class="saveStatus.kind" role="status">{{ saveStatus.text }}</span>
@@ -601,25 +600,25 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
 
           <div class="module-editor-scroll">
             <section v-if="activeTab === 'overview'" class="module-form-grid overview-grid">
-              <header class="editor-section-heading full"><span class="eyebrow">{{ creating ? 'STEP 1 OF 2' : 'SCENARIO PROFILE' }}</span><h3>{{ creating ? '填写基本资料' : '基本资料' }}</h3><p>{{ creating ? '先填写名称和简介并创建模组，创建后即可继续补充其他内容。' : '这些信息会展示在新建跑团时的模组选择页面。' }}</p></header>
+              <header class="editor-section-heading full"><span v-if="creating" class="eyebrow">第 1 步，共 2 步</span><h3>{{ creating ? '填写基本资料' : '基本资料' }}</h3><p>{{ creating ? '先填写名称和简介并创建模组，创建后即可继续补充其他内容。' : '这些信息会展示在新建跑团时的模组选择页面。' }}</p></header>
               <label class="field full"><span>模组名称 *</span><input v-model="moduleForm.name" :disabled="!canFullEdit" /></label>
               <label class="field"><span>作者</span><input v-model="moduleForm.author" :disabled="!canFullEdit" /></label>
               <label class="field"><span>时代</span><input v-if="isDefault" :value="moduleForm.era" disabled /><select v-else v-model="moduleForm.era" :disabled="!canFullEdit"><option value="1920s">1920s</option><option value="现代">现代</option></select></label>
               <label class="field"><span>玩家人数</span><input v-model="moduleForm.playerCount" :disabled="!canFullEdit" placeholder="例如：2–4 人" /></label>
               <label class="field"><span>预计时长</span><input v-model="moduleForm.estimatedDuration" :disabled="!canFullEdit" placeholder="例如：4–6 小时" /></label>
-              <div class="field full"><span>模组封面</span><div class="upload-row"><input :value="moduleForm.coverUrl" disabled placeholder="上传后自动回填图片地址" /><label v-if="canFullEdit" class="button secondary file-button"><ImageUp :size="15" />{{ uploadingCover ? '上传中…' : '上传封面' }}<input type="file" accept="image/*" :disabled="uploadingCover" @change="uploadCoverImage" /></label></div></div>
+              <div class="field full"><span>模组封面</span><div class="upload-row"><small>{{ moduleForm.coverUrl ? '已上传封面' : '尚未上传封面' }}</small><label v-if="canFullEdit" class="button secondary file-button"><ImageUp :size="15" />{{ uploadingCover ? '上传中…' : '上传封面' }}<input type="file" accept="image/*" :disabled="uploadingCover" @change="uploadCoverImage" /></label></div></div>
               <label class="field full"><span>模组简介 *</span><textarea v-model="moduleForm.introduction" rows="6" :disabled="!canFullEdit" /></label>
               <label class="field full"><span>调查员创建说明</span><textarea v-model="moduleForm.investigatorCreation" rows="5" :disabled="!canFullEdit" /></label>
               <label v-if="!isDefault" class="switch-row full"><span><strong>可用于新建跑团</strong><small>关闭后，该模组仍保留，但不会出现在新建跑团的模组列表中。</small></span><input v-model="moduleForm.visible" type="checkbox" :disabled="!canFullEdit" /></label>
             </section>
 
             <section v-else-if="activeTab === 'context'" class="module-form-grid">
-              <header class="editor-section-heading full"><span class="eyebrow">KEEPER NOTES</span><h3>主持人设定</h3><p>整理只供主持人查看的真相、流程与特殊规则。</p></header>
+              <header class="editor-section-heading full"><h3>主持人设定</h3><p>整理只供主持人查看的真相、流程与特殊规则。</p></header>
               <label v-for="field in ([['truthBackground','真相与背景'],['investigatorIntro','调查员开场'],['timeline','时间线'],['specialRules','特殊规则'],['keeperGuidance','守秘人指引'],['endingContent','结局内容'],['extraContent','补充内容']] as const)" :key="field[0]" class="field full"><span>{{ field[1] }}</span><textarea v-model="moduleForm.context[field[0]]" rows="6" :disabled="!canFullEdit" /></label>
             </section>
 
             <section v-else-if="activeTab === 'locations'" class="module-collection">
-              <header class="editor-section-heading"><span class="eyebrow">LOCATIONS</span><h3>地点</h3><p>按调查顺序维护场景摘要与主持正文。</p></header>
+              <header class="editor-section-heading"><h3>地点</h3><p>按调查顺序维护场景摘要与主持正文。</p></header>
               <article v-for="(location, index) in moduleForm.locations" :key="location.id || index" class="module-entry-card">
                 <header><strong>地点 {{ index + 1 }}</strong><button v-if="canFullEdit" class="icon-button" title="删除地点" @click="removeAt(moduleForm.locations, index)"><Trash2 :size="15" /></button></header>
                 <div class="module-form-grid"><label class="field"><span>名称 *</span><input v-model="location.name" :disabled="!canFullEdit" /></label><label class="field"><span>摘要 *</span><input v-model="location.summary" :disabled="!canFullEdit" /></label><label class="field full"><span>地点正文 *</span><textarea v-model="location.content" rows="8" :disabled="isDefault" /></label></div>
@@ -629,7 +628,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
             </section>
 
             <section v-else-if="activeTab === 'clues'" class="module-collection">
-              <header class="editor-section-heading"><span class="eyebrow">CLUES</span><h3>线索</h3><p>管理玩家可能获取的信息以及关键线索标记。</p></header>
+              <header class="editor-section-heading"><h3>线索</h3><p>管理玩家可能获取的信息以及关键线索标记。</p></header>
               <article v-for="(clue, index) in moduleForm.clues" :key="clue.id || `new-${index}`" class="module-entry-card">
                 <header><strong>{{ clue.id ? `线索 ${index + 1}` : '新线索' }}</strong><button v-if="canFullEdit" class="icon-button" title="删除线索" @click="removeAt(moduleForm.clues, index)"><Trash2 :size="15" /></button></header>
                 <div class="module-form-grid"><label class="field full"><span>标题 *</span><input v-model="clue.title" :disabled="!canFullEdit && Boolean(clue.id)" /></label><label class="field full"><span>线索正文 *</span><textarea v-model="clue.content" rows="7" :disabled="isDefault" /></label><label class="switch-row full"><span><strong>重要线索</strong></span><input v-model="clue.important" type="checkbox" :disabled="!canFullEdit && Boolean(clue.id)" /></label></div>
@@ -639,7 +638,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
             </section>
 
             <section v-else-if="activeTab === 'materials'" class="module-collection material-grid">
-              <header class="editor-section-heading collection-heading"><span class="eyebrow">HANDOUTS</span><h3>素材</h3><p>上传可在跑团过程中展示给玩家的图片资料。</p></header>
+              <header class="editor-section-heading collection-heading"><h3>素材</h3><p>上传可在跑团过程中展示给玩家的图片资料。</p></header>
               <article v-for="(material, index) in moduleForm.materials" :key="material.id || index" class="module-entry-card material-card">
                 <header><strong>素材 {{ index + 1 }}</strong><button v-if="canFullEdit" class="icon-button" title="删除素材" @click="removeAt(moduleForm.materials, index)"><Trash2 :size="15" /></button></header>
                 <label v-if="canFullEdit && !material.imageUrl" class="material-image-frame empty" :class="{ uploading: uploadingMaterial === index }">
@@ -666,12 +665,12 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
             </section>
 
             <section v-else class="module-character-section">
-              <header class="editor-section-heading"><span class="eyebrow">PRE-GENERATED INVESTIGATORS</span><h3>预设角色</h3><p>查看或维护模组附带的调查员人物卡。</p></header>
+              <header class="editor-section-heading"><h3>模组角色卡</h3><p>查看或维护模组中的人物、怪物和其他登场角色。</p></header>
               <div v-if="moduleForm.characters.length || canFullEdit" class="preset-character-list">
-                <article v-for="(card, index) in moduleForm.characters" :key="index"><button class="preset-character-main" type="button" @click="openCharacterEditor(index)"><span class="preset-avatar">{{ card.character.name.slice(0, 1) }}</span><span><strong>{{ card.character.name }}</strong><small>{{ card.skills.length }} 项技能 · {{ card.weapons.length }} 件武器</small></span></button><button v-if="canFullEdit" class="icon-button" aria-label="删除预设角色" @click="removeAt(moduleForm.characters, index)"><Trash2 :size="15" /></button></article>
-                <button v-if="canFullEdit" class="preset-character-create-card" type="button" @click="openNewCharacterDialog"><Plus :size="18" /><strong>新建预设角色</strong></button>
+                <article v-for="(card, index) in moduleForm.characters" :key="index"><button class="preset-character-main" type="button" @click="openCharacterEditor(index)"><span class="preset-avatar">{{ card.character.name.slice(0, 1) }}</span><span><strong>{{ card.character.name }}</strong><small>{{ card.skills.length }} 项技能 · {{ card.weapons.length }} 件武器</small></span></button><button v-if="canFullEdit" class="icon-button" aria-label="删除模组角色卡" @click="removeAt(moduleForm.characters, index)"><Trash2 :size="15" /></button></article>
+                <button v-if="canFullEdit" class="preset-character-create-card" type="button" @click="openNewCharacterDialog"><Plus :size="18" /><strong>新建模组角色卡</strong></button>
               </div>
-              <div v-else class="module-empty small">此模组没有预设角色。</div>
+              <div v-else class="module-empty small">此模组尚未添加角色卡。</div>
 
               <BaseDialog v-model="characterDialogOpen" :title="characterDialogTitle" :description="characterDialogDescription" size="lg" :content-class="characterDialogContentClass">
                 <div class="character-editor-content">
@@ -682,12 +681,12 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
 
                   <section v-else-if="characterEditorMode === 'parse'" class="character-parser-layout">
                     <div class="character-parser-source">
-                      <span class="eyebrow">SOURCE TEXT</span><h3>粘贴人物数据</h3>
+                      <h3>粘贴人物数据</h3>
                       <p>属性支持中文名和 STR 等缩写；技能按中文名称匹配。武器只标记原文，不会自动建立。</p>
                       <textarea v-model="importingText" rows="18" placeholder="粘贴图片示例中的文字格式…" />
                     </div>
                     <div class="character-parser-result">
-                      <span class="eyebrow">PARSE RESULT</span><h3>解析结果</h3>
+                      <h3>解析结果</h3>
                       <div v-if="importedCard" class="parse-result-summary">
                         <div class="review-heading"><div><strong>{{ importedCard.character.name || '未识别姓名' }}</strong><small>{{ importedCard.skills.length }} 项技能已匹配</small></div><span v-if="missingAttributes.length" class="validation-badge error">缺少 {{ missingAttributes.join('、') }}</span><span v-else class="validation-badge">核心属性完整</span></div>
                         <div class="parsed-attribute-grid"><span v-for="field in ([['str','STR'],['con','CON'],['siz','SIZ'],['dex','DEX'],['app','APP'],['intValue','INT'],['pow','POW'],['edu','EDU']] as const)" :key="field[0]"><small>{{ field[1] }}</small><strong>{{ importedCard.character[field[0]] || '—' }}</strong></span></div>

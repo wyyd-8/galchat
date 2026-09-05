@@ -320,12 +320,12 @@ export function buildTrpgExecutionState(
 ): TrpgExecutionState {
   const activePlan = plans[0]
   if (!activePlan) {
-    return { kind: 'exploration', title: '探索执行状态', subtitle: '暂无场景计划', scenes: [] }
+    return { kind: 'exploration', title: '当前场景与行动顺序', subtitle: '暂无场景计划', scenes: [] }
   }
   if (activePlan.source === 'COMBAT') {
     return {
       kind: 'combat',
-      title: '战斗执行状态',
+      title: '当前战斗与行动顺序',
       subtitle: activePlan.displayName,
       scenes: [buildScene(activePlan, 'combat', activePlan, new Set(), turn, true)],
     }
@@ -350,7 +350,7 @@ export function buildTrpgExecutionState(
   })
   return {
     kind: 'exploration',
-    title: '探索执行状态',
+    title: '当前场景与行动顺序',
     subtitle: activePlan.displayName,
     scenes: moveFirst(roots, activeRoot.id).map((root) => {
       const childPlans = orderLinkedPlans(root.id == null ? [] : childrenByRoot.get(root.id) ?? [])

@@ -42,7 +42,7 @@ export function validateCocModulePayload(payload: CocModuleSavePayload): string 
     if (!hasText(damageBonus)) continue
     if (!isValidDamageBonus(damageBonus)) {
       const name = card.character.name.trim() || '未命名角色'
-      return `预设角色“${name}”的伤害加值（DB）格式不合法`
+      return `模组角色卡“${name}”的伤害加值（DB）格式不合法`
     }
   }
 

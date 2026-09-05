@@ -94,7 +94,7 @@ async function renderCharacters(options: {
       activeTab: 'characters', canFullEdit: options.canFullEdit ?? true,
       moduleForm: { characters }, characterDialogOpen: options.dialogOpen ?? false,
       isSaving: false,
-      characterEditorMode: options.editorMode || 'choose', characterDialogTitle: '新建预设角色',
+      characterEditorMode: options.editorMode || 'choose', characterDialogTitle: '新建模组角色卡',
       characterDialogDescription: '手动录入数值，或从现有文本中提取人物资料。',
       characterDialogContentClass: `module-character-editor-dialog character-dialog-${(options.editorMode || 'choose') === 'choose' ? 'choice' : 'workspace'}`,
       importedCard, importingText: '', missingAttributes: [], unresolvedWeaponLines: [],
@@ -248,7 +248,7 @@ test('offers cover upload instead of an editable cover address', async () => {
 
   assert.match(html, /上传封面/)
   assert.match(html, /type="file"[^>]*accept="image\/\*"/)
-  assert.match(html, /<span>模组封面<\/span>[\s\S]*?<input[^>]*disabled[^>]*placeholder="上传后自动回填图片地址"/)
+  assert.match(html, /<span>模组封面<\/span>[\s\S]*?尚未上传封面/)
 })
 
 test('places the save status immediately before the export action', async () => {
@@ -275,7 +275,7 @@ test('uses the material image itself as the upload area', async () => {
 test('adds a same-size preset character creation card with only the requested label', async () => {
   const html = await renderCharacters()
 
-  assert.match(html, /class="preset-character-create-card"[\s\S]*?>[\s\S]*?新建预设角色[\s\S]*?<\/button>/)
+  assert.match(html, /class="preset-character-create-card"[\s\S]*?>[\s\S]*?新建模组角色卡[\s\S]*?<\/button>/)
   const card = html.match(/<button[^>]*class="preset-character-create-card"[\s\S]*?<\/button>/)?.[0]
   assert.ok(card)
   assert.doesNotMatch(card, /手动录入|文本解析|创建方式/)
@@ -294,7 +294,7 @@ test('keeps completed preset character card information beside the creation card
 
   assert.match(html, /阿利斯泰尔/)
   assert.match(html, /1 项技能 · 1 件武器/)
-  assert.match(html, /新建预设角色/)
+  assert.match(html, /新建模组角色卡/)
 })
 
 test('offers manual entry and text parsing without AI generation in the new character dialog', async () => {

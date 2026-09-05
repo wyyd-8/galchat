@@ -150,10 +150,10 @@ async function confirmDelete() {
 </script>
 
 <template>
-  <BaseDialog v-model="open" title="模型管理" description="添加并测试 OpenAI 兼容接口。第一版仅保存配置，暂不影响单聊、群聊或跑团。" size="lg" content-class="model-api-manager-dialog">
+  <BaseDialog v-model="open" title="模型管理" description="添加并测试 OpenAI 兼容模型连接。保存后，可在单聊、群聊或跑团中为角色选择回复模型。" size="lg" content-class="model-api-manager-dialog">
     <div class="model-api-toolbar">
       <div>
-        <span class="eyebrow"><ServerCog :size="13" /> MODEL CONNECTIONS</span>
+        <span class="eyebrow"><ServerCog :size="13" /> 模型连接</span>
         <p>已保存 {{ manager.models.value.length }} 个模型配置</p>
       </div>
       <button class="button primary" @click="openCreate"><Plus :size="15" />添加模型</button>

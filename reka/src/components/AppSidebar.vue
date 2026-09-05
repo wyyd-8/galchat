@@ -49,7 +49,7 @@ function activityLabel(value?: string) {
       <ScrollAreaViewport class="sidebar-viewport">
         <button v-for="world in worlds" :key="world.id" class="sidebar-item" :class="{ active: selectedWorldId === world.id }" @click="emit('selectWorld', world.id)">
           <span class="mini-cover" :style="world.image ? { backgroundImage: `url(${world.image})` } : {}"><BookOpen v-if="!world.image" :size="16" /></span>
-          <span class="sidebar-item-copy"><strong>{{ world.name }}</strong><small>{{ world.myWorld === true ? '原创世界' : world.myWorld === false ? '模板世界' : '用户世界' }}</small></span>
+          <span class="sidebar-item-copy"><strong>{{ world.name }}</strong><small>{{ world.myWorld === true ? '自有模板' : world.myWorld === false ? '他人模板' : '世界' }}</small></span>
         </button>
         <template v-if="selectedWorldId">
           <div class="sidebar-heading recent-heading"><span>最近互动</span></div>

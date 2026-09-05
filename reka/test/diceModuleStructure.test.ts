@@ -184,14 +184,13 @@ test('keeps baked cinnabar gold detail atlases free of black bleed', async () =>
   }
 })
 
-test('keeps dice debugging inside the TRPG tools instead of a standalone demo', async () => {
-  await assert.rejects(access(new URL('../../dice-lab/', import.meta.url)))
-  await access(new URL('../src/dice/components/DiceDebugPanel.vue', import.meta.url))
-
-  const toolsSource = await readFile(new URL('../src/components/TrpgToolsDialog.vue', import.meta.url), 'utf8')
-  assert.match(toolsSource, /DiceDebugPanel/)
-  assert.match(toolsSource, /value="dice-debug"/)
-  assert.match(toolsSource, /骰子调试/)
+test('excludes the retired dice debug UI and keeps the result player', async () => {
+  await assert.rejects(access(new URL('../src/dice/components/DiceDebugPanel.vue', import.meta.url)))
+  await assert.rejects(access(new URL('../src/dice/debug/diceDebugScenarios.ts', import.meta.url)))
+  await access(new URL('../src/dice/components/DicePlayerDialog.vue', import.meta.url))
+  const appSource = await readFile(new URL('../src/App.vue', import.meta.url), 'utf8')
+  assert.doesNotMatch(appSource, /openDiceDebug|debug-dice/)
+  assert.match(appSource, /@open-dice="openDiceMessage"/)
 })
 
 test('routes frontend consumers through the dice feature hierarchy', async () => {

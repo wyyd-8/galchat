@@ -64,7 +64,7 @@ test('nests child scenes in execution order and removes their characters from th
   )
 
   assert.equal(state.kind, 'exploration')
-  assert.equal(state.title, '探索执行状态')
+  assert.equal(state.title, '当前场景与行动顺序')
   assert.deepEqual(state.scenes.map((scene) => scene.plan.id), [10, 30])
   assert.deepEqual(state.scenes[0].childScenes.map((scene) => scene.plan.id), [20, 21])
   assert.deepEqual(
@@ -136,7 +136,7 @@ test('shows only the active combat plan and maps combat step states', () => {
   const state = buildTrpgExecutionState([combat, suspendedScene], turn)
 
   assert.equal(state.kind, 'combat')
-  assert.equal(state.title, '战斗执行状态')
+  assert.equal(state.title, '当前战斗与行动顺序')
   assert.equal(state.subtitle, '战斗第3轮')
   assert.deepEqual(state.scenes.map((scene) => scene.plan.id), [40])
   assert.deepEqual(

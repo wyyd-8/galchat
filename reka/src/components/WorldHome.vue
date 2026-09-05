@@ -38,7 +38,7 @@ const dialogueEntries = computed<DialogueEntry[]>(() => [
     id: conversation.id,
     kind: conversation.mode === 'trpg' ? 'trpg' as const : 'group' as const,
     title: conversation.title,
-    preview: conversation.lastChatContent || conversation.summary || (conversation.status === 'active' ? '等待下一次互动' : '会话已关闭'),
+    preview: conversation.lastChatContent || conversation.summary || (conversation.status === 'active' ? '等待下一次互动' : '会话已结束'),
     time: conversation.lastChatTime || conversation.updatedAt,
     status: conversation.status,
   })),
@@ -84,14 +84,14 @@ function openDialogue(entry: DialogueEntry) {
 <template>
   <main class="world-home">
     <header class="workspace-banner" :style="world.image ? { backgroundImage: `linear-gradient(90deg, rgba(25,27,29,.92), rgba(25,27,29,.38)), url(${world.image})` } : {}">
-      <div><span class="eyebrow light">CURRENT WORLD</span><h1>{{ world.name }}</h1><p>{{ characters.length }} 位角色 · {{ conversations.filter((item) => item.status === 'active').length }} 个进行中的会话</p></div>
+      <div><h1>{{ world.name }}</h1><p>{{ characters.length }} 位角色 · {{ conversations.filter((item) => item.status === 'active').length }} 个进行中的会话</p></div>
       <button class="button glass" @click="emit('settings')"><Settings2 :size="17" />世界设置</button>
     </header>
     <div class="world-dashboard">
       <section class="dashboard-main dialogue-hub">
         <header class="dialogue-hub-heading">
-          <div><span class="eyebrow">DIALOGUE HUB</span><h2>对话中心</h2><p>单聊、群聊和跑团按最近互动排列。</p></div>
-          <div class="dialogue-hub-actions"><button class="button secondary" @click="emit('addCharacter')"><Plus :size="16" />添加角色</button><button class="button primary" @click="emit('newConversation')"><Plus :size="16" />新建会话</button></div>
+          <div><h2>对话中心</h2><p>单聊、群聊和跑团按最近互动排列。</p></div>
+          <div class="dialogue-hub-actions"><button class="button secondary" @click="emit('addCharacter')"><Plus :size="16" />添加角色</button><button class="button primary" @click="emit('newConversation')"><Plus :size="16" />新建群聊或跑团</button></div>
         </header>
 
         <div class="dialogue-filter" role="tablist" aria-label="对话类型">
@@ -114,7 +114,7 @@ function openDialogue(entry: DialogueEntry) {
               </span>
               <ChevronRight :size="17" />
             </button>
-            <button v-if="entry.kind === 'direct'" class="icon-button dialogue-entry-edit" title="编辑角色资料" aria-label="编辑角色资料" @click="emit('editCharacter', entry.id)"><Pencil :size="14" /></button>
+            <button v-if="entry.kind === 'direct'" class="icon-button dialogue-entry-edit" title="编辑角色设置" aria-label="编辑角色设置" @click="emit('editCharacter', entry.id)"><Pencil :size="14" /></button>
           </article>
         </div>
         <div v-else class="dialogue-hub-empty">
@@ -123,7 +123,7 @@ function openDialogue(entry: DialogueEntry) {
           <p>{{ dialogueFilter === 'direct' ? '添加角色后即可开始单聊。' : dialogueFilter === 'group' || dialogueFilter === 'trpg' ? '建立会话后会显示在这里。' : '添加角色后即可开始单聊并建立会话。' }}</p>
         </div>
       </section>
-      <aside class="snapshot-card"><span class="snapshot-icon"><Archive :size="22" /></span><span class="eyebrow">WORLD SNAPSHOT</span><h3>世界存档</h3><p v-if="worldSave">{{ worldSave.remark || '未填写备注' }}<small>{{ worldSave.savedAt || '存档时间未知' }}</small></p><p v-else>尚未建立存档。存档包含角色状态、单聊、群聊和世界事件。</p><div><button class="button secondary" @click="emit('save')"><Save :size="16" />{{ worldSave ? '覆盖存档' : '创建存档' }}</button><button class="button ghost" :disabled="!worldSave" @click="emit('load')">读取存档</button></div></aside>
+      <aside class="snapshot-card"><span class="snapshot-icon"><Archive :size="22" /></span><h3>世界存档</h3><p v-if="worldSave">{{ worldSave.remark || '未填写备注' }}<small>{{ worldSave.savedAt || '存档时间未知' }}</small></p><p v-else>尚未建立存档。存档包含角色状态、单聊、群聊和世界事件。</p><div><button class="button secondary" @click="emit('save')"><Save :size="16" />{{ worldSave ? '覆盖存档' : '创建存档' }}</button><button class="button ghost" :disabled="!worldSave" @click="emit('load')">读取存档</button></div></aside>
     </div>
   </main>
 </template>

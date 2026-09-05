@@ -394,7 +394,7 @@ onMounted(() => execute(async () => {
         </section>
 
         <section v-else-if="currentStep === 'BACKGROUND'" class="creation-background-step">
-          <div class="background-progress"><span>已填写 {{ backgroundCount }}/6 项</span><small>所有项目均可留空，确认后未填写内容会保存为（空）；没有选择关键连接时会自动指定。</small></div>
+          <div class="background-progress"><span>已填写 {{ backgroundCount }}/6 项</span><small>所有项目均可留空；未选择关键连接时，系统会自动指定。</small></div>
           <article v-for="item in BACKGROUND_META" :key="item.code" class="background-dossier-card">
             <header><span><strong>{{ item.label }}</strong></span><button v-if="item.rollable" class="button ghost" :disabled="busy" @click="execute(() => rollBackground(item.code))"><RotateCw :size="13" />{{ backgroundPrompts[item.code] ? '重新掷提示' : '掷骰提示' }}</button></header>
             <div v-if="backgroundPrompts[item.code]" class="background-prompt"><Dices :size="14" /><span><small>随机提示 · {{ backgroundPrompts[item.code].rolls.join(' / ') }}</small><p>{{ backgroundPrompts[item.code].prompts.join('；') }}</p></span></div>

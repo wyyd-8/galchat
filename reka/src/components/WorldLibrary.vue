@@ -18,17 +18,17 @@ function pick(event: Event) { const file = (event.target as HTMLInputElement).fi
       <div class="hero-actions"><button class="button primary" @click="emit('createWorld')"><Plus :size="17" />创建世界</button><label class="button secondary file-button"><Import :size="17" />导入世界模板<input type="file" accept="application/json" @change="pick" /></label></div>
     </header>
     <section class="content-section">
-      <div class="section-title"><div><span class="eyebrow">CONTINUE</span><h2>继续你的世界</h2></div><span class="count-label">{{ worlds.length }} 个世界</span></div>
+      <div class="section-title"><div><h2>继续你的世界</h2></div><span class="count-label">{{ worlds.length }} 个世界</span></div>
       <div v-if="worlds.length" class="world-grid">
         <button v-for="world in worlds" :key="world.id" class="world-card" @click="emit('select', world.id)">
           <span class="world-cover" :style="world.image ? { backgroundImage: `linear-gradient(180deg, transparent 40%, rgba(15,18,22,.72)), url(${world.image})` } : {}"><BookOpen v-if="!world.image" :size="30" /></span>
-          <span class="world-card-copy"><small>{{ world.myWorld === true ? '原创世界' : world.myWorld === false ? '模板世界' : '用户世界' }}</small><strong>{{ world.name }}</strong><span>进入世界 <ArrowRight :size="15" /></span></span>
+          <span class="world-card-copy"><small>{{ world.myWorld === true ? '自有模板' : world.myWorld === false ? '他人模板' : '世界' }}</small><strong>{{ world.name }}</strong><span>进入世界 <ArrowRight :size="15" /></span></span>
         </button>
       </div>
       <div v-else class="empty-panel"><BookOpen :size="28" /><h3>还没有自己的世界</h3><p>从公开模板开始，或创建一套全新的设定。</p></div>
     </section>
     <section class="content-section muted-section">
-      <div class="section-title"><div><span class="eyebrow">DISCOVER</span><h2>世界模板</h2></div><button class="button ghost" @click="emit('createTemplate')"><Plus :size="16" />创建模板</button></div>
+      <div class="section-title"><div><h2>世界模板</h2></div><button class="button ghost" @click="emit('createTemplate')"><Plus :size="16" />创建模板</button></div>
       <div class="template-strip"><button v-for="template in templates.slice(0, 6)" :key="template.id" class="template-card" :disabled="!template.id" @click="template.id && emit('previewTemplate', template.id)"><div class="template-cover" :style="template.image ? { backgroundImage: `url(${template.image})` } : {}" /><small>查看世界模板</small><h3>{{ template.name }}</h3><p>查看作者与世界背景</p></button></div>
     </section>
   </main>

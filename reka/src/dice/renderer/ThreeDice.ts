@@ -667,7 +667,7 @@ function moduleHeading(
   const expression = document.createElement('strong')
   expression.textContent = module.expression
   const total = document.createElement('span')
-  total.textContent = `模块结果 ${module.result}`
+  total.textContent = `检定点数 ${module.result}`
   heading.append(expression, total)
   return heading
 }
@@ -935,7 +935,7 @@ export class ThreeDiceBoard {
   private renderWaitingDice(): void {
     const placeholder = document.createElement('p')
     placeholder.className = 'empty-tray'
-    placeholder.textContent = '选择示例并点击“播放掷骰”'
+    placeholder.textContent = '正在加载掷骰结果…'
     this.diceTray.replaceChildren(placeholder)
   }
 

@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BookUser, Check, ChevronDown, ChevronUp, ClipboardCheck, Dices, FlaskConical, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, Search, Sparkles, UserRound, X } from '@lucide/vue'
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BookUser, Check, ChevronDown, ChevronUp, ClipboardCheck, Dices, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, Search, Sparkles, UserRound, X } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
-import DiceDebugPanel from '@/dice/components/DiceDebugPanel.vue'
 import { api } from '@/api/client'
 import type {
   Character, CharacterCard, CharacterCardCreationDraft, CocModule, ContextWindowOverview, ContextWindowUsage, Conversation, DiceRollAggregate,
@@ -43,7 +42,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   restored: []
   openDice: [aggregate: DiceRollAggregate]
-  debugDice: [aggregate: DiceRollAggregate]
   locateDice: [messageId: number]
   loadEarlier: []
   createCharacterCard: [targetKey: string, method: CharacterCardCreationMethod]
@@ -129,7 +127,9 @@ const runtimeActors = computed<RuntimeActorView[]>(() => {
         item.subjectCharacterId === investigator?.cardId)?.usage
       return {
         key: `character:${runtime.actorId}`,
-        name: investigator?.name || character?.characterName || `角色 #${runtime.actorId}`,
+        name: investigator && character && investigator.name !== character.characterName
+          ? `${character.characterName} 饰演 ${investigator.name}`
+          : investigator?.name || character?.characterName || `角色 #${runtime.actorId}`,
         image: character?.characterImage,
         runtime,
         usage,
@@ -152,16 +152,16 @@ const diceFiltersActive = computed(() => Boolean(
   diceSearchQuery.value.trim() || diceCategoryFilter.value || diceResultFilter.value,
 ))
 const diceHistoryMatchCopy = computed(() => diceFiltersActive.value
-  ? `找到 ${diceHistoryEntries.value.length} 条 · 已检索最近 ${allDiceHistoryEntries.value.length} 条骰子记录`
+  ? `找到 ${diceHistoryEntries.value.length} 条 · 已检索最近 ${allDiceHistoryEntries.value.length} 条掷骰记录`
   : `已显示 ${diceHistoryEntries.value.length} 条掷骰记录`)
 const diceHistoryLoadLabel = computed(() => {
   if (props.loadingOlderMessages) return '正在加载…'
-  if (!props.hasOlderMessages) return '已显示全部聊天记录'
-  return diceFiltersActive.value ? '加载更早记录并继续筛选' : '加载更早的聊天记录'
+  if (!props.hasOlderMessages) return '已显示全部掷骰记录'
+  return diceFiltersActive.value ? '加载更早记录并继续筛选' : '查找更早的掷骰记录'
 })
 const diceHistoryLoadHint = computed(() => props.hasOlderMessages
-  ? '将继续查找更早聊天中的骰子记录'
-  : '没有更多聊天记录了')
+  ? '将继续查找更早聊天中的掷骰记录'
+  : '')
 const diceResultOptions: Array<{ value: DiceHistoryResultKind; label: string }> = [
   { value: 'numeric', label: '数值' },
   { value: 'success', label: '成功' },
@@ -239,6 +239,10 @@ const characterStatuses = computed(() => {
 })
 
 function time(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '暂无记录' }
+function profileText(value?: string | null) {
+  const text = value?.trim()
+  return !text || ['（空）', '(空)'].includes(text) ? '暂未填写' : text
+}
 function shown(value?: string | number | null) { return value == null || value === '' ? '—' : value }
 function clearDiceFilters() {
   diceSearchQuery.value = ''
@@ -275,7 +279,7 @@ function runtimeSummary(actor: RuntimeActorView): string {
   return actor.runtime.modelApiName || '默认模型'
 }
 function runtimeModeLabel(actor: RuntimeActorView): string {
-  return actor.runtime.controlMode === 'MANUAL' ? '人工' : '模型'
+  return actor.runtime.controlMode === 'MANUAL' ? '手动控制' : 'AI 控制'
 }
 function modelStatusLabel(model?: ModelApi): string {
   if (!model) return ''
@@ -520,21 +524,20 @@ watch(selectedSheetTab, (tab) => {
 </script>
 
 <template>
-  <BaseDialog v-model="open" title="跑团工具" :description="`${conversation.title} · ${module?.name || `模组 #${conversation.moduleId || '未记录'}`}`" size="lg" :content-class="dialogContentClass">
+  <BaseDialog v-model="open" title="跑团工具" :description="module?.name === conversation.title ? conversation.title : `${conversation.title} · 模组：${module?.name || '未记录'}`" size="lg" :content-class="dialogContentClass">
     <TabsRoot v-model="selectedToolTab" class="tabs trpg-tools">
       <TabsList class="tabs-list">
         <TabsTrigger value="status"><Activity :size="15" />状态</TabsTrigger>
         <TabsTrigger value="save"><Save :size="15" />存档</TabsTrigger>
         <TabsTrigger value="card"><BookUser :size="15" />人物卡</TabsTrigger>
-        <TabsTrigger value="dice"><Dices :size="15" />骰子</TabsTrigger>
-        <TabsTrigger value="dice-debug"><FlaskConical :size="15" />骰子调试</TabsTrigger>
+        <TabsTrigger value="dice"><Dices :size="15" />掷骰记录</TabsTrigger>
       </TabsList>
 
       <TabsContent value="status" class="tabs-content tool-section">
         <section class="trpg-runtime-dashboard">
           <header class="trpg-runtime-heading">
-            <span><strong>角色发言</strong><small>模型 {{ modelRuntimeCount }} · 人工 {{ manualRuntimeCount }}</small></span>
-            <button class="icon-button bordered" :disabled="busy" title="刷新" aria-label="刷新角色发言状态" @click="execute(refreshOverview)"><RefreshCw :size="15" /></button>
+            <span><strong>角色控制方式</strong><small>AI 控制 {{ modelRuntimeCount }} 位 · 手动控制 {{ manualRuntimeCount }} 位</small></span>
+            <button class="icon-button bordered" :disabled="busy" title="刷新" aria-label="刷新角色控制方式" @click="execute(refreshOverview)"><RefreshCw :size="15" /></button>
           </header>
 
           <div class="trpg-runtime-list">
@@ -556,20 +559,20 @@ watch(selectedSheetTab, (tab) => {
                 </button>
 
                 <div v-if="actor.usage" class="trpg-runtime-context">
-                  <span><small>上下文</small><em>{{ runtimeContextPercent(actor) }}%</em></span>
+                  <span><small>对话容量占用</small><em>{{ runtimeContextPercent(actor) }}%</em></span>
                   <div class="context-meter" :class="runtimeContextTone(actor)"><i :style="{ width: `${Math.min(runtimeContextPercent(actor), 100)}%` }" /></div>
                 </div>
                 <p v-if="!actor.runtime.modelApiAvailable" class="trpg-runtime-inline-warning">原模型已删除，现使用默认模型</p>
 
                 <div v-if="expandedRuntimeKey === actor.key" class="trpg-runtime-editor">
                   <div v-if="actor.runtime.actorType === 'character'" class="trpg-runtime-field">
-                    <span>发言方式</span>
+                    <span>控制方式</span>
                     <div class="segmented trpg-runtime-mode-switch">
-                      <button type="button" :class="{ active: runtimeControlMode === 'MODEL' }" @click="runtimeControlMode = 'MODEL'">模型</button>
-                      <button type="button" :class="{ active: runtimeControlMode === 'MANUAL' }" @click="runtimeControlMode = 'MANUAL'">人工</button>
+                      <button type="button" :class="{ active: runtimeControlMode === 'MODEL' }" @click="runtimeControlMode = 'MODEL'">AI 控制</button>
+                      <button type="button" :class="{ active: runtimeControlMode === 'MANUAL' }" @click="runtimeControlMode = 'MANUAL'">手动控制</button>
                     </div>
                   </div>
-                  <p v-else class="trpg-runtime-kp-note">KP 仅支持模型发言</p>
+                  <p v-else class="trpg-runtime-kp-note">KP 由 AI 控制</p>
 
                   <template v-if="runtimeControlMode === 'MODEL'">
                     <label class="trpg-runtime-field">
@@ -700,10 +703,10 @@ watch(selectedSheetTab, (tab) => {
                   :style="card.character.image ? { backgroundImage: `url(${card.character.image})` } : {}"
                 ><UserRound v-if="!card.character.image" :size="24" /></span>
                 <div class="sheet-identity">
-                  <small>{{ selectedActorName }} · {{ card.character.occupation || '未填写职业' }}</small>
+                  <small>扮演者：{{ selectedActorName }} · {{ card.character.occupation || '未填写职业' }}</small>
                   <h3>{{ card.character.name }}</h3>
                   <p>{{ shown(card.character.sex) }} · {{ shown(card.character.age) }} 岁 · {{ card.character.era || '时代未填' }}</p>
-                  <p>{{ card.character.birthplace || '出身地未填' }} · {{ card.character.residence || '居住地未填' }}</p>
+                  <p v-if="profileText(card.character.birthplace) !== '暂未填写' && card.character.birthplace?.trim() !== '无'">出身地：{{ profileText(card.character.birthplace) }}</p><p v-if="profileText(card.character.residence) !== '暂未填写' && card.character.residence?.trim() !== '无'">居住地：{{ profileText(card.character.residence) }}</p>
                 </div>
                 <div class="sheet-statuses" aria-label="调查员状态">
                   <em v-for="status in characterStatuses" :key="status.label" :class="status.tone">{{ status.label }}</em>
@@ -856,31 +859,31 @@ watch(selectedSheetTab, (tab) => {
                     </TabsList>
                     <TabsContent value="background" class="sheet-profile-content">
                       <div class="sheet-profile-grid">
-                        <section><strong>形象描述</strong><p>{{ card.profile?.appearance || '未记录' }}</p></section>
-                        <section><strong>思想与信念</strong><p>{{ card.profile?.ideology || '未记录' }}</p></section>
-                        <section><strong>特质</strong><p>{{ card.profile?.traits || '未记录' }}</p></section>
+                        <section><strong>形象描述</strong><p>{{ profileText(card.profile?.appearance) }}</p></section>
+                        <section><strong>思想与信念</strong><p>{{ profileText(card.profile?.ideology) }}</p></section>
+                        <section><strong>特质</strong><p>{{ profileText(card.profile?.traits) }}</p></section>
                       </div>
                     </TabsContent>
                     <TabsContent value="connections" class="sheet-profile-content">
                       <div class="sheet-profile-grid">
-                        <section><strong>重要之人</strong><p>{{ card.profile?.significantPeople || '未记录' }}</p></section>
-                        <section><strong>意义非凡之地</strong><p>{{ card.profile?.meaningfulLocations || '未记录' }}</p></section>
-                        <section><strong>宝贵之物</strong><p>{{ card.profile?.treasuredPossessions || '未记录' }}</p></section>
-                        <section><strong>关键连接</strong><small>{{ card.profile?.keyConnectionCategory || '未分类' }}</small><p>{{ card.profile?.keyConnectionText || '未记录' }}</p></section>
+                        <section><strong>重要之人</strong><p>{{ profileText(card.profile?.significantPeople) }}</p></section>
+                        <section><strong>意义非凡之地</strong><p>{{ profileText(card.profile?.meaningfulLocations) }}</p></section>
+                        <section><strong>宝贵之物</strong><p>{{ profileText(card.profile?.treasuredPossessions) }}</p></section>
+                        <section><strong>关键连接</strong><small>{{ card.profile?.keyConnectionCategory || '未分类' }}</small><p>{{ profileText(card.profile?.keyConnectionText) }}</p></section>
                       </div>
                     </TabsContent>
                     <TabsContent value="trauma" class="sheet-profile-content">
                       <div class="sheet-profile-grid">
-                        <section><strong>伤口和疤痕</strong><p>{{ card.profile?.injuriesAndScars || '未记录' }}</p></section>
-                        <section><strong>恐惧症和狂躁症</strong><p>{{ card.profile?.phobiasAndManias || '未记录' }}</p></section>
+                        <section><strong>伤口和疤痕</strong><p>{{ profileText(card.profile?.injuriesAndScars) }}</p></section>
+                        <section><strong>恐惧症和狂躁症</strong><p>{{ profileText(card.profile?.phobiasAndManias) }}</p></section>
                       </div>
                     </TabsContent>
                     <TabsContent value="assets" class="sheet-profile-content">
                       <div class="sheet-profile-grid">
-                        <section><strong>装备和道具</strong><p>{{ card.profile?.equipmentText || '未记录' }}</p></section>
+                        <section><strong>装备和道具</strong><p>{{ profileText(card.profile?.equipmentText) }}</p></section>
                         <section class="sheet-wealth"><strong>财务状况</strong><dl><div><dt>消费水平</dt><dd>{{ card.profile?.spendingLevel || '—' }}</dd></div><div><dt>现金</dt><dd>{{ card.profile?.cash || '—' }}</dd></div></dl></section>
-                        <section><strong>资产</strong><p>{{ card.profile?.assetsText || '未记录' }}</p></section>
-                        <section><strong>调查员笔记</strong><p>{{ card.profile?.notes || '未记录' }}</p></section>
+                        <section><strong>资产</strong><p>{{ profileText(card.profile?.assetsText) }}</p></section>
+                        <section><strong>调查员笔记</strong><p>{{ profileText(card.profile?.notes) }}</p></section>
                       </div>
                     </TabsContent>
                   </TabsRoot>
@@ -1002,7 +1005,7 @@ watch(selectedSheetTab, (tab) => {
             <div v-else class="dice-history-empty">
               <Dices :size="26" />
               <strong>{{ allDiceHistoryEntries.length ? '没有符合条件的掷骰记录' : '当前聊天还没有掷骰记录' }}</strong>
-              <p>{{ allDiceHistoryEntries.length ? '可以调整筛选，或继续加载更早的聊天记录。' : '跑团中产生的掷骰会自动出现在这里。' }}</p>
+              <p>{{ allDiceHistoryEntries.length ? '可以调整筛选，或继续查找更早的掷骰记录。' : '跑团中产生的掷骰会自动出现在这里。' }}</p>
             </div>
             <footer class="dice-history-load-zone">
               <button
@@ -1015,15 +1018,12 @@ watch(selectedSheetTab, (tab) => {
                 <ArrowDown v-else :size="15" />
                 {{ diceHistoryLoadLabel }}
               </button>
-              <p>{{ diceHistoryLoadHint }}</p>
+              <p v-if="diceHistoryLoadHint">{{ diceHistoryLoadHint }}</p>
             </footer>
           </div>
         </div>
       </TabsContent>
 
-      <TabsContent value="dice-debug" class="tabs-content tool-section">
-        <DiceDebugPanel @play="(aggregate) => emit('debugDice', aggregate)" />
-      </TabsContent>
 
     </TabsRoot>
     <div v-if="busy" class="dialog-busy"><LoaderCircle class="spin" :size="17" />正在处理…</div>

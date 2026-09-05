@@ -84,7 +84,7 @@ const emptyDescription = computed(() => props.conversation.mode === 'trpg'
   : '输入消息后，角色会按照右侧保存的顺序依次回应。')
 const planTitle = computed(() => props.conversation.mode === 'trpg' ? trpgExecution.value.title : '回复顺序')
 const planDescription = computed(() => props.conversation.mode === 'trpg'
-  ? `${trpgExecution.value.subtitle} · 由场景或战斗流程实时维护。`
+  ? trpgExecution.value.subtitle
   : '从上到下依次回复；拖动调整，点击移除后保存。')
 const turnButtonLabel = computed(() => trpgTurnActionLabel(props.currentTurn))
 const betweenTrpgTurns = computed(() => props.conversation.mode === 'trpg'
@@ -99,7 +99,7 @@ const turnCountdown = createCountdownController({
 })
 const autoStartLabel = computed(() => `${Math.max(1, turnCountdownRemaining.value)}s后开始行动轮`)
 const composerPlaceholder = computed(() => {
-  if (props.conversation.status !== 'active') return '这个会话已经关闭'
+  if (props.conversation.status !== 'active') return '这个会话已经结束'
   if (effectiveComposerIntent.value === 'inquiry') return '向 KP 询问公开事实或当前可见信息……'
   if (waitingForMessage.value && sceneProposalRole.value === 'lead') return '提出一个具体、可执行的场景计划…'
   if (waitingForMessage.value && sceneProposalRole.value === 'contributor') return '回应已有计划，或提出补充与替代方案…'
@@ -205,6 +205,16 @@ function cancelAutoAdvance() {
   turnCountdownRemaining.value = 0
   autoAdvance.value = false
 }
+function messageSpeakerName(message: GroupMessage): string {
+  if (message.speakerType === 'user') return '你'
+  if (message.speakerType === 'narrator') return '叙事'
+  if (message.speakerType === 'kp') return message.speakerName || 'KP'
+  const roleName = message.speakerName || character(message.speakerId)?.characterName || '角色'
+  const investigator = props.conversation.mode === 'trpg'
+    ? props.investigatorCards.find((card) => card.actorType === 'BOT' && card.participantId === message.speakerId)
+    : undefined
+  return investigator && investigator.name !== roleName ? `${roleName} 饰演 ${investigator.name}` : roleName
+}
 function keydown(event: KeyboardEvent) { if (!event.isComposing && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitComposer() } }
 function scrollToLatest() {
   void nextTick(() => {
@@ -240,7 +250,7 @@ function handleReasoningScroll(event: Event) {
 
 <template>
   <main class="chat-page">
-    <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已关闭' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button class="button ghost" :disabled="sending" @click="emit('end')"><CircleStop :size="16" />{{ conversation.status === 'active' ? '关闭会话' : '会话操作' }}</button></div></header>
+    <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已结束' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button class="button ghost" :disabled="sending" @click="emit('end')"><CircleStop :size="16" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></div></header>
     <div class="chat-layout">
       <section class="chat-main">
         <div class="message-scroll"><div :ref="bindScroller" class="message-viewport" @scroll="handleScroll"><div>
@@ -255,7 +265,7 @@ function handleReasoningScroll(event: Event) {
             <template v-else>
             <div v-if="message.speakerType === 'character'" class="message-avatar" :style="character(message.speakerId)?.characterImage ? { backgroundImage: `url(${character(message.speakerId)?.characterImage})` } : {}">{{ character(message.speakerId)?.characterImage ? '' : (message.speakerName || character(message.speakerId)?.characterName || '?').slice(0, 1) }}</div>
             <div class="message-content">
-              <div class="message-meta"><strong>{{ message.speakerType === 'user' ? '你' : message.speakerType === 'narrator' ? '叙事' : message.speakerType === 'kp' ? (message.speakerName || 'KP') : message.speakerName || character(message.speakerId)?.characterName || '角色' }}</strong><span v-if="message.status === 'streaming'" class="typing-dot">正在回应</span><span v-if="message.status === 'failed'" class="failed-label">生成失败</span></div>
+              <div class="message-meta"><strong>{{ messageSpeakerName(message) }}</strong><span v-if="message.status === 'streaming'" class="typing-dot">正在回应</span><span v-if="message.status === 'failed'" class="failed-label">生成失败</span></div>
               <CollapsibleRoot v-if="reasoning[message.id]" v-model:open="reasoningOpen[message.id]" class="reasoning-block">
                 <CollapsibleTrigger class="reasoning-trigger">思考过程 <ChevronDown :size="14" /></CollapsibleTrigger>
                 <CollapsibleContent class="reasoning-content" :data-reasoning-streaming="reasoningPhase.get(message.id) === 'thinking' ? 'true' : undefined" @scroll="handleReasoningScroll">{{ reasoning[message.id] }}</CollapsibleContent>
@@ -297,7 +307,7 @@ function handleReasoningScroll(event: Event) {
             <button class="button secondary turn-auto-advance-start" :disabled="sending" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ autoStartLabel }}</button>
             <button class="button ghost turn-auto-advance-cancel" :disabled="sending" @click="cancelAutoAdvance">取消自动推进</button>
           </div>
-          <button v-else-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" :disabled="sending || conversation.status !== 'active'" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
+          <button v-else-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" title="开始下一轮，由参与者依次行动" :disabled="sending || conversation.status !== 'active'" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
           <PopoverRoot v-if="betweenTrpgTurns && !autoAdvance">
             <PopoverTrigger as-child><button class="icon-button bordered turn-experiment-settings" type="button" title="行动轮设置" aria-label="行动轮设置"><Settings2 :size="17" /></button></PopoverTrigger>
             <PopoverPortal><PopoverContent class="turn-experiment-popover" side="top" align="end" :side-offset="10">
@@ -393,7 +403,7 @@ function handleReasoningScroll(event: Event) {
           </div>
           <p v-if="replyTurnState.error">{{ replyTurnState.error }}</p>
         </section>
-        <div class="panel-note"><strong>执行规则</strong><span>{{ conversation.mode === 'trpg' ? '场景与战斗会自动维护行动顺序，公共界面不能手动修改。' : '角色依次生成回复，后一位可以看到本轮前面角色刚完成的内容。' }}</span></div>
+        <div class="panel-note"><strong>执行规则</strong><span>{{ conversation.mode === 'trpg' ? '行动顺序由系统根据当前场景或战斗自动安排。' : '角色依次生成回复，后一位可以看到本轮前面角色刚完成的内容。' }}</span></div>
       </aside>
     </div>
   </main>

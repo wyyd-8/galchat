@@ -311,15 +311,15 @@ test('keeps actor speaking controls inside the compact status dashboard', async 
   const dashboard = findElement(statusPanel as unknown as RootNode,
     (element) => hasClass(element, 'trpg-runtime-dashboard'))
   assert.ok(dashboard, 'the status panel should contain the actor speaking dashboard')
-  assert.match(textContent(dashboard), /角色发言/)
-  assert.match(textContent(dashboard), /模型.*人工/)
+  assert.match(textContent(dashboard), /角色控制方式/)
+  assert.match(textContent(dashboard), /AI 控制.*手动控制/)
   assert.ok(findElement(dashboard as unknown as RootNode,
     (element) => hasClass(element, 'trpg-runtime-card')),
   'actors should be displayed as compact expandable cards')
   assert.ok(findElement(dashboard as unknown as RootNode,
     (element) => element.tag === 'select' && hasClass(element, 'trpg-runtime-model-select')),
   'expanded actor cards should choose a managed model inline')
-  assert.match(textContent(dashboard), /KP 仅支持模型发言/)
+  assert.match(textContent(dashboard), /KP 由 AI 控制/)
   assert.doesNotMatch(textContent(dashboard), /运行时|自动降级|请求参数会在实际调用时/)
 })
 
@@ -397,29 +397,14 @@ test('shows target investigator state below the restore explanation', async () =
   assert.match(textContent(investigatorList), /restoreInvestigatorCondition/)
 })
 
-test('exposes backend-shaped dice debugging in a dedicated tools tab', async () => {
+test('keeps dice records available without a dice debug tab', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
-  assert.ok(template, 'TrpgToolsDialog should contain a template')
+  assert.ok(template)
   const root = baseParse(template)
-
-  const debugTab = findElement(root, (element) => element.tag === 'TabsTrigger'
-    && hasAttribute(element, 'value', 'dice-debug'))
-  const debugPanel = findElement(root, (element) => element.tag === 'TabsContent'
-    && hasAttribute(element, 'value', 'dice-debug'))
-  const debugComponent = debugPanel && findElement(
-    debugPanel as unknown as RootNode,
-    (element) => element.tag === 'DiceDebugPanel',
-  )
-
-  assert.ok(debugTab, 'the tools dialog should expose a dice debug tab')
-  assert.match(textContent(debugTab), /骰子调试/)
-  assert.ok(debugPanel, 'the tools dialog should contain the dice debug panel')
-  assert.ok(debugComponent, 'the debug panel should render the backend scenario launcher')
-  assert.ok(debugComponent.props.some((prop) => prop.type === NodeTypes.DIRECTIVE
-    && prop.name === 'on'
-    && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION
-    && prop.arg.content === 'play'
-    && prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
-    && prop.exp.content.includes("emit('debugDice', aggregate)")))
+  assert.ok(findElement(root, (element) => element.tag === 'TabsTrigger'
+    && hasAttribute(element, 'value', 'dice')))
+  assert.ok(findElement(root, (element) => element.tag === 'TabsContent'
+    && hasAttribute(element, 'value', 'dice')))
+  assert.doesNotMatch(source, /dice-debug|DiceDebugPanel|debugDice/)
 })

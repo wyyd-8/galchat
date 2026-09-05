@@ -48,14 +48,14 @@ async function renderStage(context: TestContext, status: 'active' | 'closed') {
 test('active conversations expose deletion through the close-conversation entry', async (context) => {
   const html = await renderStage(context, 'active')
 
-  assert.match(html, />关闭会话</)
+  assert.match(html, />结束群聊</)
   assert.doesNotMatch(html, />永久删除</)
 })
 
 test('closed conversations retain one conversation-actions entry', async (context) => {
   const html = await renderStage(context, 'closed')
 
-  assert.doesNotMatch(html, />关闭会话</)
+  assert.doesNotMatch(html, />结束群聊</)
   assert.match(html, />会话操作</)
   assert.doesNotMatch(html, />永久删除</)
 })

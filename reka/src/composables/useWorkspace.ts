@@ -222,11 +222,11 @@ export function useWorkspace() {
   async function removeWorld() { if (!selectedWorldId.value) return; await api.deleteWorld(selectedWorldId.value); resetWorkspace(); await Promise.all([loadWorlds(), loadModules()]); notify('当前世界已删除', '', 'success') }
   async function createTemplate(payload: WorldTemplate) { await api.createWorldTemplate(payload); await loadTemplates(); notify('世界模板已创建', '', 'success') }
   async function loadEditableWorldTemplate() {
-    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有原创世界可以修改模板')
+    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
     return api.myWorldTemplate(selectedWorldId.value)
   }
   async function updateTemplate(payload: WorldTemplate) {
-    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有原创世界可以修改模板')
+    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
     await api.updateWorldTemplate(selectedWorldId.value, payload); await Promise.all([loadTemplates(), selectWorld(selectedWorldId.value)])
     notify('世界模板已保存', '', 'success')
   }
@@ -256,11 +256,11 @@ export function useWorkspace() {
     characterTemplates.value = await api.characterTemplates(selectedWorld.value.worldId); notify('角色模板已创建', '', 'success')
   }
   async function loadEditableCharacterTemplate(id: number) {
-    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有原创世界可以修改角色模板')
+    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改角色模板')
     return api.myCharacterTemplate(selectedWorldId.value, id)
   }
   async function updateCharacterTemplate(id: number, payload: CharacterTemplate) {
-    if (!selectedWorldId.value || !selectedWorld.value?.worldId || !canEditSelectedWorld.value) throw new Error('只有原创世界可以修改角色模板')
+    if (!selectedWorldId.value || !selectedWorld.value?.worldId || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改角色模板')
     await api.updateCharacterTemplate(selectedWorldId.value, id, payload)
     characterTemplates.value = await api.characterTemplates(selectedWorld.value.worldId); await reloadCharacters()
     notify('角色模板已保存', '', 'success')

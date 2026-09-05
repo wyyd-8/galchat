@@ -2,7 +2,7 @@ package com.me.galchat.controller;
 
 import com.me.galchat.domain.Result;
 import com.me.galchat.domain.dto.GroupActorRuntimeSaveDTO;
-import com.me.galchat.service.impl.GroupActorRuntimeService;
+import com.me.galchat.service.impl.group.GroupActorRuntimeService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;

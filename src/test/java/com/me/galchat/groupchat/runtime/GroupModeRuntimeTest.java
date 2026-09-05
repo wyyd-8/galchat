@@ -1,5 +1,14 @@
 package com.me.galchat.groupchat.runtime;
 
+import com.me.galchat.service.impl.trpg.TrpgAgentDecisionContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgCombatLifecycleService;
+import com.me.galchat.service.impl.trpg.TrpgContextWindowService;
+import com.me.galchat.service.impl.trpg.TrpgModuleContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgInvestigatorContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgGameTimeContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgSceneRuntimeContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgExplorationContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgChildSceneCommandService;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupConversation;
@@ -10,9 +19,9 @@ import com.me.galchat.groupchat.runtime.chat.ChatGroupRuntime;
 import com.me.galchat.groupchat.runtime.trpg.TrpgGroupAgentPolicy;
 import com.me.galchat.groupchat.runtime.trpg.TrpgGroupContextPolicy;
 import com.me.galchat.groupchat.runtime.trpg.TrpgGroupRuntime;
-import com.me.galchat.service.impl.GroupContextAssembler;
+import com.me.galchat.service.impl.group.GroupContextAssembler;
 import com.me.galchat.service.ICharacterCardService;
-import com.me.galchat.service.impl.CharacterCardContextFormatter;
+import com.me.galchat.service.impl.character.CharacterCardContextFormatter;
 import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
@@ -22,9 +31,7 @@ import com.me.galchat.vector.GroupTopicVectorService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
-
 import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -63,23 +70,19 @@ class GroupModeRuntimeTest {
                 .thenReturn(List.of(new UserMessage("上一话题"), new UserMessage("继续调查仓库")));
         when(vectorService.search(1L, 10L, "上一话题\n继续调查仓库"))
                 .thenReturn("更早话题的相关记忆");
-        com.me.galchat.service.impl.TrpgExplorationContextAssembler
+        TrpgExplorationContextAssembler
                 explorationAssembler = mock(
-                com.me.galchat.service.impl
-                        .TrpgExplorationContextAssembler.class);
+                TrpgExplorationContextAssembler.class);
         when(explorationAssembler.assemble(trpg, actor))
                 .thenReturn(List.of(new UserMessage("跑团上下文")));
 
         ChatGroupContextPolicy chatPolicy = new ChatGroupContextPolicy(topicService, vectorService, assembler);
         TrpgGroupContextPolicy trpgPolicy = new TrpgGroupContextPolicy(
-                mock(com.me.galchat.service.impl.TrpgModuleContextAssembler.class),
-                mock(com.me.galchat.service.impl
-                        .TrpgAgentDecisionContextAssembler.class),
+                mock(TrpgModuleContextAssembler.class),
+                mock(TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
-                mock(com.me.galchat.service.impl
-                        .TrpgSceneRuntimeContextAssembler.class),
-                mock(com.me.galchat.service.impl
-                        .TrpgGameTimeContextAssembler.class));
+                mock(TrpgSceneRuntimeContextAssembler.class),
+                mock(TrpgGameTimeContextAssembler.class));
 
         chatPolicy.onTurnStarted(chat, userMessage);
         trpgPolicy.onTurnStarted(trpg, userMessage);
@@ -129,16 +132,14 @@ class GroupModeRuntimeTest {
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
                 mock(com.me.galchat.tool.KpRunTools.class),
-                mock(com.me.galchat.service.impl.TrpgContextWindowService.class),
-                mock(com.me.galchat.service.impl.TrpgInvestigatorContextAssembler.class),
+                mock(TrpgContextWindowService.class),
+                mock(TrpgInvestigatorContextAssembler.class),
                 mock(com.me.galchat.tool.KpCombatTools.class),
-                mock(com.me.galchat.service.impl
-                        .TrpgCombatLifecycleService.class),
+                mock(TrpgCombatLifecycleService.class),
                 mock(com.me.galchat.tool.KpChildSceneTools.class),
                 mock(com.me.galchat.tool
                         .KpWaitingInvestigatorTools.class),
-                mock(com.me.galchat.service.impl
-                        .TrpgChildSceneCommandService.class)).prepare(
+                mock(TrpgChildSceneCommandService.class)).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_TRPG_COMBAT,
                         GroupChatConstant.ACTOR_CHARACTER, 11L, "round:1", "第1轮", 1, 1),

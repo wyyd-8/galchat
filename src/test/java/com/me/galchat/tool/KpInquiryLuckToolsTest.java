@@ -5,14 +5,12 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.constant.DiceRollConstant;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.KpDiceToolResult;
-import com.me.galchat.service.impl.GroupConversationService;
-import com.me.galchat.service.impl.TrpgInquiryLuckService;
+import com.me.galchat.service.impl.group.GroupConversationService;
+import com.me.galchat.service.impl.trpg.TrpgInquiryLuckService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
-
 import java.util.Map;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;

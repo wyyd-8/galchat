@@ -8,8 +8,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.Map;
@@ -19,9 +17,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @Transactional
 class UserModelApiMapperIntegrationTest {
-
-    private static final Path MIGRATION = Path.of(
-            "docs/sql/V20260829_2__user_model_api.sql");
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -34,7 +29,32 @@ class UserModelApiMapperIntegrationTest {
                 .toString().replace("-", "");
         jdbcTemplate.execute("CREATE SCHEMA \"" + schema + "\"");
         jdbcTemplate.execute("SET LOCAL search_path TO \"" + schema + "\"");
-        jdbcTemplate.execute(Files.readString(MIGRATION));
+        jdbcTemplate.execute("""
+                CREATE TABLE user_model_api (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    name VARCHAR(100) NOT NULL,
+                    base_url VARCHAR(1000) NOT NULL,
+                    model_name VARCHAR(255) NOT NULL,
+                    api_key_encrypted TEXT NOT NULL,
+                    api_key_hint VARCHAR(32) NOT NULL,
+                    request_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    status VARCHAR(20) NOT NULL,
+                    chat_capability VARCHAR(20) NOT NULL,
+                    streaming_capability VARCHAR(20) NOT NULL,
+                    tool_calling_capability VARCHAR(20) NOT NULL,
+                    reasoning_output_status VARCHAR(20) NOT NULL,
+                    last_test_code VARCHAR(50),
+                    last_test_message VARCHAR(1000),
+                    last_test_at TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+                """);
+        jdbcTemplate.execute("""
+                CREATE UNIQUE INDEX uk_user_model_api_user_name
+                ON user_model_api (user_id, name)
+                """);
     }
 
     @Test

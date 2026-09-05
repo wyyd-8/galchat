@@ -2,19 +2,14 @@ package com.me.galchat.mapper;
 
 import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
 import com.me.galchat.domain.po.TrpgAutoSave;
-import com.me.galchat.service.impl.TrpgSaveServiceImpl;
+import com.me.galchat.service.impl.trpg.TrpgSaveServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
@@ -90,34 +85,6 @@ class TrpgAutoSaveMapperIntegrationTest {
         assertThat(autoSaveMapper.selectByConversationId(-9004L))
                 .extracting(TrpgAutoSave::getCheckpointType)
                 .containsExactlyInAnyOrder("INITIAL", "SCENE");
-    }
-
-    @Test
-    void migrationKeepsLegacyTurnCheckpointAndEnablesAdditionalTypes()
-            throws IOException {
-        jdbcTemplate.execute("""
-                CREATE TEMP TABLE trpg_auto_save (
-                    conversation_id BIGINT PRIMARY KEY,
-                    saved_at TIMESTAMP NOT NULL,
-                    format_version INT NOT NULL,
-                    snapshot JSONB NOT NULL
-                ) ON COMMIT DROP
-                """);
-        jdbcTemplate.update("""
-                INSERT INTO trpg_auto_save (
-                    conversation_id, saved_at, format_version, snapshot
-                ) VALUES (?, ?, ?, ?::jsonb)
-                """, -9005L, LocalDateTime.of(2026, 8, 20, 12, 0),
-                TrpgSaveServiceImpl.FORMAT_VERSION,
-                "{\"formatVersion\":2,\"conversationId\":-9005}");
-
-        jdbcTemplate.execute(Files.readString(Path.of(
-                "docs/sql/V20260828__trpg_auto_save_checkpoints.sql")));
-        autoSaveMapper.upsert(autoSave(-9005L, "SCENE", -9020L));
-
-        assertThat(autoSaveMapper.selectByConversationId(-9005L))
-                .extracting(TrpgAutoSave::getCheckpointType)
-                .containsExactlyInAnyOrder("TURN", "SCENE");
     }
 
     private TrpgAutoSave autoSave(

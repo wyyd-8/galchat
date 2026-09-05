@@ -2,10 +2,6 @@
 
 GalChat 是一个面向角色聊天与互动故事的全栈项目。它不是只把用户消息转发给大模型，而是围绕“一个可持续演进的用户世界”做了状态管理：角色有好感度和个人提示词，聊天会形成长期记忆，世界事件会进入时间线，用户可以在关键分支前存档，也可以撤回上一轮对话并回滚由这轮对话带来的副作用。
 
-> 当前代码基线的已完成模块、验证结果与实现边界，见[《GalChat 已完成开发模块说明》](docs/development-completion-summary.md)。
->
-> 后端 REST、SSE、WebSocket 与 Python 辅助服务的完整调用说明，见[《GalChat 后端接口文档》](docs/backend-api.md)。
-
 后端基于 Spring Boot + Spring AI，当前新版前端位于 `reka/`，基于 Vue 3 + Reka UI；`vue/` 保留为旧版界面。另有两个 Python 辅助服务用于输入完整性判断和检索结果重排。
 
 ## 项目特色

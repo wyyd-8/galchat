@@ -1,19 +1,19 @@
 package com.me.galchat.tool;
 
+import com.me.galchat.service.impl.trpg.TrpgCombatStateService;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.KpCombatStateDTOs;
 import com.me.galchat.domain.dto.KpQuickNpcDTOs;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.service.impl.TrpgCombatLifecycleService;
+import com.me.galchat.service.impl.trpg.TrpgCombatLifecycleService;
 import com.me.galchat.utils.TypeConvertUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
-
 import java.util.List;
 import java.util.Map;
 
@@ -22,7 +22,7 @@ import java.util.Map;
 public class KpCombatTools {
 
     private final TrpgCombatLifecycleService combatLifecycleService;
-    private final com.me.galchat.service.impl.TrpgCombatStateService
+    private final TrpgCombatStateService
             combatStateService;
 
     @Tool(

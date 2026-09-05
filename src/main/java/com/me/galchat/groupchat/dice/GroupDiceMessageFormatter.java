@@ -6,11 +6,10 @@ import com.me.galchat.domain.po.DiceRollSummary;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.DiceRollResultMapper;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
-import com.me.galchat.service.impl.CocDiceSummaryFormatter;
+import com.me.galchat.service.impl.dice.CocDiceSummaryFormatter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;

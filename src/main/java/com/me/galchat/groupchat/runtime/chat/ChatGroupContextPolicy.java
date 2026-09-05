@@ -6,13 +6,12 @@ import com.me.galchat.groupchat.context.GroupTopicService;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupContextPolicy;
-import com.me.galchat.service.impl.GroupContextAssembler;
+import com.me.galchat.service.impl.group.GroupContextAssembler;
 import com.me.galchat.vector.GroupTopicVectorService;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-
 import java.util.ArrayList;
 import java.util.List;
 

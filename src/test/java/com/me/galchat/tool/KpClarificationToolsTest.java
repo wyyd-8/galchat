@@ -3,14 +3,12 @@ package com.me.galchat.tool;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupConversation;
-import com.me.galchat.service.impl.GroupConversationService;
-import com.me.galchat.service.impl.TrpgStepInteractionService;
+import com.me.galchat.service.impl.group.GroupConversationService;
+import com.me.galchat.service.impl.trpg.TrpgStepInteractionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
-
 import java.util.Map;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;

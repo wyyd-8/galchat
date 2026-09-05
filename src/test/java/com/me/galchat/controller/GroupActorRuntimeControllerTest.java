@@ -2,14 +2,12 @@ package com.me.galchat.controller;
 
 import com.me.galchat.domain.dto.GroupActorRuntimeSaveDTO;
 import com.me.galchat.domain.vo.GroupActorRuntimeVO;
-import com.me.galchat.service.impl.GroupActorRuntimeService;
+import com.me.galchat.service.impl.group.GroupActorRuntimeService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
 import java.util.List;
-
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;

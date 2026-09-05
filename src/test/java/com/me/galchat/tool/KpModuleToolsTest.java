@@ -6,18 +6,16 @@ import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.domain.dto.KpEquipmentDTOs;
 import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.service.ICharacterCardService;
-import com.me.galchat.service.impl.TrpgMaterialService;
-import com.me.galchat.service.impl.TrpgEquipmentService;
-import com.me.galchat.service.impl.TrpgModuleQueryService;
+import com.me.galchat.service.impl.trpg.TrpgMaterialService;
+import com.me.galchat.service.impl.trpg.TrpgEquipmentService;
+import com.me.galchat.service.impl.trpg.TrpgModuleQueryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.annotation.Tool;
-
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Map;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;

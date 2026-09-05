@@ -11,13 +11,12 @@ import com.me.galchat.domain.po.CharacterTemplate;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.WorldDetail;
 import com.me.galchat.domain.po.WorldTemplate;
-import com.me.galchat.service.impl.WorldArchiveServiceImpl;
+import com.me.galchat.service.impl.world.WorldArchiveServiceImpl;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.cache.CacheManager;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;

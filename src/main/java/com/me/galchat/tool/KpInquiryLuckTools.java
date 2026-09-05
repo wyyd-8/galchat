@@ -6,15 +6,14 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.service.impl.GroupConversationService;
-import com.me.galchat.service.impl.TrpgInquiryLuckService;
+import com.me.galchat.service.impl.group.GroupConversationService;
+import com.me.galchat.service.impl.trpg.TrpgInquiryLuckService;
 import com.me.galchat.utils.TypeConvertUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
-
 import java.util.Map;
 
 @Component

@@ -5,15 +5,13 @@ import com.me.galchat.domain.dto.CocModuleContentUpdateDTO;
 import com.me.galchat.domain.dto.CocModuleCreateDTO;
 import com.me.galchat.domain.po.CocModule;
 import com.me.galchat.domain.vo.CocModuleDetailVO;
-import com.me.galchat.service.impl.CocModuleRuntimeService;
-import com.me.galchat.service.impl.CocModuleService;
+import com.me.galchat.service.impl.trpg.CocModuleRuntimeService;
+import com.me.galchat.service.impl.trpg.CocModuleService;
 import com.me.galchat.utils.CurrentHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
 import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;

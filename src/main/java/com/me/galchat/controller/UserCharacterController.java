@@ -12,7 +12,7 @@ import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
-import com.me.galchat.service.impl.SingleChatRuntimeService;
+import com.me.galchat.service.impl.chat.SingleChatRuntimeService;
 import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;

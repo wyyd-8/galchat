@@ -1,5 +1,7 @@
 package com.me.galchat.groupchat.runtime.trpg;
 
+import com.me.galchat.service.impl.trpg.TrpgCombatLifecycleService;
+import com.me.galchat.service.impl.trpg.TrpgStepInteractionService;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.TrpgCombat;
@@ -11,12 +13,12 @@ import com.me.galchat.groupchat.runtime.GroupAgentPolicy;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.service.ICharacterCardService;
-import com.me.galchat.service.impl.CharacterCardContextFormatter;
-import com.me.galchat.service.impl.GroupContextAssembler;
-import com.me.galchat.service.impl.TrpgContextWindowService;
-import com.me.galchat.service.impl.TrpgChildSceneCommandService;
-import com.me.galchat.service.impl.TrpgInvestigatorContextAssembler;
-import com.me.galchat.service.impl.TrpgInvestigatorSuspensionService;
+import com.me.galchat.service.impl.character.CharacterCardContextFormatter;
+import com.me.galchat.service.impl.group.GroupContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgContextWindowService;
+import com.me.galchat.service.impl.trpg.TrpgChildSceneCommandService;
+import com.me.galchat.service.impl.trpg.TrpgInvestigatorContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService;
 import com.me.galchat.tool.KpChildSceneTools;
 import com.me.galchat.tool.KpClarificationTools;
 import com.me.galchat.tool.KpDiceTools;
@@ -43,7 +45,6 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -135,7 +136,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
     private final TrpgContextWindowService contextWindowService;
     private final TrpgInvestigatorContextAssembler investigatorContextAssembler;
     private final com.me.galchat.tool.KpCombatTools kpCombatTools;
-    private final com.me.galchat.service.impl.TrpgCombatLifecycleService
+    private final TrpgCombatLifecycleService
             combatLifecycleService;
     private final KpChildSceneTools kpChildSceneTools;
     private final KpWaitingInvestigatorTools kpWaitingInvestigatorTools;
@@ -170,8 +171,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                                         investigatorContextAssembler,
                                 com.me.galchat.tool.KpCombatTools
                                         kpCombatTools,
-                                com.me.galchat.service.impl
-                                        .TrpgCombatLifecycleService
+                                TrpgCombatLifecycleService
                                         combatLifecycleService,
                                 KpChildSceneTools kpChildSceneTools,
                                 KpWaitingInvestigatorTools
@@ -281,13 +281,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 .equals(action.actionType());
         boolean investigatorKpInquiry = interactionResponse
                 && GroupChatConstant.ACTOR_KP.equals(actor.type())
-                && com.me.galchat.service.impl.TrpgStepInteractionService
+                && TrpgStepInteractionService
                 .INVESTIGATOR_KP_INQUIRY.equals(
                         action.interactionType());
         boolean canAskKp = GroupChatConstant.ACTOR_CHARACTER.equals(
                 actor.type()) && (scenePhase || combatAttack);
         boolean resumedFromKpInquiry = canAskKp
-                && com.me.galchat.service.impl.TrpgStepInteractionService
+                && TrpgStepInteractionService
                 .INVESTIGATOR_KP_INQUIRY.equals(
                         action.interactionType());
         boolean combatPhase = combatIntro || combatAttack || combatDefense

@@ -8,16 +8,15 @@ import com.me.galchat.domain.dto.KpWeaponStateDTOs;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.ICharacterCardService;
-import com.me.galchat.service.impl.TrpgMaterialService;
-import com.me.galchat.service.impl.TrpgEquipmentService;
-import com.me.galchat.service.impl.TrpgModuleQueryService;
+import com.me.galchat.service.impl.trpg.TrpgMaterialService;
+import com.me.galchat.service.impl.trpg.TrpgEquipmentService;
+import com.me.galchat.service.impl.trpg.TrpgModuleQueryService;
 import com.me.galchat.utils.TypeConvertUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
-
 import java.util.Map;
 
 @Component

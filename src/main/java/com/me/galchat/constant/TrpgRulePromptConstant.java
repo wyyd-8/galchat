@@ -3,9 +3,7 @@ package com.me.galchat.constant;
 /**
  * KP运行时规则提示词。
  *
- * <p>文档源分别位于
- * {@code docs/trpg-rules/kp-resident-rules.md} 和
- * {@code docs/trpg-rules/kp-combat-rules.md}。</p>
+ * <p>常驻与战斗规则在本类中维护，作为运行时提示词的唯一来源。</p>
  */
 public final class TrpgRulePromptConstant {
 

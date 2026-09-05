@@ -6,7 +6,7 @@ import ch.qos.logback.core.read.ListAppender;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
-import com.me.galchat.service.impl.GroupTurnCheckpointService;
+import com.me.galchat.service.impl.group.GroupTurnCheckpointService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
@@ -16,11 +16,9 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import tools.jackson.databind.json.JsonMapper;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;

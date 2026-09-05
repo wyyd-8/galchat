@@ -1,11 +1,9 @@
 package com.me.galchat.controller;
 
 import com.me.galchat.domain.dto.StepwiseCharacterCardModels;
-import com.me.galchat.service.impl.StepwiseCharacterCardCreationService;
+import com.me.galchat.service.impl.character.StepwiseCharacterCardCreationService;
 import org.junit.jupiter.api.Test;
-
 import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;

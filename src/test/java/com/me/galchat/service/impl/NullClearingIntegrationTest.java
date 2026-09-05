@@ -1,5 +1,11 @@
 package com.me.galchat.service.impl;
 
+import com.me.galchat.service.impl.trpg.TrpgTemporaryInsanityService;
+import com.me.galchat.service.impl.world.UserWorldSaveServiceImpl;
+import com.me.galchat.service.impl.world.WorldTemplateServiceImpl;
+import com.me.galchat.service.impl.character.CharacterCardServiceImpl;
+import com.me.galchat.service.impl.character.CharacterTemplateServiceImpl;
+import com.me.galchat.service.impl.group.GroupReplyPlanService;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.UserWorldSaveSnapshotDTO;
 import com.me.galchat.domain.po.CharacterTemplate;
@@ -18,7 +24,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest

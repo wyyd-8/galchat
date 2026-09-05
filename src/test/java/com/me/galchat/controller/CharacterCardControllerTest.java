@@ -1,5 +1,7 @@
 package com.me.galchat.controller;
 
+import com.me.galchat.service.impl.character.CharacterSkillResolver;
+import com.me.galchat.service.impl.character.ImportedWeaponAuditQueue;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.mapper.CharacterTemplateMapper;
 import com.me.galchat.mapper.CocCharacterMapper;
@@ -9,14 +11,12 @@ import com.me.galchat.mapper.CocCharacterWeaponMapper;
 import com.me.galchat.mapper.CocSkillDefMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.UserInfoMapper;
-import com.me.galchat.service.impl.CharacterCardServiceImpl;
+import com.me.galchat.service.impl.character.CharacterCardServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
 import java.util.List;
-
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -40,11 +40,11 @@ class CharacterCardControllerTest {
                 mock(CocCharacterWeaponMapper.class),
                 mock(CocCharacterProfileMapper.class),
                 mock(CocSkillDefMapper.class),
-                new com.me.galchat.service.impl.CharacterSkillResolver(),
+                new CharacterSkillResolver(),
                 mock(CharacterTemplateMapper.class),
                 mock(UserInfoMapper.class),
                 mock(GroupConversationMapper.class),
-                mock(com.me.galchat.service.impl.ImportedWeaponAuditQueue.class));
+                mock(ImportedWeaponAuditQueue.class));
         mockMvc = MockMvcBuilders.standaloneSetup(
                 new CharacterCardController(service)).build();
     }

@@ -6,7 +6,7 @@ import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupAgentPolicy;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupModelInvocation;
-import com.me.galchat.service.impl.GroupContextAssembler;
+import com.me.galchat.service.impl.group.GroupContextAssembler;
 import com.me.galchat.tool.UserCharacterFavorTools;
 import com.me.galchat.tool.VectorTools;
 import com.me.galchat.tool.TrpgRunMemoryTools;
@@ -17,7 +17,6 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.List;
 

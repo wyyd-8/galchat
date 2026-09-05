@@ -4,14 +4,13 @@ import com.me.galchat.domain.vo.SingleChatRuntimeVO;
 import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
-import com.me.galchat.service.impl.SingleChatRuntimeService;
+import com.me.galchat.service.impl.chat.SingleChatRuntimeService;
 import com.me.galchat.utils.CurrentHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;

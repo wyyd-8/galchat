@@ -1,5 +1,6 @@
 package com.me.galchat.groupchat.tool;
 
+import com.me.galchat.service.impl.group.GroupTurnCheckpointService;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.utils.CurrentHolder;
 import org.junit.jupiter.api.Test;
@@ -12,11 +13,9 @@ import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
-
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -194,8 +193,7 @@ class RecordingGroupToolCallingManagerTest {
         GroupToolCallStore store = new GroupToolCallStore(
                 mock(com.me.galchat.mapper.GroupChatToolCallMapper.class),
                 mock(tools.jackson.databind.ObjectMapper.class),
-                mock(com.me.galchat.service.impl
-                        .GroupTurnCheckpointService.class)) {
+                mock(GroupTurnCheckpointService.class)) {
             public boolean hasExecution(
                     Long replyStepId, String toolName) {
                 return Long.valueOf(41L).equals(replyStepId)

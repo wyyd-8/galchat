@@ -1,13 +1,11 @@
 package com.me.galchat.controller;
 
 import com.me.galchat.domain.vo.TrpgCombatParticipantOverviewVO;
-import com.me.galchat.service.impl.GroupConversationService;
-import com.me.galchat.service.impl.TrpgCombatOverviewService;
+import com.me.galchat.service.impl.group.GroupConversationService;
+import com.me.galchat.service.impl.trpg.TrpgCombatOverviewService;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
-
 import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;

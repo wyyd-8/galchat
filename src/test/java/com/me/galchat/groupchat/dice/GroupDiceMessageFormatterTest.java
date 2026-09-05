@@ -7,15 +7,13 @@ import com.me.galchat.domain.vo.DiceRollResultVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.DiceRollResultMapper;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
-import com.me.galchat.service.impl.CocDiceSummaryFormatter;
+import com.me.galchat.service.impl.dice.CocDiceSummaryFormatter;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
-
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;

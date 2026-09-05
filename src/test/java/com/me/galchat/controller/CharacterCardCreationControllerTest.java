@@ -1,9 +1,9 @@
 package com.me.galchat.controller;
 
+import com.me.galchat.service.impl.character.StepwiseCharacterCardCreationService;
 import com.me.galchat.domain.dto.CharacterCardGenerationModels;
-import com.me.galchat.service.impl.CharacterCardCreationService;
+import com.me.galchat.service.impl.character.CharacterCardCreationService;
 import org.junit.jupiter.api.Test;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -14,8 +14,8 @@ class CharacterCardCreationControllerTest {
     @Test
     void exposesAutoCreationAndBackgroundRewrite() {
         CharacterCardCreationService service = mock(CharacterCardCreationService.class);
-        com.me.galchat.service.impl.StepwiseCharacterCardCreationService stepService =
-                mock(com.me.galchat.service.impl.StepwiseCharacterCardCreationService.class);
+        StepwiseCharacterCardCreationService stepService =
+                mock(StepwiseCharacterCardCreationService.class);
         CharacterCardCreationController controller =
                 new CharacterCardCreationController(service, stepService);
         var create = new CharacterCardGenerationModels.CreateRequest(1L, 2L, "c-1");
@@ -41,8 +41,8 @@ class CharacterCardCreationControllerTest {
     @Test
     void exposesTheCompleteStepwiseCreationApi() {
         CharacterCardCreationService autoService = mock(CharacterCardCreationService.class);
-        com.me.galchat.service.impl.StepwiseCharacterCardCreationService stepService =
-                mock(com.me.galchat.service.impl.StepwiseCharacterCardCreationService.class);
+        StepwiseCharacterCardCreationService stepService =
+                mock(StepwiseCharacterCardCreationService.class);
         CharacterCardCreationController controller =
                 new CharacterCardCreationController(autoService, stepService);
         var create = new com.me.galchat.domain.dto.StepwiseCharacterCardModels.CreateRequest(

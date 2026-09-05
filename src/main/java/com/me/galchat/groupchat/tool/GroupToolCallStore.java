@@ -7,7 +7,7 @@ import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.service.DiceFollowUpLocator;
-import com.me.galchat.service.impl.GroupTurnCheckpointService;
+import com.me.galchat.service.impl.group.GroupTurnCheckpointService;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
@@ -20,7 +20,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
-
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;

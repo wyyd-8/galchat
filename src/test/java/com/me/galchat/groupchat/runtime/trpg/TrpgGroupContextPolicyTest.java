@@ -1,17 +1,17 @@
 package com.me.galchat.groupchat.runtime.trpg;
 
+import com.me.galchat.service.impl.trpg.TrpgGameTimeContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgNpcContextSelector;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
-import com.me.galchat.service.impl.TrpgModuleContextAssembler;
-import com.me.galchat.service.impl.TrpgAgentDecisionContextAssembler;
-import com.me.galchat.service.impl.TrpgExplorationContextAssembler;
-import com.me.galchat.service.impl.TrpgSceneRuntimeContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgModuleContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgAgentDecisionContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgExplorationContextAssembler;
+import com.me.galchat.service.impl.trpg.TrpgSceneRuntimeContextAssembler;
 import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.Set;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -23,9 +23,8 @@ class TrpgGroupContextPolicyTest {
 
     @Test
     void kpContextCarriesStructuredRelevantNpcIds() {
-        com.me.galchat.service.impl.TrpgNpcContextSelector selector =
-                mock(com.me.galchat.service.impl
-                        .TrpgNpcContextSelector.class);
+        TrpgNpcContextSelector selector =
+                mock(TrpgNpcContextSelector.class);
         TrpgExplorationContextAssembler explorationAssembler =
                 mock(TrpgExplorationContextAssembler.class);
         when(explorationAssembler.assemble(any(), any()))
@@ -35,8 +34,7 @@ class TrpgGroupContextPolicyTest {
                 mock(TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
                 mock(TrpgSceneRuntimeContextAssembler.class),
-                mock(com.me.galchat.service.impl
-                        .TrpgGameTimeContextAssembler.class),
+                mock(TrpgGameTimeContextAssembler.class),
                 selector);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(3L);
@@ -58,8 +56,7 @@ class TrpgGroupContextPolicyTest {
                 mock(TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
                 mock(TrpgSceneRuntimeContextAssembler.class),
-                mock(com.me.galchat.service.impl
-                        .TrpgGameTimeContextAssembler.class));
+                mock(TrpgGameTimeContextAssembler.class));
         GroupConversation conversation =
                 new GroupConversation().setId(7L);
         GroupActionSpec action = action(
@@ -76,9 +73,8 @@ class TrpgGroupContextPolicyTest {
 
     @Test
     void kpAndInvestigatorReceiveLatestGameTimeContext() {
-        com.me.galchat.service.impl.TrpgGameTimeContextAssembler
-                timeAssembler = mock(com.me.galchat.service.impl
-                .TrpgGameTimeContextAssembler.class);
+        TrpgGameTimeContextAssembler
+                timeAssembler = mock(TrpgGameTimeContextAssembler.class);
         TrpgExplorationContextAssembler explorationAssembler =
                 mock(TrpgExplorationContextAssembler.class);
         when(explorationAssembler.assemble(any(), any()))
@@ -129,8 +125,7 @@ class TrpgGroupContextPolicyTest {
                 mock(TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
                 runtimeAssembler,
-                mock(com.me.galchat.service.impl
-                        .TrpgGameTimeContextAssembler.class));
+                mock(TrpgGameTimeContextAssembler.class));
 
         var context = policy.load(conversation, kpAction);
         assertThat(context.messages())
@@ -152,8 +147,7 @@ class TrpgGroupContextPolicyTest {
                 mock(TrpgAgentDecisionContextAssembler.class),
                 explorationAssembler,
                 mock(TrpgSceneRuntimeContextAssembler.class),
-                mock(com.me.galchat.service.impl
-                        .TrpgGameTimeContextAssembler.class));
+                mock(TrpgGameTimeContextAssembler.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(3L);
         when(explorationAssembler.assemble(
@@ -185,8 +179,7 @@ class TrpgGroupContextPolicyTest {
                 decisionAssembler,
                 explorationAssembler,
                 mock(TrpgSceneRuntimeContextAssembler.class),
-                mock(com.me.galchat.service.impl
-                        .TrpgGameTimeContextAssembler.class));
+                mock(TrpgGameTimeContextAssembler.class));
         GroupConversation conversation =
                 new GroupConversation().setId(7L);
         GroupActionSpec sceneAction = action(

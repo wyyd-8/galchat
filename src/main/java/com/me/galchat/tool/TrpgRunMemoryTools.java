@@ -2,14 +2,13 @@ package com.me.galchat.tool;
 
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.domain.dto.TrpgRunMemoryModels;
-import com.me.galchat.service.impl.TrpgRunMemoryService;
+import com.me.galchat.service.impl.trpg.TrpgRunMemoryService;
 import com.me.galchat.utils.TypeConvertUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
-
 import java.util.Map;
 
 @Component

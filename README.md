@@ -1,212 +1,185 @@
 # GalChat
 
-GalChat 是一个面向角色聊天与互动故事的全栈项目。它不是只把用户消息转发给大模型，而是围绕“一个可持续演进的用户世界”做了状态管理：角色有好感度和个人提示词，聊天会形成长期记忆，世界事件会进入时间线，用户可以在关键分支前存档，也可以撤回上一轮对话并回滚由这轮对话带来的副作用。
+GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目。用户可以创建或导入世界，与角色单独聊天、组织群聊，也可以选择模组，由 KP（主持人）和调查员共同推进跑团。聊天记忆、角色好感、行动轮、掷骰结果和存档共同构成可持续恢复的游戏状态。
 
-后端基于 Spring Boot + Spring AI，当前新版前端位于 `reka/`，基于 Vue 3 + Reka UI；`vue/` 保留为旧版界面。另有两个 Python 辅助服务用于输入完整性判断和检索结果重排。
+后端基于 Java 21、Spring Boot 和 Spring AI；前端位于 `reka/`，使用 Vue 3、TypeScript、Reka UI 和 Three.js。`python/` 提供输入完整性判断、检索重排和角色卡 PDF 工具。
 
-## 项目特色
+## 核心功能
 
-### 世界级存档 / 读档
+### 角色单聊与长期记忆
 
-GalChat 的存档不是简单记录一段聊天文本，而是为一个用户世界生成可恢复快照。快照会覆盖：
+- 支持 SSE 流式回复，以及按用户世界建立的 WebSocket 会话。
+- `TopicAwareMessageChatMemoryAdvisor` 根据话题边界组织上下文，结合世界详情和历史聊天进行向量检索，可使用本地 reranker 重排结果。
+- 支持角色提示词、好感度、思考内容和工具调用展示；模型产生的好感变化会绑定到对应用户消息。
+- 可为单个角色选择用户配置的模型 API；未绑定时使用内置模型。
+- 撤回上一轮用户消息时，会同步清理回复、思考、工具记录和检索提示，回滚相关好感变化，刷新话题边界与缓存。单聊最多连续撤回 3 条用户消息。
 
-- 聊天历史边界：记录当前最大的聊天、好感、用户事件、世界事件和剧情事件 ID。
-- 角色状态：保存角色头像、名称、最近聊天内容、好感值和用户自定义提示词。
-- 话题边界：保存每个角色当前话题窗口、上一话题窗口和活跃剧情事件位置。
-- 最近聊天轮次：保留每个角色最近 3 轮聊天，以及对应的思考记录、工具调用记录和好感日志。
-- 世界事件与剧情事件：保存最后一条世界事件日志，以及当前进行中的故事事件和参与角色。
+### 普通群聊
 
-读档时，系统会删除存档点之后产生的聊天、思考、工具调用、好感日志、用户事件、世界事件和剧情事件，再恢复快照中的角色状态、最近轮次、话题边界、世界事件向量等派生数据。为了避免读档和剧情推进互相踩状态，存档与读档都会对相关角色加 Redisson 分布式锁。
+- 在同一用户世界中创建多角色会话，角色依次回复，后续角色可看到本轮前面角色的发言。
+- 支持查看和调整发言计划、聊天历史分页、撤回、关闭与删除会话。
+- 按参与者配置控制方式和模型 API，支持 AI 生成与手动代发。
+- 生成过程通过 SSE 推送，并提供按 `clientRequestId` 重新订阅生成结果的接口。
+- 群聊话题有独立的上下文和向量记忆。
 
-接口位置：
+### CoC 跑团
 
-- `GET /world-saves/{userWorldId}`：查询当前世界存档概览。
-- `POST /world-saves/{userWorldId}`：保存当前世界进度，可附带备注。
-- `POST /world-saves/{userWorldId}/load`：读取存档并回滚当前世界。
+跑团使用独立的 `trpg` 会话模式，围绕模组、KP、调查员、场景和行动轮组织流程。
 
-前端在世界总览页提供“存档/读档”面板，读档前会展示存档时间、备注和角色好感快照。
+- **模组管理**：浏览、创建、编辑、导入和导出模组，管理地点、线索、展示材料与人物设定。
+- **角色准备**：支持角色卡导入、自动生成和分步创建；分步流程覆盖身份、属性掷骰、年龄调整、职业、技能、背景及装备。
+- **场景探索**：支持场景选择、运行时子场景、调查员向 KP 提问、探索结束、场景总结及游戏内时间维护。
+- **行动执行**：展示当前行动轮与步骤，支持继续、提交行动、手动发言和失败步骤重试。
+- **规则与战斗**：提供技能、理智、近战、枪械及伤害等规则处理，记录掷骰明细，维护角色状态和战斗概览；前端使用 Three.js 展示骰子并支持皮肤切换。
+- **跑团记忆**：结合模组信息、探索记录、上下文摘要与行动轮检索，为后续行动提供历史依据。
+- **结局与恢复**：支持结局生成、手动存档，以及行动轮、场景和初始状态的自动存档回滚。
 
-### 对话撤回与副作用回滚
+前端另有标记为“实验功能”的自动推进和下一轮方向修正：自动推进可在行动轮之间及非用户掷骰后倒计时继续；方向修正用于临时调整下一轮 AI 调查员的探索或战斗方向。
 
-撤回功能针对“上一轮用户消息”设计，而不是只删 UI 上最后一条气泡。一次撤回会同步处理：
+### 存档与回档
 
-- 将用户消息标记为已撤回，并清空原始内容。
-- 删除这条用户消息触发的助手回复。
-- 删除 DeepSeek 思考内容、工具调用记录和自动检索提示。
-- 反向扣回本轮工具调用产生的角色好感变化。
-- 清理相关 Redis 快捷缓存，包括 stepNo、角色最近回复和提示词缓存。
-- 如果话题边界引用了被撤回的消息，会同步清理边界。
-- 刷新角色的最近聊天时间和最近聊天内容。
+| 类型 | 范围 | 接口前缀 |
+| --- | --- | --- |
+| 世界存档 | 角色状态、单聊历史边界和最近轮次、普通群聊的历史边界、最近轮次及发言计划 | `/world-saves/{userWorldId}` |
+| 跑团存档 | 指定跑团的会话状态、角色卡、装备、战斗、行动轮、掷骰、执行检查点及相关 Redis 状态 | `/trpg-saves/{conversationId}` |
 
-为了防止连续回滚造成记忆窗口混乱，当前限制最多连续撤回 3 条用户消息。撤回过程同样会尝试获取角色会话锁，如果剧情切换或结束正在进行，会拒绝撤回。
+读档会清理存档点之后的数据，并恢复快照和相关派生状态。世界存档保留每个角色最近 3 轮单聊的恢复数据；跑团通过独立接口恢复，不应把世界存档视为跑团全量备份。存读档过程使用分布式锁协调并发操作。
 
-接口位置：
+### 世界与模型管理
 
-- `POST /history/withdraw?userworldid={id}&characterid={id}`
-
-### 话题感知长期记忆
-
-项目实现了自定义的 `TopicAwareMessageChatMemoryAdvisor`。每次对话前，它会先保存用户消息，再根据话题边界决定当前上下文窗口，并自动拼接：
-
-- 当前话题窗口内的聊天历史。
-- 本轮消息和上一轮上下文构造出的检索查询。
-- 来自世界详情、聊天历史和世界事件的向量召回结果。
-- 可选的角色首轮特殊提示词。
-
-这样可以让模型既保持当前对话的连贯性，又能在需要时引用更早的剧情、设定或世界事件。检索结果来自 PostgreSQL + pgvector，并可通过本地 reranker 服务重排。
-
-### 互动故事事件
-
-世界中可以开启、推进和结束故事事件。一个故事事件会绑定多个角色，并影响这些角色的聊天话题边界。
-
-- 开启事件：根据主题、开场和世界详情生成事件标题、当前场景和开场文本。
-- 推进事件：根据用户填写的转场描述生成新的场景推进，并写入参与角色的聊天历史。
-- 结束事件：汇总事件过程，生成结局摘要，写入世界事件日志，并将世界事件向量化，供后续聊天检索。
-
-故事事件操作会锁定参与角色，避免角色正在聊天时剧情事件被并发改写。
-
-### 角色好感度工具
-
-模型可以通过 Spring AI Tool 调整当前角色对用户的好感度。好感变化会绑定到具体用户消息，因此：
-
-- 聊天时可以根据用户表达自动加减好感。
-- 撤回消息时可以反向回滚好感变化。
-- 存档时会保存每个角色的好感快照，读档时恢复。
-- 世界总览页可以展示角色好感概况和平均好感。
-
-好感系统支持不同难度系数，例如更容易增长或更难增长。
-
-### 世界模板导入 / 导出
-
-用户可以把自己的世界模板导出为 JSON，也可以导入外部世界包。归档内容包括世界基本信息、世界详情和角色模板。导入时会重新创建世界模板、详情和角色，并重新写入世界详情向量。
-
-## 功能概览
-
-- 用户注册、登录、邮箱验证码、资料维护和密码修改。
-- 世界模板、用户世界、世界详情、角色模板和角色绑定管理。
-- 基于 DeepSeek 的角色回复生成，支持 SSE 流式输出。
-- WebSocket 实时聊天连接，支持按用户世界建立会话。
-- PostgreSQL + pgvector 向量检索，覆盖世界详情、聊天历史和世界事件。
-- 话题边界识别、长期记忆、自动检索、rerank 和聊天历史分页。
-- 世界级存档/读档，以及聊天撤回和副作用回滚。
-- 互动故事事件的开启、推进、结束、摘要和归档。
-- Redis 队列、延迟任务、缓存和 Redisson 分布式锁。
-- 本地 Python BERT 服务用于输入完整性判断，本地 reranker 服务用于召回结果重排。
+- 世界模板、世界详情、角色模板和用户世界分别管理，支持世界 JSON 导入 / 导出及模板替换。
+- 用户可维护多个 OpenAI 兼容模型 API，配置 Base URL、模型名、API Key 和请求覆盖参数，并测试聊天、流式输出、工具调用等能力。
+- API Key 以 AES-GCM 加密存储；自定义模型地址必须使用 HTTPS 并解析到公网地址。
+- 用户功能包括注册、登录、邮箱验证码、资料维护、密码修改、图片上传及骰子皮肤设置。
 
 ## 技术栈
 
+以下版本以仓库中的 `pom.xml` 和 `reka/package.json` 为准。
+
 | 模块 | 技术 |
 | --- | --- |
-| 后端 | Java 21, Spring Boot 4.0.5, Spring AI 2.0.0-M4, MyBatis-Plus |
-| AI | DeepSeek Chat, Ollama Embedding, Spring AI Tool Calling |
-| 数据 | PostgreSQL, pgvector, Redis, Redisson |
-| 前端 | Vue 3, TypeScript, Vite, Reka UI |
-| Python 辅助服务 | FastAPI, PyTorch, Transformers, jieba |
-| 文件与通知 | Aliyun OSS, Aliyun Direct Mail |
+| 后端 | Java 21、Spring Boot 4.0.5、Spring AI 2.0.1、MyBatis-Plus |
+| AI | DeepSeek、OpenAI 兼容 API、Ollama Embedding、Spring AI Tool Calling |
+| 数据与并发 | PostgreSQL、pgvector、Redis、Redisson |
+| 前端 | Vue 3.5、TypeScript 6、Vite 8、Reka UI 2、Three.js |
+| Python 辅助服务 | FastAPI、PyTorch、Transformers、jieba |
+| 文件与邮件 | Aliyun OSS、Aliyun Direct Mail |
 
 ## 项目结构
 
 ```text
 .
-|-- pom.xml
-|-- README.md
-|-- src
-|   |-- main
-|   |   |-- java/com/me/galchat
-|   |   |   |-- controller/      # REST API
-|   |   |   |-- service/         # 核心业务：聊天、存档、剧情、用户世界等
-|   |   |   |-- memory/          # 聊天记忆、话题边界、消息聚合
-|   |   |   |-- vector/          # 世界详情、聊天历史、世界事件向量检索
-|   |   |   |-- tool/            # Spring AI 工具调用，如好感度更新
-|   |   |   |-- mapper/          # MyBatis Mapper
-|   |   |   |-- domain/          # PO / DTO / VO
-|   |   |   |-- websocket/       # WebSocket 入口
-|   |   |   |-- consumer/        # Redis 队列消费者
-|   |   |   |-- task/            # 定时任务
-|   |   |   `-- config/          # Web、Redis、AI、向量库等配置
-|   |   `-- resources
-|   |       |-- application.yaml
-|   |       `-- mapper/
-|   `-- test
-|       `-- java/com/me/galchat/init/console.sql
-|-- reka                        # 当前 Vue 3 新版前端
-|-- vue                         # 旧版 Element Plus 前端
-`-- python
-    |-- bert.py                 # 输入完整性判断服务，默认 localhost:8081
-    |-- character_card_pdf.py   # 角色卡 PDF 调用入口
-    |-- character_card/         # 角色卡实现、资源、依赖、示例和测试
-    `-- reranker_server.py      # rerank 服务，默认 localhost:8082
+├── pom.xml
+├── mvnw / mvnw.cmd
+├── src/main/java/com/me/galchat/
+│   ├── controller/             # REST API 和 SSE 入口
+│   ├── service/impl/
+│   │   ├── character/          # 角色模板、角色卡、自动与分步创建
+│   │   ├── chat/               # 单聊及本地 NLP 服务适配
+│   │   ├── dice/               # 掷骰、CoC 检定与战斗规则
+│   │   ├── group/              # 群聊、发言计划、生成流与执行恢复
+│   │   ├── trpg/               # 模组、场景、行动轮、战斗与跑团存档
+│   │   ├── user/               # 用户、历史、好感与用户事件
+│   │   └── world/              # 世界模板、用户世界、世界归档与存档
+│   ├── groupchat/              # 群聊 / 跑团运行策略、上下文、工具记录
+│   ├── singlechat/             # 单聊客户端组装
+│   ├── modelapi/               # 自定义模型配置、加密、探测与运行时
+│   ├── memory/                 # 单聊记忆、话题窗口与消息聚合
+│   ├── vector/                 # 世界详情、聊天、群聊话题、跑团行动检索
+│   ├── tool/                   # 好感、KP、调查员等模型工具
+│   ├── domain/                 # PO / DTO / VO
+│   ├── mapper/                 # MyBatis Mapper
+│   ├── websocket/              # WebSocket 入口
+│   ├── consumer/               # 队列消费者
+│   ├── task/                   # 定时任务
+│   └── config/                 # Web、AI、Redis、向量库等配置
+├── src/main/resources/
+│   ├── application.yaml
+│   └── mapper/                 # SQL 映射
+├── src/test/java/com/me/galchat/
+│   └── init/console.sql        # 空数据库的完整建表脚本；同目录树含后端测试
+├── reka/
+│   ├── src/api/                # 请求客户端与接口类型
+│   ├── src/components/         # 世界、单聊、群聊、跑团、角色卡等界面
+│   ├── src/dice/               # 骰子展示与播放逻辑
+│   └── test/                   # 前端测试；部分测试与源文件同目录
+├── python/
+│   ├── bert.py                # 输入完整性判断，localhost:8081
+│   ├── reranker_server.py     # 检索重排，localhost:8082
+│   ├── character_card_pdf.py  # 角色卡 PDF 命令入口
+│   └── character_card/        # PDF 实现、资源、依赖、示例和测试
+├── data/
+│   ├── worlds/                # 世界 JSON 数据
+│   ├── modules/               # 模组 SQL 数据
+│   └── maintenance/           # 特定数据维护脚本
+├── dice/                      # 骰子 Blender 源文件
+└── output/                    # 规则资料、转换结果及素材输出
 ```
 
-## 环境要求
+## 环境与配置
 
-- JDK 21
-- Node.js 20.19+ 或 22.12+
-- PostgreSQL，并启用 `pgvector` 扩展
-- Redis
-- Ollama，并准备 1024 维 embedding 模型，例如 `bge-m3`
-- DeepSeek API Key
-- Python 3.10+，在启用本地 BERT、reranker 服务或生成角色卡 PDF 时需要
-- Aliyun OSS / Aliyun Direct Mail 配置，仅在使用图片上传、邮箱验证码等能力时需要
+- JDK 21；仓库提供 Maven Wrapper。
+- Node.js 满足 `^20.19.0 || >=22.12.0`，用于前端开发和构建。
+- PostgreSQL，并安装 pgvector 扩展；Redis。
+- Ollama 和 1024 维 embedding 模型，当前配置为 `bge-m3`。
+- 可用的 DeepSeek API 配置，用于内置聊天及辅助生成流程。
+- Python 3.10+，仅在运行 Python 辅助服务或角色卡 PDF 工具时需要。
+- 图片上传和邮箱验证码需要相应的 Aliyun OSS / Direct Mail 配置与凭据。
 
-默认配置位于 `src/main/resources/application.yaml`。首次运行前请按自己的环境修改数据库、Redis、DeepSeek、Ollama、OSS 和邮件配置。生产环境请使用环境变量或外部配置覆盖敏感信息，不要提交真实密钥。
+后端配置入口为 [application.yaml](src/main/resources/application.yaml)。按实际环境设置以下配置：
+
+| 配置项 | 用途 |
+| --- | --- |
+| `spring.datasource.url` / `username` / `password` | PostgreSQL 连接 |
+| `spring.data.redis.*` | Redis 连接 |
+| `spring.ai.deepseek.base-url` / `api-key` / `chat.model` | 内置模型服务与模型名 |
+| `spring.ai.ollama.base-url` / `embedding.model` | Ollama 地址与 embedding 模型 |
+| `galchat.model-api.master-key` | 加密用户自定义模型 API Key 的主密钥 |
+| `galchat.model-api.request-timeout` | 自定义模型请求超时，当前为 `30s` |
+| `galchat.alioss.*` / `galchat.aliemail.*` | OSS 与邮件业务配置；OSS 使用环境变量凭据，邮件使用阿里云默认凭据链 |
+
+主密钥必须是 **32 字节随机数据的 Base64 编码**。首次部署时可用 `openssl rand -base64 32` 生成，并通过外部配置持久保存；配置读取也支持 `GALCHAT_MODEL_API_MASTER_KEY` 作为回退值。已有加密数据需要同一把密钥才能解密。数据库连接、API Key 等敏感值请使用环境变量或外部配置覆盖。
 
 ## 快速启动
 
-### 1. 初始化数据库
+以下命令除前端步骤外，均在仓库根目录执行。
 
-创建 PostgreSQL 数据库后执行初始化脚本：
+### 1. 初始化空数据库
+
+创建 PostgreSQL 数据库后执行：
 
 ```bash
-psql -h localhost -U <username> -d <database> -f src/test/java/com/me/galchat/init/console.sql
+psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
+  -f src/test/java/com/me/galchat/init/console.sql
 ```
 
-该脚本会创建业务表、索引以及 `vector` 扩展。后端启动后，Spring AI 的 `PgVectorStore` 还会初始化以下向量表：
+该脚本包含当前业务表、索引和 `vector` 扩展，面向空数据库，不是已有数据库的增量升级脚本。后端的 `VectorConfiguration` 会初始化以下 1024 维向量表：
 
 - `world_detail_vector_store`
 - `chat_history_vector_store`
 - `group_topic_vector_store`
 - `trpg_turn_vector_store`
 
-### 2. 准备 Redis 和 Ollama
+如果需要示例跑团模组，可在建表后单独执行：
 
-启动 Redis 后，准备默认 embedding 模型：
+```bash
+psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
+  -f data/modules/15-01-amidst-the-ancient-trees.sql
+```
+
+该脚本导入《古树林中》，重复导入会报错。`data/modules/00-debug-combat-arena.sql` 用于战斗调试；`data/maintenance/` 中的脚本针对特定数据维护，不属于首次启动必需步骤。世界 JSON 可通过前端导入。
+
+### 2. 准备 Redis、Ollama 和后端配置
+
+启动 Redis 与 Ollama，拉取 embedding 模型：
 
 ```bash
 ollama pull bge-m3
 ```
 
-当前向量配置固定为 1024 维。如果更换 embedding 模型，需要同步确认模型维度与 `VectorConfiguration` 中的 `dimensions(1024)` 保持一致。
+按上一节设置数据库、Redis、DeepSeek 等配置。如果更换 embedding 模型，必须同时核对 `VectorConfiguration` 中的 `dimensions(1024)` 和已有向量表结构。
 
-### 3. 启动 Python 辅助服务
-
-如果只想先跑通主流程，可以暂时不启动这两个服务；Java 侧在调用失败时会降级处理。完整体验建议启动。
-
-安装依赖：
-
-```bash
-pip install fastapi uvicorn torch "transformers>=4.36.0" pydantic jieba
-```
-
-输入完整性判断服务：
-
-```bash
-python python/bert.py
-```
-
-reranker 服务：
-
-```bash
-python python/reranker_server.py
-```
-
-默认 reranker 模型为 `Alibaba-NLP/gte-multilingual-reranker-base`。如需使用本地模型目录：
-
-```bash
-RERANKER_MODEL_PATH=/path/to/gte-multilingual-reranker-base python python/reranker_server.py
-```
-
-### 4. 启动后端
+### 3. 启动后端
 
 macOS / Linux：
 
@@ -220,68 +193,116 @@ Windows：
 .\mvnw.cmd spring-boot:run
 ```
 
-后端默认地址：
+默认 HTTP 地址为 `http://localhost:8080`，WebSocket 路径为 `/ws/{sid}`。Actuator 健康检查路径为 `/actuator/health`；当前鉴权拦截器未豁免该路径，需要携带 `token`。
 
-- HTTP API: `http://localhost:8080`
-- WebSocket: `ws://localhost:8080/ws/{sid}`
-- Actuator Health: `http://localhost:8080/actuator/health`
-
-### 5. 启动前端
+### 4. 启动前端
 
 ```bash
 cd reka
-npm install
+npm ci
 npm run dev
 ```
 
-Vite 默认运行在 `http://localhost:5173`。开发环境中，`reka/vite.config.ts` 会将 `/api` 代理到 `http://localhost:8080`，将 `/ws` 代理到 `ws://localhost:8080`。
+默认开发地址为 `http://localhost:5173`。`reka/vite.config.ts` 将 `/api` 请求转发到后端并移除 `/api` 前缀，将 `/ws` 转发到后端 WebSocket 服务。
+
+登录后可导入或创建世界、添加角色并开始单聊或群聊；跑团需要选择模组、配置参与者和角色卡，再开始行动轮。
+
+### 5. 可选：启动 Python 辅助服务
+
+```bash
+python -m pip install fastapi uvicorn torch "transformers>=4.36.0" pydantic jieba
+```
+
+输入完整性判断服务需要事先在 `python/bert_model/` 放置可加载的分类模型与 tokenizer；该模型不随 Git 仓库提供。
+
+```bash
+python python/bert.py
+```
+
+检索重排服务默认加载 `Alibaba-NLP/gte-multilingual-reranker-base`，首次启动可能需要下载模型：
+
+```bash
+python python/reranker_server.py
+```
+
+也可以指定本地模型目录：
+
+```bash
+RERANKER_MODEL_PATH=/path/to/gte-multilingual-reranker-base python python/reranker_server.py
+```
+
+reranker 还支持 `RERANKER_DEVICE`、`RERANKER_MAX_LENGTH`、`RERANKER_BATCH_SIZE` 和 `RERANKER_TORCH_DTYPE`。Java 当前直接调用本机 `8081` 和 `8082`；异机部署需要调整 Java 侧地址。
+
+这两个服务调用失败时，BERT 判断会使用延迟任务兜底，reranker 会保留原始向量召回顺序，可先不启动它们来验证主流程。
+
+### 可选：生成角色卡 PDF
+
+这是独立的命令行工具，使用角色卡 JSON 生成 PDF。详细说明见 [角色卡 PDF 工具](python/character_card/README.md)。
+
+```bash
+python -m pip install -r python/character_card/requirements.txt
+python python/character_card_pdf.py \
+  python/character_card/examples/character-card.sample.json \
+  /tmp/galchat-character-card.pdf \
+  --background modern --font-index 0
+```
 
 ## 主要接口
 
-除登录、注册和注册邮箱验证码接口外，HTTP 接口默认需要在请求头携带 `token`。
+下表路径均为后端路径。通过 Vite 代理访问时加 `/api` 前缀。除登录、注册和注册邮箱验证码外，HTTP 请求默认需要携带 `token` 请求头；SSE 接口返回事件流，其余大部分接口返回 `Result` 包装的数据。
 
-| 模块 | 路径 |
+| 模块 | 主要路径 |
 | --- | --- |
-| 用户 | `POST /user/login`, `POST /user/register`, `POST /user/register/email-code`, `GET/PUT /user/info`, `PUT /user/password` |
-| 世界 | `/world/**` |
-| 世界存档 | `GET /world-saves/{userWorldId}`, `POST /world-saves/{userWorldId}`, `POST /world-saves/{userWorldId}/load` |
-| 角色 | `/character/**` |
-| 聊天 | `POST /ai/chat` |
-| 聊天历史 | `GET /history`, `POST /history/withdraw` |
-| 图片上传 | `POST /upload` |
-| WebSocket | `/ws/{sid}` |
+| 用户 | `/user/login`、`/user/register`、`/user/register/email-code`、`/user/info`、`/user/password`、`/user/password/email-code` |
+| 世界与角色 | `/world/**`、`/character/**` |
+| 单聊与历史 | `POST /ai/chat`、`GET /history`、`POST /history/withdraw` |
+| 单聊模型绑定 | `PUT /character/{userWorldId}/{characterId}/model` |
+| 世界存档 | `GET/POST /world-saves/{userWorldId}`、`POST /world-saves/{userWorldId}/load` |
+| 模型 API | `GET/POST /model-apis`、`PUT/DELETE /model-apis/{id}`、`POST /model-apis/{id}/test` |
+| 群聊会话 | `GET/POST /group-chat/conversations`、`GET/DELETE /group-chat/conversations/{conversationId}` |
+| 群聊消息 | `GET/POST /group-chat/conversations/{conversationId}/messages`、`POST /group-chat/conversations/{conversationId}/withdraw` |
+| 生成流恢复 | `GET /group-chat/conversations/{conversationId}/generations/{clientRequestId}` |
+| 参与者与计划 | `/group-chat/conversations/{conversationId}/actor-runtimes`、`/group-chat/conversations/{conversationId}/reply-plan` |
+| 模组 | `/coc-modules/**`，含 `/import` 和 `/{id}/export` |
+| 角色卡 | `/character-cards/**`、`/character-card-creation/drafts/**` |
+| 跑团执行 | `/group-chat/conversations/{conversationId}/turns/**` |
+| 跑团状态 | `/group-chat/conversations/{conversationId}/context-window`、`/game-time`、`/combat-overview`（后两项使用相同会话前缀） |
+| 掷骰 | `GET /dice-rolls/{id}`、`GET /dice-rolls/{id}/results`、`POST /dice-roll-results/{id}/roll` |
+| 跑团存档 | `GET/POST /trpg-saves/{conversationId}`、`POST /trpg-saves/{conversationId}/load` |
+| 跑团回滚 | `GET /trpg-saves/{conversationId}/rollback-status`；`POST` 同前缀下的 `/rollback-turn`、`/rollback-scene`、`/rollback-initial` |
+| 图片与实时连接 | `POST /upload`、WebSocket `/ws/{sid}` |
 
-## 常用命令
+完整请求字段与响应结构以 `src/main/java/com/me/galchat/controller/`、`domain/dto/`、`domain/vo/` 和 `reka/src/api/` 为准。
 
-后端测试：
+## 开发与验证
+
+后端测试与打包：
 
 ```bash
 ./mvnw test
-```
-
-后端打包：
-
-```bash
 ./mvnw clean package
 ```
 
-如果本地没有准备 PostgreSQL、Redis、Ollama、DeepSeek 等测试依赖，可以先跳过测试：
+仓库同时包含单元测试和依赖数据库、应用上下文或外部服务的集成测试，运行全部测试前需准备相应环境。仅需验证编译与打包时：
 
 ```bash
 ./mvnw clean package -DskipTests
 ```
 
-前端类型检查和构建：
+前端测试、类型检查和构建：
 
 ```bash
 cd reka
+npm test
 npm run type-check
 npm run build
 ```
 
-## 开发注意事项
+`npm run build` 已包含类型检查；前端测试直接使用 Node 的测试运行器执行 TypeScript 文件，需要使用支持直接运行 TypeScript 的 Node 版本。`npm run preview` 可预览构建产物；部署时需配置 `/api`、`/ws` 后端路由，并支持 WebSocket 和 SSE 长连接。
 
-- `application.yaml` 当前偏向本地开发配置，生产环境请使用外部配置管理数据库密码、DeepSeek Key、OSS Key 和 JWT 相关密钥。
-- PostgreSQL 必须启用 `pgvector`，否则向量表和检索能力无法正常工作。
-- Redis 承担缓存、队列、延迟任务和分布式锁能力，开发与部署时需要保持可用。
-- Java 服务当前直接调用本机 `http://localhost:8081` 和 `http://localhost:8082`。如果 Python 服务部署在其他机器，需要同步调整 Java 侧配置或代码。
+角色卡 PDF 工具测试：
+
+```bash
+cd python
+python -m unittest discover -s character_card/tests
+```

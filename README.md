@@ -169,6 +169,8 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
 
 该脚本导入《古树林中》，重复导入会报错。`data/modules/00-debug-combat-arena.sql` 用于战斗调试；`data/maintenance/` 中的脚本针对特定数据维护，不属于首次启动必需步骤。世界 JSON 可通过前端导入。
 
+《太阳与九英镑》提供[个人模组导入 JSON](data/modules/sun-and-nine-pounds.json) 和[系统默认模组 SQL](data/modules/sun-and-nine-pounds.sql)，两种方式任选其一。该模组按可回访的地点网络组织，保留场景原文并补充 AI 主持说明；封面与10份展示材料已填写上传地址。组织方式、材料取舍和验证结果见[导入说明](data/modules/sun-and-nine-pounds.md)。
+
 ### 2. 准备 Redis、Ollama 和后端配置
 
 启动 Redis 与 Ollama，拉取 embedding 模型：

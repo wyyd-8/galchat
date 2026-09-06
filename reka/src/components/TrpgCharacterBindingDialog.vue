@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import {
   ArrowDown, ArrowLeft, ArrowUp, BookOpenCheck, BookUser, Check, ChevronDown,
-  ChevronUp, CircleCheck, ClipboardCheck, Dices, Fingerprint, LoaderCircle,
+  ChevronUp, CircleCheck, ClipboardCheck, Dices, Download, Fingerprint, LoaderCircle,
   RefreshCw, ScanText, Search, Sparkles, Trash2, TriangleAlert, UserRound, X,
 } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
@@ -72,6 +72,8 @@ const complete = computed(() => targets.value.length > 0 && completedCount.value
 const displayCard = computed(() => card.value || draft.value?.state.preview || null)
 const creationMethods = computed(() => buildCharacterCardCreationMethods(selectedTarget.value?.actorType || 'PLAYER'))
 const importPreview = computed(() => analyzeCharacterCardImport(cardText.value))
+const importTemplateFilename = 'COC七版半自动人物卡v2.0.5(通用).xlsx'
+const importTemplateUrl = `${import.meta.env.BASE_URL}templates/${encodeURIComponent(importTemplateFilename)}`
 const autoDraft = computed(() => draft.value?.creationMode === 'AUTO_QUICK_START' ? draft.value : null)
 const creationMethodCopy = {
   STEP: { title: '标准步进建卡', eyebrow: '推荐 · 8–12 分钟', description: '亲自生成属性、分配技能，并逐项完成调查员背景。', action: '开始标准建卡' },
@@ -632,21 +634,26 @@ watch(() => props.conversation?.id, () => {
           <header class="creation-workbench-heading import-workbench-heading"><span><small>导入现成人物卡</small><h3>导入{{ selectedName }}人物卡</h3><p>把已有的人物卡文本粘贴到下方，右侧会即时显示已识别内容和需要补充的项目。</p></span><em :class="{ ready: importPreview.ready }">{{ importPreview.ready ? '可以导入' : cardText.trim() ? '需要补充' : '等待粘贴' }}</em></header>
           <div class="creation-import-layout">
             <main class="creation-import-editor">
-              <label class="field"><span><ScanText :size="15" />粘贴人物卡文本</span><textarea v-model="cardText" rows="14" spellcheck="false" :placeholder="importPlaceholder" aria-describedby="character-import-format-help" /></label>
+              <label class="field"><span><ScanText :size="15" />粘贴人物卡文本</span><textarea v-model="cardText" rows="14" spellcheck="false" :placeholder="importPlaceholder" aria-describedby="character-import-template-help character-import-format-help" /></label>
               <div id="character-import-format-help" class="import-format-help"><strong>最低导入要求</strong><span>第一行写明姓名、职业、性别和年龄，并包含 STR、CON、SIZ、DEX、APP、INT、POW、EDU 八项属性。技能与背景可以不填。</span></div>
               <div class="import-editor-meta"><span>{{ cardText.length }} 字符</span><span>{{ cardText.split(/\r?\n/).filter(Boolean).length }} 行</span><span>不会自动修改原文</span></div>
             </main>
             <aside class="creation-import-assistant">
-              <header class="import-assistant-heading"><ClipboardCheck :size="20" /><span><strong>导入助手</strong><p>{{ cardText.trim() ? '这是系统从左侧文本中读到的内容。' : '照着下面的格式粘贴，系统会自动检查。' }}</p></span></header>
+              <section id="character-import-template-help" aria-labelledby="character-import-template-title">
+                <header class="import-assistant-heading"><BookOpenCheck :size="20" /><span><strong id="character-import-template-title">人物卡模板与导入步骤</strong><p>按照以下步骤准备人物卡，再粘贴到左侧。</p></span></header>
+                <div class="import-template-download">
+                  <small>{{ importTemplateFilename }}</small>
+                  <a class="button primary" :href="importTemplateUrl" :download="importTemplateFilename"><Download :size="15" />下载人物卡模板</a>
+                </div>
+                <div class="import-empty-guide">
+                  <article><i>1</i><span><strong>打开模板</strong><small>下载后，用 Excel 或 WPS 打开人物卡表格。</small></span></article>
+                  <article><i>2</i><span><strong>逐步完成建卡</strong><small>按照表格中的“建卡”部分，一步一步完成填写。</small></span></article>
+                  <article><i>3</i><span><strong>选择“txt输出”</strong><small>建卡完成后，选择“txt输出”，复制输出的人物卡文本内容。</small></span></article>
+                  <article><i>4</i><span><strong>粘贴并导入</strong><small>将内容粘贴到左侧“粘贴人物卡文本”输入框，检查提示后点击“导入并绑定人物卡”。</small></span></article>
+                </div>
+              </section>
 
-              <div v-if="!cardText.trim()" class="import-empty-guide">
-                <p>先准备两项必填内容</p>
-                <article><i>1</i><span><strong>身份信息放在第一行</strong><small>例如：周宁，记者，女，27岁</small></span></article>
-                <article><i>2</i><span><strong>写全八项基础属性</strong><small>属性名使用 STR、CON、SIZ、DEX、APP、INT、POW、EDU，后面填写整数。</small></span></article>
-                <div><BookOpenCheck :size="17" /><span><strong>技能和背景不是必填项</strong><small>已有内容可以一并粘贴；暂时没有也不影响导入。</small></span></div>
-              </div>
-
-              <template v-else>
+              <template v-if="cardText.trim()">
                 <section class="import-result-status" :class="{ ready: importPreview.ready }" aria-live="polite">
                   <CircleCheck v-if="importPreview.ready" :size="21" />
                   <TriangleAlert v-else :size="21" />

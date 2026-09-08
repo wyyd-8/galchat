@@ -16,6 +16,8 @@ interface DialogueEntry {
   image?: string
   favor?: number
   status?: Conversation['status']
+  completionStatus?: Conversation['completionStatus']
+  archivedAt?: string
 }
 
 const props = defineProps<{ world: UserWorld; characters: Character[]; conversations: Conversation[]; worldSave: WorldSave | null }>()
@@ -38,9 +40,11 @@ const dialogueEntries = computed<DialogueEntry[]>(() => [
     id: conversation.id,
     kind: conversation.mode === 'trpg' ? 'trpg' as const : 'group' as const,
     title: conversation.title,
-    preview: conversation.lastChatContent || conversation.summary || (conversation.status === 'active' ? '等待下一次互动' : '会话已结束'),
+    preview: (conversation.completionStatus === 'ready' ? conversation.summary : conversation.lastChatContent) || conversation.summary || (conversation.status === 'active' ? '等待下一次互动' : '会话已结束'),
     time: conversation.lastChatTime || conversation.updatedAt,
     status: conversation.status,
+    completionStatus: conversation.completionStatus,
+    archivedAt: conversation.archivedAt,
   })),
 ].sort((left, right) => activityTime(right.time) - activityTime(left.time)))
 
@@ -110,7 +114,7 @@ function openDialogue(entry: DialogueEntry) {
                 <span class="dialogue-entry-overline"><em>{{ kindLabel(entry.kind) }}</em><small>{{ activityLabel(entry.time) }}</small></span>
                 <strong>{{ entry.title }}</strong>
                 <p>{{ entry.preview }}</p>
-                <span class="dialogue-entry-meta"><small v-if="entry.kind === 'direct'">好感 {{ entry.favor }}</small><small v-else :class="{ closed: entry.status === 'closed' }">{{ entry.status === 'active' ? '进行中' : '已关闭' }}</small></span>
+                <span class="dialogue-entry-meta"><small v-if="entry.kind === 'direct'">好感 {{ entry.favor }}</small><small v-else :class="{ closed: entry.status === 'closed' }">{{ entry.archivedAt ? '已归档 · 可重读' : entry.completionStatus === 'ready' ? '已归档 · 查看回顾' : entry.completionStatus ? '待生成总结' : entry.status === 'active' ? '进行中' : '已结束' }}</small></span>
               </span>
               <ChevronRight :size="17" />
             </button>

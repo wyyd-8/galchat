@@ -78,6 +78,12 @@ public class TrpgTurnExecutionService {
     private CocModuleRuntimeService moduleRuntimeService;
     private TrpgTurnVectorIndexQueue turnVectorIndexQueue;
     private TrpgTurnDirectionStore turnDirectionStore;
+    private TrpgCompletionService completionService;
+
+    @Autowired
+    void setCompletionService(TrpgCompletionService completionService) {
+        this.completionService = completionService;
+    }
 
     @Autowired
     void setModuleRuntimeService(
@@ -498,6 +504,7 @@ public class TrpgTurnExecutionService {
                 || !turnId.equals(step.getTurnId())) {
             throw new UserRequestException("回复步骤不存在");
         }
+        if (GroupChatConstant.STATUS_FAILED.equals(step.getStatus()) && isCompletionAction(step)) return step;
         if (!GroupChatConstant.STATUS_FAILED.equals(
                 step.getStatus())
                 || !GroupChatConstant.ACTOR_CHARACTER.equals(
@@ -520,6 +527,13 @@ public class TrpgTurnExecutionService {
 
     private boolean restoreFailedStep(
             GroupChatTurn turn, GroupChatReplyStep failedStep) {
+        if (isCompletionAction(failedStep)) {
+            failedStep.setStatus(GroupChatConstant.STATUS_PENDING).setErrorMessage(null).setUpdatedAt(LocalDateTime.now());
+            persistRetryableStep(failedStep);
+            turn.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
+            turnMapper.updateById(turn);
+            return false;
+        }
         boolean restored = checkpointService.restore(
                 turn, failedStep);
         if (!restored) {
@@ -1380,6 +1394,10 @@ public class TrpgTurnExecutionService {
                         .turnId(turn.getId())
                         .build());
             }
+            if (planResolver.hasRunFinishRequest(conversation, turn.getId()) && !hasRunningStep(turn.getId())) {
+                recoveryService.cancelPendingSteps(turn.getId(), "KP已结束正篇");
+                return complete(conversation, turn);
+            }
             if (index >= scheduled.size()) {
                 return complete(conversation, turn);
             }
@@ -1394,6 +1412,9 @@ public class TrpgTurnExecutionService {
                     next.getStatus())) {
                 return executeScheduledSteps(
                         conversation, turn, scheduled, index + 1);
+            }
+            if (isCompletionAction(next)) {
+                return executeCompletionAction(conversation, turn, next);
             }
             if (next.getParentStepId() == null
                     && GroupChatConstant.ACTION_COMBAT_ADJUDICATE.equals(
@@ -1721,9 +1742,29 @@ public class TrpgTurnExecutionService {
     private Flux<GroupChatEvent> complete(
             GroupConversation conversation, GroupChatTurn turn) {
         return Flux.defer(() -> {
+            boolean finishing = planResolver.hasRunFinishRequest(conversation, turn.getId());
+            if (finishing && !GroupChatConstant.STATUS_COMPLETED.equals(turn.getStatus())) {
+                List<GroupChatReplyStep> closing = stepMapper.selectList(new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turn.getId())
+                        .eq(GroupChatReplyStep::getActionType, GroupChatConstant.ACTION_TRPG_RUN_SCENE_CLOSE));
+                GroupChatReplyStep step = closing.isEmpty() ? null : closing.getFirst();
+                if (step == null) {
+                    var all = stepMapper.selectList(new LambdaQueryWrapper<GroupChatReplyStep>()
+                            .eq(GroupChatReplyStep::getTurnId, turn.getId()));
+                    int nextNo = all.stream().mapToInt(GroupChatReplyStep::getStepNo).max().orElse(0) + 1;
+                    step = new GroupChatReplyStep().setTurnId(turn.getId()).setStepNo(nextNo)
+                            .setActionType(GroupChatConstant.ACTION_TRPG_RUN_SCENE_CLOSE)
+                            .setSpeakerType(GroupChatConstant.ACTOR_KP).setGroupKey("completion")
+                            .setGroupName("完成主场景").setGroupOrder(nextNo).setItemOrder(1).setForceReply(false)
+                            .setStatus(GroupChatConstant.STATUS_PENDING)
+                            .setCreatedAt(LocalDateTime.now()).setUpdatedAt(LocalDateTime.now());
+                    stepMapper.insert(step);
+                }
+                return executeCompletionAction(conversation, turn, step);
+            }
             transactionTemplate.executeWithoutResult(status -> {
-                planResolver.onTurnCompleted(
-                        conversation, turn);
+                if (!finishing && !GroupChatConstant.TURN_SOURCE_SUMMARY.equals(turn.getPlanSource()))
+                    planResolver.onTurnCompleted(conversation, turn);
                 turn.setStatus(GroupChatConstant.STATUS_COMPLETED)
                         .setUpdatedAt(LocalDateTime.now());
                 turnMapper.updateById(turn);
@@ -1738,6 +1779,55 @@ public class TrpgTurnExecutionService {
                     .conversationId(conversation.getId())
                     .turnId(turn.getId())
                     .build());
+        });
+    }
+
+    private boolean isCompletionAction(GroupChatReplyStep step) {
+        return GroupChatConstant.ACTION_TRPG_SUMMARY.equals(step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_RUN_SCENE_CLOSE.equals(step.getActionType());
+    }
+
+    private Flux<GroupChatEvent> executeCompletionAction(
+            GroupConversation conversation, GroupChatTurn turn, GroupChatReplyStep step) {
+        return Flux.defer(() -> {
+            step.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
+            stepMapper.updateById(step);
+            try {
+                if (GroupChatConstant.ACTION_TRPG_SUMMARY.equals(step.getActionType())) {
+                    completionService.executeUnderLock(conversation, turn, step);
+                } else {
+                    var messages = messageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
+                            .eq(GroupChatMessage::getConversationId, conversation.getId())
+                            .eq(GroupChatMessage::getStatus, GroupChatConstant.STATUS_COMPLETED)
+                            .eq(GroupChatMessage::getVisibility, "public")
+                            .orderByDesc(GroupChatMessage::getSequenceNo).last("limit 1"));
+                    if (messages.isEmpty()) throw new UserRequestException("最后场景没有可总结的公开记录");
+                    sceneLifecycleService.closeRunScene(conversation, messages.getFirst().getSequenceNo());
+                    transactionTemplate.executeWithoutResult(status -> {
+                        sceneLifecycleService.finishRunSceneUnderLock(conversation);
+                        step.setStatus(GroupChatConstant.STATUS_COMPLETED).setUpdatedAt(LocalDateTime.now());
+                        stepMapper.updateById(step);
+                        turn.setStatus(GroupChatConstant.STATUS_COMPLETED).setUpdatedAt(LocalDateTime.now());
+                        turnMapper.updateById(turn);
+                    });
+                }
+            } catch (RuntimeException exception) {
+                step.setStatus(GroupChatConstant.STATUS_FAILED).setErrorMessage(exception.getMessage())
+                        .setUpdatedAt(LocalDateTime.now());
+                turn.setStatus(GroupChatConstant.STATUS_FAILED).setUpdatedAt(LocalDateTime.now());
+                transactionTemplate.executeWithoutResult(status -> {
+                    stepMapper.updateById(step);
+                    turnMapper.updateById(turn);
+                });
+                throw exception;
+            }
+            checkpointService.clear(conversation.getId());
+            clearTurnDirection(conversation.getId());
+            if (turnVectorIndexQueue != null && !GroupChatConstant.TURN_SOURCE_SUMMARY.equals(turn.getPlanSource())) {
+                turnVectorIndexQueue.submitTurnAfterCommit(turn.getId());
+            }
+            return Flux.just(GroupChatEvent.builder().eventType(GroupChatConstant.EVENT_TURN_COMPLETED)
+                    .conversationId(conversation.getId()).turnId(turn.getId()).build());
         });
     }
 

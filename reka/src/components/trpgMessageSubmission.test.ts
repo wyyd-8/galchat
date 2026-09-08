@@ -39,6 +39,7 @@ test('submits a clarification through the waiting user step', async () => {
     sessionStorage: storage(),
   })
 
+  const originalConversation = api.conversation
   const originalMessage = streamTrpgTurn.message
   const originalGroupMessages = api.groupMessages
   const originalReplyPlan = api.replyPlan
@@ -49,6 +50,7 @@ test('submits a clarification through the waiting user step', async () => {
       submitted = { conversationId, turnId, stepId, content: payload.content }
       onEvent({ eventType: 'stream.caught_up', conversationId })
     }
+    api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: 'active' })
     api.groupMessages = async () => []
     api.replyPlan = async () => [{ source: 'SCENE', displayName: '书房', items: [] }]
     api.currentTurn = async () => null
@@ -97,6 +99,7 @@ test('submits a clarification through the waiting user step', async () => {
     })
     assert.equal(workspace.messageInput.value, '')
   } finally {
+    api.conversation = originalConversation
     streamTrpgTurn.message = originalMessage
     api.groupMessages = originalGroupMessages
     api.replyPlan = originalReplyPlan
@@ -122,6 +125,7 @@ test('submits a KP inquiry and returns the composer to action mode', async () =>
     sessionStorage: storage(),
   })
 
+  const originalConversation = api.conversation
   const originalInquiry = streamTrpgTurn.inquiry
   const originalGroupMessages = api.groupMessages
   const originalReplyPlan = api.replyPlan
@@ -132,6 +136,7 @@ test('submits a KP inquiry and returns the composer to action mode', async () =>
       submitted = { conversationId, turnId, stepId, question: payload.question }
       onEvent({ eventType: 'stream.caught_up', conversationId })
     }
+    api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: 'active' })
     api.groupMessages = async () => []
     api.replyPlan = async () => [{ source: 'SCENE', displayName: '深夜街道', items: [] }]
     api.currentTurn = async () => null
@@ -183,6 +188,7 @@ test('submits a KP inquiry and returns the composer to action mode', async () =>
     assert.equal(workspace.inquiryInput.value, '')
     assert.equal(workspace.composerIntent.value, 'action')
   } finally {
+    api.conversation = originalConversation
     streamTrpgTurn.inquiry = originalInquiry
     api.groupMessages = originalGroupMessages
     api.replyPlan = originalReplyPlan
@@ -208,6 +214,7 @@ test('starts a new TRPG turn with the temporary investigator direction', async (
     sessionStorage: storage(),
   })
 
+  const originalConversation = api.conversation
   const originalContinue = streamTrpgTurn.continue
   const originalGroupMessages = api.groupMessages
   const originalReplyPlan = api.replyPlan
@@ -218,6 +225,7 @@ test('starts a new TRPG turn with the temporary investigator direction', async (
       submittedDirection = args[3]
       args[2]({ eventType: 'stream.caught_up', conversationId: args[0] })
     }
+    api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: 'active' })
     api.groupMessages = async () => []
     api.replyPlan = async () => [{ source: 'SCENE', displayName: '书房', items: [] }]
     api.currentTurn = async () => null
@@ -250,6 +258,7 @@ test('starts a new TRPG turn with the temporary investigator direction', async (
     assert.equal(submittedDirection, '优先确认地下室入口。')
     assert.equal(succeeded, true)
   } finally {
+    api.conversation = originalConversation
     streamTrpgTurn.continue = originalContinue
     api.groupMessages = originalGroupMessages
     api.replyPlan = originalReplyPlan

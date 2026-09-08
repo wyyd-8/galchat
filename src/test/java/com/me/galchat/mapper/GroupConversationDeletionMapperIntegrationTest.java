@@ -31,6 +31,8 @@ class GroupConversationDeletionMapperIntegrationTest {
 
     @Test
     void deletesAllConversationOwnedRowsWithoutRevertingFavorValue() {
+        jdbcTemplate.execute("CREATE TEMP TABLE trpg_completion (conversation_id BIGINT PRIMARY KEY) ON COMMIT DROP");
+        jdbcTemplate.update("INSERT INTO trpg_completion VALUES (?)", CONVERSATION_ID);
         insertFixture();
 
         int deleted = deletionMapper.deleteConversationData(
@@ -39,6 +41,7 @@ class GroupConversationDeletionMapperIntegrationTest {
         assertThat(deleted).isEqualTo(1);
         for (String check : List.of(
                 "SELECT COUNT(*) FROM group_conversation WHERE id = -97001",
+                "SELECT COUNT(*) FROM trpg_completion WHERE conversation_id = -97001",
                 "SELECT COUNT(*) FROM group_chat_member WHERE conversation_id = -97001",
                 "SELECT COUNT(*) FROM group_actor_runtime_config WHERE conversation_id = -97001",
                 "SELECT COUNT(*) FROM group_reply_plan WHERE conversation_id = -97001",

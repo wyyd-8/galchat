@@ -53,7 +53,8 @@ class ChatClientMessageAggregator {
                 new AtomicReference<>(new ArrayList<>());
         private final AtomicReference<Map<String, Object>> context =
                 new AtomicReference<>(new HashMap<>());
-        private final Map<String, String> cumulativeReasoningByStream = new HashMap<>();
+        private final AssistantReasoningStream reasoningStream =
+                new AssistantReasoningStream();
         private final AtomicReference<ChatResponseMetadata> responseMetadata =
                 new AtomicReference<>();
         private final AtomicReference<ChatGenerationMetadata> generationMetadata =
@@ -68,7 +69,7 @@ class ChatClientMessageAggregator {
             context.set(new HashMap<>());
             responseMetadata.set(null);
             generationMetadata.set(ChatGenerationMetadata.NULL);
-            cumulativeReasoningByStream.clear();
+            reasoningStream.reset();
             hasAssistantOutput = false;
         }
 
@@ -93,8 +94,7 @@ class ChatClientMessageAggregator {
                     continue;
                 }
 
-                String snapshot = AssistantReasoning.get(output);
-                String delta = reasoningDelta(streamKey(chatResponse, output, index), snapshot);
+                String delta = reasoningStream.delta(chatResponse, output, index);
                 Map<String, Object> properties = new HashMap<>(output.getMetadata());
                 properties.remove(AssistantReasoning.METADATA_KEY);
                 if (delta != null && !delta.isEmpty()) {
@@ -112,22 +112,6 @@ class ChatClientMessageAggregator {
                     .chatResponse(new ChatResponse(generations, chatResponse.getMetadata()))
                     .context(response.context())
                     .build();
-        }
-
-        private String streamKey(ChatResponse response, AssistantMessage output, int generationIndex) {
-            Object outputId = output.getMetadata().get("id");
-            String responseId = response.getMetadata() == null ? null : response.getMetadata().getId();
-            Object streamId = outputId == null ? responseId : outputId;
-            return (streamId == null ? "default" : streamId.toString()) + ":" + generationIndex;
-        }
-
-        private String reasoningDelta(String streamKey, String snapshot) {
-            String current = snapshot == null ? "" : snapshot;
-            String previous = cumulativeReasoningByStream.put(streamKey, current);
-            if (previous == null || previous.isEmpty()) {
-                return current;
-            }
-            return current.startsWith(previous) ? current.substring(previous.length()) : current;
         }
 
         void append(ChatClientResponse response) {

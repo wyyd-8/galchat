@@ -129,13 +129,14 @@ class TrpgGroupAgentPolicyTest {
     }
 
     @Test
-    void postCombatTransitionOffersOnlyNarrativeSuspensionManagement() {
+    void finishRunIsExposedOnlyDuringExplorationAndPostCombat() {
         ICharacterCardService cardService = mock(ICharacterCardService.class);
         when(cardService.listDiceCharacters(7L)).thenReturn(List.of());
         var suspendTools = mock(com.me.galchat.tool
                 .KpInvestigatorSuspensionTools.class);
         var recoveryTools = mock(com.me.galchat.tool
                 .KpSuspendedInvestigatorRecoveryTools.class);
+        var runTools = mock(com.me.galchat.tool.KpRunTools.class);
         TrpgGroupAgentPolicy policy = new TrpgGroupAgentPolicy(
                 mock(ChatClient.class), mock(GroupContextAssembler.class),
                 cardService, new CharacterCardContextFormatter(),
@@ -146,7 +147,7 @@ class TrpgGroupAgentPolicyTest {
                 mock(com.me.galchat.tool.KpSkillRuleTools.class),
                 mock(com.me.galchat.tool.InvestigatorSceneTools.class),
                 mock(com.me.galchat.tool.KpSceneTools.class),
-                mock(com.me.galchat.tool.KpRunTools.class),
+                runTools,
                 mock(TrpgContextWindowService.class),
                 mock(TrpgInvestigatorContextAssembler.class),
                 mock(com.me.galchat.tool.KpCombatTools.class),
@@ -170,7 +171,7 @@ class TrpgGroupAgentPolicyTest {
                 new GroupContextMaterial(List.of()));
 
         assertThat(invocation.tools())
-                .containsExactly(suspendTools)
+                .containsExactly(suspendTools, runTools)
                 .doesNotContain(recoveryTools);
         assertThat(invocation.prompt().getInstructions().getLast().getText())
                 .contains("战斗结束后的叙事过渡")
@@ -178,6 +179,15 @@ class TrpgGroupAgentPolicyTest {
                 .contains("不要仅因昏迷、受伤、受控或暂时无法行动")
                 .contains("适合继续主持")
                 .contains("切换镜头");
+        for (String action : List.of(GroupChatConstant.ACTION_TRPG_SCENE_INTRO,
+                GroupChatConstant.ACTION_TRPG_SCENE_SELECTION, GroupChatConstant.ACTION_TRPG_COMBAT,
+                GroupChatConstant.ACTION_COMBAT_ADJUDICATE, GroupChatConstant.ACTION_COMBAT_ATTACK,
+                GroupChatConstant.ACTION_COMBAT_DEFENSE)) {
+            assertThat(policy.prepare(conversation, new GroupActionSpec(action, "kp", null, "phase", "阶段", 1, 1),
+                    new GroupContextMaterial(List.of())).tools()).doesNotContain(runTools);
+        }
+        assertThat(policy.prepare(conversation, new GroupActionSpec(GroupChatConstant.ACTION_TRPG_SCENE,
+                "kp", null, "scene", "探索", 1, 1), new GroupContextMaterial(List.of())).tools()).contains(runTools);
     }
 
     @Test
@@ -859,7 +869,7 @@ class TrpgGroupAgentPolicyTest {
                 .contains("不要输出时间推进原因");
         assertThat(invocation.tools())
                 .containsExactly(
-                        selectionTools, moduleTools, runTools);
+                        selectionTools, moduleTools);
     }
 
     @Test

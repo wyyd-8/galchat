@@ -32,7 +32,7 @@ import com.me.galchat.groupchat.tool.GroupToolContextFactory;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
-import com.me.galchat.memory.AssistantReasoning;
+import com.me.galchat.memory.AssistantReasoningStream;
 import com.me.galchat.service.IUserWorldPrefixService;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -1021,7 +1021,10 @@ public class GroupChatService {
         List<GroupChatEvent> events = new ArrayList<>();
         events.addAll(materialEvents(
                 conversation, turn, step, accumulator));
-        for (Generation generation : response.getResults()) {
+        for (int generationIndex = 0;
+             generationIndex < response.getResults().size();
+             generationIndex++) {
+            Generation generation = response.getResults().get(generationIndex);
             AssistantMessage output = generation.getOutput();
             if (isDirectTool(
                     generation, "publishExplorationScenes")) {
@@ -1082,7 +1085,8 @@ public class GroupChatService {
                         .build());
                 continue;
             }
-            String reasoning = AssistantReasoning.get(output);
+            String reasoning = accumulator.reasoningStream.delta(
+                    response, output, generationIndex);
             if (StringUtils.hasText(reasoning)) {
                 accumulator.reasoning.append(reasoning);
                 events.add(baseEvent(GroupChatConstant.EVENT_REASONING_DELTA,
@@ -1560,6 +1564,8 @@ public class GroupChatService {
     private static class GenerationAccumulator {
         private final StringBuilder content = new StringBuilder();
         private final StringBuilder reasoning = new StringBuilder();
+        private final AssistantReasoningStream reasoningStream =
+                new AssistantReasoningStream();
         private final DecisionActionStreamParser decisionActionParser;
         private KpDiceToolResult diceRoll;
         private TrpgStepInteractionService.InteractionRequest interaction;

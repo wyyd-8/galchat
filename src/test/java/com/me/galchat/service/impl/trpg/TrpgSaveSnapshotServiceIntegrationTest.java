@@ -46,8 +46,13 @@ class TrpgSaveSnapshotServiceIntegrationTest {
     @Autowired
     private GroupConversationMapper conversationMapper;
 
+    @Autowired
+    private com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
+
     @Test
-    void restoreDatabaseClearsAConversationStateValueSavedAsNull() {
+    void restoreDatabaseClearsAConversationStateValueSavedAsNull() throws Exception {
+        jdbcTemplate.execute(java.nio.file.Files.readString(java.nio.file.Path.of("data/maintenance/2026-09-07-trpg-completion.sql"))
+                .replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE").replace("\n);", "\n) ON COMMIT DROP;"));
         jdbcTemplate.execute("""
                 CREATE TEMP TABLE group_conversation (
                     id BIGINT PRIMARY KEY,
@@ -89,7 +94,7 @@ class TrpgSaveSnapshotServiceIntegrationTest {
         CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
         when(planMapper.selectList(any())).thenReturn(List.of());
         when(characterMapper.selectList(any())).thenReturn(List.of());
-        TrpgSaveSnapshotService service = new TrpgSaveSnapshotService(
+        TrpgSaveSnapshotService service = new TrpgSaveSnapshotService(completionMapper,
                 mock(TrpgSaveRestoreMapper.class),
                 conversationMapper,
                 planMapper,
@@ -134,6 +139,17 @@ class TrpgSaveSnapshotServiceIntegrationTest {
                 .containsEntry("active_reply_plan_id", null)
                 .containsEntry("summary", null)
                 .containsEntry("closed_at", null);
+        // Loading the pre-summary save reopens an archived run and restores the pending request.
+        jdbcTemplate.update("UPDATE group_conversation SET status = 'closed', closed_at = now(), summary = 'final' WHERE id = -9201");
+        var material = new com.me.galchat.domain.dto.TrpgCompletionModels.Materials("灯塔", null, 42, 3, List.of(), List.of(), List.of());
+        completionMapper.insert(new com.me.galchat.domain.po.TrpgCompletion().setConversationId(-9201L).setTurnId(-93L)
+                .setData(new com.me.galchat.domain.dto.TrpgCompletionModels.Data(material, List.of(),
+                        new com.me.galchat.domain.dto.TrpgCompletionModels.Overview("概要", "结局", List.of()))));
+        var pending = new com.me.galchat.domain.po.TrpgCompletion().setConversationId(-9201L).setTurnId(-93L);
+        service.restoreDatabase(conversation, snapshot.setCompletion(pending));
+        assertThat(completionMapper.selectById(-9201L)).isEqualTo(pending);
+        assertThat(conversationMapper.selectById(-9201L).getStatus()).isEqualTo("active");
+        assertThat(conversationMapper.selectById(-9201L).getClosedAt()).isNull();
     }
 
     private TrpgSaveSnapshotDTO snapshotWithNoActivePlan() {

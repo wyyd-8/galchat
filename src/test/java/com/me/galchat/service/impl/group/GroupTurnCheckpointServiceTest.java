@@ -35,6 +35,20 @@ class GroupTurnCheckpointServiceTest {
                 GroupChatReplyStep.class);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0L, 1L})
+    void restoringStepKeepsFinishRequestOnlyWhenItsToolCallSurvives(long remainingCalls) {
+        Fixture fixture = fixture(GroupTurnCheckpointService.STEP_START);
+        var completions = mock(com.me.galchat.mapper.TrpgCompletionMapper.class);
+        fixture.service().setCompletionMapper(completions);
+        when(completions.selectById(7L)).thenReturn(new com.me.galchat.domain.po.TrpgCompletion()
+                .setConversationId(7L).setTurnId(fixture.turn().getId()));
+        when(fixture.stepMapper().selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(fixture.step()));
+        when(fixture.toolCallMapper().selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(remainingCalls);
+        fixture.service().restore(fixture.turn(), fixture.step());
+        verify(completions, org.mockito.Mockito.times(remainingCalls == 0 ? 1 : 0)).deleteById(7L);
+    }
+
     @Test
     void invalidTurnStepContextCannotTriggerDestructiveRecovery() {
         Fixture fixture = fixture(GroupTurnCheckpointService.STEP_START);

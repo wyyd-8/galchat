@@ -18,11 +18,14 @@ import com.me.galchat.mapper.GroupChatTurnMapper;
 import com.me.galchat.mapper.GroupReplyPlanMapper;
 import com.me.galchat.mapper.TrpgCombatMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.json.JsonMapper;
 import java.util.List;
 import java.lang.reflect.Method;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -657,8 +660,9 @@ class TrpgCombatLifecycleServiceTest {
                 GroupChatConstant.ACTION_COMBAT_DEFENSE);
     }
 
-    @Test
-    void utilityActionRouteAllowsReloadWithoutAnotherParticipantTarget() {
+    @ParameterizedTest
+    @ValueSource(strings = {"SELF_OR_UTILITY", "NARRATIVE", "TARGETED"})
+    void narrativeSkipsDefenseButCombatStillRequiresParticipantTarget(String actionKind) {
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
         GroupChatReplyStepMapper stepMapper =
@@ -697,10 +701,13 @@ class TrpgCombatLifecycleServiceTest {
                 new GroupReplyPlan().setId(10L)
                         .setSource(GroupChatConstant.PLAN_SOURCE_COMBAT)
                         .setContextId(200L));
+        var participants = objectMapper.createArrayNode();
+        participants.addObject().put("characterId", 71L).put("name", "埃莉诺");
+        participants.addObject().put("characterId", 72L).put("name", "敌人");
         when(combatMapper.selectById(200L)).thenReturn(
                 new TrpgCombat().setId(200L).setConversationId(7L)
                         .setStatus(GroupChatConstant.COMBAT_STATUS_ACTIVE)
-                        .setParticipants(objectMapper.createArrayNode()));
+                        .setParticipants(participants));
         when(stepMapper.selectList(any()))
                 .thenReturn(List.of(route));
         doAnswer(invocation -> {
@@ -708,10 +715,25 @@ class TrpgCombatLifecycleServiceTest {
             return 1;
         }).when(stepMapper).insert(any(GroupChatReplyStep.class));
 
+        if ("TARGETED".equals(actionKind)) {
+            assertThatThrownBy(() -> service.completeReactionRoute(
+                    conversation, turn, route,
+                    "{\"actionKind\":\"TARGETED\","
+                            + "\"targetName\":\"布莱恩·霍尔\","
+                            + "\"insertDefense\":false}"))
+                    .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                    .hasMessage("战斗目标不是合法的其他参战者");
+            verify(stepMapper, never()).insert(any(GroupChatReplyStep.class));
+            return;
+        }
+
         var decision = service.completeReactionRoute(
                 conversation, turn, route,
-                "{\"actionKind\":\"SELF_OR_UTILITY\","
-                        + "\"insertDefense\":false,\"reason\":\"装填\"}");
+                "{\"actionKind\":\"" + actionKind + "\","
+                        + "\"insertDefense\":false,\"reason\":\""
+                        + ("NARRATIVE".equals(actionKind)
+                        ? "埃莉诺朝窗口伸手，接应未参战的布莱恩·霍尔翻出来。"
+                        : "装填") + "\"}");
 
         assertThat(decision.targetCharacterId()).isNull();
         assertThat(decision.targetName()).isNull();
@@ -724,6 +746,12 @@ class TrpgCombatLifecycleServiceTest {
         assertThat(defense.getSubjectCharacterId()).isNull();
         assertThat(defense.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_CANCELLED);
+
+        route.setStatus(GroupChatConstant.STATUS_COMPLETED);
+        when(stepMapper.selectList(any())).thenReturn(List.of(route, defense));
+        assertThat(service.advanceAdjudicationChild(turn, route)).isNull();
+        assertThat(adjudication.getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_PENDING);
     }
 
     private TrpgCombatLifecycleService serviceWithSteps(

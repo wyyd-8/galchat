@@ -52,6 +52,11 @@ public class TrpgSceneSummaryService {
 
     public GroupContextSummary summarize(
             Long conversationId, Long sceneId, Long scenePlanId) {
+        return summarizeThrough(conversationId, sceneId, scenePlanId, null);
+    }
+
+    public GroupContextSummary summarizeThrough(
+            Long conversationId, Long sceneId, Long scenePlanId, Long throughSequence) {
         List<GroupChatMessage> planMessages =
                 messageMapper.selectCompletedPublicByPlanId(
                         conversationId, scenePlanId);
@@ -61,7 +66,7 @@ public class TrpgSceneSummaryService {
         long startSequence =
                 planMessages.getFirst().getSequenceNo();
         long endSequence =
-                planMessages.getLast().getSequenceNo();
+                throughSequence == null ? planMessages.getLast().getSequenceNo() : throughSequence;
         List<GroupContextSummary> previousVersions =
                 summaryMapper.selectList(
                 new LambdaQueryWrapper<GroupContextSummary>()
@@ -84,7 +89,7 @@ public class TrpgSceneSummaryService {
         String summary = scenePlan != null
                 && scenePlan.getParentPlanId() != null
                 ? summarizeChild(
-                        conversationId, scenePlan, planMessages)
+                        conversationId, scenePlan, startSequence, endSequence)
                 : summarizeParent(
                         conversationId, startSequence, endSequence);
         if (!StringUtils.hasText(summary)) {
@@ -135,7 +140,8 @@ public class TrpgSceneSummaryService {
     private String summarizeChild(
             Long conversationId,
             GroupReplyPlan scenePlan,
-            List<GroupChatMessage> planMessages) {
+            long startSequence,
+            long endSequence) {
         GroupConversation conversation =
                 conversationMapper.selectById(conversationId);
         if (conversation == null) {
@@ -145,12 +151,29 @@ public class TrpgSceneSummaryService {
                 participantService.summaryState(
                         conversation, scenePlan);
         TrpgGameTimeVO gameTime = TrpgGameTimeVO.from(conversation);
-        String evidence = childClueEvidence(planMessages);
+        // The summary replaces this entire interval. Combat results have no turnId,
+        // and post-combat narration belongs to another plan, so do not filter by plan.
+        List<GroupChatMessage> coveredMessages = messageMapper.selectList(
+                new LambdaQueryWrapper<GroupChatMessage>()
+                        .eq(GroupChatMessage::getConversationId, conversationId)
+                        .ge(GroupChatMessage::getSequenceNo, startSequence)
+                        .le(GroupChatMessage::getSequenceNo, endSequence)
+                        .eq(GroupChatMessage::getStatus, GroupChatConstant.STATUS_COMPLETED)
+                        .eq(GroupChatMessage::getVisibility, "public")
+                        .orderByAsc(GroupChatMessage::getSequenceNo)
+                        .orderByAsc(GroupChatMessage::getId));
+        String evidence = childSummaryEvidence(coveredMessages);
         String clues = StringUtils.hasText(evidence)
                 ? textGenerator.summarizeChildClues(evidence)
                 : "无";
         if (!StringUtils.hasText(clues)) {
             clues = "无";
+        }
+        String plot = StringUtils.hasText(evidence)
+                ? textGenerator.summarizeChildPlot(evidence)
+                : "无";
+        if (!StringUtils.hasText(plot)) {
+            plot = "无";
         }
         String participants = sceneState.investigatorNames().isEmpty()
                 ? "无"
@@ -161,10 +184,12 @@ public class TrpgSceneSummaryService {
         return "参与者：" + participants
                 + "\n时间：" + time
                 + "\n地点：" + sceneState.scenePath()
-                + "\n可用线索：\n" + clues.trim();
+                + "\n可用线索：\n" + clues.trim()
+                + "\n剧情经过：\n" + plot.trim();
     }
 
-    private String childClueEvidence(
+    // Both sections use KP evidence; investigator declarations cannot establish events.
+    private String childSummaryEvidence(
             List<GroupChatMessage> messages) {
         List<String> evidence = new ArrayList<>();
         for (GroupChatMessage message : messages) {
@@ -183,6 +208,8 @@ public class TrpgSceneSummaryService {
             if (GroupChatConstant.MESSAGE_DIALOGUE.equals(
                     message.getMessageKind())
                     || GroupChatConstant.MESSAGE_NARRATION.equals(
+                    message.getMessageKind())
+                    || GroupChatConstant.MESSAGE_COMBAT_RESULT.equals(
                     message.getMessageKind())) {
                 evidence.add("[KP描述]\n" + message.getContent());
             }

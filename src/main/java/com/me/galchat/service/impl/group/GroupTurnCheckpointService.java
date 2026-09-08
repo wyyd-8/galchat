@@ -48,6 +48,12 @@ public class GroupTurnCheckpointService {
             diceMessageCodec;
     private final ICharacterCardService characterCardService;
     private final ObjectMapper objectMapper;
+    private com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setCompletionMapper(com.me.galchat.mapper.TrpgCompletionMapper completionMapper) {
+        this.completionMapper = completionMapper;
+    }
 
     @Transactional(rollbackFor = Exception.class)
     public void initializeStep(
@@ -161,6 +167,7 @@ public class GroupTurnCheckpointService {
                 step.getId(), zero(checkpoint.getMessageId()));
         toolCallMapper.deleteAfterCheckpoint(
                 step.getId(), zero(checkpoint.getToolCallId()));
+        reconcileFinishRequest(turn);
         if (TOOL_COMMITTED.equals(checkpointType)) {
             restoreDiceMessage(step, diceCall);
         }
@@ -227,7 +234,20 @@ public class GroupTurnCheckpointService {
         turn.setStatus(GroupChatConstant.STATUS_RUNNING)
                 .setUpdatedAt(now);
         turnMapper.updateById(turn);
+        reconcileFinishRequest(turn);
         checkpointMapper.deleteById(turn.getConversationId());
+    }
+
+    private void reconcileFinishRequest(GroupChatTurn turn) {
+        if (completionMapper == null) return;
+        var completion = completionMapper.selectById(turn.getConversationId());
+        if (completion == null || !Objects.equals(completion.getTurnId(), turn.getId())) return;
+        var stepIds = stepMapper.selectList(new LambdaQueryWrapper<GroupChatReplyStep>()
+                .eq(GroupChatReplyStep::getTurnId, turn.getId())).stream().map(GroupChatReplyStep::getId).toList();
+        Long count = stepIds.isEmpty() ? 0L : toolCallMapper.selectCount(new LambdaQueryWrapper<GroupChatToolCall>()
+                .in(GroupChatToolCall::getReplyStepId, stepIds).eq(GroupChatToolCall::getToolName, "finishRun")
+                .isNotNull(GroupChatToolCall::getToolResult));
+        if (count == null || count == 0) completionMapper.deleteById(turn.getConversationId());
     }
 
     private void persistResetStep(GroupChatReplyStep step) {

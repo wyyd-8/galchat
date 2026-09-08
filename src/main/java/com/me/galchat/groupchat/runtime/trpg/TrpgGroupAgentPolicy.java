@@ -455,7 +455,6 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         调用publishExplorationScenes提交当天能够探索的准确地点名称列表和可选目标时间；locationNames只提交<name>元素中的地点名称，必须原样复制，不得包含<summary>或其他说明；不得输出地点ID，不要输出时间推进原因、内部判断或额外自然语言。
                         不强制限制地点数量或探索时长。
                         工具是returnDirect；调用后立即结束响应，不要再输出自然语言或JSON。
-                        如果模组已经完整结束，可调用finishRun；系统会在本轮后自动生成每位调查员的人物后传，KP不要自行输出后传。
                         """));
             } else if (sceneIntro) {
                 String kpReentry = suspensionService == null ? ""
@@ -485,11 +484,14 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         现在进行战斗结束后的叙事过渡。这一步位于战斗结果确认之后、所有调查员的下一次行动之前。
                         根据已经公开的战斗结局，简洁交代现场余波和各调查员此刻的位置。重点判断每组调查员的剧情现在是否适合继续主持，还是应切换镜头到其他调查员。
                         只有战斗结局使某些调查员在叙事上离开当前剧情线时才调用suspendInvestigators；不要仅因昏迷、受伤、受控或暂时无法行动而调用。
-                        调用工具后，在同一公开回复中自然交代停镜位置并完成镜头切换。不得替调查员选择后续行动，不掷骰，不调用其他工具。
+                        调用工具后，在同一公开回复中自然交代停镜位置并完成镜头切换。不得替调查员选择后续行动，不掷骰。
+                        如果模组正篇已经完整结束，可以调用finishRun；随后简短结束正篇，由系统完成主场景，等待玩家生成总结。不要自行撰写人物后传。
                         """));
             } else if (combatRoute) {
                 messages.add(new UserMessage("""
-                        读取紧邻的行动。攻击、阻拦、急救等涉及另一名参战者的行动使用TARGETED；装填等只影响行动者或其装备的行动使用SELF_OR_UTILITY。
+                        读取紧邻的行动，先按实际内容区分叙事行为与需要机械结算的战斗行动，不能仅因当前处于战斗轮或提到他人就使用TARGETED。
+                        对话、呼喊、传递信息、伸手接应同伴翻窗等无对抗的叙事协助使用NARRATIVE；互动对象可以是未参战的在场NPC，不要求其加入参战名单，不填写targetName或targets，insertDefense=false且defenseOptions为空。只有声明了真实攻击、强制移动、伤害、治疗或其他战斗机械效果时才进入相应战斗路由，不得把这些效果伪装成叙事以绕过校验。
+                        攻击、强行阻拦、急救治疗等需要对另一名参战者进行机械结算的行动使用TARGETED；装填等只影响行动者或其装备的行动使用SELF_OR_UTILITY。带有对话或协助描述的混合行动若同时包含攻击或其他战斗机械效果，仍须按实际机械效果路由。
                         TARGETED必须识别准确目标，并判断目标是否需要获得寻找掩护、闪避、反击或其他即时防守行动。枪械行动在一回合声明多个目标时，必须按声明顺序一次列出全部目标。
                         目标已死亡、濒死、昏迷或被眩晕（剩余眩晕回合数大于0）时，必须令insertDefense=false且defenseOptions为空；不得为其插入寻找掩护、闪避或反击。
                         只输出一个JSON对象，不要Markdown，不要叙事：
@@ -498,7 +500,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         {"actionKind":"TARGETED","targets":[{"targetName":"目标甲","insertDefense":true,"defenseOptions":["寻找掩护"]},{"targetName":"目标乙","insertDefense":false,"defenseOptions":[]}],"reason":"简短原因"}
                         或：
                         {"actionKind":"SELF_OR_UTILITY","insertDefense":false,"defenseOptions":[],"reason":"装填等简短原因"}
-                        TARGETED的目标缺失、歧义、不在参战者中或行动不合法时不要猜测，改为：
+                        或叙事行为：
+                        {"actionKind":"NARRATIVE","insertDefense":false,"defenseOptions":[],"reason":"伸手接应在场同伴翻窗，无需战斗防守"}
+                        NARRATIVE只跳过战斗目标校验与防守，不在路由阶段宣布成功；交给后续KP根据现场事实叙述，确有跌落等风险时再判断是否需要普通检定。
+                        确认属于TARGETED后，目标缺失、歧义、不在参战者中或行动不合法时不要猜测，改为：
                         {"error":"明确说明问题"}
                         如果缺少的信息会实质改变行动路由，调用askForClarification公开追问一个问题；无法唯一确定时调用askForClarification，不要输出error。
                         工具是returnDirect，调用后立即结束响应。仅在确有必要时追问；不确定是否需要追问时不要调用。
@@ -694,23 +699,22 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             tools = selectionPhase
                     ? List.of(
                             kpSceneSelectionTools,
-                            kpModuleTools, kpRunTools)
+                            kpModuleTools)
                     : postCombatTransition
-                    ? tools(investigatorSuspensionTools)
+                    ? tools(investigatorSuspensionTools, kpRunTools)
                     : scenePhase
                     ? sceneTools
                     : combatAdjudicate
                     ? tools(kpDiceTools, kpFirearmTools, kpMeleeTools,
                             kpModuleTools, kpSkillRuleTools,
-                            kpRunTools, kpCombatTools)
+                            kpCombatTools)
                     : combatRoute
                     ? tools(kpClarificationTools)
                     : investigatorKpInquiry
                     ? tools(kpInquiryLuckTools)
                     : combatIntro || combatAttack || combatDefense
                     ? List.of()
-                    : tools(kpDiceTools, kpModuleTools, kpSkillRuleTools,
-                            kpRunTools);
+                    : tools(kpDiceTools, kpModuleTools, kpSkillRuleTools);
         } else {
             tools = selectionPhase
                     ? List.of(sceneSelectionTools)

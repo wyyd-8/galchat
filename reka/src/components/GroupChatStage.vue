@@ -32,7 +32,7 @@ const props = withDefaults(defineProps<{ conversation: Conversation; username: s
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; openCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
@@ -87,7 +87,8 @@ const planDescription = computed(() => props.conversation.mode === 'trpg'
   ? trpgExecution.value.subtitle
   : '从上到下依次回复；拖动调整，点击移除后保存。')
 const turnButtonLabel = computed(() => trpgTurnActionLabel(props.currentTurn))
-const betweenTrpgTurns = computed(() => props.conversation.mode === 'trpg'
+const completionAvailable = computed(() => Boolean(props.conversation.completionStatus && (props.conversation.completionStatus !== 'requested' || props.currentTurn?.status === 'completed')))
+const betweenTrpgTurns = computed(() => !completionAvailable.value && props.conversation.mode === 'trpg'
   && props.conversation.status === 'active'
   && !props.loading
   && isBetweenTrpgTurns(props.currentTurn))
@@ -250,7 +251,7 @@ function handleReasoningScroll(event: Event) {
 
 <template>
   <main class="chat-page">
-    <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已结束' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button class="button ghost" :disabled="sending" @click="emit('end')"><CircleStop :size="16" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></div></header>
+    <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><button v-if="completionAvailable" class="button primary" @click="emit('openCompletion')">{{ conversation.completionStatus === 'ready' ? '翻阅完成记录' : '继续跑团收尾' }}</button><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已结束' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button class="button ghost" :disabled="sending || (conversation.mode === 'trpg' && !!currentTurn && !['completed', 'failed', 'blocked', 'cancelled'].includes(currentTurn.status))" @click="emit('end')"><CircleStop :size="16" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></div></header>
     <div class="chat-layout">
       <section class="chat-main">
         <div class="message-scroll"><div :ref="bindScroller" class="message-viewport" @scroll="handleScroll"><div>
@@ -307,6 +308,7 @@ function handleReasoningScroll(event: Event) {
             <button class="button secondary turn-auto-advance-start" :disabled="sending" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ autoStartLabel }}</button>
             <button class="button ghost turn-auto-advance-cancel" :disabled="sending" @click="cancelAutoAdvance">取消自动推进</button>
           </div>
+          <button v-else-if="completionAvailable" class="button secondary" @click="emit('openCompletion')">{{ conversation.completionStatus === 'ready' ? '翻阅完成记录' : '继续跑团收尾' }}</button>
           <button v-else-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" title="开始下一轮，由参与者依次行动" :disabled="sending || conversation.status !== 'active'" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
           <PopoverRoot v-if="betweenTrpgTurns && !autoAdvance">
             <PopoverTrigger as-child><button class="icon-button bordered turn-experiment-settings" type="button" title="行动轮设置" aria-label="行动轮设置"><Settings2 :size="17" /></button></PopoverTrigger>

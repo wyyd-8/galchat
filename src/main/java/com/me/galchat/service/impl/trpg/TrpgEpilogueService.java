@@ -1,134 +1,64 @@
 package com.me.galchat.service.impl.trpg;
 
-import com.me.galchat.service.impl.group.GroupConversationService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.TrpgCompletionModels.Materials;
 import com.me.galchat.domain.dto.TrpgEpilogueModels;
-import com.me.galchat.domain.po.CocCharacter;
-import com.me.galchat.domain.po.CocCharacterProfile;
-import com.me.galchat.domain.po.GroupChatMessage;
-import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.*;
 import com.me.galchat.exception.UserRequestException;
-import com.me.galchat.groupchat.runtime.GroupActorRef;
-import com.me.galchat.mapper.CocCharacterMapper;
 import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
+import com.me.galchat.service.impl.group.GroupConversationService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.ai.chat.messages.Message;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class TrpgEpilogueService {
-
-    private final CocCharacterMapper characterMapper;
     private final CocCharacterProfileMapper profileMapper;
     private final GroupChatMessageMapper messageMapper;
     private final GroupConversationService conversationService;
-    private final TrpgExplorationContextAssembler explorationContextAssembler;
     private final TrpgEpilogueGenerator generator;
     private final TrpgEpilogueMessageCodec codec;
 
-    public void generateAndPersist(
-            GroupConversation conversation, Long completingTurnId) {
-        requireTrpg(conversation);
-        Long epilogueCount = messageMapper.selectCount(
-                new LambdaQueryWrapper<GroupChatMessage>()
-                        .eq(GroupChatMessage::getConversationId,
-                                conversation.getId())
-                        .eq(GroupChatMessage::getMessageKind,
-                                GroupChatConstant.MESSAGE_EPILOGUE)
-                        .eq(GroupChatMessage::getVisibility, "public")
-                        .eq(GroupChatMessage::getStatus,
-                                GroupChatConstant.STATUS_COMPLETED));
-        if (epilogueCount != null && epilogueCount > 0) {
-            return;
-        }
-        List<CocCharacter> investigators = characterMapper.selectList(
-                        new LambdaQueryWrapper<CocCharacter>()
-                                .eq(CocCharacter::getRunId,
-                                        conversation.getId())
-                                .orderByAsc(CocCharacter::getId))
-                .stream()
-                .filter(this::isInvestigator)
-                .toList();
+    public List<TrpgEpilogueModels.Subject> subjects(List<CocCharacter> investigators) {
         if (investigators.isEmpty()) {
             throw new UserRequestException("跑团缺少可生成后传的调查员");
         }
         Map<Long, CocCharacterProfile> profiles = profiles(investigators);
-        List<TrpgEpilogueModels.Subject> subjects = investigators.stream()
-                .map(card -> subject(card, profiles.get(card.getId())))
-                .toList();
-        long historyEndSequence = historyEndSequence(
-                conversation.getId(), completingTurnId);
-        List<Message> history = explorationContextAssembler.assemble(
-                conversation,
-                new GroupActorRef(GroupChatConstant.ACTOR_KP, null),
-                historyEndSequence);
-        TrpgEpilogueModels.Response response = generator.generate(
-                conversation, subjects, formatHistory(history));
-        List<TrpgEpilogueModels.Entry> entries = normalize(
-                subjects, response);
+        return investigators.stream().map(card -> subject(card, profiles.get(card.getId()))).toList();
+    }
+
+    public List<TrpgEpilogueModels.Entry> generate(GroupConversation conversation, Materials materials) {
+        var subjects = materials.investigators().stream().map(person -> person.subject()).toList();
+        String history = materials.sources().stream().map(source -> source.text())
+                .collect(Collectors.joining("\n\n"));
+        return normalize(subjects, generator.generate(conversation, subjects, history));
+    }
+
+    // Called only by the final summary-turn transaction.
+    public void persist(GroupConversation conversation, List<TrpgEpilogueModels.Entry> entries,
+                        Long turnId, Long stepId) {
+        Long count = messageMapper.selectCount(new LambdaQueryWrapper<GroupChatMessage>()
+                .eq(GroupChatMessage::getConversationId, conversation.getId())
+                .eq(GroupChatMessage::getMessageKind, GroupChatConstant.MESSAGE_EPILOGUE)
+                .eq(GroupChatMessage::getVisibility, "public")
+                .eq(GroupChatMessage::getStatus, GroupChatConstant.STATUS_COMPLETED));
+        if (count != null && count > 0) return;
         LocalDateTime now = LocalDateTime.now();
-        GroupChatMessage message = new GroupChatMessage()
-                .setConversationId(conversation.getId())
+        messageMapper.insert(new GroupChatMessage()
+                .setConversationId(conversation.getId()).setTurnId(turnId).setReplyStepId(stepId)
                 .setSpeakerType(GroupChatConstant.ACTOR_KP)
                 .setMessageKind(GroupChatConstant.MESSAGE_EPILOGUE)
                 .setVisibility("public")
-                .setContent(codec.encode(
-                        new TrpgEpilogueModels.Content(1, entries)))
-                .setSequenceNo(conversationService.nextSequence(
-                        conversation.getId()))
-                .setStatus(GroupChatConstant.STATUS_COMPLETED)
-                .setCreatedAt(now)
-                .setUpdatedAt(now);
-        messageMapper.insert(message);
-    }
-
-    private void requireTrpg(GroupConversation conversation) {
-        if (conversation == null || conversation.getId() == null
-                || !GroupChatConstant.MODE_TRPG.equals(
-                conversation.getMode())) {
-            throw new UserRequestException("只有TRPG跑团可以生成人物后传");
-        }
-    }
-
-    private long historyEndSequence(
-            Long conversationId, Long completingTurnId) {
-        if (completingTurnId == null) {
-            return Long.MAX_VALUE;
-        }
-        GroupChatMessage finalKpMessage = messageMapper.selectOne(
-                new LambdaQueryWrapper<GroupChatMessage>()
-                        .eq(GroupChatMessage::getConversationId,
-                                conversationId)
-                        .eq(GroupChatMessage::getTurnId,
-                                completingTurnId)
-                        .eq(GroupChatMessage::getSpeakerType,
-                                GroupChatConstant.ACTOR_KP)
-                        .eq(GroupChatMessage::getVisibility, "public")
-                        .eq(GroupChatMessage::getStatus,
-                                GroupChatConstant.STATUS_COMPLETED)
-                        .orderByDesc(GroupChatMessage::getSequenceNo)
-                        .last("limit 1"));
-        if (finalKpMessage == null
-                || finalKpMessage.getSequenceNo() == null) {
-            return Long.MAX_VALUE;
-        }
-        return Math.max(0L, finalKpMessage.getSequenceNo() - 1L);
-    }
-
-    private boolean isInvestigator(CocCharacter card) {
-        return card != null && Set.of("PLAYER", "BOT")
-                .contains(card.getActorType());
+                .setContent(codec.encode(new TrpgEpilogueModels.Content(1, entries)))
+                .setSequenceNo(conversationService.nextSequence(conversation.getId()))
+                .setStatus(GroupChatConstant.STATUS_COMPLETED).setCreatedAt(now).setUpdatedAt(now));
     }
 
     private Map<Long, CocCharacterProfile> profiles(
@@ -169,17 +99,6 @@ public class TrpgEpilogueService {
                 profile == null ? null : profile.getKeyConnectionText());
     }
 
-    private String formatHistory(List<Message> history) {
-        StringBuilder result = new StringBuilder();
-        for (Message message : history) {
-            if (message != null && StringUtils.hasText(
-                    message.getText())) {
-                result.append(message.getText()).append('\n');
-            }
-        }
-        return result.toString();
-    }
-
     private List<TrpgEpilogueModels.Entry> normalize(
             List<TrpgEpilogueModels.Subject> subjects,
             TrpgEpilogueModels.Response response) {
@@ -190,6 +109,7 @@ public class TrpgEpilogueService {
                 new LinkedHashMap<>();
         for (TrpgEpilogueModels.Entry entry : response.entries()) {
             if (entry == null || entry.characterId() == null
+                    || !StringUtils.hasText(entry.lead())
                     || !StringUtils.hasText(entry.content())
                     || byCharacter.putIfAbsent(
                     entry.characterId(), entry) != null) {
@@ -206,6 +126,7 @@ public class TrpgEpilogueService {
                 .map(subject -> new TrpgEpilogueModels.Entry(
                         subject.characterId(),
                         subject.investigatorName(),
+                        byCharacter.get(subject.characterId()).lead().trim(),
                         byCharacter.get(subject.characterId())
                                 .content().trim()))
                 .toList();

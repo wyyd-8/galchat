@@ -26,6 +26,37 @@ import static org.mockito.Mockito.when;
 class TrpgSceneLifecycleServiceTest {
 
     @Test
+    void endingAfterCombatSummarizesChildAndMainThroughFinalReplyWithoutStartingNextScene() {
+        var plans = mock(GroupReplyPlanMapper.class);
+        var summaries = mock(TrpgSceneSummaryService.class);
+        var planService = mock(GroupReplyPlanService.class);
+        var insanity = mock(TrpgTemporaryInsanityService.class);
+        var service = new TrpgSceneLifecycleService(mock(GroupConversationService.class),
+                mock(GroupChatReplyStepMapper.class), mock(GroupChatTurnMapper.class), plans,
+                mock(GroupReplyPlanItemMapper.class), mock(GroupTurnRecoveryService.class),
+                mock(TrpgSceneProgressStore.class), summaries, planService,
+                mock(TrpgChildScenePlanService.class), insanity);
+        var conversation = new GroupConversation().setId(7L).setActiveReplyPlanId(30L);
+        when(plans.selectById(30L)).thenReturn(new GroupReplyPlan().setId(30L).setConversationId(7L)
+                .setSource("POST_COMBAT").setResumePlanId(20L));
+        when(plans.selectById(20L)).thenReturn(new GroupReplyPlan().setId(20L).setConversationId(7L)
+                .setSource("SCENE").setContextId(21L).setParentPlanId(10L));
+        when(plans.selectById(10L)).thenReturn(new GroupReplyPlan().setId(10L).setConversationId(7L)
+                .setSource("SCENE").setContextId(11L).setNextPlanId(40L));
+        when(summaries.summarizeThrough(any(), any(), any(), any()))
+                .thenReturn(new com.me.galchat.domain.po.GroupContextSummary());
+        service.closeRunScene(conversation, 99L);
+        var order = org.mockito.Mockito.inOrder(summaries);
+        order.verify(summaries).summarizeThrough(7L, 21L, 20L, 99L);
+        order.verify(summaries).summarizeThrough(7L, 11L, 10L, 99L);
+        org.mockito.Mockito.verifyNoInteractions(planService, insanity);
+        service.finishRunSceneUnderLock(conversation);
+        verify(planService).clearConversationPlans(conversation);
+        verify(insanity).advanceAfterLargeScene(7L);
+        verify(plans, org.mockito.Mockito.never()).selectById(40L);
+    }
+
+    @Test
     void rejectsAParentTurnAfterChildSceneActivation() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);

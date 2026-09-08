@@ -141,6 +141,7 @@ export interface TrpgGameTime {
 export interface Conversation {
   id: number; userWorldId: number; worldId: number; moduleId?: number; activeReplyPlanId?: number; mode: ConversationMode
   title: string; summary?: string; status: ConversationStatus; version?: number
+  completionStatus?: TrpgCompletionReport['status']; archivedAt?: string
   gameTime?: TrpgGameTime
   characterIds?: number[]
   createdAt?: string; updatedAt?: string; closedAt?: string; lastChatContent?: string; lastChatTime?: string
@@ -366,4 +367,20 @@ export interface TrpgRollbackOverview {
 }
 export interface TrpgRollbackResult {
   checkpointType: 'TURN' | 'SCENE' | 'INITIAL'; savedAt?: string; manualSaveDeleted: boolean
+}
+
+export type TrpgRollOutcome = 'CRITICAL_SUCCESS' | 'SUCCESS' | 'FAILURE' | 'FUMBLE'
+export interface TrpgCompletionRoll {
+  characterId: number; turnNo: number; checkName: string | null; value: number | null; target: number | null; outcome: TrpgRollOutcome
+}
+export interface TrpgCompletionPerson {
+  characterId: number; name: string; occupation: string | null; image: string | null; player: boolean
+  dead: boolean; dying: boolean; unconscious: boolean; majorWound: boolean; temporaryInsanity: boolean
+  initialHp: number | null; hp: number | null; initialSan: number | null; san: number | null; lead: string; epilogue: string
+}
+export interface TrpgCompletionReport {
+  status: 'requested' | 'pending' | 'generating' | 'failed' | 'ready'; completedAt: string | null; archivedAt: string | null
+  title: string | null; coverUrl: string | null; ending: string | null; turnCount: number
+  journey: Array<{ title: string; excerpt: string; summary: string }>
+  investigators: TrpgCompletionPerson[]; rolls: TrpgCompletionRoll[]
 }

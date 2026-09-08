@@ -82,6 +82,9 @@
             DELETE FROM trpg_combat
             WHERE conversation_id = #{conversationId}
         ),
+        deleted_completion AS (
+            DELETE FROM trpg_completion WHERE conversation_id = #{conversationId}
+        ),
         deleted_saves AS (
             DELETE FROM trpg_save
             WHERE conversation_id = #{conversationId}

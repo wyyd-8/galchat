@@ -41,6 +41,12 @@ public class GroupTurnPlanResolver {
     public ResolvedTurnPlan resolve(
             GroupConversation conversation, GroupModeRuntime runtime) {
         if (GroupChatConstant.MODE_TRPG.equals(conversation.getMode())
+                && runLifecycleService.isSummaryPending(conversation)) {
+            return new ResolvedTurnPlan(GroupChatConstant.TURN_SOURCE_SUMMARY, null, List.of(
+                    new GroupActionSpec(GroupChatConstant.ACTION_TRPG_SUMMARY, GroupChatConstant.ACTOR_KP,
+                            null, "summary", "生成跑团总结并归档", 1, 1)));
+        }
+        if (GroupChatConstant.MODE_TRPG.equals(conversation.getMode())
                 && conversation.getActiveReplyPlanId() == null) {
             return new ResolvedTurnPlan(
                     GroupChatConstant.TURN_SOURCE_SCENE_SELECTION,
@@ -112,12 +118,13 @@ public class GroupTurnPlanResolver {
                 conversation, turn)) {
             return;
         }
-        if (runLifecycleService.finalizeAfterTurn(
-                conversation, turn.getId())) {
-            return;
-        }
         onTurnCompleted(conversation, turn.getPlanSource());
     }
+
+    public boolean hasRunFinishRequest(GroupConversation conversation, Long turnId) {
+        return runLifecycleService.hasFinishRequest(conversation, turnId);
+    }
+
 
     public record ResolvedTurnPlan(
             String source,

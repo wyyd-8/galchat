@@ -61,22 +61,24 @@ class TrpgEpilogueServiceTest {
                 .setSequenceNo(41L)
                 .setStatus(GroupChatConstant.STATUS_COMPLETED);
         when(messageMapper.selectOne(any())).thenReturn(finalKpMessage);
-        when(explorationContextAssembler.assemble(
-                eq(conversation),
-                eq(new GroupActorRef(GroupChatConstant.ACTOR_KP, null)),
-                eq(40L))).thenReturn(List.of(
-                new UserMessage("<context-summary>庄园调查摘要</context-summary>"),
-                new UserMessage("<message>调查员决定留下断后</message>")));
         when(conversationService.nextSequence(7L)).thenReturn(42L);
         ArgumentCaptor<GroupChatMessage> inserted =
                 ArgumentCaptor.forClass(GroupChatMessage.class);
 
         TrpgEpilogueService service = new TrpgEpilogueService(
-                characterMapper, profileMapper, messageMapper,
-                conversationService, explorationContextAssembler, generator,
+                profileMapper, messageMapper,
+                conversationService, generator,
                 new TrpgEpilogueMessageCodec(objectMapper));
 
-        service.generateAndPersist(conversation, 99L);
+        var subjects = service.subjects(List.of(investigator(11L, "PLAYER", "林恩", false),
+                investigator(12L, "BOT", "威廉", true)));
+        var materials = new com.me.galchat.domain.dto.TrpgCompletionModels.Materials("古树之中", null, 41L,
+                1,
+                List.of(new com.me.galchat.domain.dto.TrpgCompletionModels.Source(1L, 41L, "庄园调查摘要")),
+                subjects.stream().map(subject -> new com.me.galchat.domain.dto.TrpgCompletionModels.Investigator(
+                        subject, null, false, null, null)).toList(), List.of());
+        var entries = service.generate(conversation, materials);
+        service.persist(conversation, entries, 10L, 11L);
 
         org.mockito.Mockito.verify(messageMapper).insert(inserted.capture());
         GroupChatMessage message = inserted.getValue();
@@ -103,13 +105,7 @@ class TrpgEpilogueServiceTest {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(11L, false),
                         org.assertj.core.groups.Tuple.tuple(12L, true));
-        assertThat(generator.history)
-                .contains("庄园调查摘要", "调查员决定留下断后")
-                .doesNotContain("威廉没能离开燃烧的庄园。");
-        verify(explorationContextAssembler).assemble(
-                conversation,
-                new GroupActorRef(GroupChatConstant.ACTOR_KP, null),
-                40L);
+        assertThat(generator.history).isEqualTo("庄园调查摘要");
     }
 
     private CocCharacter investigator(
@@ -142,9 +138,9 @@ class TrpgEpilogueServiceTest {
             this.history = publicHistory;
             return new TrpgEpilogueModels.Response(List.of(
                     new TrpgEpilogueModels.Entry(
-                            11L, "忽略模型名称", "林恩重新回到了报社。"),
+                            11L, "忽略模型名称", "回到报社", "林恩重新回到了报社。"),
                     new TrpgEpilogueModels.Entry(
-                            12L, "忽略模型名称", "威廉的笔记被妹妹保存了下来。")));
+                            12L, "忽略模型名称", "留下笔记", "威廉的笔记被妹妹保存了下来。")));
         }
     }
 }

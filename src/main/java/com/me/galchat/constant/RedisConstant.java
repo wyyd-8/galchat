@@ -21,7 +21,6 @@ public final class RedisConstant {
     public static final String TRPG_SHOWN_MATERIALS_PREFIX = "trpg:group:shown-materials:";
     public static final String TRPG_CONTEXT_WINDOW_PREFIX = "trpg:group:context-window:";
     public static final String TRPG_SCENE_PROGRESS_PREFIX = "trpg:group:scene-progress:";
-    public static final String TRPG_RUN_FINISH_PREFIX = "trpg:group:run-finish:";
     public static final String TRPG_PROPOSAL_ORDER_PREFIX =
             "trpg:group:proposal-order:";
     public static final String TRPG_TURN_DIRECTION_PREFIX =

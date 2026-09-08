@@ -33,6 +33,7 @@ public final class TrpgEpilogueModels {
     public record Entry(
             Long characterId,
             String investigatorName,
+            String lead,
             String content) {
     }
 

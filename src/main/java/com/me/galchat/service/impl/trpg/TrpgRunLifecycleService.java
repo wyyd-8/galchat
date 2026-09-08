@@ -1,43 +1,26 @@
 package com.me.galchat.service.impl.trpg;
 
 import com.me.galchat.service.impl.group.GroupConversationService;
-import com.me.galchat.service.impl.group.GroupConversationLifecycleService;
-import com.me.galchat.service.impl.group.GroupTurnRecoveryService;
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
-import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
-import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import java.time.Duration;
-import java.util.HashSet;
 import java.util.Objects;
-import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class TrpgRunLifecycleService {
 
-    private static final Duration REQUEST_TTL =
-            Duration.ofDays(7);
-
     private final GroupConversationService conversationService;
     private final GroupChatReplyStepMapper stepMapper;
     private final GroupChatTurnMapper turnMapper;
-    private final StringRedisTemplate redisTemplate;
-    private final GroupConversationLifecycleService conversationLifecycle;
-    private final GroupTurnRecoveryService recoveryService;
-    private final TrpgEpilogueService epilogueService;
-    private final GroupReplyPlanMapper planMapper;
-    private final TrpgSceneSummaryService sceneSummaryService;
+    private final com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
 
     public void requestFinish(
             Long conversationId, Long replyStepId) {
@@ -60,48 +43,38 @@ public class TrpgRunLifecycleService {
                 step.getSpeakerType())) {
             throw new UserAuthException("只有KP可以结束整个跑团");
         }
-        redisTemplate.opsForValue().set(
-                key(conversationId), "1", REQUEST_TTL);
-        recoveryService.cancelPendingSteps(
-                turn.getId(), "KP已结束整个跑团");
-    }
-
-    public boolean finalizeAfterTurn(
-            GroupConversation conversation, Long completingTurnId) {
-        if (conversation == null
-                || conversation.getId() == null
-                || !GroupChatConstant.MODE_TRPG.equals(
-                        conversation.getMode())
-                || !"1".equals(redisTemplate.opsForValue()
-                        .get(key(conversation.getId())))) {
-            return false;
+        if (!(GroupChatConstant.ACTION_TRPG_SCENE.equals(step.getActionType())
+                && GroupChatConstant.PLAN_SOURCE_SCENE.equals(turn.getPlanSource()))
+                && !(GroupChatConstant.ACTION_TRPG_POST_COMBAT_TRANSITION.equals(step.getActionType())
+                && GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(turn.getPlanSource()))) {
+            throw new UserRequestException("只有探索或战斗结束后的KP步骤可以结束跑团");
         }
-        epilogueService.generateAndPersist(
-                conversation, completingTurnId);
-        summarizeActivePlanHierarchy(conversation);
-        conversationLifecycle.closeAfterTurnUnderLock(
-                conversation, completingTurnId);
-        redisTemplate.delete(key(conversation.getId()));
-        return true;
-    }
-
-    private void summarizeActivePlanHierarchy(
-            GroupConversation conversation) {
-        Long planId = conversation.getActiveReplyPlanId();
-        Set<Long> visited = new HashSet<>();
-        while (planId != null && visited.add(planId)) {
-            GroupReplyPlan plan = planMapper.selectById(planId);
-            if (plan == null) {
-                return;
-            }
-            sceneSummaryService.summarize(
-                    conversation.getId(), plan.getContextId(), plan.getId());
-            planId = plan.getParentPlanId();
+        if (conversation.getActiveReplyPlanId() == null
+                || !Objects.equals(conversation.getActiveReplyPlanId(), turn.getPlanId())) {
+            throw new UserRequestException("当前回复计划已变化，不能结束跑团");
+        }
+        if (!GroupChatConstant.STATUS_RUNNING.equals(step.getStatus())
+                || !GroupChatConstant.STATUS_RUNNING.equals(turn.getStatus())) {
+            throw new UserRequestException("只能在当前执行中的KP步骤结束跑团");
+        }
+        if (completionMapper.selectById(conversationId) == null) {
+            completionMapper.insert(new com.me.galchat.domain.po.TrpgCompletion()
+                    .setConversationId(conversationId).setTurnId(turn.getId()));
         }
     }
 
-    private String key(Long conversationId) {
-        return RedisConstant.TRPG_RUN_FINISH_PREFIX
-                + conversationId;
+    public boolean hasFinishRequest(GroupConversation conversation, Long turnId) {
+        if (conversation == null || !GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) return false;
+        var completion = completionMapper.selectById(conversation.getId());
+        if (completion == null || !Objects.equals(completion.getTurnId(), turnId)) return false;
+        // A retained finishRun tool call may belong to a paused/failed KP reply. Resume that
+        // reply first so its final public narrative is included in the closing scene summary.
+        Long completed = stepMapper.countCompletedRunFinishByTurn(turnId);
+        return completed != null && completed > 0;
+    }
+
+    public boolean isSummaryPending(GroupConversation conversation) {
+        return conversation.getActiveReplyPlanId() == null
+                && completionMapper.selectById(conversation.getId()) != null;
     }
 }

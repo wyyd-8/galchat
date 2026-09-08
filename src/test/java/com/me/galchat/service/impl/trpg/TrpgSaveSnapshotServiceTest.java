@@ -116,11 +116,14 @@ class TrpgSaveSnapshotServiceTest {
     @Mock
     private VectorStoreCleanupMapper vectorCleanupMapper;
 
+    @Mock
+    private com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
+
     private TrpgSaveSnapshotService service;
 
     @BeforeEach
     void setUp() {
-        service = new TrpgSaveSnapshotService(
+        service = new TrpgSaveSnapshotService(completionMapper,
                 restoreMapper,
                 conversationMapper,
                 planMapper,
@@ -291,6 +294,7 @@ class TrpgSaveSnapshotServiceTest {
                     assertThat(turnSnapshot.getDiceResults()).containsExactly(diceResult);
                 });
         assertThat(snapshot.getRedisState()).isSameAs(redis);
+        verify(completionMapper).selectById(51L);
     }
 
     @Test
@@ -498,6 +502,25 @@ class TrpgSaveSnapshotServiceTest {
         verify(runtimeChildSceneMapper).insert(runtimeChildScene);
         verify(weaponStashMapper).delete(any());
         verify(weaponStashMapper).insert(any(TrpgWeaponStash.class));
+    }
+
+    @Test
+    void restoreClearsFutureCompletionAndRestoresAnArchivedCompletionFromSave() {
+        var snapshot = baseSnapshot();
+        snapshot.setConversationState(new TrpgSaveSnapshotDTO.ConversationStateSnapshot().setStatus("active"));
+        service.restoreDatabase(conversation(), snapshot);
+        verify(completionMapper).deleteById(51L);
+        var completion = new com.me.galchat.domain.po.TrpgCompletion().setConversationId(51L)
+                .setTurnId(88L);
+        service.restoreDatabase(conversation(), snapshot.setCompletion(completion));
+        verify(completionMapper).insert(completion);
+    }
+
+    @Test
+    void restoreRejectsCompletionFromAnotherRun() {
+        var snapshot = baseSnapshot().setCompletion(new com.me.galchat.domain.po.TrpgCompletion().setConversationId(99L));
+        assertThatThrownBy(() -> service.restoreDatabase(conversation(), snapshot)).hasMessageContaining("完成报告存档身份");
+        verify(completionMapper, never()).deleteById(any(Long.class));
     }
 
     @Test

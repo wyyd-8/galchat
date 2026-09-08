@@ -20,7 +20,7 @@ public class KpRunTools {
 
     @Tool(
             name = "finishRun",
-            description = "KP确认模组已经跑完。本轮后系统会为每位调查员自动生成人物后传，然后关闭跑团群聊。调用者不要自行输出人物后传。")
+            description = "KP确认模组已经跑完。本轮结束后系统会总结并关闭当前主场景，进入待生成跑团总结阶段。调用者不要自行输出人物后传。")
     public String finishRun(ToolContext context) {
         Map<String, Object> values = requireContext(context);
         if (!GroupChatConstant.ACTOR_KP.equals(
@@ -37,7 +37,7 @@ public class KpRunTools {
         }
         lifecycleService.requestFinish(
                 conversationId, replyStepId);
-        return "跑团将在本轮结束后关闭，系统将自动生成每位调查员的人物后传。当前只需简短结束正篇，不要自行输出后传。";
+        return "已记录完结请求。本轮结束后将完成主场景，等待玩家生成总结并归档。当前只需简短结束正篇，不要自行输出后传。";
     }
 
     private Map<String, Object> requireContext(ToolContext context) {

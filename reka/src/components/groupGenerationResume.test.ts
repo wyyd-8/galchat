@@ -169,6 +169,7 @@ test('clears a completed generation but retains an interrupted generation for re
     localStorage: storage(),
     sessionStorage: session,
   })
+  const originalConversation = api.conversation
   const originalContinue = streamTrpgTurn.continue
   const originalMessages = api.groupMessages
   const originalPlans = api.replyPlan
@@ -180,6 +181,7 @@ test('clears a completed generation but retains an interrupted generation for re
       onEvent({ eventType: 'stream.caught_up', conversationId })
       onEvent({ eventType: 'turn.completed', conversationId, turnId: 42 })
     }
+    api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: 'active' })
     api.groupMessages = async () => []
     api.replyPlan = async () => [{ source: 'USER', displayName: '群聊', items: [] }]
     api.currentTurn = async () => null
@@ -221,6 +223,7 @@ test('clears a completed generation but retains an interrupted generation for re
 
     assert.equal(session.getItem('galchat:generation:7'), interruptedId)
   } finally {
+    api.conversation = originalConversation
     streamTrpgTurn.continue = originalContinue
     api.groupMessages = originalMessages
     api.replyPlan = originalPlans
@@ -247,6 +250,7 @@ test('keeps generation debug details only in page memory and exposes the failed 
     localStorage: local,
     sessionStorage: session,
   })
+  const originalConversation = api.conversation
   const originalContinue = streamTrpgTurn.continue
   const originalMessages = api.groupMessages
   const originalPlans = api.replyPlan
@@ -254,9 +258,11 @@ test('keeps generation debug details only in page memory and exposes the failed 
   const originalCombat = api.combatOverview
   try {
     const requestIds: string[] = []
+    let completionReady = false
     streamTrpgTurn.continue = async (conversationId, clientRequestId, onEvent) => {
       requestIds.push(clientRequestId)
       if (requestIds.length > 1) {
+        completionReady = true
         onEvent({ eventType: 'stream.caught_up', conversationId })
         onEvent({ eventType: 'turn.completed', conversationId, turnId: 42 })
         return
@@ -275,6 +281,7 @@ test('keeps generation debug details only in page memory and exposes the failed 
         },
       })
     }
+    api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: completionReady ? 'closed' : 'active', completionStatus: completionReady ? 'ready' : undefined })
     api.groupMessages = async () => [{
       id: 100, conversationId: 7, turnId: 42, replyStepId: 9,
       speakerType: 'kp', speakerName: 'KP', messageKind: 'dialogue',
@@ -326,9 +333,13 @@ test('keeps generation debug details only in page memory and exposes the failed 
     assert.equal(typeof retry, 'function')
     await (retry as () => Promise<void>)()
     assert.equal(requestIds.length, 2)
+    assert.equal(workspace.selectedConversation.value?.status, 'closed')
+    assert.equal(workspace.selectedConversation.value?.completionStatus, 'ready')
+    assert.equal(workspace.generationFailureOpen.value, false)
     assert.notEqual(requestIds[0], requestIds[1])
     assert.equal(workspace.generationFailureOpen.value, false)
   } finally {
+    api.conversation = originalConversation
     streamTrpgTurn.continue = originalContinue
     api.groupMessages = originalMessages
     api.replyPlan = originalPlans

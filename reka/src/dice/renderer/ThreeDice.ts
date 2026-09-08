@@ -352,7 +352,7 @@ async function buildModel(
         clone.roughness = 0.16
         clone.metalness = 0.06
         clone.emissive.set(0x071748)
-        clone.emissiveIntensity = 0.32
+        clone.emissiveIntensity = 0.42
         clone.emissiveMap = clone.map
       }
       if (skin === 'moonwhite' && object.name.includes('_Body_') && clone instanceof THREE.MeshStandardMaterial) {
@@ -1001,7 +1001,7 @@ export class ThreeDiceBoard {
       this.renderer.setSize(width, height, false)
     }
     this.renderer.toneMappingExposure = this.skin === 'galaxy'
-      ? 1.26
+      ? 1.48
       : this.skin === 'moonwhite'
         ? 1.18
         : this.skin === 'cinnabar'

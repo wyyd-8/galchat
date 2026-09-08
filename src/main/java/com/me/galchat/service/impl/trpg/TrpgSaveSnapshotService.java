@@ -72,6 +72,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
             GroupChatConstant.STATUS_FAILED,
             GroupChatConstant.STATUS_BLOCKED);
 
+    private final com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
     private final TrpgSaveRestoreMapper restoreMapper;
     private final GroupConversationMapper conversationMapper;
     private final GroupReplyPlanMapper planMapper;
@@ -189,6 +190,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                                 .eq(TrpgCombat::getConversationId, conversationId)
                                 .orderByAsc(TrpgCombat::getId)))
                 .setRestorableTurns(restorableTurns(conversationId))
+                .setCompletion(completionMapper.selectById(conversationId))
                 .setCheckpoint(checkpointMapper.selectById(conversationId))
                 .setRedisState(redisStateService.capture(
                         conversationId, sceneIds));
@@ -237,6 +239,13 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 cursors.getMaxDiceResultId());
         restoreMapper.deleteDiceSummariesAfter(
                 conversationId, cursors.getMaxDiceSummaryId());
+        completionMapper.deleteById(conversationId);
+        if (snapshot.getCompletion() != null) {
+            var completion = snapshot.getCompletion();
+            if (completion.getData() != null && (completion.getData().epilogues() == null
+                    || completion.getData().overview() == null)) completion.setData(null);
+            completionMapper.insert(completion);
+        }
         restoreRestorableTurns(snapshot.getRestorableTurns());
         restorePlans(conversationId, snapshot);
         restoreCharacters(conversationId, snapshot);
@@ -266,6 +275,10 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 || !Objects.equals(snapshot.getWorldId(), conversation.getWorldId())
                 || !Objects.equals(snapshot.getModuleId(), conversation.getModuleId())) {
             throw new UserRequestException("跑团存档身份信息不一致");
+        }
+        if (snapshot.getCompletion() != null
+                && !Objects.equals(snapshot.getCompletion().getConversationId(), conversation.getId())) {
+            throw new UserRequestException("跑团完成报告存档身份不一致");
         }
         validateCursors(snapshot.getCursors());
         List<GroupReplyPlan> plans = safe(snapshot.getReplyPlans());

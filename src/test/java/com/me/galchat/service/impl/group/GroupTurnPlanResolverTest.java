@@ -254,7 +254,7 @@ class GroupTurnPlanResolverTest {
     }
 
     @Test
-    void requestedRunFinishClosesBeforeAnyNextStageIsCreated() {
+    void pendingCompletionResolvesToOneSummaryActionWithoutSceneSelection() {
         TrpgSceneSelectionService selectionService =
                 mock(TrpgSceneSelectionService.class);
         TrpgSceneLifecycleService sceneLifecycle =
@@ -275,10 +275,15 @@ class GroupTurnPlanResolverTest {
                 .setId(9L)
                 .setPlanSource(
                         GroupChatConstant.TURN_SOURCE_SCENE_SELECTION);
-        when(runLifecycle.finalizeAfterTurn(conversation, 9L))
+        when(runLifecycle.hasFinishRequest(conversation, 9L))
                 .thenReturn(true);
 
-        resolver.onTurnCompleted(conversation, turn);
+        assertThat(resolver.hasRunFinishRequest(conversation, turn.getId())).isTrue();
+        when(runLifecycle.isSummaryPending(conversation)).thenReturn(true);
+        var resolved = resolver.resolve(conversation, mock(GroupModeRuntime.class));
+        assertThat(resolved.source()).isEqualTo(GroupChatConstant.TURN_SOURCE_SUMMARY);
+        assertThat(resolved.actions()).hasSize(1);
+        assertThat(resolved.actions().getFirst().actionType()).isEqualTo(GroupChatConstant.ACTION_TRPG_SUMMARY);
 
         verify(selectionService, never())
                 .finalizeSelections(conversation);

@@ -20,6 +20,8 @@ public class GroupConversationVO {
     private String title;
     private String summary;
     private String status;
+    private String completionStatus;
+    private LocalDateTime archivedAt;
     private Integer version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

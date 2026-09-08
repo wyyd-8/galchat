@@ -166,6 +166,29 @@ public class GroupTurnRecoveryService {
                                 GroupChatConstant.ACTOR_CHARACTER));
     }
 
+    public void assertCanCloseConversation(Long conversationId) {
+        assertConversationHasNoNonTerminalTurns(conversationId);
+        if (positive(turnMapper.selectCount(new LambdaQueryWrapper<GroupChatTurn>()
+                .eq(GroupChatTurn::getConversationId, conversationId)
+                .in(GroupChatTurn::getStatus, GroupChatConstant.STATUS_PAUSED, GroupChatConstant.STATUS_WAITING_DICE)))) {
+            throw new UserRequestException("当前行动轮尚未结束");
+        }
+    }
+
+    public void cancelFailedTurns(Long conversationId) {
+        var failed = turnMapper.selectList(new LambdaQueryWrapper<GroupChatTurn>()
+                .eq(GroupChatTurn::getConversationId, conversationId)
+                .in(GroupChatTurn::getStatus, GroupChatConstant.STATUS_FAILED, GroupChatConstant.STATUS_BLOCKED));
+        for (var turn : failed) {
+            stepMapper.update(new GroupChatReplyStep().setStatus(GroupChatConstant.STATUS_CANCELLED)
+                            .setUpdatedAt(LocalDateTime.now()),
+                    new LambdaUpdateWrapper<GroupChatReplyStep>().eq(GroupChatReplyStep::getTurnId, turn.getId())
+                            .ne(GroupChatReplyStep::getStatus, GroupChatConstant.STATUS_COMPLETED));
+            turn.setStatus(GroupChatConstant.STATUS_CANCELLED).setUpdatedAt(LocalDateTime.now());
+            turnMapper.updateById(turn);
+        }
+    }
+
     public void assertNoNonTerminalTurns(Long userWorldId) {
         if (positive(turnMapper.countNonTerminalByUserWorldId(userWorldId))) {
             throw new UserRequestException("当前世界存在未完成的群聊轮次");
@@ -192,7 +215,9 @@ public class GroupTurnRecoveryService {
 
     private boolean isRetryableTrpgStep(
             GroupChatReplyStep step) {
-        return GroupChatConstant.ACTION_TRPG_SCENE.equals(
+        return GroupChatConstant.ACTION_TRPG_SUMMARY.equals(step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_RUN_SCENE_CLOSE.equals(step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_SCENE.equals(
                 step.getActionType())
                 || GroupChatConstant.ACTION_TRPG_COMBAT.equals(
                 step.getActionType())

@@ -25,6 +25,18 @@ import static org.mockito.Mockito.when;
 class TrpgSaveSnapshotJsonTest {
 
     @Test
+    void oldFinishFlagDoesNotPreventReadingExistingSaves() {
+        var mapper = JsonMapper.builder()
+                .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
+        var snapshot = mapper.readValue("""
+                {"conversationId":7,"redisState":{"runFinishRequested":true,"shownMaterialIds":[9]}}
+                """, TrpgSaveSnapshotDTO.class);
+        assertThat(snapshot.getConversationId()).isEqualTo(7L);
+        assertThat(snapshot.getRedisState().getShownMaterialIds()).containsExactly(9L);
+        assertThat(snapshot.getCompletion()).isNull();
+    }
+
+    @Test
     void removedWorldEventFieldsRemainReadableAsLegacyJson() throws Exception {
         JsonMapper mapper = JsonMapper.builder().build();
 

@@ -755,15 +755,24 @@ class GroupChatServiceTest {
             return 1;
         }).when(stepMapper).insert(any(GroupChatReplyStep.class));
 
-        AssistantMessage output = AssistantMessage.builder()
+        AssistantMessage firstOutput = AssistantMessage.builder()
+                .content("")
+                .properties(Map.of(
+                        "id", "reply-1",
+                        "reasoningContent", "先"))
+                .build();
+        AssistantMessage secondOutput = AssistantMessage.builder()
                 .content("公开回复")
                 .properties(Map.of(
-                        "reasoningContent", "只供前端展示的思考"))
+                        "id", "reply-1",
+                        "reasoningContent", "先想"))
                 .build();
         AtomicReference<Prompt> modelPrompt = new AtomicReference<>();
         when(model.stream(any(Prompt.class))).thenAnswer(invocation -> {
             modelPrompt.set(invocation.getArgument(0));
-            return reactor.core.publisher.Flux.just(new ChatResponse(List.of(new Generation(output))));
+            return reactor.core.publisher.Flux.just(
+                    new ChatResponse(List.of(new Generation(firstOutput))),
+                    new ChatResponse(List.of(new Generation(secondOutput))));
         });
 
         GroupChatRequestDTO request = new GroupChatRequestDTO();
@@ -776,12 +785,13 @@ class GroupChatServiceTest {
                 GroupChatConstant.EVENT_TURN_ACCEPTED,
                 GroupChatConstant.EVENT_REPLY_STARTED,
                 GroupChatConstant.EVENT_REASONING_DELTA,
+                GroupChatConstant.EVENT_REASONING_DELTA,
                 GroupChatConstant.EVENT_MESSAGE_DELTA,
                 GroupChatConstant.EVENT_MESSAGE_COMPLETED,
                 GroupChatConstant.EVENT_TURN_COMPLETED);
         assertThat(events).filteredOn(event -> GroupChatConstant.EVENT_REASONING_DELTA.equals(event.getEventType()))
                 .extracting(GroupChatEvent::getDelta)
-                .containsExactly("只供前端展示的思考");
+                .containsExactly("先", "想");
         assertThat(events).filteredOn(event -> event.getReplyStepId() != null)
                 .allSatisfy(event -> {
                     assertThat(event.getActionType()).isEqualTo(GroupChatConstant.ACTION_CHAT_REPLY);

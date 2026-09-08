@@ -53,6 +53,7 @@ public class TrpgSaveSnapshotDTO {
     private List<RestorableTurnSnapshot> restorableTurns;
     private GroupTurnCheckpoint checkpoint;
     private RedisStateSnapshot redisState;
+    private com.me.galchat.domain.po.TrpgCompletion completion;
 
     @Data
     @Accessors(chain = true)
@@ -100,13 +101,13 @@ public class TrpgSaveSnapshotDTO {
 
     @Data
     @Accessors(chain = true)
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class RedisStateSnapshot {
         private Set<Long> shownMaterialIds;
         private Long sceneSelectionTurnId;
         private Map<String, Long> sceneSelections;
         private Map<String, LocationOptionSnapshot> sceneOptions;
         private List<SceneProgressSnapshot> sceneProgress;
-        private Boolean runFinishRequested;
     }
 
     @Data

@@ -64,9 +64,6 @@ class TrpgRedisStateServiceTest {
         when(redisTemplate.hasKey(
                 RedisConstant.TRPG_SCENE_PROGRESS_PREFIX + "51:301:finish"))
                 .thenReturn(true);
-        when(redisTemplate.hasKey(
-                RedisConstant.TRPG_RUN_FINISH_PREFIX + "51"))
-                .thenReturn(true);
 
         TrpgSaveSnapshotDTO.RedisStateSnapshot snapshot =
                 service.capture(51L, List.of(301L));
@@ -82,7 +79,6 @@ class TrpgRedisStateServiceTest {
                     .containsExactlyInAnyOrder("user:401", "character:2");
             assertThat(progress.getFinishRequested()).isTrue();
         });
-        assertThat(snapshot.getRunFinishRequested()).isTrue();
     }
 
     @Test
@@ -108,8 +104,7 @@ class TrpgRedisStateServiceTest {
                                 new TrpgSaveSnapshotDTO.SceneProgressSnapshot()
                                         .setSceneId(301L)
                                         .setReadyActors(Set.of("user:401"))
-                                        .setFinishRequested(true)))
-                        .setRunFinishRequested(true);
+                                        .setFinishRequested(true)));
 
         service.restore(51L, snapshot);
 
@@ -130,9 +125,6 @@ class TrpgRedisStateServiceTest {
         verify(valueOperations).set(
                 RedisConstant.TRPG_SCENE_PROGRESS_PREFIX + "51:301:finish",
                 "1", TrpgRedisStateService.TRANSIENT_TTL);
-        verify(valueOperations).set(
-                RedisConstant.TRPG_RUN_FINISH_PREFIX + "51",
-                "1", TrpgRedisStateService.TRANSIENT_TTL);
     }
 
     @Test
@@ -152,7 +144,6 @@ class TrpgRedisStateServiceTest {
                 RedisConstant.TRPG_SHOWN_MATERIALS_PREFIX + "51",
                 RedisConstant.TRPG_SCENE_SELECTION_PREFIX + "51:active",
                 RedisConstant.TRPG_CONTEXT_WINDOW_PREFIX + "51",
-                RedisConstant.TRPG_RUN_FINISH_PREFIX + "51",
                 RedisConstant.TRPG_TURN_DIRECTION_PREFIX + "51"));
     }
 }

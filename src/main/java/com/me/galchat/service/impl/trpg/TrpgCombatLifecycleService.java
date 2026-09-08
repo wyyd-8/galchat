@@ -242,7 +242,8 @@ public class TrpgCombatLifecycleService {
         TrpgCombat combat = requireActiveCombat(conversation);
         String actionKind = root.get("actionKind") == null
                 ? "TARGETED" : root.get("actionKind").asText();
-        if ("SELF_OR_UTILITY".equals(actionKind)) {
+        if ("SELF_OR_UTILITY".equals(actionKind)
+                || "NARRATIVE".equals(actionKind)) {
             GroupChatReplyStep defense = defenseForRoute(turn, routeStep);
             defense.setSubjectCharacterId(null)
                     .setStatus(GroupChatConstant.STATUS_CANCELLED)

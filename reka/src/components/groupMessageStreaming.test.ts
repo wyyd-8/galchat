@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import test from 'node:test'
-import type { DiceRollAggregate, GroupMessage } from '../api/types.ts'
+import type { Conversation, DiceRollAggregate, GroupChatEvent, GroupMessage } from '../api/types.ts'
 
 const sourceRoot = new URL('../', import.meta.url)
 registerHooks({
@@ -49,6 +49,96 @@ const diceMessage: GroupMessage = {
   diceRoll,
   status: 'completed',
 }
+
+test('keeps earlier dice rounds visible after streaming a follow-up round and syncing history', async (t) => {
+  const { api, streamTrpgTurn } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { splitDiceAggregateByRound } = await import('../dice/domain/dicePlayback.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  const storage = new Map<string, string>()
+  const webStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    key: (index: number) => [...storage.keys()][index] ?? null,
+    get length() { return storage.size },
+  }
+  Object.assign(globalThis, {
+    window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: webStorage,
+    sessionStorage: webStorage,
+  })
+  t.after(() => Object.assign(globalThis, {
+    window: previousWindow, localStorage: previousLocalStorage,
+    sessionStorage: previousSessionStorage,
+  }))
+
+  let workspace!: ReturnType<typeof useWorkspace>
+  const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+    patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+    createElement: () => ({}), createText: (text) => ({ text }),
+    createComment: (text) => ({ text }), setText(node, text) { node.text = text },
+    setElementText(node, text) { node.text = text },
+    parentNode: (node) => node.parent as Record<string, unknown> | null,
+    nextSibling: () => null,
+  })
+  const app = renderer.createApp(defineComponent({
+    setup() { workspace = useWorkspace(); return () => h('div') },
+  }))
+  app.mount({})
+  t.after(() => app.unmount())
+  const conversation: Conversation = {
+    id: 7, userWorldId: 3, worldId: 2,
+    mode: 'trpg', title: '旧宅调查', status: 'active',
+  }
+  workspace.conversations.value = [conversation]
+  workspace.selectedConversationId.value = 7
+
+  let round = 1
+  const results = [
+    { id: 601, summaryId: 501, roundNo: 1, reason: '理智检定' },
+    { id: 602, summaryId: 501, roundNo: 2, reason: '理智损失' },
+  ]
+  t.mock.method(api, 'conversation', async () => conversation)
+  t.mock.method(api, 'replyPlan', async () => [{ source: 'USER', displayName: '群聊', items: [] }])
+  t.mock.method(api, 'currentTurn', async () => null)
+  t.mock.method(api, 'combatOverview', async () => [])
+  t.mock.method(api, 'investigatorCards', async () => [])
+  t.mock.method(api, 'diceSummary', async () => ({ ...diceRoll.summary, roundCount: round }))
+  t.mock.method(api, 'diceResults', async () => results.slice(0, round))
+  t.mock.method(api, 'groupMessages', async () => results.slice(0, round).map((result) => ({
+    ...diceMessage, id: 99 + result.roundNo, sequenceNo: 9 + result.roundNo,
+    diceRoll: undefined, content: JSON.stringify({ summaryId: 501, roundNos: [result.roundNo] }),
+  })))
+  t.mock.method(streamTrpgTurn, 'continue', async (_id: number, _requestId: string, onEvent: (event: GroupChatEvent) => void) => {
+    const event = {
+      conversationId: 7, turnId: 42, replyStepId: 9,
+      messageId: 99 + round, sequence: 9 + round,
+      speaker: { type: 'kp', name: 'KP' },
+    }
+    onEvent({ ...event, eventType: 'reply.started', messageKind: 'dialogue' })
+    onEvent({ ...event, eventType: 'dice_roll.created', toolName: round === 1 ? 'requestSanCheck' : 'rollSanLoss',
+      diceRoll: { summary: { ...diceRoll.summary, roundCount: round }, results: [results[round - 1]!] },
+    })
+    onEvent({ ...event, eventType: 'message.completed', messageKind: 'dice_roll' })
+    onEvent({ eventType: 'turn.paused', conversationId: 7, turnId: 42 })
+    assert.deepEqual(workspace.messages.value.map((message) =>
+      splitDiceAggregateByRound(message.diceRoll!).map((card) => card.results[0]!.id)),
+    round === 1 ? [[601]] : [[601], [602]])
+  })
+
+  assert.equal(await workspace.startTrpgTurn(), true)
+  assert.deepEqual(workspace.messages.value[0]?.diceRoll?.results.map((result) => result.id), [601])
+  round = 2
+  assert.equal(await workspace.startTrpgTurn(), true)
+  assert.deepEqual(workspace.messages.value.map((message) => ({
+    id: message.id,
+    cards: splitDiceAggregateByRound(message.diceRoll!).map((card) => card.results[0]!.id),
+  })), [{ id: 100, cards: [601] }, { id: 101, cards: [602] }])
+})
 
 test('keeps continued streaming output below the dice message from the same reply step', async () => {
   const { api, streamTrpgTurn } = await import('../api/client.ts')

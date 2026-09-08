@@ -62,9 +62,7 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
                 .setSceneSelectionTurnId(selectionTurnId)
                 .setSceneSelections(Map.copyOf(selections))
                 .setSceneOptions(Map.copyOf(options))
-                .setSceneProgress(progress)
-                .setRunFinishRequested(Boolean.TRUE.equals(
-                        redisTemplate.hasKey(runFinishKey(conversationId))));
+                .setSceneProgress(progress);
     }
 
     @Override
@@ -78,10 +76,6 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
         restoreMaterials(conversationId, snapshot.getShownMaterialIds());
         restoreSelection(conversationId, snapshot);
         restoreSceneProgress(conversationId, snapshot.getSceneProgress());
-        if (Boolean.TRUE.equals(snapshot.getRunFinishRequested())) {
-            redisTemplate.opsForValue().set(
-                    runFinishKey(conversationId), "1", TRANSIENT_TTL);
-        }
     }
 
     @Override
@@ -103,7 +97,6 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
                 materialKey(conversationId),
                 selectionActiveKey(conversationId),
                 contextWindowKey(conversationId),
-                runFinishKey(conversationId),
                 RedisConstant.TRPG_TURN_DIRECTION_PREFIX
                         + conversationId));
     }
@@ -245,10 +238,6 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
 
     private String contextWindowKey(Long conversationId) {
         return RedisConstant.TRPG_CONTEXT_WINDOW_PREFIX + conversationId;
-    }
-
-    private String runFinishKey(Long conversationId) {
-        return RedisConstant.TRPG_RUN_FINISH_PREFIX + conversationId;
     }
 
     private <T> List<T> safeList(List<T> values) {

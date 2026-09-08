@@ -47,8 +47,9 @@ class GroupTurnRecoveryServiceTest {
         assertThat(turnCaptor.getValue().getStatus()).isEqualTo(GroupChatConstant.STATUS_FAILED);
     }
 
-    @Test
-    void recoveryBlocksTailAfterInterruptedRetryableCharacterStep() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"trpg_scene_action", "trpg_summary", "trpg_run_scene_close"})
+    void recoveryBlocksTailAfterInterruptedRetryableStep(String actionType) {
         GroupChatTurnMapper turnMapper =
                 mock(GroupChatTurnMapper.class);
         GroupChatReplyStepMapper stepMapper =
@@ -69,7 +70,7 @@ class GroupTurnRecoveryServiceTest {
                         .setTurnId(10L)
                         .setStepNo(2)
                         .setActionType(
-                                GroupChatConstant.ACTION_TRPG_SCENE)
+                                actionType)
                         .setSpeakerType(
                                 GroupChatConstant.ACTOR_CHARACTER)
                         .setStatus(

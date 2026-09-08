@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GroupConversationService {
 
+    private final com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
     private final GroupConversationMapper conversationMapper;
     private final GroupChatMemberMapper memberMapper;
     private final GroupChatMessageMapper messageMapper;
@@ -250,20 +251,42 @@ public class GroupConversationService {
                 .selectLatestCompletedByConversationIds(conversations.stream().map(GroupConversation::getId).toList())
                 .stream()
                 .collect(Collectors.toMap(GroupChatMessage::getConversationId, Function.identity()));
-        return conversations.stream().map(conversation -> toVO(conversation, latestMessages.get(conversation.getId())))
-                .toList();
+        var ids = conversations.stream().filter(conversation -> GroupChatConstant.MODE_TRPG.equals(conversation.getMode()))
+                .map(GroupConversation::getId).toList();
+        var completions = ids.isEmpty() ? Map.<Long, com.me.galchat.domain.po.TrpgCompletion>of()
+                : completionMapper.selectList(new LambdaQueryWrapper<com.me.galchat.domain.po.TrpgCompletion>()
+                        .in(com.me.galchat.domain.po.TrpgCompletion::getConversationId, ids)).stream()
+                        .collect(Collectors.toMap(com.me.galchat.domain.po.TrpgCompletion::getConversationId, Function.identity()));
+        return conversations.stream().map(conversation -> withCompletion(
+                toVO(conversation, latestMessages.get(conversation.getId())), completions.get(conversation.getId()))).toList();
     }
 
     public GroupConversationVO get(Long conversationId) {
         GroupConversation conversation = requireAuthorized(conversationId);
         List<GroupChatMessage> messages = messageMapper
                 .selectLatestCompletedByConversationIds(List.of(conversationId));
-        return toVO(conversation, messages.isEmpty() ? null : messages.getFirst())
+        return withCompletion(toVO(conversation, messages.isEmpty() ? null : messages.getFirst()),
+                GroupChatConstant.MODE_TRPG.equals(conversation.getMode()) ? completionMapper.selectById(conversationId) : null)
                 .setCharacterIds(listMembers(conversationId).stream()
                         .filter(member -> GroupChatConstant.ACTOR_CHARACTER.equals(
                                 member.getActorType()))
                         .map(GroupChatMember::getActorId)
                         .toList());
+    }
+
+    public void discardCompletion(Long conversationId) {
+        completionMapper.deleteById(conversationId);
+    }
+
+    public boolean hasCompletion(Long conversationId) {
+        return completionMapper.selectById(conversationId) != null;
+    }
+
+    private GroupConversationVO withCompletion(GroupConversationVO result, com.me.galchat.domain.po.TrpgCompletion completion) {
+        if (completion != null) result.setCompletionStatus(completion.getData() != null ? "ready"
+                : result.getActiveReplyPlanId() == null ? "pending" : "requested")
+                .setArchivedAt(completion.getData() == null ? null : result.getClosedAt());
+        return result;
     }
 
     public void checkReplyMember(Long conversationId, String speakerType, Long speakerId, boolean force) {

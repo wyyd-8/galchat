@@ -447,7 +447,9 @@ export function useWorkspace() {
       if (!catchingUpGenerationId) {
         incomingDiceRolls.value.push(aggregate)
       }
-      diceRollCache.set(aggregate.summary.id, Promise.resolve(aggregate))
+      // Stream events contain only the newly created rounds. History needs the
+      // full aggregate, including earlier rounds under the same summary ID.
+      diceRollCache.delete(aggregate.summary.id)
       const message = findEventMessage(event)
       if (message) Object.assign(message, {
         messageKind: 'dice_roll',
@@ -568,7 +570,7 @@ export function useWorkspace() {
     if (!clientRequestId) return
     loading.sending = true
     try {
-      const outcome = await consumeGeneration(
+      await consumeGeneration(
         conversationId,
         clientRequestId,
         (onEvent) => streamGroupGeneration.resume(
@@ -576,8 +578,7 @@ export function useWorkspace() {
         true,
       )
       const conversation = selectedConversation.value
-      if (outcome.failed && conversation?.id === conversationId
-        && conversation.mode === 'trpg') {
+      if (conversation?.id === conversationId && conversation.mode === 'trpg') {
         await syncTrpgState(conversation)
       }
     } catch {
@@ -594,9 +595,12 @@ export function useWorkspace() {
     }
   }
   async function syncTrpgState(conversation: Conversation) {
-    const [history, plans, turn, overview, cards] = await Promise.all([
-      api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id), loadCombatOverview(conversation.id), loadInvestigatorCards(conversation.id),
+    const [detail, history, plans, turn, overview, cards] = await Promise.all([
+      api.conversation(conversation.id), api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id), loadCombatOverview(conversation.id), loadInvestigatorCards(conversation.id),
     ])
+    if (selectedConversationId.value !== conversation.id) return
+    conversations.value = conversations.value.map((item) => item.id === conversation.id ? { ...item, ...detail } : item)
+    if (detail.completionStatus && detail.completionStatus !== 'requested') generationFailureOpen.value = false
     messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
     setReplyPlans(plans)
     currentTurn.value = turn

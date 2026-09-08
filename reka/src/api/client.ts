@@ -1,5 +1,5 @@
 import type {
-  ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
+  TrpgCompletionReport, ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   SingleChatRuntime, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
@@ -138,6 +138,7 @@ export const api = {
   conversations: (worldId: number, status?: 'active' | 'closed') => request<Conversation[]>(`/group-chat/conversations?${new URLSearchParams({ userWorldId: String(worldId), ...(status ? { status } : {}) })}`),
   conversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}`),
   createConversation: (payload: { userWorldId: number; moduleId?: number; mode: string; title: string; characterIds: number[] }) => request<Conversation>('/group-chat/conversations', { method: 'POST', body: body(payload) }),
+  completionReport: (id: number) => request<TrpgCompletionReport | null>(`/group-chat/conversations/${id}/completion-report`),
   closeConversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}/close`, { method: 'POST' }),
   deleteConversation: (id: number) => request<void>(`/group-chat/conversations/${id}`, { method: 'DELETE' }),
   contextWindow: (id: number) => request<ContextWindowOverview | null>(`/group-chat/conversations/${id}/context-window`),

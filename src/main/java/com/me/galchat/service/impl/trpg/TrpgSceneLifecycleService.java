@@ -190,6 +190,36 @@ public class TrpgSceneLifecycleService {
         return true;
     }
 
+    public void closeRunScene(GroupConversation conversation, Long throughSequence) {
+        Long planId = conversation.getActiveReplyPlanId();
+        java.util.Set<Long> visited = new java.util.HashSet<>();
+        boolean mainClosed = false;
+        while (planId != null && visited.add(planId)) {
+            GroupReplyPlan plan = planMapper.selectById(planId);
+            if (plan == null || !java.util.Objects.equals(plan.getConversationId(), conversation.getId())) {
+                throw new UserRequestException("结束跑团的主场景不存在");
+            }
+            if (GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(plan.getSource())) {
+                planId = plan.getResumePlanId();
+                continue;
+            }
+            if (!GroupChatConstant.PLAN_SOURCE_SCENE.equals(plan.getSource())) {
+                throw new UserRequestException("当前阶段不能结束跑团");
+            }
+            if (summaryService.summarizeThrough(conversation.getId(), plan.getContextId(), plan.getId(), throughSequence) == null) {
+                throw new UserRequestException("最后的场景摘要未生成，请重试");
+            }
+            mainClosed = plan.getParentPlanId() == null;
+            planId = plan.getParentPlanId();
+        }
+        if (!mainClosed) throw new UserRequestException("结束跑团的主场景不存在");
+    }
+
+    public void finishRunSceneUnderLock(GroupConversation conversation) {
+        replyPlanService.clearConversationPlans(conversation);
+        temporaryInsanityService.advanceAfterLargeScene(conversation.getId());
+    }
+
     private SceneExecution requireSceneExecution(
             Long conversationId, Long replyStepId) {
         GroupConversation conversation =

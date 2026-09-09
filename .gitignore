@@ -39,3 +39,4 @@ build/
 
 ### 模型 ###
 /python/bert_model/
+/output/interview/

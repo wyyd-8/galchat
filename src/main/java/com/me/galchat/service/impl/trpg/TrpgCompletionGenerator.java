@@ -3,7 +3,6 @@ package com.me.galchat.service.impl.trpg;
 import com.me.galchat.domain.dto.TrpgCompletionModels.*;
 import com.me.galchat.exception.UserRequestException;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import tools.jackson.databind.ObjectMapper;
@@ -12,15 +11,13 @@ import java.util.HashSet;
 
 @Component
 public class TrpgCompletionGenerator {
-    private final ChatClient client;
     private final ObjectMapper mapper;
 
-    public TrpgCompletionGenerator(@Qualifier("groupNonThinkingChatClient") ChatClient client, ObjectMapper mapper) {
-        this.client = client;
+    public TrpgCompletionGenerator(ObjectMapper mapper) {
         this.mapper = mapper;
     }
 
-    public Overview generate(Materials materials) {
+    public Overview generate(ChatClient client, Materials materials) {
         StringBuilder sources = new StringBuilder();
         for (int i = 0; i < materials.sources().size(); i++) {
             sources.append("[sourceIndex=").append(i).append("]\n")

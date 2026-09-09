@@ -26,13 +26,13 @@ const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
 const autoAdvance = defineModel<boolean>('autoAdvance', { default: false })
 const directionEnabled = defineModel<boolean>('directionEnabled', { default: false })
 const investigatorDirection = defineModel<string>('investigatorDirection', { default: '' })
-const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; actorRuntimes?: GroupActorRuntime[]; modelApis?: ModelApi[]; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean }>(), {
+const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; actorRuntimes?: GroupActorRuntime[]; modelApis?: ModelApi[]; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean; completionBusy?: boolean; completionError?: string }>(), {
   actorRuntimes: () => [],
   modelApis: () => [],
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; openCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; openCompletion: []; generateCompletion: []; skipCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
@@ -88,6 +88,10 @@ const planDescription = computed(() => props.conversation.mode === 'trpg'
   : '从上到下依次回复；拖动调整，点击移除后保存。')
 const turnButtonLabel = computed(() => trpgTurnActionLabel(props.currentTurn))
 const completionAvailable = computed(() => Boolean(props.conversation.completionStatus && (props.conversation.completionStatus !== 'requested' || props.currentTurn?.status === 'completed')))
+const completionPending = computed(() => completionAvailable.value && props.conversation.completionStatus !== 'ready')
+const summaryBusy = computed(() => props.sending || props.completionBusy)
+const summaryFailed = computed(() => ['failed', 'blocked'].includes(props.currentTurn?.status || ''))
+const skipSummaryDisabled = computed(() => summaryBusy.value || (!!props.currentTurn && !['completed', 'failed', 'blocked', 'cancelled'].includes(props.currentTurn.status)))
 const betweenTrpgTurns = computed(() => !completionAvailable.value && props.conversation.mode === 'trpg'
   && props.conversation.status === 'active'
   && !props.loading
@@ -251,7 +255,7 @@ function handleReasoningScroll(event: Event) {
 
 <template>
   <main class="chat-page">
-    <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><button v-if="completionAvailable" class="button primary" @click="emit('openCompletion')">{{ conversation.completionStatus === 'ready' ? '翻阅完成记录' : '继续跑团收尾' }}</button><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已结束' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button class="button ghost" :disabled="sending || (conversation.mode === 'trpg' && !!currentTurn && !['completed', 'failed', 'blocked', 'cancelled'].includes(currentTurn.status))" @click="emit('end')"><CircleStop :size="16" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></div></header>
+    <header class="chat-header"><div><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已结束' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button class="button ghost" :disabled="sending || (conversation.mode === 'trpg' && !!currentTurn && !['completed', 'failed', 'blocked', 'cancelled'].includes(currentTurn.status))" @click="emit('end')"><CircleStop :size="16" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></div></header>
     <div class="chat-layout">
       <section class="chat-main">
         <div class="message-scroll"><div :ref="bindScroller" class="message-viewport" @scroll="handleScroll"><div>
@@ -308,7 +312,11 @@ function handleReasoningScroll(event: Event) {
             <button class="button secondary turn-auto-advance-start" :disabled="sending" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ autoStartLabel }}</button>
             <button class="button ghost turn-auto-advance-cancel" :disabled="sending" @click="cancelAutoAdvance">取消自动推进</button>
           </div>
-          <button v-else-if="completionAvailable" class="button secondary" @click="emit('openCompletion')">{{ conversation.completionStatus === 'ready' ? '翻阅完成记录' : '继续跑团收尾' }}</button>
+          <div v-else-if="completionPending" class="turn-completion-actions">
+            <button class="button secondary" :disabled="summaryBusy" @click="emit('generateCompletion')"><LoaderCircle v-if="summaryBusy" class="spin" :size="17" /><Archive v-else :size="17" />{{ summaryBusy ? '正在生成跑团总结…' : summaryFailed ? '重新生成跑团总结并归档' : '生成跑团总结并归档' }}</button>
+            <button class="button ghost" :disabled="skipSummaryDisabled" title="保留现有记录，跳过人物后传与完成报告" @click="emit('skipCompletion')"><CircleStop :size="17" />直接结束跑团</button>
+          </div>
+          <button v-else-if="completionAvailable" class="button secondary turn-start-button" @click="emit('openCompletion')">翻阅完成记录</button>
           <button v-else-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" title="开始下一轮，由参与者依次行动" :disabled="sending || conversation.status !== 'active'" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
           <PopoverRoot v-if="betweenTrpgTurns && !autoAdvance">
             <PopoverTrigger as-child><button class="icon-button bordered turn-experiment-settings" type="button" title="行动轮设置" aria-label="行动轮设置"><Settings2 :size="17" /></button></PopoverTrigger>
@@ -348,6 +356,7 @@ function handleReasoningScroll(event: Event) {
             <TooltipProvider><TooltipRoot><TooltipTrigger as-child><button class="send-button" :disabled="!composerValue.trim() || sending || conversation.status !== 'active' || !waitingForMessage" @click="submitComposer"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">{{ effectiveComposerIntent === 'inquiry' ? 'Enter 询问 KP · Shift+Enter 换行' : 'Enter 发送 · Shift+Enter 换行' }}</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider>
           </div>
         </div>
+        <p v-if="completionPending && completionError" class="turn-completion-error" role="alert">{{ completionError }}</p>
       </section>
       <aside class="reply-panel">
         <section v-if="conversation.mode === 'trpg'" class="trpg-time-panel">
@@ -410,3 +419,10 @@ function handleReasoningScroll(event: Event) {
     </div>
   </main>
 </template>
+
+<style>
+.turn-completion-actions { grid-column: 1 / -1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.turn-completion-actions .button { min-width: 0; justify-content: center; white-space: normal; }
+.turn-completion-actions svg { flex-shrink: 0; }
+.turn-completion-error { margin: 8px 0 0; color: var(--wine); font-size: 12px; }
+</style>

@@ -32,10 +32,10 @@ class DeepSeekTrpgEpilogueGeneratorTest {
                 """));
         DeepSeekTrpgEpilogueGenerator generator =
                 new DeepSeekTrpgEpilogueGenerator(
-                        ChatClient.builder(chatModel).build(),
                         JsonMapper.builder().build());
 
         TrpgEpilogueModels.Response result = generator.generate(
+                ChatClient.builder(chatModel).build(),
                 new GroupConversation().setId(7L).setTitle("古树之中"),
                 List.of(subject(11L, "林恩", false),
                         subject(12L, "威廉", true)),

@@ -57,6 +57,27 @@ class GroupActorRuntimeServiceTest {
     }
 
     @Test
+    void summaryStepSnapshotsKpModelAndReusesItOnRetry() {
+        var conversation = conversation("trpg");
+        var step = new GroupChatReplyStep().setId(80L).setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SUMMARY);
+        var config = new GroupActorRuntimeConfig().setControlMode(GroupChatConstant.CONTROL_MODEL).setModelApiId(44L);
+        when(configMapper.selectByActorKey(9L, "kp")).thenReturn(config);
+        var fallback = mock(ChatClient.class);
+        var selected = mock(ChatClient.class);
+        when(runtimeProvider.resolveIfPresent(7L, 44L)).thenReturn(Optional.of(
+                new ResolvedUserModelRuntime(7L, 44L, new UserModelApi(), mock(ChatModel.class))));
+        when(clientFactory.create(any(ChatClient.Builder.class))).thenReturn(selected);
+        assertThat(service.chatClient(conversation, step, fallback)).isSameAs(selected);
+        assertThat(step.getModelApiId()).isEqualTo(44L);
+        verify(stepMapper).updateById(step);
+        config.setModelApiId(55L);
+        assertThat(service.chatClient(conversation, step, fallback)).isSameAs(selected);
+        verify(configMapper).selectByActorKey(9L, "kp");
+        verify(runtimeProvider, never()).resolveIfPresent(7L, 55L);
+    }
+
+    @Test
     void savesManualControlForAConversationCharacterWithoutCapabilityChecks() {
         GroupConversation conversation = conversation("chat");
         when(conversationService.requireAuthorized(9L))

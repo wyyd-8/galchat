@@ -52,19 +52,18 @@ const workspace = useWorkspace()
 const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters })
 const authOpen = ref(!workspace.isLoggedIn.value)
 const view = ref<'library' | 'modules' | 'world' | 'group' | 'direct'>('library')
-const completionTranscript = ref(false)
+const completionTranscript = ref(true)
 const completionReport = ref<TrpgCompletionReport | null>(null)
 const completionLoading = ref(false)
 const completionBusy = ref(false)
 const completionError = ref('')
-const completionAvailable = computed(() => {
-  const conversation = workspace.selectedConversation.value
-  return Boolean(conversation?.completionStatus && (conversation.completionStatus !== 'requested'
-    || workspace.currentTurn.value?.status === 'completed'))
-})
-watch(() => workspace.selectedConversationId.value, () => { completionTranscript.value = false; completionReport.value = null; completionError.value = '' })
-watch(() => `${workspace.selectedConversationId.value}:${completionAvailable.value}:${workspace.selectedConversation.value?.completionStatus}`, () => {
-  if (completionAvailable.value) { completionTranscript.value = false; void loadCompletion() }
+const completionAvailable = computed(() => workspace.selectedConversation.value?.completionStatus === 'ready')
+watch(() => workspace.selectedConversationId.value, () => { completionTranscript.value = true; completionReport.value = null; completionError.value = '' })
+watch(() => [workspace.selectedConversationId.value, workspace.selectedConversation.value?.completionStatus] as const, ([id, status], [previousId, previousStatus]) => {
+  if (id === previousId && previousStatus && previousStatus !== 'ready' && status === 'ready' && view.value === 'group') {
+    completionTranscript.value = false
+    void loadCompletion()
+  }
 })
 async function loadCompletion() {
   const id = workspace.selectedConversationId.value
@@ -94,7 +93,6 @@ async function skipCompletion() {
   catch (error) { completionError.value = errorMessage(error) }
   finally { completionBusy.value = false }
 }
-const completionFailed = computed(() => ['failed', 'blocked'].includes(workspace.currentTurn.value?.status || ''))
 const dialogs = reactive({ world: false, template: false, templatePreview: false, templateDelete: false, templateReplaceConfirm: false, conversation: false, trpgBinding: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, modelApis: false, end: false, deleteConversation: false, trpgTools: false })
 const busy = ref(false)
 const canRetryGenerationFailure = computed(() => {
@@ -454,6 +452,7 @@ function home() { direct.close(); workspace.selectedWorldId.value = null; worksp
 function openModuleLibrary() { direct.close(); workspace.selectedConversationId.value = null; view.value = 'modules' }
 async function selectWorld(id: number) { direct.close(); await workspace.selectWorld(id); view.value = 'world' }
 async function selectConversation(id: number) {
+  completionTranscript.value = true
   direct.close()
   dialogs.trpgBinding = false
   trpgBindingTargetKey.value = null
@@ -462,6 +461,7 @@ async function selectConversation(id: number) {
   const loadingConversation = workspace.selectConversation(id)
   view.value = 'group'
   await loadingConversation
+  if (workspace.selectedConversationId.value === id) completionTranscript.value = true
   const conversation = workspace.selectedConversation.value
   if (conversation?.mode === 'trpg' && conversation.status === 'active' && !conversation.completionStatus) {
     try {
@@ -777,8 +777,8 @@ async function changePassword() {
       <CocModuleLibrary v-else-if="view === 'modules'" @changed="workspace.loadModules" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
-      <TrpgCompletionStage v-else-if="view === 'group' && completionAvailable && !completionTranscript" :key="workspace.selectedConversationId.value || 0" :report="completionReport" :loading="completionLoading" :busy="completionBusy || workspace.loading.sending" :failed="completionFailed" :skip-disabled="!!workspace.currentTurn.value && !completionFailed && workspace.currentTurn.value.status !== 'completed'" :error="completionError" @retry="retryCompletion" @skip="skipCompletion" @tools="dialogs.trpgTools = true" @reload="loadCompletion" @archive="archiveCompletion" @transcript="completionTranscript = true" @back="view = 'world'" />
-      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
+      <TrpgCompletionStage v-else-if="view === 'group' && completionAvailable && !completionTranscript" :key="workspace.selectedConversationId.value || 0" :report="completionReport" :loading="completionLoading" :busy="completionBusy || workspace.loading.sending" :error="completionError" @reload="loadCompletion" @archive="archiveCompletion" @back="completionTranscript = true" />
+      <GroupChatStage v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
   </div>
   <div v-else class="signed-out"><span class="brand-glyph large">✦</span><h1>GalChat</h1><p>一个安静的角色与群像叙事工作台。</p><button class="button primary" @click="authOpen = true">登录或注册</button></div>

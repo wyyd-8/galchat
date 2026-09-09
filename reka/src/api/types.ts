@@ -383,4 +383,5 @@ export interface TrpgCompletionReport {
   title: string | null; coverUrl: string | null; ending: string | null; turnCount: number
   journey: Array<{ title: string; excerpt: string; summary: string }>
   investigators: TrpgCompletionPerson[]; rolls: TrpgCompletionRoll[]
+  combats?: Array<{ combatId: number; sceneName: string | null; summary: string | null }> | null
 }

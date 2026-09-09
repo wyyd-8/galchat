@@ -62,7 +62,7 @@ class GroupConversationLifecycleServiceTest {
     @Test
     void generatedCompletionPreservesSourceSummaries() {
         var materials = new com.me.galchat.domain.dto.TrpgCompletionModels.Materials("灯塔", null, 42, 3,
-                List.of(new com.me.galchat.domain.dto.TrpgCompletionModels.Source(1, 42, "原摘要")), List.of(), List.of());
+                List.of(new com.me.galchat.domain.dto.TrpgCompletionModels.Source(1, 42, "原摘要")), List.of(), List.of(), List.of());
         service.closeWithCompletionUnderLock(conversation, materials, "最终概要");
         assertThat(conversation.getSummary()).isEqualTo("最终概要");
         verify(summaries).insert(any(GroupContextSummary.class));

@@ -9,6 +9,7 @@ import com.me.galchat.groupchat.dice.DiceRollMessageCodec;
 import com.me.galchat.mapper.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -25,6 +26,8 @@ public class TrpgCompletionMaterialsService {
     private final DiceRollResultMapper diceResultMapper;
     private final DiceRollMessageCodec diceCodec;
     private final TrpgEpilogueService epilogueService;
+    private final TrpgCombatMapper combatMapper;
+    private final CocModuleLocationMapper locationMapper;
 
     public Materials capture(GroupConversation conversation, Long completingTurnId) {
         List<GroupChatMessage> messages = messageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
@@ -62,7 +65,46 @@ public class TrpgCompletionMaterialsService {
         CocModule module = conversation.getModuleId() == null ? null : moduleMapper.selectById(conversation.getModuleId());
         return new Materials(module == null ? conversation.getTitle() : module.getName(),
                 module == null ? null : module.getCoverUrl(), endSequence, turns.size(), sources, people,
-                rolls(messages, cards.stream().map(CocCharacter::getId).collect(Collectors.toSet()), turnNumbers));
+                rolls(messages, cards.stream().map(CocCharacter::getId).collect(Collectors.toSet()), turnNumbers),
+                combats(conversation.getId(), endSequence));
+    }
+
+    private List<Combat> combats(Long conversationId, long endSequence) {
+        List<TrpgCombat> completed = combatMapper.selectList(new LambdaQueryWrapper<TrpgCombat>()
+                .eq(TrpgCombat::getConversationId, conversationId)
+                .eq(TrpgCombat::getStatus, GroupChatConstant.COMBAT_STATUS_COMPLETED)
+                .le(TrpgCombat::getEndSequence, endSequence)
+                .orderByAsc(TrpgCombat::getStartRequestedStepId, TrpgCombat::getId));
+        if (completed.isEmpty()) return List.of();
+        return withSceneNames(completed.stream()
+                .map(combat -> new Combat(combat.getId(), null, combat.getSummary())).toList(), completed);
+    }
+
+    /** Older reports may contain empty names because runtime plans had already been deleted. */
+    public List<Combat> fillMissingCombatSceneNames(Long conversationId, List<Combat> entries) {
+        if (entries == null || entries.isEmpty()) return entries;
+        List<Long> missing = entries.stream().filter(entry -> !StringUtils.hasText(entry.sceneName()))
+                .map(Combat::combatId).filter(Objects::nonNull).distinct().toList();
+        if (missing.isEmpty()) return entries;
+        List<TrpgCombat> records = combatMapper.selectList(new LambdaQueryWrapper<TrpgCombat>()
+                .eq(TrpgCombat::getConversationId, conversationId).in(TrpgCombat::getId, missing));
+        return withSceneNames(entries, records);
+    }
+
+    private List<Combat> withSceneNames(List<Combat> entries, List<TrpgCombat> records) {
+        List<Long> locationIds = records.stream().map(TrpgCombat::getSourceSceneId)
+                .filter(Objects::nonNull).distinct().toList();
+        if (locationIds.isEmpty()) return entries;
+        Map<Long, String> names = locationMapper.selectList(new LambdaQueryWrapper<CocModuleLocation>()
+                        .in(CocModuleLocation::getId, locationIds)).stream()
+                .filter(location -> StringUtils.hasText(location.getName()))
+                .collect(Collectors.toMap(CocModuleLocation::getId, CocModuleLocation::getName));
+        Map<Long, TrpgCombat> byId = records.stream().collect(Collectors.toMap(TrpgCombat::getId, record -> record));
+        return entries.stream().map(entry -> {
+            TrpgCombat record = byId.get(entry.combatId());
+            if (StringUtils.hasText(entry.sceneName()) || record == null) return entry;
+            return new Combat(entry.combatId(), names.get(record.getSourceSceneId()), entry.summary());
+        }).toList();
     }
 
     private Map<Long, CocCharacter> initialCharacters(Long conversationId) {

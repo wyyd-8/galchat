@@ -1486,6 +1486,55 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
+    void pushedCheckAllowsSummaryContainingCheckAndHealing() {
+        DiceRollSummary summary = new DiceRollSummary()
+                .setId(101L)
+                .setConversationId(7L)
+                .setRoundCount(2)
+                .setStatus(DiceRollConstant.STATUS_COMPLETED);
+        DiceRollResult check = resolvedCheck(
+                201L, 101L, 1, "林恩", 11L, 70, "FAILURE");
+        DiceRollResult healing = new DiceRollResult()
+                .setId(202L)
+                .setSummaryId(101L)
+                .setRoundNo(2)
+                .setDisplayOrder(1)
+                .setDisplayType(DiceRollConstant.TYPE_HEALING)
+                .setResultData(new DiceRollResultVO("1D3", List.of(), 2))
+                .setResolutionData(com.me.galchat.domain.vo.DiceResolutionDataVO.pending(
+                        DiceRollConstant.TYPE_HEALING,
+                        201L,
+                        Map.of("characterName", "陈默", "cardId", 12L))
+                        .setOutcome(Map.of("characterName", "陈默", "healing", 2)))
+                .setResolvedAt(LocalDateTime.now());
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(check, healing));
+        when(cards.requireDiceCharacter(5L, "林恩"))
+                .thenReturn(player("林恩", 70));
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+                .thenAnswer(invocation -> materialize(
+                        101L, 3, invocation.getArgument(2)));
+
+        KpDiceToolResult result = service.requestPushedCheck(
+                7L,
+                5L,
+                new KpDiceRequestDTOs.Pushed(
+                        "继续尝试检定",
+                        101L,
+                        CocCheckDifficulty.REGULAR,
+                        null,
+                        List.of(target("林恩", "侦查"))));
+
+        assertThat(result.summary().getId()).isEqualTo(101L);
+        assertThat(result.summary().getRoundCount()).isEqualTo(3);
+        assertThat(result.results()).singleElement().satisfies(pushed -> {
+            assertThat(pushed.getRoundNo()).isEqualTo(3);
+            assertThat(pushed.getResolution().getType()).isEqualTo("CHECK");
+            assertThat(pushed.getResolution().getCharacterName()).isEqualTo("林恩");
+        });
+    }
+
+    @Test
     void pushedCheckRejectsNonCheckSummary() {
         DiceRollSummary summary = new DiceRollSummary()
                 .setId(101L)

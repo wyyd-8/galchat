@@ -27,8 +27,7 @@ export function useDirectChat(context: DirectChatContext) {
   const selectedCharacter = computed(() => context.characters.value.find((item) => item.characterId === selectedCharacterId.value) || null)
   const canWithdraw = computed(() => {
     if (loading.history || loading.sending || loading.withdrawing) return false
-    const conversation = messages.value.filter((item) => item.role === 'user' || item.role === 'assistant')
-    return conversation.at(-1)?.role === 'assistant' && conversation.at(-1)?.complete !== false && conversation.some((item) => item.role === 'user')
+    return messages.value.some((item) => item.role === 'user')
   })
 
   let socket: WebSocket | null = null

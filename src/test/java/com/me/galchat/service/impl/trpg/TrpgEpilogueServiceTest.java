@@ -76,8 +76,10 @@ class TrpgEpilogueServiceTest {
                 1,
                 List.of(new com.me.galchat.domain.dto.TrpgCompletionModels.Source(1L, 41L, "庄园调查摘要")),
                 subjects.stream().map(subject -> new com.me.galchat.domain.dto.TrpgCompletionModels.Investigator(
-                        subject, null, false, null, null)).toList(), List.of());
-        var entries = service.generate(conversation, materials);
+                        subject, null, false, null, null)).toList(), List.of(), List.of());
+        var client = mock(org.springframework.ai.chat.client.ChatClient.class);
+        var entries = service.generate(client, conversation, materials);
+        assertThat(generator.client).isSameAs(client);
         service.persist(conversation, entries, 10L, 11L);
 
         org.mockito.Mockito.verify(messageMapper).insert(inserted.capture());
@@ -128,12 +130,15 @@ class TrpgEpilogueServiceTest {
 
         private List<TrpgEpilogueModels.Subject> subjects = List.of();
         private String history;
+        private org.springframework.ai.chat.client.ChatClient client;
 
         @Override
         public TrpgEpilogueModels.Response generate(
+                org.springframework.ai.chat.client.ChatClient client,
                 GroupConversation conversation,
                 List<TrpgEpilogueModels.Subject> subjects,
                 String publicHistory) {
+            this.client = client;
             this.subjects = List.copyOf(subjects);
             this.history = publicHistory;
             return new TrpgEpilogueModels.Response(List.of(

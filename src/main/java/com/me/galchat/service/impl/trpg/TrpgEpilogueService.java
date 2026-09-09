@@ -10,6 +10,7 @@ import com.me.galchat.mapper.CocCharacterProfileMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.service.impl.group.GroupConversationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
@@ -34,11 +35,11 @@ public class TrpgEpilogueService {
         return investigators.stream().map(card -> subject(card, profiles.get(card.getId()))).toList();
     }
 
-    public List<TrpgEpilogueModels.Entry> generate(GroupConversation conversation, Materials materials) {
+    public List<TrpgEpilogueModels.Entry> generate(ChatClient client, GroupConversation conversation, Materials materials) {
         var subjects = materials.investigators().stream().map(person -> person.subject()).toList();
         String history = materials.sources().stream().map(source -> source.text())
                 .collect(Collectors.joining("\n\n"));
-        return normalize(subjects, generator.generate(conversation, subjects, history));
+        return normalize(subjects, generator.generate(client, conversation, subjects, history));
     }
 
     // Called only by the final summary-turn transaction.

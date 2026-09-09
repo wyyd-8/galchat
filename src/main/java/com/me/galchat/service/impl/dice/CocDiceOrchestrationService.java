@@ -601,7 +601,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                 .filter(result -> DiceRollConstant.TYPE_CHECK.equals(
                         resolution(result).getType()))
                 .toList();
-        if (checks.isEmpty() || checks.size() != existing.size()) {
+        if (checks.isEmpty()) {
             throw new UserRequestException("指定掷骰不是普通检定");
         }
         int latestRound = checks.stream()

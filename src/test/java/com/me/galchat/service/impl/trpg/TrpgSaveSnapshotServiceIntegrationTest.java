@@ -141,7 +141,7 @@ class TrpgSaveSnapshotServiceIntegrationTest {
                 .containsEntry("closed_at", null);
         // Loading the pre-summary save reopens an archived run and restores the pending request.
         jdbcTemplate.update("UPDATE group_conversation SET status = 'closed', closed_at = now(), summary = 'final' WHERE id = -9201");
-        var material = new com.me.galchat.domain.dto.TrpgCompletionModels.Materials("灯塔", null, 42, 3, List.of(), List.of(), List.of());
+        var material = new com.me.galchat.domain.dto.TrpgCompletionModels.Materials("灯塔", null, 42, 3, List.of(), List.of(), List.of(), List.of());
         completionMapper.insert(new com.me.galchat.domain.po.TrpgCompletion().setConversationId(-9201L).setTurnId(-93L)
                 .setData(new com.me.galchat.domain.dto.TrpgCompletionModels.Data(material, List.of(),
                         new com.me.galchat.domain.dto.TrpgCompletionModels.Overview("概要", "结局", List.of()))));

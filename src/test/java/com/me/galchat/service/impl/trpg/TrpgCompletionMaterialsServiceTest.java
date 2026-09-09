@@ -18,7 +18,7 @@ class TrpgCompletionMaterialsServiceTest {
         var codec = new DiceRollMessageCodec(JsonMapper.builder().build());
         var service = new TrpgCompletionMaterialsService(mock(GroupContextSummaryMapper.class), new TrpgSummaryIntervalSelector(), mock(GroupChatMessageMapper.class),
                 mock(GroupChatTurnMapper.class), mock(CocCharacterMapper.class), mock(CocModuleMapper.class),
-                mock(TrpgAutoSaveMapper.class), mapper, codec, mock(TrpgEpilogueService.class));
+                mock(TrpgAutoSaveMapper.class), mapper, codec, mock(TrpgEpilogueService.class), mock(TrpgCombatMapper.class), mock(CocModuleLocationMapper.class));
         var message = new GroupChatMessage().setTurnId(9L).setMessageKind("dice_roll").setContent(codec.encode(10L, List.of(1, 2)));
         when(mapper.selectList(any())).thenReturn(List.of(
                 result(1L, 1, 11L, "CRITICAL_SUCCESS", "REGULAR"),

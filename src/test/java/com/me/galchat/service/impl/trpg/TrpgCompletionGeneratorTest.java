@@ -7,9 +7,25 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 
 class TrpgCompletionGeneratorTest {
-    final TrpgCompletionGenerator generator = new TrpgCompletionGenerator(null, JsonMapper.builder().build());
+    final TrpgCompletionGenerator generator = new TrpgCompletionGenerator( JsonMapper.builder().build());
     final Materials materials = new Materials("灯塔", null, 42, 3,
-            List.of(new Source(1, 10, "旅馆里找到信件。"), new Source(11, 42, "共同走出迷雾。")), List.of(), List.of());
+            List.of(new Source(1, 10, "旅馆里找到信件。"), new Source(11, 42, "共同走出迷雾。")), List.of(), List.of(), List.of());
+
+    @Test
+    void sendsReportPromptToTheSuppliedKpClient() {
+        var model = org.mockito.Mockito.mock(org.springframework.ai.chat.model.ChatModel.class);
+        org.mockito.Mockito.when(model.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
+        org.mockito.Mockito.when(model.call(org.mockito.ArgumentMatchers.any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(
+                        new org.springframework.ai.chat.messages.AssistantMessage("""
+                        {"summary":"概要","ending":"结局","journey":[
+                          {"sourceIndex":0,"title":"来信","excerpt":"找到信件"},
+                          {"sourceIndex":1,"title":"离开","excerpt":"走出迷雾"}]}
+                        """)))));
+        var result = generator.generate(org.springframework.ai.chat.client.ChatClient.builder(model).build(), materials);
+        assertThat(result.ending()).isEqualTo("结局");
+        org.mockito.Mockito.verify(model).call(org.mockito.ArgumentMatchers.any(org.springframework.ai.chat.prompt.Prompt.class));
+    }
 
     @Test
     void realExcerptsAreSortedChronologicallyAndShortRunsKeepAvailableChapters() {

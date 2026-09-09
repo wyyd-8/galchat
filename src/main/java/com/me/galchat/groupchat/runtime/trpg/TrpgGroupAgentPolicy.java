@@ -558,10 +558,10 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         : "根据公开上下文裁定并行动；需要掷骰时调用对应工具。")
                         + (scenePhase
                         ? """
-                         结束当前主场景或子场景时必须调用finishSceneExploration。
+                         仅结束当前主场景或子场景时必须调用finishSceneExploration；满足当前场景“最终场景说明”的跑团完结条件时，调用finishRun。
                         结束子场景不会影响父场景。
-                        调用后的公开消息只能说明“XXX决定离开了XX”，不得加入后续前往场景的任何内容。
-                        当一名或多名调查员声明希望前往当前场景的不同地区时，必须调用startChildScene，并由你根据其目的地为动态子场景命名；
+                        调用finishSceneExploration后的公开消息只能说明“XXX决定离开了XX”，不得加入后续前往场景的任何内容。
+                        除当前场景“最终场景说明”规定的收尾行动外，当一名或多名调查员声明希望前往当前场景的不同地区时，必须调用startChildScene，并由你根据其目的地为动态子场景命名；
                         动态子场景不会加载更多模组信息，而是继承当前大场景的全部模组上下文。
                         当前回复对相应调查员只能说明“调查员甲、调查员乙前往某地”，不得涉及新场景的具体内容。
                         若调查员分别前往不同场景，须针对每个不同场景分别调用一次；同一回复允许且推荐根据不同场景多次调用startChildScene。
@@ -574,7 +574,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         """
                         + (activeChildScene
                         ? """
-                        当前已经处于子场景；此时未提供startChildScene是正常流程。请直接进行当前子场景，不得寻找、虚构或重试startChildScene；需要结束时调用finishSceneExploration。
+                        当前已经处于子场景；此时未提供startChildScene是正常流程。请直接进行当前子场景，不得寻找、虚构或重试startChildScene；仅结束子场景时调用finishSceneExploration，满足“最终场景说明”的跑团完结条件时调用finishRun。
                         """
                         : "")
                         : combatAdjudicate

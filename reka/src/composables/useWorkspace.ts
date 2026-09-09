@@ -157,10 +157,18 @@ export function useWorkspace() {
 
   async function refreshDiceRoll(summaryId: number): Promise<DiceRollAggregate> {
     const aggregate = await loadDiceAggregate(summaryId, true)
-    const diceRoundNos = [...new Set(aggregate.results.map((detail) => detail.roundNo || 1))]
     messages.value = messages.value.map((message) => {
       if (message.diceRoll?.summary.id !== summaryId) return message
-      return { ...message, diceRoll: aggregate, diceRoundNos }
+      // Each stream message owns its rounds; follow-up rounds have separate messages.
+      const diceRoundNos = message.diceRoundNos?.length
+        ? message.diceRoundNos
+        : [...new Set(message.diceRoll.results.map((detail) => detail.roundNo || 1))]
+      const rounds = new Set(diceRoundNos)
+      return {
+        ...message,
+        diceRoll: { ...aggregate, results: aggregate.results.filter((detail) => rounds.has(detail.roundNo || 1)) },
+        diceRoundNos,
+      }
     })
     latestDiceRoll.value = aggregate
     if (selectedConversation.value?.mode === 'trpg') {
@@ -600,7 +608,6 @@ export function useWorkspace() {
     ])
     if (selectedConversationId.value !== conversation.id) return
     conversations.value = conversations.value.map((item) => item.id === conversation.id ? { ...item, ...detail } : item)
-    if (detail.completionStatus && detail.completionStatus !== 'requested') generationFailureOpen.value = false
     messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
     setReplyPlans(plans)
     currentTurn.value = turn

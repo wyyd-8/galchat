@@ -4,7 +4,6 @@ import com.me.galchat.domain.dto.TrpgEpilogueModels;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.exception.UserRequestException;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -14,18 +13,16 @@ import java.util.List;
 public class DeepSeekTrpgEpilogueGenerator
         implements TrpgEpilogueGenerator {
 
-    private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
 
     public DeepSeekTrpgEpilogueGenerator(
-            @Qualifier("groupNonThinkingChatClient") ChatClient chatClient,
             ObjectMapper objectMapper) {
-        this.chatClient = chatClient;
         this.objectMapper = objectMapper;
     }
 
     @Override
     public TrpgEpilogueModels.Response generate(
+            ChatClient chatClient,
             GroupConversation conversation,
             List<TrpgEpilogueModels.Subject> subjects,
             String publicHistory) {

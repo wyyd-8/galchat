@@ -236,7 +236,8 @@ test('clears a completed generation but retains an interrupted generation for re
   }
 })
 
-test('keeps generation debug details only in page memory and exposes the failed turn', async () => {
+for (const completionStatus of [undefined, 'pending', 'failed'] as const) {
+test(`keeps the generation error dialog open after ${completionStatus || 'normal turn'} state sync and allows retry`, async () => {
   const { api, streamTrpgTurn } = await import('../api/client.ts')
   const { useWorkspace } = await import('../composables/useWorkspace.ts')
   const { createRenderer, defineComponent, h } = await import('vue')
@@ -281,7 +282,7 @@ test('keeps generation debug details only in page memory and exposes the failed 
         },
       })
     }
-    api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: completionReady ? 'closed' : 'active', completionStatus: completionReady ? 'ready' : undefined })
+    api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: completionReady ? 'closed' : 'active', completionStatus: completionReady ? 'ready' : completionStatus })
     api.groupMessages = async () => [{
       id: 100, conversationId: 7, turnId: 42, replyStepId: 9,
       speakerType: 'kp', speakerName: 'KP', messageKind: 'dialogue',
@@ -309,7 +310,7 @@ test('keeps generation debug details only in page memory and exposes the failed 
     })).mount({})
     workspace.conversations.value = [{
       id: 7, userWorldId: 3, worldId: 2,
-      mode: 'trpg', title: '调查', status: 'active',
+      mode: 'trpg', title: '调查', status: 'active', completionStatus,
     }]
     workspace.selectedConversationId.value = 7
     workspace.currentTurn.value = {
@@ -322,7 +323,7 @@ test('keeps generation debug details only in page memory and exposes the failed 
 
     assert.equal(workspace.currentTurn.value?.status, 'failed')
     assert.equal(workspace.messages.value[0]?.status, 'failed')
-    assert.equal(workspace.generationFailureOpen.value, true)
+    assert.equal(workspace.generationFailureOpen.value, true, 'state refresh must not dismiss the generation error')
     assert.equal(workspace.generationFailure.value?.detail.errorId, 'error-1')
     assert.equal(session.getItem('galchat:generation:7'), null)
     assert.equal([...Array.from({ length: local.length }, (_, index) => local.key(index))]
@@ -352,6 +353,7 @@ test('keeps generation debug details only in page memory and exposes the failed 
     })
   }
 })
+}
 
 test('refresh discards debug details and resyncs an expired generation as retryable', async () => {
   const { api, streamGroupGeneration } = await import('../api/client.ts')
@@ -448,7 +450,7 @@ test('refresh discards debug details and resyncs an expired generation as retrya
   }
 })
 
-test('refreshes a live dice message with the follow-up rounds appended by the backend', async () => {
+test('refreshes only each dice message’s own rounds while returning the full group for playback', async () => {
   const { api } = await import('../api/client.ts')
   const { useWorkspace } = await import('../composables/useWorkspace.ts')
   const { createRenderer, defineComponent, h } = await import('vue')
@@ -521,17 +523,57 @@ test('refreshes a live dice message with the follow-up rounds appended by the ba
           displayOrder: 1,
           displayType: 'MELEE_ATTACK',
           resultData: { formula: '1D100', modules: [], result: 25 },
-          resolvedAt: '2026-08-18T02:28:30',
         }],
       },
     }]
 
-    await workspace.refreshDiceRoll(25)
+    const refreshed = await workspace.refreshDiceRoll(25)
 
-    assert.deepEqual(workspace.messages.value[0]?.diceRoundNos, [1, 2])
+    assert.deepEqual(workspace.messages.value[0]?.diceRoundNos, [1])
     assert.deepEqual(
       workspace.messages.value[0]?.diceRoll?.results.map((detail) => detail.id),
+      [33],
+    )
+    assert.equal(workspace.messages.value[0]?.diceRoll?.results[0]?.resolvedAt, '2026-08-18T02:28:30')
+    assert.equal(workspace.messages.value[0]?.diceRoll?.summary.status, 'COMPLETED')
+    assert.deepEqual(
+      refreshed.results.map((detail) => detail.id),
       [33, 35],
+    )
+    assert.deepEqual(workspace.latestDiceRoll.value, refreshed)
+
+    // The follow-up round gets its own message when the stream resumes.
+    workspace.messages.value.push({
+      id: 313,
+      conversationId: 4,
+      speakerType: 'kp',
+      messageKind: 'dice_roll',
+      content: '',
+      sequenceNo: 25,
+      status: 'completed',
+      diceRoundNos: [2],
+      diceRoll: {
+        summary: refreshed.summary,
+        results: [{ ...refreshed.results[1]!, resolvedAt: undefined }],
+      },
+    })
+
+    await workspace.refreshDiceRoll(25)
+
+    assert.deepEqual(workspace.messages.value.map((message) => message.diceRoundNos), [[1], [2]])
+    assert.deepEqual(
+      workspace.messages.value.map((message) => message.diceRoll?.results.map((detail) => detail.id)),
+      [[33], [35]],
+    )
+    assert.equal(workspace.messages.value[1]?.diceRoll?.results[0]?.resolvedAt, '2026-08-18T02:28:35')
+
+    // Messages without explicit round metadata retain the rounds they already carry.
+    delete workspace.messages.value[0]!.diceRoundNos
+    await workspace.refreshDiceRoll(25)
+    assert.deepEqual(workspace.messages.value.map((message) => message.diceRoundNos), [[1], [2]])
+    assert.deepEqual(
+      workspace.messages.value.map((message) => message.diceRoll?.results.map((detail) => detail.id)),
+      [[33], [35]],
     )
   } finally {
     api.diceSummary = originalSummary

@@ -48,7 +48,7 @@ class GroupConversationServiceTest {
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleLockService moduleLockService =
                 mock(CocModuleLockService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 mock(GroupChatMemberMapper.class),
                 mock(GroupChatMessageMapper.class),
@@ -93,7 +93,7 @@ class GroupConversationServiceTest {
         CocModuleLockService moduleLockService = mock(CocModuleLockService.class);
         CocModuleCharacterInstantiationService moduleCharacterService =
                 mock(CocModuleCharacterInstantiationService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 memberMapper,
                 mock(GroupChatMessageMapper.class),
@@ -136,7 +136,7 @@ class GroupConversationServiceTest {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 mock(GroupChatMemberMapper.class),
                 mock(GroupChatMessageMapper.class),
@@ -176,7 +176,7 @@ class GroupConversationServiceTest {
         CocModuleLockService moduleLockService = mock(CocModuleLockService.class);
         CocModuleCharacterInstantiationService moduleCharacterService =
                 mock(CocModuleCharacterInstantiationService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 memberMapper,
                 mock(GroupChatMessageMapper.class),
@@ -223,7 +223,7 @@ class GroupConversationServiceTest {
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
         IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 mock(GroupChatMemberMapper.class),
                 mock(GroupChatMessageMapper.class),
@@ -256,7 +256,7 @@ class GroupConversationServiceTest {
     void normalChatCannotBindTrpgModule() {
         GroupConversationMapper conversationMapper =
                 mock(GroupConversationMapper.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 mock(GroupChatMemberMapper.class),
                 mock(GroupChatMessageMapper.class),
@@ -290,7 +290,7 @@ class GroupConversationServiceTest {
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleLockService moduleLockService = mock(CocModuleLockService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 mock(GroupChatMemberMapper.class),
                 mock(GroupChatMessageMapper.class),
@@ -330,7 +330,7 @@ class GroupConversationServiceTest {
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
         CocModuleMapper moduleMapper = mock(CocModuleMapper.class);
         CocModuleLockService moduleLockService = mock(CocModuleLockService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 mock(GroupChatMemberMapper.class),
                 mock(GroupChatMessageMapper.class),
@@ -366,7 +366,7 @@ class GroupConversationServiceTest {
     void createRejectsWhileWorldSaveOrLoadOwnsWorldLock() {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 conversationMapper,
                 mock(GroupChatMemberMapper.class),
                 mock(GroupChatMessageMapper.class),
@@ -393,7 +393,7 @@ class GroupConversationServiceTest {
     void createAuthorizesWorldBeforeAcquiringWorldLock() {
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class),
                 mock(GroupConversationMapper.class),
                 mock(GroupChatMemberMapper.class),
                 mock(GroupChatMessageMapper.class),
@@ -423,7 +423,7 @@ class GroupConversationServiceTest {
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
         IUserCharacterInfoService characterService = mock(IUserCharacterInfoService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class), conversationMapper,
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class), conversationMapper,
                 mock(GroupChatMemberMapper.class), mock(GroupChatMessageMapper.class),
                 mock(GroupReplyPlanMapper.class), mock(GroupReplyPlanItemMapper.class),
                 worldService, characterService, lockService,
@@ -449,7 +449,7 @@ class GroupConversationServiceTest {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class), conversationMapper,
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class), conversationMapper,
                 mock(GroupChatMemberMapper.class), messageMapper, mock(GroupReplyPlanMapper.class),
                 mock(GroupReplyPlanItemMapper.class), worldService, mock(IUserCharacterInfoService.class),
                 mock(GroupConversationLockService.class), mock(CocModuleMapper.class),
@@ -479,7 +479,7 @@ class GroupConversationServiceTest {
         GroupConversationMapper conversationMapper = mock(GroupConversationMapper.class);
         GroupChatMemberMapper memberMapper = mock(GroupChatMemberMapper.class);
         IUserWorldPrefixService worldService = mock(IUserWorldPrefixService.class);
-        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.TrpgCompletionMapper.class), conversationMapper,
+        GroupConversationService service = new GroupConversationService(mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class), mock(com.me.galchat.mapper.TrpgCompletionMapper.class), conversationMapper,
                 memberMapper, mock(GroupChatMessageMapper.class), mock(GroupReplyPlanMapper.class),
                 mock(GroupReplyPlanItemMapper.class), worldService, mock(IUserCharacterInfoService.class),
                 mock(GroupConversationLockService.class), mock(CocModuleMapper.class),

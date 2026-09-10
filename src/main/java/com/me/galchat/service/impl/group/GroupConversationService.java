@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.GroupConversationCreateDTO;
 import com.me.galchat.domain.po.GroupChatMember;
+import com.me.galchat.domain.po.GroupActorRuntimeConfig;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.GroupReplyPlan;
@@ -15,6 +16,7 @@ import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.GroupConversationVO;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatMemberMapper;
+import com.me.galchat.mapper.GroupActorRuntimeConfigMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
@@ -31,11 +33,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class GroupConversationService {
 
+    private final GroupActorRuntimeConfigMapper runtimeConfigMapper;
     private final com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
     private final GroupConversationMapper conversationMapper;
     private final GroupChatMemberMapper memberMapper;
@@ -158,9 +159,8 @@ public class GroupConversationService {
                 && CollectionUtils.isEmpty(distinctCharacterIds)) {
             throw new UserRequestException("群聊参与角色不能为空");
         }
-        if (!distinctCharacterIds.isEmpty()) {
-            checkCharacters(userWorldId, distinctCharacterIds);
-        }
+        Map<Long, UserCharacterInfo> characters = distinctCharacterIds.isEmpty()
+                ? Map.of() : checkCharacters(userWorldId, distinctCharacterIds);
 
         LocalDateTime now = LocalDateTime.now();
         GroupConversation conversation = new GroupConversation()
@@ -184,6 +184,19 @@ public class GroupConversationService {
                     .setPosition(i)
                     .setEnabled(true)
                     .setTalkativeness(0.5));
+            Long characterId = distinctCharacterIds.get(i);
+            Long modelApiId = characters.get(characterId).getModelApiId();
+            if (modelApiId != null) {
+                runtimeConfigMapper.insert(new GroupActorRuntimeConfig()
+                        .setConversationId(conversation.getId())
+                        .setActorKey(GroupChatConstant.ACTOR_CHARACTER + ":" + characterId)
+                        .setActorType(GroupChatConstant.ACTOR_CHARACTER)
+                        .setActorId(characterId)
+                        .setControlMode(GroupChatConstant.CONTROL_MODEL)
+                        .setModelApiId(modelApiId)
+                        .setCreatedAt(now)
+                        .setUpdatedAt(now));
+            }
         }
         if (GroupChatConstant.MODE_CHAT.equals(mode)) {
             createDefaultReplyPlan(conversation, distinctCharacterIds, now);
@@ -325,13 +338,13 @@ public class GroupConversationService {
         return latest == null || latest.getSequenceNo() == null ? 1L : latest.getSequenceNo() + 1L;
     }
 
-    private void checkCharacters(Long userWorldId, List<Long> characterIds) {
-        Set<Long> existing = new HashSet<>(userCharacterInfoService.listByUserWorldId(userWorldId).stream()
-                .map(UserCharacterInfo::getCharacterId)
-                .toList());
-        if (!existing.containsAll(characterIds)) {
+    private Map<Long, UserCharacterInfo> checkCharacters(Long userWorldId, List<Long> characterIds) {
+        Map<Long, UserCharacterInfo> characters = userCharacterInfoService.listByUserWorldId(userWorldId).stream()
+                .collect(Collectors.toMap(UserCharacterInfo::getCharacterId, Function.identity()));
+        if (!characters.keySet().containsAll(characterIds)) {
             throw new UserRequestException("只有已创建的角色才能加入群聊");
         }
+        return characters;
     }
 
     private GroupConversationVO toVO(GroupConversation conversation, GroupChatMessage latestMessage) {

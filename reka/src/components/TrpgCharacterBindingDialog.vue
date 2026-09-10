@@ -775,7 +775,7 @@ watch(() => props.conversation?.id, () => {
         </section>
       </aside>
     </div>
-    <div v-if="busy" class="dialog-busy"><LoaderCircle class="spin" :size="17" />正在处理…</div>
+    <div v-if="busy && displayCard" class="dialog-busy"><LoaderCircle class="spin" :size="17" />正在处理…</div>
     <template v-if="!mobileWizardActive && (!isMobile || !mobileDetailOpen || selectedCreationMethod === 'IMPORT' || autoDraft || selectedCreationMethod === 'AUTO')" #footer>
       <template v-if="isMobile && mobileDetailOpen">
         <button v-if="selectedCreationMethod === 'IMPORT'" class="button primary" :disabled="!importPreview.ready || busy" @click="execute(bindCard)">导入并绑定人物卡</button>

@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BookUser, Check, ChevronDown, ChevronUp, ClipboardCheck, Dices, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, Search, Sparkles, UserRound, X } from '@lucide/vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { Activity, Settings2, Ellipsis, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookUser, Check, ChevronDown, ChevronUp, ClipboardCheck, Dices, LoaderCircle, LocateFixed, MessageSquareText, RefreshCw, RotateCcw, Save, Search, Sparkles, UserRound, X } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
+import { useMobileViewport } from '@/composables/useMobileViewport'
+import './mobile-tools.css'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import MobileInvestigatorSheet from '@/components/MobileInvestigatorSheet.vue'
+import MobileDiceHistory from '@/components/MobileDiceHistory.vue'
+import MobileRestorePreview from '@/components/MobileRestorePreview.vue'
+import { matchesMobileHistoryQuery } from '@/components/mobileHistoryPresentation'
 import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
 import CharacterCardExport from '@/components/CharacterCardExport.vue'
 import { api } from '@/api/client'
@@ -38,9 +44,13 @@ const props = defineProps<{
   saveActorRuntime: (payload: GroupActorRuntimeSavePayload) => Promise<GroupActorRuntime | undefined>
   hasOlderMessages: boolean
   loadingOlderMessages: boolean
+  requestedTool?: 'status' | 'card' | 'save' | 'dice'
   requestedCardId?: number | null
 }>()
 const emit = defineEmits<{
+  turnSettings: []
+  endTrpg: []
+  openScene: []
   restored: []
   openDice: [aggregate: DiceRollAggregate]
   locateDice: [messageId: number]
@@ -48,6 +58,51 @@ const emit = defineEmits<{
   createCharacterCard: [targetKey: string, method: CharacterCardCreationMethod]
 }>()
 
+const { isMobile } = useMobileViewport()
+const mobileToolOpen = ref(false)
+const mobileCardOpen = ref(false)
+const sheetMoreOpen = ref(false)
+const mobileSheet = ref<InstanceType<typeof MobileInvestigatorSheet> | null>(null)
+function navigateMobileSheet(section: string, profile?: string) {
+  mobileSheet.value?.navigate(section, profile)
+  sheetMoreOpen.value = false
+}
+const mobileToolHeading = ref<HTMLElement | null>(null)
+const mobileCardDetail = ref<HTMLElement | null>(null)
+let mobileToolTrigger: HTMLElement | null = null
+let mobileCardTrigger: HTMLElement | null = null
+let mobileCardListScroll = 0
+async function backMobileTool() {
+  const fromCard = mobileCardOpen.value && selectedToolTab.value === 'card'
+  if (fromCard) mobileCardOpen.value = false
+  else mobileToolOpen.value = false
+  await nextTick()
+  const target = fromCard ? mobileCardTrigger : mobileToolTrigger
+  target?.focus({ preventScroll: true })
+  target?.closest('.dialog-body')?.scrollTo({ top: fromCard ? mobileCardListScroll : 0 })
+}
+const mobileTools = [
+  { id: 'status', title: '场景与执行状态', description: '探索 / 战斗 · 角色控制 · 回复模型', icon: Activity },
+  { id: 'card', title: '人物卡', description: '查看调查员属性与技能', icon: BookUser },
+  { id: 'save', title: '跑团存档', description: '手动存档与自动回退点', icon: Save },
+  { id: 'dice', title: '掷骰记录', description: '筛选历史检定、定位与重放', icon: Dices },
+]
+function showConversationOperation(operation: 'turnSettings' | 'endTrpg' | 'openScene') {
+  open.value = false
+  if (operation === 'turnSettings') emit('turnSettings')
+  else if (operation === 'endTrpg') emit('endTrpg')
+  else emit('openScene')
+}
+async function showMobileTool(id: string) {
+  if (id === 'status') { showConversationOperation('openScene'); return }
+  mobileToolTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  selectedToolTab.value = id
+  mobileCardOpen.value = false
+  mobileToolOpen.value = true
+  await nextTick()
+  mobileToolHeading.value?.focus({ preventScroll: true })
+  mobileToolHeading.value?.closest('.dialog-body')?.scrollTo({ top: 0 })
+}
 const busy = ref(false)
 const contextOverview = ref<ContextWindowOverview | null>(null)
 const save = ref<TrpgSave | null>(null)
@@ -145,10 +200,10 @@ const completedCardCount = computed(() => characterTargets.value.filter((target)
 const dialogContentClass = computed(() => toolDialogContentClass(selectedToolTab.value))
 const allDiceHistoryEntries = computed(() => listDiceHistoryEntriesNewestFirst(props.messages))
 const diceHistoryEntries = computed(() => filterDiceHistoryEntries(allDiceHistoryEntries.value, {
-  query: diceSearchQuery.value,
+  query: isMobile.value ? '' : diceSearchQuery.value,
   category: diceCategoryFilter.value,
   resultKind: diceResultFilter.value,
-}))
+}).filter(entry => !isMobile.value || matchesMobileHistoryQuery(entry, diceSearchQuery.value)))
 const diceFiltersActive = computed(() => Boolean(
   diceSearchQuery.value.trim() || diceCategoryFilter.value || diceResultFilter.value,
 ))
@@ -460,7 +515,18 @@ async function confirmRestore() {
   notify(`${restoredTitle}完成`, result.manualSaveDeleted ? '当前手动存档已同时删除' : '可以从回退点重新继续跑团', 'success')
 }
 async function selectTarget(key: string) {
-  if (busy.value || selectedKey.value === key) return
+  if (busy.value) return
+  if (isMobile.value) {
+    mobileCardTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    mobileCardListScroll = mobileCardTrigger?.closest('.dialog-body')?.scrollTop || 0
+  }
+  mobileCardOpen.value = true
+  if (isMobile.value) {
+    await nextTick()
+    mobileCardDetail.value?.focus({ preventScroll: true })
+    mobileCardDetail.value?.closest('.dialog-body')?.scrollTo({ top: 0 })
+  }
+  if (selectedKey.value === key) return
   selectedKey.value = key
   selectedSheetTab.value = 'skills'
   selectedProfileTab.value = 'background'
@@ -490,7 +556,10 @@ watch(open, (visible) => {
     expandedRuntimeKey.value = null
     return
   }
+  mobileToolOpen.value = props.requestedCardId != null || props.requestedTool != null
+  mobileCardOpen.value = props.requestedCardId != null
   if (props.requestedCardId != null) selectedToolTab.value = 'card'
+  else if (props.requestedTool) selectedToolTab.value = props.requestedTool
   void execute(() => refreshOverview(props.requestedCardId ?? null))
 })
 watch(() => props.conversation.id, () => {
@@ -525,9 +594,20 @@ watch(selectedSheetTab, (tab) => {
 </script>
 
 <template>
-  <BaseDialog v-model="open" title="跑团工具" :description="module?.name === conversation.title ? conversation.title : `${conversation.title} · 模组：${module?.name || '未记录'}`" size="lg" :content-class="dialogContentClass">
-    <TabsRoot v-model="selectedToolTab" class="tabs trpg-tools">
-      <TabsList class="tabs-list">
+  <BaseDialog v-model="open" :title="isMobile && mobileToolOpen ? (selectedToolTab === 'status' ? '角色控制' : mobileTools.find(tool => tool.id === selectedToolTab)?.title || '跑团工具') : '跑团工具'" :mobile-back="isMobile && mobileToolOpen ? backMobileTool : undefined" :description="isMobile ? '' : module?.name === conversation.title ? conversation.title : `${conversation.title} · 模组：${module?.name || '未记录'}`" size="lg" mobile-presentation="page" :content-class="dialogContentClass">
+    <template v-if="isMobile && mobileToolOpen && mobileCardOpen && selectedToolTab === 'card' && card" #header-actions><button class="icon-button" type="button" aria-label="人物卡更多选项" @click="sheetMoreOpen = true"><Ellipsis :size="21" /></button></template>
+    <nav v-if="isMobile && !mobileToolOpen" class="mobile-tools-menu" aria-label="跑团工具目录">
+      <div class="mobile-tools-intro"><small>CASE FILE</small><h1>调查档案</h1><p>{{ module?.name || conversation.title }}</p></div>
+      <button v-for="tool in mobileTools" :key="tool.id" type="button" @click="showMobileTool(tool.id)">
+        <i class="mobile-tool-avatar"><component :is="tool.icon" :size="23" /></i><span><strong>{{ tool.title }}</strong><small>{{ tool.description }}</small></span><ArrowRight :size="18" />
+      </button>
+      <h3>会话操作</h3>
+      <button type="button" @click="showConversationOperation('turnSettings')"><i class="mobile-tool-avatar"><Settings2 :size="23" /></i><span><strong>行动轮设置</strong><small>自动推进 · 修正下一轮方向</small></span><ArrowRight :size="18" /></button>
+      <button type="button" class="mobile-tool-end" @click="showConversationOperation('endTrpg')"><span><strong>{{ conversation.status === 'active' ? '结束跑团' : '会话管理' }}</strong><small>{{ conversation.status === 'active' ? '结局生成与关闭会话' : conversation.completionStatus === 'ready' ? '跑团已完成 · 查看管理选项' : '跑团已关闭 · 查看管理选项' }}</small></span><ArrowRight :size="18" /></button>
+    </nav>
+    <h2 v-if="isMobile && mobileToolOpen" ref="mobileToolHeading" class="mobile-tools-focus-heading" tabindex="-1">{{ mobileTools.find(tool => tool.id === selectedToolTab)?.title }}</h2>
+    <TabsRoot v-show="!isMobile || mobileToolOpen" v-model="selectedToolTab" class="tabs trpg-tools">
+      <TabsList v-show="!isMobile" class="tabs-list">
         <TabsTrigger value="status"><Activity :size="15" />状态</TabsTrigger>
         <TabsTrigger value="save"><Save :size="15" />存档</TabsTrigger>
         <TabsTrigger value="card"><BookUser :size="15" />人物卡</TabsTrigger>
@@ -565,7 +645,11 @@ watch(selectedSheetTab, (tab) => {
                 </div>
                 <p v-if="!actor.runtime.modelApiAvailable" class="trpg-runtime-inline-warning">原模型已删除，现使用默认模型</p>
 
-                <div v-if="expandedRuntimeKey === actor.key" class="trpg-runtime-editor">
+                <component :is="isMobile ? BaseDialog : 'div'" v-if="expandedRuntimeKey === actor.key"
+                  v-bind="isMobile ? { modelValue: true, title: '角色控制', mobilePresentation: 'page', layer: 'foreground', contentClass: 'mobile-runtime-dialog' } : {}"
+                  @update:model-value="expandedRuntimeKey = null">
+                <div v-if="isMobile" class="mobile-runtime-hero"><span class="mobile-runtime-portrait" :style="actor.image ? { backgroundImage: `url(${actor.image})` } : {}">{{ actor.image ? '' : actor.name.slice(0, 1) }}</span><h1>{{ actor.name }}</h1><p>{{ actor.runtime.actorType === 'kp' ? '本次跑团的主持人' : '本次跑团的调查员' }}</p></div>
+                <div class="trpg-runtime-editor">
                   <div v-if="actor.runtime.actorType === 'character'" class="trpg-runtime-field">
                     <span>控制方式</span>
                     <div class="segmented trpg-runtime-mode-switch">
@@ -592,13 +676,17 @@ watch(selectedSheetTab, (tab) => {
                   </template>
                   <p v-else class="trpg-runtime-manual-note">轮到该角色时由你输入</p>
 
-                  <div class="trpg-runtime-actions">
+                  <div v-if="!isMobile" class="trpg-runtime-actions">
                     <button type="button" class="button ghost" :disabled="runtimeSavingKey === actor.key" @click="expandedRuntimeKey = null">取消</button>
                     <button type="button" class="button secondary" :disabled="runtimeSavingKey === actor.key || !runtimeDraftChanged(actor)" @click="saveRuntime(actor)">
                       <LoaderCircle v-if="runtimeSavingKey === actor.key" class="spin" :size="14" />保存
                     </button>
                   </div>
                 </div>
+                <div v-if="isMobile && actor.usage" class="mobile-runtime-capacity"><span>对话容量占用<strong>{{ runtimeContextPercent(actor) }}%</strong></span><div class="context-meter"><i :style="{ width: `${Math.min(runtimeContextPercent(actor), 100)}%` }" /></div></div>
+                <p v-if="isMobile" class="mobile-tools-notice">{{ actor.runtime.actorType === 'kp' ? 'KP 始终由 AI 控制，仅可选择回复模型。' : '手动控制时，轮到这位调查员由你输入。' }}</p>
+                <template v-if="isMobile" #footer><button class="button primary" :disabled="runtimeSavingKey === actor.key || !runtimeDraftChanged(actor)" @click="saveRuntime(actor)"><LoaderCircle v-if="runtimeSavingKey === actor.key" class="spin" :size="14" />保存控制方式</button></template>
+                </component>
               </article>
             </template>
           </div>
@@ -606,7 +694,22 @@ watch(selectedSheetTab, (tab) => {
       </TabsContent>
 
       <TabsContent value="save" class="tabs-content tool-section">
-        <section class="progress-archive">
+        <section v-if="isMobile" class="mobile-progress-archive">
+          <div class="mobile-tools-intro"><h1>回到某一刻</h1><p>手动存档与自动回退点。</p></div>
+          <button type="button" class="button primary" @click="saveEditorOpen = true">保存当前进度</button>
+          <h3>手动存档</h3>
+          <article v-for="recovery in recoveryTimeline.filter(item => item.kind === 'manual')" :key="recovery.key" class="mobile-save-record">
+            <small>{{ time(recovery.savedAt) }}</small><h4>{{ recovery.remark || recovery.title }}</h4><p>{{ recovery.description }}</p>
+            <button class="button secondary" :disabled="busy || !recovery.available" @click="requestRecovery(recovery)">查看恢复预览</button>
+          </article>
+          <p v-if="!save" class="mobile-save-empty">尚未创建手动存档</p>
+          <h3>自动回退点</h3>
+          <button v-for="recovery in recoveryTimeline.filter(item => item.kind === 'automatic')" :key="recovery.key" type="button" class="mobile-save-point" :disabled="busy || !recovery.available" @click="requestRecovery(recovery)">
+            <span class="mobile-save-point-icon"><RotateCcw :size="21" /></span><span><strong>{{ recovery.title }}</strong><small>{{ recovery.available ? time(recovery.savedAt) : '尚未形成' }} · {{ recovery.description }}</small><small v-if="recovery.willDeleteManualSave" class="danger">继续恢复还将删除当前手动存档</small></span><ArrowRight :size="16" />
+          </button>
+          <p class="mobile-tools-notice">跑团存档仅恢复本次跑团；世界存档在世界主页管理。</p>
+        </section>
+        <section v-else class="progress-archive">
           <header class="progress-archive-heading">
             <span class="progress-archive-emblem"><Save :size="18" /></span>
             <div>
@@ -660,9 +763,9 @@ watch(selectedSheetTab, (tab) => {
 
       <TabsContent value="card" class="tabs-content tool-section">
         <div class="trpg-binding-layout trpg-tools-card-layout">
-          <section class="trpg-binding-list-pane">
+          <section v-show="!isMobile || !mobileCardOpen" class="trpg-binding-list-pane">
             <header class="settings-section-heading">
-              <span><strong>调查员</strong><small>选择左侧人物，在右侧查看人物卡详情</small></span>
+              <span><strong>调查员</strong><small>选择调查员，查看人物卡详情</small></span>
               <em>{{ completedCardCount }}/{{ characterTargets.length }} 已建立</em>
             </header>
             <div class="character-choice-list trpg-binding-targets" role="radiogroup" aria-label="人物卡角色">
@@ -694,8 +797,9 @@ watch(selectedSheetTab, (tab) => {
             </div>
           </section>
 
-          <aside class="trpg-binding-card-pane">
+          <aside v-show="!isMobile || mobileCardOpen" ref="mobileCardDetail" tabindex="-1" aria-label="当前调查员人物卡" class="trpg-binding-card-pane">
             <div v-if="busy && !card" class="binding-empty"><LoaderCircle class="spin" :size="24" /><strong>正在读取人物卡…</strong></div>
+            <MobileInvestigatorSheet v-else-if="card && isMobile" ref="mobileSheet" :card="card" :actor-name="selectedActorName" can-switch @switch="backMobileTool" />
             <section v-else-if="card" class="character-sheet binding-sheet trpg-character-sheet">
               <header class="sheet-overview">
                 <span
@@ -743,7 +847,7 @@ watch(selectedSheetTab, (tab) => {
               </div>
 
               <TabsRoot v-model="selectedSheetTab" class="sheet-detail-tabs" :class="{ 'skill-panel-expanded': skillPanelExpanded }">
-                <TabsList v-show="!skillPanelExpanded" class="sheet-primary-tabs">
+                <TabsList v-show="isMobile || !skillPanelExpanded" class="sheet-primary-tabs">
                   <TabsTrigger value="skills">技能</TabsTrigger>
                   <TabsTrigger value="combat">武器</TabsTrigger>
                   <TabsTrigger value="profile">背景与资产</TabsTrigger>
@@ -765,7 +869,7 @@ watch(selectedSheetTab, (tab) => {
                       <strong>技能</strong>
                       <span>成功率 <small>常规 / 困难 / 极难</small></span>
                     </header>
-                    <div v-if="skillPanelExpanded" class="sheet-skill-toolbar">
+                    <div v-if="isMobile || skillPanelExpanded" class="sheet-skill-toolbar">
                       <label class="sheet-skill-search">
                         <Search :size="14" />
                         <input
@@ -840,12 +944,12 @@ watch(selectedSheetTab, (tab) => {
                               </span>
                               <small v-if="weapon.notes">{{ weapon.notes }}</small><em v-if="weapon.isBroken">已损坏</em>
                             </td>
-                            <td class="check-rate">{{ formatCheckRate(resolveWeaponCheckValue(weapon, card.skills)) }}</td>
-                            <td>{{ shown(weapon.damage) }}</td>
-                            <td>{{ shown(weapon.range) }}</td>
-                            <td>{{ shown(weapon.attacksPerRound) }}</td>
-                            <td>{{ ammo(weapon.remainingAmmo, weapon.ammoCapacity) }}</td>
-                            <td>{{ shown(weapon.malfunction) }}</td>
+                            <td data-label="成功率" class="check-rate">{{ formatCheckRate(resolveWeaponCheckValue(weapon, card.skills)) }}</td>
+                            <td data-label="伤害">{{ shown(weapon.damage) }}</td>
+                            <td data-label="射程">{{ shown(weapon.range) }}</td>
+                            <td data-label="次数">{{ shown(weapon.attacksPerRound) }}</td>
+                            <td data-label="弹药">{{ ammo(weapon.remainingAmmo, weapon.ammoCapacity) }}</td>
+                            <td data-label="故障值">{{ shown(weapon.malfunction) }}</td>
                           </tr>
                           <tr v-if="!card.weapons.length"><td colspan="7" class="sheet-table-empty">暂无武器</td></tr>
                         </tbody>
@@ -942,7 +1046,11 @@ watch(selectedSheetTab, (tab) => {
       </TabsContent>
 
       <TabsContent value="dice" class="tabs-content tool-section">
-        <div class="dice-history-panel">
+        <MobileDiceHistory v-if="isMobile" v-model:query="diceSearchQuery" v-model:category="diceCategoryFilter" v-model:result="diceResultFilter"
+          :entries="diceHistoryEntries" :all-count="allDiceHistoryEntries.length" :match-copy="diceHistoryMatchCopy" :filters-active="diceFiltersActive"
+          :loading-older="loadingOlderMessages" :has-older="hasOlderMessages" :load-label="diceHistoryLoadLabel" :load-hint="diceHistoryLoadHint"
+          @clear="clearDiceFilters" @replay="emit('openDice', $event)" @locate="emit('locateDice', $event)" @earlier="emit('loadEarlier')" />
+        <div v-else class="dice-history-panel">
           <div class="dice-history-toolbar">
             <label class="dice-history-search-wrap">
               <span>名称</span>
@@ -1031,13 +1139,25 @@ watch(selectedSheetTab, (tab) => {
 
     </TabsRoot>
     <div v-if="busy" class="dialog-busy"><LoaderCircle class="spin" :size="17" />正在处理…</div>
+    <template v-if="isMobile && !mobileToolOpen" #footer><button class="button ghost" @click="open = false">返回跑团</button></template>
+  </BaseDialog>
+  <BaseDialog v-if="isMobile" v-model="sheetMoreOpen" title="人物卡目录" mobile-presentation="sheet" layer="foreground">
+    <nav class="mobile-tools-menu"><button type="button" @click="navigateMobileSheet('skills')"><span><strong>技能与排序</strong></span><ArrowRight :size="16" /></button><button type="button" @click="navigateMobileSheet('weapons')"><span><strong>武器与战斗数据</strong></span><ArrowRight :size="16" /></button><button v-for="title in ['人物背景', '重要联系', '创伤记录', '资产与笔记']" :key="title" type="button" @click="navigateMobileSheet('background', title)"><span><strong>{{ title }}</strong></span><ArrowRight :size="16" /></button></nav>
+    <CharacterCardExport v-if="card" :card="card" :active="open && selectedToolTab === 'card'" />
+    <template #footer><button class="button ghost" @click="sheetMoreOpen = false">取消</button></template>
+  </BaseDialog>
+  <BaseDialog v-if="isMobile" v-model="saveEditorOpen" :title="save ? '覆盖跑团存档' : '保存跑团进度'" mobile-presentation="page" layer="foreground">
+    <label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="4" maxlength="200" placeholder="记录当前场景、线索或风险…" /></label>
+    <p class="mobile-tools-notice">{{ save ? '保存后将覆盖当前手动存档。' : '记录当前进度，方便稍后回到此刻。' }}</p>
+    <template #footer><button class="button primary" :disabled="busy" @click="execute(saveSnapshot)">{{ save ? '确认覆盖存档' : '保存当前进度' }}</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="confirmationOpen" :title="confirmationTitle" :description="`目标时间：${time(confirmationTargetTime)}`" size="sm" :layer="'foreground'" :content-class="confirmationContentClass">
+  <BaseDialog v-model="confirmationOpen" :title="isMobile && restoreConfirmation.stage.value === 'primary' ? '确认恢复' : confirmationTitle" :description="isMobile ? '' : `目标时间：${time(confirmationTargetTime)}`" size="sm" mobile-presentation="page" :layer="'foreground'" :content-class="isMobile ? 'mobile-restore-dialog' : confirmationContentClass">
     <div v-if="restoreConfirmation.stage.value === 'delete-manual-save'" class="restore-confirmation-copy">
       <strong>确认删除当前存档</strong>
       <p>该自动回退点早于当前手动存档。继续回退将同时删除当前跑团存档，且不可恢复。</p>
     </div>
+    <MobileRestorePreview v-else-if="isMobile" :target-time="time(confirmationTargetTime)" :preview="rollbackMessagePreview" :loading="rollbackPreviewLoading" :failed="rollbackPreviewFailed" :investigators="pendingRestoreInvestigators" :deletes-manual-save="!!pendingRollback?.point.willDeleteManualSave" />
     <div v-else class="rollback-confirmation-layout">
       <section
         class="rollback-chat-preview"
@@ -1123,7 +1243,7 @@ watch(selectedSheetTab, (tab) => {
       <button class="button ghost" :disabled="busy" @click="restoreConfirmation.clear()">取消</button>
       <button class="button danger" :disabled="busy" @click="execute(confirmRestore)">
         <LoaderCircle v-if="busy" class="spin" :size="16" />
-        {{ restoreConfirmation.stage.value === 'delete-manual-save' ? '删除存档并回退' : restoreConfirmation.action.value === 'load' ? '确认读取存档' : '确认回退' }}
+        {{ restoreConfirmation.stage.value === 'delete-manual-save' ? '删除存档并回退' : isMobile ? '确认恢复此进度' : restoreConfirmation.action.value === 'load' ? '确认读取存档' : '确认回退' }}
       </button>
     </template>
   </BaseDialog>

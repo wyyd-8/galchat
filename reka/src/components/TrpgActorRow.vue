@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import {
-  Check, CircleDot, Dices, MessageCircle, Minus, Pause, UserRound, X,
+  Check, ChevronDown, CircleDot, Dices, MessageCircle, Minus, Pause, UserRound, X,
 } from '@lucide/vue'
 import type { Component } from 'vue'
 import {
-  TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger,
+  CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
+import { useMobileViewport } from '@/composables/useMobileViewport'
 import type { InvestigatorCardSummary, TrpgCombatParticipantOverview } from '../api/types'
 import { buildCombatHoverCard, combatInvestigatorCardId, type TrpgCombatHoverCard } from './trpgCombatOverview'
 import { buildExplorationHoverCard, explorationInvestigatorCardId, type TrpgExplorationHoverCard, type TrpgExplorationMetric } from './trpgExplorationOverview'
+import { sceneModelTarget } from './mobileActorModel'
 import type { TrpgExecutionActor, TrpgExecutionScene } from './trpgExecutionState'
 
 const props = withDefaults(defineProps<{
@@ -23,7 +25,8 @@ const props = withDefaults(defineProps<{
   displayState: 'active',
   playerControlled: false,
 })
-const emit = defineEmits<{ openCard: [cardId: number] }>()
+const { isMobile } = useMobileViewport()
+const emit = defineEmits<{ openCard: [cardId: number]; switchModel: [actor: TrpgExecutionActor] }>()
 
 const statusIcons: Partial<Record<string, Component>> = {
   blocked: X,
@@ -91,7 +94,7 @@ function openCard() {
 }
 
 function hasOverview(): boolean {
-  return props.sceneKind === 'combat' || actorExplorationCard() != null
+  return props.sceneKind === 'combat' || actorExplorationCard() != null || (isMobile.value && sceneModelTarget(props.actor.item) != null)
 }
 
 function overviewName(): string {
@@ -103,7 +106,7 @@ function overviewName(): string {
 function overviewRole(): string {
   return props.sceneKind === 'combat'
     ? actorCombatCard().roleLabel
-    : actorExplorationCard()?.roleLabel ?? '调查员'
+    : actorExplorationCard()?.roleLabel ?? (props.actor.item.actorType === 'kp' ? (props.actor.genericKp ? 'KP' : 'NPC') : '调查员')
 }
 
 function overviewStatuses(): string[] {
@@ -120,29 +123,31 @@ function explorationMetrics(
 </script>
 
 <template>
-  <TooltipRoot v-if="hasOverview()">
-    <TooltipTrigger as-child>
+  <component :is="isMobile ? CollapsibleRoot : TooltipRoot" v-if="hasOverview()" :class="{ 'mobile-actor-disclosure': isMobile }">
+    <component :is="isMobile ? CollapsibleTrigger : TooltipTrigger" as-child>
       <component
-        :is="investigatorCardId() == null ? 'div' : 'button'"
-        class="trpg-actor-row"
+        :is="!isMobile && investigatorCardId() == null ? 'div' : 'button'"
+        class="trpg-actor-row" :data-avatar="actor.name.slice(0, 1)"
         :class="[rowStatus(), { 'card-link': investigatorCardId() != null }]"
-        :type="investigatorCardId() == null ? undefined : 'button'"
-        :aria-label="rowAriaLabel()"
+        :type="!isMobile && investigatorCardId() == null ? undefined : 'button'"
+        :aria-label="isMobile ? `查看${actor.name}的当前状态` : rowAriaLabel()"
         tabindex="0"
-        @click="openCard"
+        @click="!isMobile && openCard()"
       >
-        <span class="trpg-actor-name">{{ actor.name }}</span>
-        <span class="trpg-actor-row-meta">
+        <span v-if="isMobile" class="mobile-scene-avatar" aria-hidden="true">{{ actor.name.slice(0, 1) }}</span>
+        <span class="trpg-actor-name">{{ actor.name }}<small v-if="isMobile" class="mobile-actor-caption">{{ playerControlled ? '由你控制 · ' : '' }}{{ displayState === 'ready' ? '已完成' : displayState === 'waiting' ? '暂不参与' : actor.statusLabel }}</small></span>
+        <span v-if="!isMobile" class="trpg-actor-row-meta">
           <span v-if="playerControlled" class="trpg-player-control-badge" title="由你控制" aria-label="由你控制"><UserRound :size="11" :stroke-width="2" aria-hidden="true" /></span>
           <span class="trpg-status-icon" aria-hidden="true">
             <small v-if="rowStatusLabel()" :class="displayState === 'active' ? 'trpg-active-label' : 'trpg-row-state-label'">{{ rowStatusLabel() }}</small>
             <component :is="actorIcon()" v-if="actorIcon()" :size="13" :stroke-width="1.8" />
           </span>
         </span>
+        <ChevronDown v-if="isMobile" class="mobile-actor-chevron" :size="16" aria-hidden="true" />
       </component>
-    </TooltipTrigger>
-    <TooltipPortal>
-      <TooltipContent class="trpg-combat-overview-tooltip" side="left" :side-offset="10">
+    </component>
+    <component :is="isMobile ? 'div' : TooltipPortal">
+      <component :is="isMobile ? CollapsibleContent : TooltipContent" class="trpg-combat-overview-tooltip" :class="{ 'mobile-actor-overview': isMobile }" side="left" :side-offset="10">
         <header>
           <span><strong>{{ overviewName() }}</strong><small>{{ overviewRole() }}</small></span>
           <em>{{ actor.statusLabel }}</em>
@@ -152,7 +157,7 @@ function explorationMetrics(
             <dt>{{ metric.label }}</dt><dd>{{ metric.value }}</dd>
           </div>
         </dl>
-        <template v-else-if="sceneKind !== 'combat'">
+        <template v-else-if="sceneKind !== 'combat' && actorExplorationCard()">
           <dl class="trpg-combat-overview-metrics">
             <div v-for="metric in explorationMetrics('resources')" :key="metric.label">
               <dt>{{ metric.label }}</dt><dd>{{ metric.value }}</dd>
@@ -182,12 +187,13 @@ function explorationMetrics(
           </div>
           <p v-else>未见特殊状态</p>
         </section>
-      </TooltipContent>
-    </TooltipPortal>
-  </TooltipRoot>
-  <div v-else class="trpg-actor-row" :class="rowStatus()" :title="actor.statusLabel" :aria-label="rowAriaLabel()">
-    <span class="trpg-actor-name">{{ actor.name }}</span>
-    <span class="trpg-actor-row-meta">
+      <button v-if="isMobile" class="button secondary" :disabled="!sceneModelTarget(actor.item)" @click="emit('switchModel', actor)">切换回复模型</button><p v-if="isMobile && !sceneModelTarget(actor.item)" class="mobile-model-unavailable">该调查员由你输入回复，无需设置模型。</p></component>
+    </component>
+  </component>
+  <div v-else class="trpg-actor-row" :data-avatar="actor.name.slice(0, 1)" :class="rowStatus()" :title="actor.statusLabel" :aria-label="rowAriaLabel()">
+    <span v-if="isMobile" class="mobile-scene-avatar" aria-hidden="true">{{ actor.name.slice(0, 1) }}</span>
+        <span class="trpg-actor-name">{{ actor.name }}<small v-if="isMobile" class="mobile-actor-caption">{{ playerControlled ? '由你控制 · ' : '' }}{{ displayState === 'ready' ? '已完成' : displayState === 'waiting' ? '暂不参与' : actor.statusLabel }}</small></span>
+    <span v-if="!isMobile" class="trpg-actor-row-meta">
       <span v-if="playerControlled" class="trpg-player-control-badge" title="由你控制" aria-label="由你控制"><UserRound :size="11" :stroke-width="2" aria-hidden="true" /></span>
       <span class="trpg-status-icon" aria-hidden="true">
         <small v-if="rowStatusLabel()" :class="displayState === 'active' ? 'trpg-active-label' : 'trpg-row-state-label'">{{ rowStatusLabel() }}</small>

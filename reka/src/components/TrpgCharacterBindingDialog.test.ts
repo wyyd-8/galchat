@@ -156,7 +156,10 @@ test('renders text import with an actionable guide and accessible live results',
   const root = baseParse(template, { isVoidTag: (tag) => tag === 'br' })
   const editor = findElement(root, (element) => hasClass(element, 'creation-import-editor'))
   const assistant = findElement(root, (element) => hasClass(element, 'creation-import-assistant'))
-  const emptyGuide = findElement(root, (element) => hasClass(element, 'import-empty-guide'))
+  const guideSource = await readFile(new URL('./CharacterCardImportGuide.vue', import.meta.url), 'utf8')
+  const guideTemplate = guideSource.match(/<template>([\s\S]*)<\/template>/)?.[1]
+  assert.ok(guideTemplate)
+  const emptyGuide = findElement(baseParse(guideTemplate), (element) => hasClass(element, 'import-empty-guide'))
   const requiredChecks = findElement(root, (element) => hasClass(element, 'import-required-checks'))
   const optionalChecks = findElement(root, (element) => hasClass(element, 'import-optional-checks'))
   const liveStatus = findElement(root, (element) => hasClass(element, 'import-result-status')

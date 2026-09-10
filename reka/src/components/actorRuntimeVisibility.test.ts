@@ -100,7 +100,10 @@ test('normal group chat exposes each reply actor model inside the reply order', 
   assert.doesNotMatch(html, /以\s*艾琳\s*的身份输入/)
   assert.doesNotMatch(html, /人工接管/)
   assert.match(html, /aria-label="选择艾琳的回复模型"/)
-  assert.match(html, /<option value="">默认模型<\/option>/)
+  // Vue serializes an empty value as either value="" or a bare value attribute.
+  const modelSelect = html.match(/<select\b[^>]*aria-label="选择艾琳的回复模型"[^>]*>[\s\S]*?<\/select>/)?.[0]
+  assert.ok(modelSelect, 'the actor must have its own model selector')
+  assert.match(modelSelect, /<option value(?:="")?>默认模型<\/option>/)
   assert.match(html, /<select value="7" aria-label="选择艾琳的回复模型">/)
   assert.match(html, /<option value="7">月影<\/option>/)
 })

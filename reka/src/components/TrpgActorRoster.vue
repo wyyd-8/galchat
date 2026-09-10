@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, Pause } from '@lucide/vue'
 import { TooltipProvider } from 'reka-ui'
+import { useMobileViewport } from '@/composables/useMobileViewport'
 import type { GroupActorRuntime, InvestigatorCardSummary, TrpgCombatParticipantOverview } from '../api/types'
 import TrpgActorRow from './TrpgActorRow.vue'
 import type { TrpgExecutionActor, TrpgExecutionScene } from './trpgExecutionState'
@@ -14,8 +15,10 @@ const props = withDefaults(defineProps<{
   investigatorCards: () => [],
   actorRuntimes: () => [],
 })
+const { isMobile } = useMobileViewport()
 const emit = defineEmits<{
   openCard: [cardId: number]
+  switchModel: [actor: TrpgExecutionActor]
 }>()
 
 function actorKey(actor: TrpgExecutionActor): string {
@@ -46,8 +49,10 @@ function isUserControlled(actor: TrpgExecutionActor): boolean {
           :investigator-cards="investigatorCards"
           :player-controlled="isUserControlled(actor)"
           @open-card="emit('openCard', $event)"
+          @switch-model="emit('switchModel', $event)"
         />
         <div v-if="actor.routedActor" class="trpg-routed-actor">
+          <p v-if="isMobile" class="mobile-route-label">响应{{ actor.name }}</p>
           <TrpgActorRow
             :actor="actor.routedActor"
             :scene-kind="scene.kind"
@@ -55,6 +60,7 @@ function isUserControlled(actor: TrpgExecutionActor): boolean {
             :investigator-cards="investigatorCards"
             :player-controlled="isUserControlled(actor.routedActor)"
             @open-card="emit('openCard', $event)"
+          @switch-model="emit('switchModel', $event)"
           />
         </div>
       </div>
@@ -73,6 +79,7 @@ function isUserControlled(actor: TrpgExecutionActor): boolean {
             :player-controlled="isUserControlled(actor)"
             display-state="waiting"
             @open-card="emit('openCard', $event)"
+          @switch-model="emit('switchModel', $event)"
           />
         </div>
       </div>
@@ -91,6 +98,7 @@ function isUserControlled(actor: TrpgExecutionActor): boolean {
             :player-controlled="isUserControlled(actor)"
             display-state="ready"
             @open-card="emit('openCard', $event)"
+          @switch-model="emit('switchModel', $event)"
           />
         </div>
       </div>

@@ -48,8 +48,10 @@ export function interpolateRotation(
 export function createDiceStartDelays(
   moduleDiceCounts: number[],
   groups?: DiceAnimationGroupTiming[],
+  simultaneous = false,
 ): number[] {
   const totalDice = moduleDiceCounts.reduce((total, count) => total + Math.max(0, count), 0)
+  if (simultaneous) return Array.from({ length: totalDice }, () => 0)
   const delays = Array.from({ length: totalDice }, (_, index) => index * DIE_STAGGER_MS)
   if (!groups?.length) return delays
 

@@ -854,6 +854,7 @@ export class ThreeDiceBoard {
   async playResult(
     result: DiceRollResult,
     animationGroups?: DiceAnimationGroupTiming[],
+    options?: { simultaneous?: boolean },
   ): Promise<void> {
     if (this.preparedResult !== result || this.activeDice.length === 0) {
       await this.prepareResult(result)
@@ -867,6 +868,7 @@ export class ThreeDiceBoard {
     const startDelays = createDiceStartDelays(
       this.activeModules.map((module) => module.length),
       animationGroups,
+      options?.simultaneous,
     )
     await animateDice(this.activeDice, controller.signal, () => this.renderAll(), startDelays)
     if (controller.signal.aborted || this.disposed) return

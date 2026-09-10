@@ -6,7 +6,7 @@ import { renderToString } from '@vue/server-renderer'
 import { createServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-test('keeps the API key visible while it is being entered', async () => {
+test('masks the API key by default and provides an explicit reveal control', async () => {
   const vite = await createServer({
     appType: 'custom',
     configFile: false,
@@ -31,8 +31,8 @@ test('keeps the API key visible while it is being entered', async () => {
       render: () => h(ModelApiManagerDialog, { modelValue: true }),
     }))
 
-    assert.match(html, /<input[^>]*type="text"[^>]*autocomplete="off"[^>]*>/)
-    assert.doesNotMatch(html, /<input[^>]*type="password"[^>]*>/)
+    assert.match(html, /<input[^>]*type="password"[^>]*autocomplete="off"[^>]*>/)
+    assert.match(html, /aria-label="显示密钥"[^>]*aria-pressed="false"/)
   } finally {
     await vite.close()
   }

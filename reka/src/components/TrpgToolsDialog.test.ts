@@ -185,7 +185,7 @@ test('uses a category card to enter and leave a focused skill group', async () =
   assert.match(textContent(categoryButton), /selectedSkillGroup.*返回全部技能.*查看大类技能/)
 })
 
-test('reveals skill search and sorting only inside the expanded desktop panel', async () => {
+test('keeps skill search and sorting available on mobile and in the expanded desktop panel', async () => {
   const source = await readFile(new URL('./TrpgToolsDialog.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'TrpgToolsDialog should contain a template')
@@ -207,11 +207,11 @@ test('reveals skill search and sorting only inside the expanded desktop panel', 
 
   assert.ok(toggle, 'the green skill heading should expose an icon-only expand toggle')
   assert.ok(primaryTabs, 'the character sheet should contain its primary tabs')
-  assert.equal(hasDirectiveExpression(primaryTabs, 'show', '!skillPanelExpanded'), true,
-    'the skill, equipment, and background tabs should stay out of the expanded skill panel')
+  assert.equal(hasDirectiveExpression(primaryTabs, 'show', 'isMobile || !skillPanelExpanded'), true,
+    'mobile keeps section navigation while desktop expands skills')
   assert.equal(hasDirectiveExpression(toggle, 'on', 'skillPanelExpanded = !skillPanelExpanded'), true)
   assert.ok(toolbar, 'the expanded skill panel should contain its controls')
-  assert.equal(hasIfExpression(toolbar, 'skillPanelExpanded'), true)
+  assert.equal(hasIfExpression(toolbar, 'isMobile || skillPanelExpanded'), true)
   assert.ok(search, 'the expanded controls should include skill search')
   assert.ok(sort, 'the expanded controls should include the sort mode')
   assert.ok(direction, 'the expanded controls should include sort direction')
@@ -329,7 +329,7 @@ test('uses foreground dialogs for load, rollback, and manual-save deletion confi
   assert.ok(template, 'TrpgToolsDialog should contain a template')
   const root = baseParse(template)
   const confirmation = findElement(root, (element) => element.tag === 'BaseDialog'
-    && hasDirectiveExpression(element, 'bind', 'confirmationTitle'))
+    && hasDirectiveExpression(element, 'model', 'confirmationOpen'))
 
   assert.ok(confirmation, 'restore actions should open a dedicated confirmation dialog')
   assert.equal(hasDirectiveExpression(confirmation, 'bind', "'foreground'"), true)
@@ -343,9 +343,12 @@ test('uses the same chat preview for the first load and rollback confirmation', 
   assert.ok(template, 'TrpgToolsDialog should contain a template')
   const root = baseParse(template)
   const confirmation = findElement(root, (element) => element.tag === 'BaseDialog'
-    && hasDirectiveExpression(element, 'bind', 'confirmationTitle'))
+    && hasDirectiveExpression(element, 'model', 'confirmationOpen'))
   assert.ok(confirmation, 'restore actions should open a dedicated confirmation dialog')
 
+  const mobilePreview = findElement(confirmation as unknown as RootNode, element => element.tag === 'MobileRestorePreview')
+  assert.ok(mobilePreview, 'mobile uses the dedicated first-edition restore layout')
+  assert.ok(hasDirectiveExpression(mobilePreview, 'bind', 'rollbackMessagePreview'), 'mobile receives the same true boundary preview')
   const preview = findElement(confirmation as unknown as RootNode, (element) => hasClass(element, 'rollback-chat-preview'))
   assert.ok(preview, 'the first rollback confirmation should contain a compact chat preview')
   assert.ok(findElement(preview as unknown as RootNode, (element) => hasClass(element, 'retained')))

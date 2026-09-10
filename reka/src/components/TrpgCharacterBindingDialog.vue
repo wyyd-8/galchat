@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import {
   ArrowDown, ArrowLeft, ArrowUp, BookOpenCheck, BookUser, Check, ChevronDown,
-  ChevronUp, CircleCheck, ClipboardCheck, Dices, Download, Fingerprint, LoaderCircle,
+  ChevronUp, CircleCheck, ClipboardCheck, Dices, Fingerprint, LoaderCircle,
   RefreshCw, ScanText, Search, Sparkles, Trash2, TriangleAlert, UserRound, X,
 } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
+import './mobile-tools.css'
+import { useMobileViewport } from '@/composables/useMobileViewport'
+import CharacterCardImportGuide from './CharacterCardImportGuide.vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import MobileInvestigatorSheet from '@/components/MobileInvestigatorSheet.vue'
 import DicePlayerDialog from '@/dice/components/DicePlayerDialog.vue'
 import StepwiseCharacterCardWizard from '@/components/StepwiseCharacterCardWizard.vue'
 import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
@@ -41,7 +45,27 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ complete: [] }>()
 
+const { isMobile } = useMobileViewport()
+const importGuideOpen = ref(false)
+const mobileImportTab = ref('text')
+const mobileDetailOpen = ref(false)
+const mobileDetailPane = ref<HTMLElement | null>(null)
+let mobileQueueTrigger: HTMLElement | null = null
+let mobileQueueScroll = 0
+const importDrafts = new Map<string, string>()
+function rememberImportDraft() {
+  if (selectedCreationMethod.value === 'IMPORT') importDrafts.set(selectedKey.value, cardText.value)
+}
+async function backToBindingQueue() {
+  rememberImportDraft()
+  mobileDetailOpen.value = false
+  await nextTick()
+  mobileQueueTrigger?.focus({ preventScroll: true })
+  const viewport = mobileQueueTrigger?.closest('.dialog-body') || mobileDetailPane.value?.closest('.dialog-body')
+  viewport?.scrollTo({ top: mobileQueueScroll })
+}
 const busy = ref(false)
+const wizardBusy = ref(false)
 const cards = ref<InvestigatorCardSummary[]>([])
 const selectedKey = ref('player')
 const card = ref<CharacterCard | null>(null)
@@ -68,12 +92,17 @@ const selectedName = computed(() => selectedTarget.value?.actorType === 'PLAYER'
   ? '玩家调查员'
   : selectedCharacter.value?.characterName || `角色 #${selectedTarget.value?.participantId}`)
 const completedCount = computed(() => targets.value.filter((target) => target.boundCardId !== undefined).length)
+const mobileBindingTitle = computed(() => !mobileDetailOpen.value ? '绑定人物卡' : card.value ? '人物卡' : autoDraft.value && displayCard.value ? '审阅人物卡' : selectedCreationMethod.value === 'STEP' || draft.value?.creationMode === 'STEP_STANDARD' ? '步进建卡' : selectedCreationMethod.value === 'IMPORT' ? '导入人物卡' : selectedCreationMethod.value === 'AUTO' ? '自动建卡' : '建立人物卡')
+const mobileWizardActive = computed(() => isMobile.value && mobileDetailOpen.value && (selectedCreationMethod.value === 'STEP' || draft.value?.creationMode === 'STEP_STANDARD'))
+async function backMobileBinding() {
+  if (busy.value || wizardBusy.value) return
+  if (selectedCreationMethod.value && !draft.value && !card.value) { rememberImportDraft(); selectedCreationMethod.value = null; mobileImportTab.value = 'text'; return }
+  await backToBindingQueue()
+}
 const complete = computed(() => targets.value.length > 0 && completedCount.value === targets.value.length)
 const displayCard = computed(() => card.value || draft.value?.state.preview || null)
 const creationMethods = computed(() => buildCharacterCardCreationMethods(selectedTarget.value?.actorType || 'PLAYER'))
 const importPreview = computed(() => analyzeCharacterCardImport(cardText.value))
-const importTemplateFilename = 'COC七版半自动人物卡v2.0.5(通用).xlsx'
-const importTemplateUrl = `${import.meta.env.BASE_URL}templates/${encodeURIComponent(importTemplateFilename)}`
 const autoDraft = computed(() => draft.value?.creationMode === 'AUTO_QUICK_START' ? draft.value : null)
 const creationMethodCopy = {
   STEP: { title: '标准步进建卡', eyebrow: '推荐 · 8–12 分钟', description: '亲自生成属性、分配技能，并逐项完成调查员背景。', action: '开始标准建卡' },
@@ -161,8 +190,9 @@ function characterName(participantId?: number) {
 }
 
 async function loadSelectedCard() {
+  importGuideOpen.value = false
   confirmDelete.value = false
-  cardText.value = ''
+  cardText.value = importDrafts.get(selectedKey.value) || ''
   autoReviewSection.value = 'OVERVIEW'
   const content = await loadBindingTargetContent(
     selectedTarget.value,
@@ -175,7 +205,8 @@ async function loadSelectedCard() {
   draft.value = content.draft
   selectedCreationMethod.value = content.draft?.creationMode === 'STEP_STANDARD'
     ? 'STEP'
-    : content.draft?.creationMode === 'AUTO_QUICK_START' ? 'AUTO' : null
+    : content.draft?.creationMode === 'AUTO_QUICK_START' ? 'AUTO'
+      : !content.card && importDrafts.has(selectedKey.value) ? 'IMPORT' : null
 }
 
 function requestId() {
@@ -281,7 +312,23 @@ async function execute(action: () => Promise<void>) {
 }
 
 async function selectTarget(key: string) {
-  if (busy.value) return
+  if (busy.value || wizardBusy.value) return
+  rememberImportDraft()
+  if (isMobile.value) {
+    mobileQueueTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    mobileQueueScroll = mobileQueueTrigger?.closest('.dialog-body')?.scrollTop || 0
+  }
+  mobileDetailOpen.value = true
+  if (isMobile.value) {
+    await nextTick()
+    mobileDetailPane.value?.focus({ preventScroll: true })
+    mobileDetailPane.value?.closest('.dialog-body')?.scrollTo({ top: 0 })
+    // Returning from the queue to the same actor keeps the editor mounted and untouched.
+    if (selectedKey.value === key) return
+  }
+  card.value = null
+  draft.value = null
+  selectedCreationMethod.value = null
   selectedKey.value = key
   selectedSheetTab.value = 'skills'
   selectedProfileTab.value = 'background'
@@ -338,8 +385,15 @@ function finish() {
 }
 
 watch(open, (visible) => {
-  if (visible) void execute(() => refreshCards(true))
+  if (visible) {
+    mobileDetailOpen.value = Boolean(props.requestedTargetKey || props.requestedCreationMethod)
+    mobileQueueTrigger = null
+    mobileQueueScroll = 0
+    void execute(() => refreshCards(true))
+  }
   else {
+    rememberImportDraft()
+    importGuideOpen.value = false
     selectedSkillGroup.value = null
     skillPanelExpanded.value = false
     skillSearchQuery.value = ''
@@ -348,6 +402,8 @@ watch(open, (visible) => {
   }
 }, { immediate: true })
 watch(() => props.conversation?.id, () => {
+  importDrafts.clear()
+  mobileDetailOpen.value = false
   selectedKey.value = 'player'
   cards.value = []
   card.value = null
@@ -359,15 +415,18 @@ watch(() => props.conversation?.id, () => {
 <template>
   <BaseDialog
     v-model="open"
-    title="绑定调查员人物卡"
-    description="第三阶段 · 为玩家和每位 AI 调查员准备本次跑团使用的人物卡。"
+    :title="isMobile ? mobileBindingTitle : '绑定调查员人物卡'"
+    :mobile-back="isMobile && mobileDetailOpen ? backMobileBinding : undefined"
+    :description="isMobile ? '' : '第三阶段 · 为玩家和每位 AI 调查员准备本次跑团使用的人物卡。'"
     size="lg"
-    content-class="trpg-binding-dialog trpg-character-creation-dialog"
+    mobile-presentation="page"
+    :content-class="`trpg-binding-dialog trpg-character-creation-dialog ${mobileWizardActive ? 'mobile-binding-workflow' : ''}`"
   >
     <div class="trpg-binding-layout">
-      <section class="trpg-binding-list-pane">
-        <header class="settings-section-heading">
-          <span><strong>调查员</strong><small>选择左侧对象，在右侧查看或绑定人物卡</small></span>
+      <section v-show="!isMobile || !mobileDetailOpen" class="trpg-binding-list-pane">
+        <div v-if="isMobile" class="mobile-binding-intro"><h1>让调查员就位</h1><p>已绑定 {{ completedCount }} / {{ targets.length }} 张人物卡</p></div>
+        <header v-if="!isMobile" class="settings-section-heading">
+          <span><strong>调查员</strong><small>选择对象，查看或绑定人物卡</small></span>
           <em>{{ completedCount }}/{{ targets.length }} 已绑定</em>
         </header>
         <div class="character-choice-list trpg-binding-targets">
@@ -401,9 +460,12 @@ watch(() => props.conversation?.id, () => {
             </span>
           </button>
         </div>
+        <p v-if="isMobile" class="mobile-tools-notice">你的调查员支持步进建卡或导入；自动建卡仅对 AI 调查员开放。</p>
+        <button v-if="isMobile" class="button secondary mobile-binding-later" :disabled="busy || wizardBusy" @click="open = false">稍后处理</button>
+        <p v-if="isMobile" class="mobile-binding-help">全部人物卡完成后才能进入跑团。</p>
       </section>
 
-      <aside class="trpg-binding-card-pane">
+      <aside v-show="!isMobile || mobileDetailOpen" ref="mobileDetailPane" tabindex="-1" aria-label="当前调查员建卡与绑定" class="trpg-binding-card-pane">
         <div v-if="busy && !displayCard" class="binding-empty auto-generation-loading">
           <LoaderCircle class="spin" :size="27" />
           <strong>{{ selectedCreationMethod === 'AUTO' ? '正在生成人物卡…' : selectedCreationMethod === 'IMPORT' ? '正在导入并绑定人物卡…' : '正在读取人物卡…' }}</strong>
@@ -412,12 +474,14 @@ watch(() => props.conversation?.id, () => {
         </div>
         <StepwiseCharacterCardWizard
           v-else-if="selectedCreationMethod === 'STEP' || draft?.creationMode === 'STEP_STANDARD'"
+          :key="`${conversation?.id}:${selectedKey}`"
           v-model:draft="draft"
           :run-id="conversation!.id"
           :participant-id="selectedTarget?.participantId"
           :default-name="selectedCharacter?.characterName"
           :default-era="module?.era"
           :dice-skin="diceSkin"
+          @busy-change="wizardBusy = $event"
           @complete="execute(completeStepwiseCard)"
           @abandoned="selectedCreationMethod = null"
         />
@@ -447,6 +511,11 @@ watch(() => props.conversation?.id, () => {
               <p>生成结果不满意时，可以整张重来，也可以只重新生成人物背景。</p>
             </aside>
           </div>
+        </section>
+        <section v-else-if="autoDraft && displayCard && isMobile" class="mobile-auto-review">
+          <p class="mobile-tools-notice">已生成 · 请检查后再绑定</p>
+          <MobileInvestigatorSheet :card="displayCard" :actor-name="selectedName" />
+          <details class="mobile-review-options"><summary>生成选项</summary><button class="button secondary" :disabled="busy" @click="playAutoDice(autoDraft)">重放骰点</button><button class="button secondary" :disabled="busy" @click="execute(rewriteBackground)">仅重骰并重写背景</button><button class="button secondary" :disabled="busy" @click="execute(regenerateCard)">完整重新生成</button><button class="button ghost" :disabled="busy" @click="execute(abandonAutoDraft)">放弃草稿</button></details>
         </section>
         <section v-else-if="autoDraft && displayCard" class="auto-review-dossier">
           <div class="creation-process-strip">
@@ -528,6 +597,7 @@ watch(() => props.conversation?.id, () => {
             </aside>
           </div>
         </section>
+        <MobileInvestigatorSheet v-else-if="card && isMobile" :card="card" :actor-name="selectedName"><details class="mobile-review-options"><summary>人物卡管理</summary><button class="button" :class="confirmDelete ? 'danger' : 'ghost'" :disabled="busy" @click="execute(removeCard)">{{ confirmDelete ? '确认解除绑定' : '解除并重新绑定' }}</button></details></MobileInvestigatorSheet>
         <section v-else-if="card" class="character-sheet binding-sheet trpg-character-sheet trpg-binding-established-sheet">
           <header class="sheet-overview">
             <span
@@ -578,7 +648,7 @@ watch(() => props.conversation?.id, () => {
                   </button>
                   <strong>技能</strong><span>成功率 <small>常规 / 困难 / 极难</small></span>
                 </header>
-                <div v-if="skillPanelExpanded" class="sheet-skill-toolbar">
+                <div v-if="isMobile || skillPanelExpanded" class="sheet-skill-toolbar">
                   <label class="sheet-skill-search"><Search :size="14" /><input v-model="skillSearchQuery" class="sheet-skill-search-input" type="search" aria-label="检索技能" placeholder="检索技能名称" autocomplete="off" /><button v-if="skillSearchQuery" type="button" class="sheet-skill-clear" aria-label="清除技能检索" @click="skillSearchQuery = ''"><X :size="13" /></button></label>
                   <label class="sheet-skill-sort"><select v-model="skillSortMode" class="sheet-skill-sort-select" aria-label="技能排序方式"><option value="default">默认顺序</option><option value="value">成功率</option><option value="category">大类</option></select></label>
                   <button type="button" class="sheet-skill-direction-toggle" :aria-label="skillSortDirection === 'asc' ? '切换为倒序' : '切换为正序'" @click="skillSortDirection = skillSortDirection === 'asc' ? 'desc' : 'asc'"><ArrowUp v-if="skillSortDirection === 'asc'" :size="13" /><ArrowDown v-else :size="13" />{{ skillSortDirection === 'asc' ? '正序' : '倒序' }}</button>
@@ -604,7 +674,7 @@ watch(() => props.conversation?.id, () => {
                   <tbody>
                     <tr v-for="weapon in card.weapons" :key="weapon.id" :class="{ broken: weapon.isBroken }">
                       <td><span class="weapon-name-line"><strong>{{ weapon.name }}</strong><WeaponRiskNotice v-if="shouldShowWeaponRisk(weapon)" :weapon="weapon" /></span><small v-if="weapon.notes">{{ weapon.notes }}</small><em v-if="weapon.isBroken">已损坏</em></td>
-                      <td class="check-rate">{{ formatCheckRate(resolveWeaponCheckValue(weapon, card.skills)) }}</td><td>{{ shown(weapon.damage) }}</td><td>{{ shown(weapon.range) }}</td><td>{{ shown(weapon.attacksPerRound) }}</td><td>{{ ammo(weapon.remainingAmmo, weapon.ammoCapacity) }}</td><td>{{ shown(weapon.malfunction) }}</td>
+                      <td data-label="成功率" class="check-rate">{{ formatCheckRate(resolveWeaponCheckValue(weapon, card.skills)) }}</td><td data-label="伤害">{{ shown(weapon.damage) }}</td><td data-label="射程">{{ shown(weapon.range) }}</td><td data-label="次数">{{ shown(weapon.attacksPerRound) }}</td><td data-label="弹药">{{ ammo(weapon.remainingAmmo, weapon.ammoCapacity) }}</td><td data-label="故障值">{{ shown(weapon.malfunction) }}</td>
                     </tr>
                     <tr v-if="!card.weapons.length"><td colspan="7" class="sheet-table-empty">暂无武器</td></tr>
                   </tbody>
@@ -631,33 +701,26 @@ watch(() => props.conversation?.id, () => {
           <div class="creation-process-strip import-process-strip">
             <span class="active"><i>1</i>粘贴人物卡</span><span :class="{ active: cardText.trim(), complete: importPreview.ready }"><i>2</i>检查必填内容</span><span><i>3</i>确认并绑定</span>
           </div>
-          <header class="creation-workbench-heading import-workbench-heading"><span><small>导入现成人物卡</small><h3>导入{{ selectedName }}人物卡</h3><p>把已有的人物卡文本粘贴到下方，右侧会即时显示已识别内容和需要补充的项目。</p></span><em :class="{ ready: importPreview.ready }">{{ importPreview.ready ? '可以导入' : cardText.trim() ? '需要补充' : '等待粘贴' }}</em></header>
+          <header class="creation-workbench-heading import-workbench-heading"><span><small>导入现成人物卡</small><h3>导入{{ selectedName }}人物卡</h3><p>把已有的人物卡文本粘贴到下方，即时检查已识别内容和需要补充的项目。</p></span><em :class="{ ready: importPreview.ready }">{{ importPreview.ready ? '可以导入' : cardText.trim() ? '需要补充' : '等待粘贴' }}</em></header>
+          <nav v-if="isMobile" class="mobile-import-tabs" aria-label="人物卡导入"><button type="button" :aria-pressed="mobileImportTab === 'text'" @click="mobileImportTab = 'text'">粘贴原文</button><button type="button" :aria-pressed="mobileImportTab === 'result'" @click="mobileImportTab = 'result'">识别结果</button></nav>
           <div class="creation-import-layout">
-            <main class="creation-import-editor">
-              <label class="field"><span><ScanText :size="15" />粘贴人物卡文本</span><textarea v-model="cardText" rows="14" spellcheck="false" :placeholder="importPlaceholder" aria-describedby="character-import-template-help character-import-format-help" /></label>
+            <main v-show="!isMobile || mobileImportTab === 'text'" class="creation-import-editor">
+              <label class="field"><span><ScanText :size="15" />粘贴人物卡文本</span><textarea v-model="cardText" rows="14" spellcheck="false" :placeholder="importPlaceholder" aria-describedby="character-import-format-help" /></label>
+              <button v-if="isMobile" class="import-guide-entry" type="button" @click="importGuideOpen = true">
+                <BookOpenCheck :size="20" /><span><strong>人物卡模板与导入说明</strong><small>下载模板 · 完成建卡 · 复制文本</small></span><ChevronDown :size="18" />
+              </button>
               <div id="character-import-format-help" class="import-format-help"><strong>最低导入要求</strong><span>第一行写明姓名、职业、性别和年龄，并包含 STR、CON、SIZ、DEX、APP、INT、POW、EDU 八项属性。技能与背景可以不填。</span></div>
               <div class="import-editor-meta"><span>{{ cardText.length }} 字符</span><span>{{ cardText.split(/\r?\n/).filter(Boolean).length }} 行</span><span>不会自动修改原文</span></div>
             </main>
-            <aside class="creation-import-assistant">
-              <section id="character-import-template-help" aria-labelledby="character-import-template-title">
-                <header class="import-assistant-heading"><BookOpenCheck :size="20" /><span><strong id="character-import-template-title">人物卡模板与导入步骤</strong><p>按照以下步骤准备人物卡，再粘贴到左侧。</p></span></header>
-                <div class="import-template-download">
-                  <small>{{ importTemplateFilename }}</small>
-                  <a class="button primary" :href="importTemplateUrl" :download="importTemplateFilename"><Download :size="15" />下载人物卡模板</a>
-                </div>
-                <div class="import-empty-guide">
-                  <article><i>1</i><span><strong>打开模板</strong><small>下载后，用 Excel 或 WPS 打开人物卡表格。</small></span></article>
-                  <article><i>2</i><span><strong>逐步完成建卡</strong><small>按照表格中的“建卡”部分，一步一步完成填写。</small></span></article>
-                  <article><i>3</i><span><strong>选择“txt输出”</strong><small>建卡完成后，选择“txt输出”，复制输出的人物卡文本内容。</small></span></article>
-                  <article><i>4</i><span><strong>粘贴并导入</strong><small>将内容粘贴到左侧“粘贴人物卡文本”输入框，检查提示后点击“导入并绑定人物卡”。</small></span></article>
-                </div>
-              </section>
+            <aside v-show="!isMobile || mobileImportTab === 'result'" class="creation-import-assistant">
+              <p v-if="isMobile && !cardText.trim()" class="mobile-tools-notice">请先粘贴人物卡原文，识别结果会显示在这里。</p>
+              <CharacterCardImportGuide v-if="!isMobile" />
 
               <template v-if="cardText.trim()">
                 <section class="import-result-status" :class="{ ready: importPreview.ready }" aria-live="polite">
                   <CircleCheck v-if="importPreview.ready" :size="21" />
                   <TriangleAlert v-else :size="21" />
-                  <span><strong>{{ importPreview.ready ? '必填内容已识别，可以导入' : `还需处理 ${importRequiredIssueCount} 处必填内容` }}</strong><small>{{ importPreview.ready ? '点击下方按钮后，将按当前内容创建并绑定人物卡。' : '根据下面的红色提示修改左侧原文。' }}</small></span>
+                  <span><strong>{{ importPreview.ready ? '必填内容已识别，可以导入' : `还需处理 ${importRequiredIssueCount} 处必填内容` }}</strong><small>{{ importPreview.ready ? '点击下方按钮后，将按当前内容创建并绑定人物卡。' : '根据下方的字段提示修改原文。' }}</small></span>
                 </section>
 
                 <section class="import-required-checks">
@@ -678,7 +741,7 @@ watch(() => props.conversation?.id, () => {
                 </section>
 
                 <section class="import-recognized-preview">
-                  <header><strong>属性识别结果</strong><small>对照左侧原文检查</small></header>
+                  <header><strong>属性识别结果</strong><small>对照原文检查</small></header>
                   <div><span v-for="item in importAttributeItems" :key="item.code" :class="{ missing: importPreview.attributes[item.code] == null }"><small>{{ item.label }} {{ item.code }}</small><strong>{{ importPreview.attributes[item.code] ?? '未识别' }}</strong></span></div>
                 </section>
 
@@ -689,7 +752,7 @@ watch(() => props.conversation?.id, () => {
               </template>
             </aside>
           </div>
-          <div class="creation-import-actions"><button class="button ghost" @click="selectedCreationMethod = null"><ArrowLeft :size="14" />返回选择</button><button class="button primary" :disabled="!importPreview.ready || busy" @click="execute(bindCard)"><ClipboardCheck :size="15" />导入并绑定人物卡</button></div>
+          <div v-if="!isMobile" class="creation-import-actions"><button class="button ghost" @click="selectedCreationMethod = null"><ArrowLeft :size="14" />返回选择</button><button class="button primary" :disabled="!importPreview.ready || busy" @click="execute(bindCard)"><ClipboardCheck :size="15" />导入并绑定人物卡</button></div>
         </section>
         <section v-else class="creation-method-picker">
           <header class="creation-method-heading"><span><small>选择建卡方式</small><strong>为{{ selectedName }}建立人物卡</strong><p>三种方式最终都会先让你检查内容，确认后才会绑定。</p></span><em>尚未绑定</em></header>
@@ -703,7 +766,7 @@ watch(() => props.conversation?.id, () => {
               :disabled="!option.enabled || busy"
               @click="execute(() => chooseCreationMethod(option.id))"
             >
-              <span class="creation-method-icon"><Dices v-if="option.id === 'STEP'" :size="24" /><Sparkles v-else-if="option.id === 'AUTO'" :size="24" /><BookUser v-else :size="24" /></span>
+              <span class="creation-method-icon"><template v-if="isMobile">{{ option.id === 'STEP' ? '01' : option.id === 'AUTO' ? '02' : '03' }}</template><template v-else><Dices v-if="option.id === 'STEP'" :size="24" /><Sparkles v-else-if="option.id === 'AUTO'" :size="24" /><BookUser v-else :size="24" /></template></span>
               <span class="creation-method-copy"><small>{{ creationMethodCopy[option.id].eyebrow }}</small><strong>{{ creationMethodCopy[option.id].title }}</strong><p>{{ creationMethodCopy[option.id].description }}</p></span>
               <span class="creation-method-action">{{ option.enabled ? creationMethodCopy[option.id].action : '仅 AI 调查员可用' }}</span>
             </button>
@@ -713,11 +776,57 @@ watch(() => props.conversation?.id, () => {
       </aside>
     </div>
     <div v-if="busy" class="dialog-busy"><LoaderCircle class="spin" :size="17" />正在处理…</div>
-    <template #footer>
-      <span class="binding-footer-status">{{ complete ? '全部人物卡已绑定' : `仍有 ${targets.length - completedCount} 张人物卡待绑定` }}</span>
-      <button class="button ghost" :disabled="busy" @click="open = false">稍后处理</button>
-      <button class="button primary" :disabled="!complete || busy" @click="finish">完成并进入跑团</button>
+    <template v-if="!mobileWizardActive && (!isMobile || !mobileDetailOpen || selectedCreationMethod === 'IMPORT' || autoDraft || selectedCreationMethod === 'AUTO')" #footer>
+      <template v-if="isMobile && mobileDetailOpen">
+        <button v-if="selectedCreationMethod === 'IMPORT'" class="button primary" :disabled="!importPreview.ready || busy" @click="execute(bindCard)">导入并绑定人物卡</button>
+        <button v-else-if="autoDraft" class="button primary" :disabled="busy" @click="execute(confirmGeneratedCard)">确认并绑定人物卡</button>
+        <button v-else-if="selectedCreationMethod === 'AUTO'" class="button primary" :disabled="busy" @click="execute(generateCard)">开始自动生成</button>
+      </template>
+      <template v-else>
+      <span v-if="!isMobile" class="binding-footer-status">{{ complete ? '全部人物卡已绑定' : `仍有 ${targets.length - completedCount} 张人物卡待绑定` }}</span>
+      <button v-if="!isMobile" class="button ghost" :disabled="busy || wizardBusy" @click="open = false">稍后处理</button>
+      <button class="button primary" :disabled="!complete || busy || wizardBusy" @click="finish">{{ !complete && isMobile ? `仍有 ${targets.length - completedCount} 张待绑定` : '完成并进入跑团' }}</button>
+      </template>
     </template>
+  </BaseDialog>
+  <BaseDialog v-if="isMobile" v-model="importGuideOpen" title="模板与导入说明"
+    :description="`返回后继续为${selectedName}导入人物卡，已粘贴的内容会保留。`"
+    layer="foreground" mobile-presentation="page" content-class="import-guide-dialog">
+    <CharacterCardImportGuide />
+    <template #footer><button class="button primary" @click="importGuideOpen = false"><ArrowLeft :size="16" />返回粘贴人物卡</button></template>
   </BaseDialog>
   <DicePlayerDialog v-model="diceOpen" :request="diceRequest" />
 </template>
+
+<style>
+.import-guide-entry { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; background: #fffef9; color: var(--pine); text-align: left; }
+.import-guide-entry > span { display: grid; flex: 1; gap: 5px; min-width: 0; }
+.import-guide-entry strong { font-size: 14px; }
+.import-guide-entry small { color: var(--muted); font-size: 12px; }
+@media (max-width: 767px) {
+  .mobile-binding-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .mobile-binding-navigation strong { font-size: 14px; overflow-wrap: anywhere; }
+  .trpg-character-creation-dialog .trpg-binding-targets { max-height: none; }
+  .trpg-character-creation-dialog .trpg-binding-layout { height: auto; min-height: 0; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .dialog-content.trpg-character-creation-dialog .trpg-binding-card-pane { min-width: 0; min-height: 0; overflow: visible; padding: 0; border: 0; }
+  .trpg-character-creation-dialog .trpg-binding-list-pane { overflow: visible; }
+  .trpg-character-creation-dialog .creation-import-workbench { min-height: 0; padding-bottom: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .trpg-character-creation-dialog .creation-import-layout { min-height: 0; grid-template-columns: minmax(0, 1fr); padding: 0; gap: 16px; }
+  .trpg-character-creation-dialog .creation-import-editor { padding: 14px; }
+  .trpg-character-creation-dialog .creation-import-editor textarea { min-height: 240px; font-size: 16px; line-height: 1.8; }
+  .trpg-character-creation-dialog .creation-import-assistant { overflow: visible; padding: 14px; }
+  .trpg-character-creation-dialog .creation-import-assistant:empty { display: none; }
+  .trpg-character-creation-dialog .import-workbench-heading { flex-wrap: wrap; padding: 18px 0; }
+  .trpg-character-creation-dialog .import-workbench-heading h3 { font-size: 18px; overflow-wrap: anywhere; }
+  .trpg-character-creation-dialog .import-process-strip { gap: 8px; padding: 12px 0; flex-wrap: wrap; }
+  .trpg-character-creation-dialog .creation-import-actions { padding: 16px 0; flex-wrap: wrap; }
+  .trpg-character-creation-dialog .creation-import-actions .button { min-height: 48px; }
+  .trpg-character-creation-dialog .creation-import-actions .primary { flex: 1; }
+  .trpg-character-creation-dialog .creation-method-grid { grid-template-columns: minmax(0, 1fr); }
+  .trpg-character-creation-dialog .creation-method-heading { flex-wrap: wrap; }
+  .trpg-character-creation-dialog .import-format-help span,
+  .trpg-character-creation-dialog .import-required-checks small,
+  .trpg-character-creation-dialog .import-result-status small { font-size: 12px; line-height: 1.75; }
+  .trpg-character-creation-dialog .import-recognized-preview > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>

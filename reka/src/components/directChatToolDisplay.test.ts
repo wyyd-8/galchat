@@ -132,3 +132,28 @@ test('appends live tool calls inside the current reasoning process', async () =>
     Object.assign(globalThis, { fetch: previousFetch, localStorage: previousLocalStorage })
   }
 })
+
+
+test('restores a character draft on return and clears it when the account signs out', async () => {
+  const { api, chat, app } = await mountDirectChat()
+  const originalHistory = api.history
+  const originalModelApis = api.modelApis
+  try {
+    api.history = async () => []
+    api.modelApis = async () => []
+    await chat.selectCharacter(7)
+    chat.input.value = '尚未发出的问候'
+    chat.close()
+    assert.equal(chat.input.value, '')
+    await chat.selectCharacter(7)
+    assert.equal(chat.input.value, '尚未发出的问候')
+    chat.clearDrafts()
+    chat.close()
+    await chat.selectCharacter(7)
+    assert.equal(chat.input.value, '')
+  } finally {
+    api.history = originalHistory
+    api.modelApis = originalModelApis
+    app.unmount()
+  }
+})

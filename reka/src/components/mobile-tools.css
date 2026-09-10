@@ -1,0 +1,366 @@
+.creation-preview-container > .creation-live-sheet { height: 100%; box-sizing: border-box; }
+@media (max-width: 767px) {
+  .trpg-character-sheet .sheet-identity h3, .creation-method-heading strong { font-size: 20px; }
+  .creation-method-copy strong { font-size: 14px; }
+  .stepwise-character-card-wizard .creation-step-heading h3 { font-size: 18px; }
+  .mobile-tools-menu { display: grid; gap: 12px; }
+  .mobile-tools-menu button { display: flex; align-items: center; gap: 14px; padding: 20px 16px; border: 1px solid var(--line); border-radius: 14px; color: var(--pine); background: #fbfaf6; text-align: left; }
+  .mobile-tools-menu button > span { min-width: 0; flex: 1; display: grid; gap: 7px; }
+  .mobile-tools-menu strong { font-size: 15px; }
+  .mobile-tools-menu small { font-size: 12px; line-height: 1.6; color: var(--muted); }
+  .mobile-tool-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .mobile-tool-navigation h3 { margin: 0; font-size: 15px; }
+  .trpg-tools .trpg-tools-card-layout { height: auto; min-height: 0; display: block; }
+  .trpg-tools .trpg-binding-card-pane { padding: 0; border: 0; min-height: 0; }
+  .trpg-tools .trpg-binding-targets { max-height: none; }
+  .trpg-tools .trpg-character-sheet, .dialog-content.trpg-character-creation-dialog .trpg-character-sheet { height: auto; min-height: 0; padding: 14px; overflow: visible; }
+  .trpg-character-sheet .sheet-overview { grid-template-columns: auto minmax(0, 1fr); flex-wrap: wrap; }
+  .trpg-character-sheet .sheet-overview-actions, .trpg-character-sheet .sheet-statuses { grid-column: 1 / -1; flex-wrap: wrap; }
+  .trpg-character-sheet .sheet-identity { min-width: 0; }
+  .trpg-character-sheet .sheet-identity h3, .trpg-character-sheet .sheet-identity p { white-space: normal; overflow-wrap: anywhere; }
+  .trpg-character-sheet .sheet-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trpg-character-sheet .sheet-attribute-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .trpg-character-sheet .sheet-attribute-grid > span:nth-child(4) { border-right: 0; }
+  .trpg-character-sheet .sheet-attribute-grid > span:nth-child(-n + 4) { border-bottom: 1px solid var(--line); }
+  .trpg-character-sheet .sheet-derived-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trpg-character-sheet .sheet-detail-tabs { min-height: 0; }
+  .trpg-character-sheet .sheet-detail-tabs.skill-panel-expanded { position: static; padding: 0; border: 0; box-shadow: none; background: transparent; }
+  .trpg-character-sheet .sheet-primary-tabs, .trpg-character-sheet .sheet-secondary-tabs { flex-wrap: wrap; overflow: visible; }
+  .trpg-character-sheet .sheet-primary-tabs button, .trpg-character-sheet .sheet-secondary-tabs button { min-height: 44px; font-size: 12px; }
+  .trpg-character-sheet .sheet-skill-expand-toggle { display: none; }
+  .trpg-character-sheet .sheet-skill-toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+  .trpg-character-sheet .sheet-skill-search { flex-basis: 100%; height: 44px; min-width: 0; }
+  .trpg-character-sheet .sheet-skill-search-input { font-size: 16px; }
+  .trpg-character-sheet .sheet-skill-sort-select, .trpg-character-sheet .sheet-skill-direction-toggle { min-height: 44px; font-size: 14px; }
+  .trpg-character-sheet .sheet-skill-clear { width: 44px; height: 44px; }
+  .trpg-character-sheet .sheet-skill-scroll { overflow: visible; }
+  .trpg-character-sheet .sheet-skill-grid { grid-template-columns: minmax(0, 1fr); }
+  .trpg-character-sheet .sheet-skill-item strong { font-size: 13px; white-space: normal; }
+  .trpg-character-sheet .sheet-skill-item small { font-size: 12px; white-space: normal; }
+  .trpg-character-sheet .sheet-skill-heading { flex-wrap: wrap; }
+  .trpg-character-sheet .sheet-profile-grid { grid-template-columns: minmax(0, 1fr); }
+  .trpg-character-sheet .sheet-profile-grid p { max-height: none; overflow: visible; font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
+  .trpg-character-sheet .sheet-table-scroll { overflow: visible; }
+  .trpg-character-sheet .weapon-data-table { display: block; min-width: 0; width: 100%; }
+  .trpg-character-sheet .weapon-data-table thead { display: none; }
+  .trpg-character-sheet .weapon-data-table tbody { display: grid; gap: 14px; }
+  .trpg-character-sheet .weapon-data-table tr { display: block; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .trpg-character-sheet .weapon-data-table td { display: block; width: auto; min-width: 0; padding: 9px 0; border: 0; font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+  .trpg-character-sheet .weapon-data-table td[data-label] { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); text-align: right; }
+  .trpg-character-sheet .weapon-data-table td[data-label]::before { content: attr(data-label); color: var(--muted); text-align: left; }
+  .trpg-tools .creation-method-grid { grid-template-columns: minmax(0, 1fr); }
+  .trpg-tools .creation-method-heading { flex-wrap: wrap; }
+  .trpg-tools .dice-history-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trpg-tools .dice-history-search-wrap { grid-column: 1 / -1; }
+  .trpg-tools .dice-history-toolbar select, .trpg-tools .dice-history-toolbar input { font-size: 16px; min-height: 44px; }
+  .trpg-tools .progress-archive-heading { flex-wrap: wrap; }
+  .trpg-tools .recovery-record-card header { flex-wrap: wrap; }
+  .rollback-confirmation-dialog .rollback-confirmation-layout { grid-template-columns: minmax(0, 1fr); }
+  .rollback-confirmation-dialog .rollback-confirmation-sidebar { order: -1; }
+  .rollback-confirmation-dialog .rollback-preview-viewport, .rollback-confirmation-dialog .rollback-investigator-list { max-height: none; overflow: visible; }
+  .rollback-confirmation-dialog .rollback-preview-message p { font-size: 13px; line-height: 1.8; }
+  .rollback-confirmation-dialog .rollback-preview-message strong { font-size: 12px; }
+  .rollback-confirmation-dialog .rollback-preview-message p > span { display: block; -webkit-line-clamp: unset; }
+  .mobile-runtime-dialog .trpg-runtime-editor { border: 0; padding: 0; gap: 20px; }
+  .mobile-runtime-dialog .trpg-runtime-model-select { min-height: 48px; font-size: 16px; }
+  .mobile-runtime-dialog .trpg-runtime-mode-switch button { min-height: 48px; }
+  .mobile-runtime-dialog .trpg-runtime-actions { flex-wrap: wrap; }
+  .mobile-creation-navigation { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px; padding: 10px 4px; background: #ede8dc; }
+  .mobile-creation-navigation .button { font-size: 12px; min-height: 44px; }
+  .dialog-content.trpg-character-creation-dialog .stepwise-character-card-wizard { overflow: visible; }
+  .stepwise-character-card-wizard .creation-dossier-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .stepwise-character-card-wizard .creation-dossier-tabs span { min-width: 0; min-height: 36px; font-size: 12px; }
+  .stepwise-character-card-wizard .creation-workbench { min-height: 0; display: block; }
+  .stepwise-character-card-wizard .creation-step-panel { padding: 18px 12px; }
+  .stepwise-character-card-wizard .creation-step-heading { flex-wrap: wrap; }
+  .stepwise-character-card-wizard .creation-identity-form, .stepwise-character-card-wizard .creation-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .stepwise-character-card-wizard input, .stepwise-character-card-wizard textarea, .stepwise-character-card-wizard select { font-size: 16px; }
+  .stepwise-character-card-wizard .creation-step-intro { font-size: 13px; line-height: 1.85; }
+  .stepwise-character-card-wizard .creation-roll-callout { flex-wrap: wrap; }
+  .stepwise-character-card-wizard .attribute-formula-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stepwise-character-card-wizard .age-adjustment-heading { flex-wrap: wrap; }
+  .stepwise-character-card-wizard .age-penalty-grid { grid-template-columns: minmax(0, 1fr); }
+  .stepwise-character-card-wizard .skill-budget-strip { position: sticky; top: 0; z-index: 5; padding: 8px 2px; box-shadow: 0 5px 12px #294f4912; }
+  .stepwise-character-card-wizard .skill-budget-strip span { flex-direction: column; align-items: center; gap: 4px; padding: 4px; }
+  .stepwise-character-card-wizard .skill-budget-strip small { font-size: 12px; }
+  .stepwise-character-card-wizard .creation-skill-search input { min-height: 44px; font-size: 16px; }
+  .stepwise-character-card-wizard .creation-skill-list { max-height: none; overflow: visible; }
+  .stepwise-character-card-wizard .creation-skill-list article { grid-template-columns: minmax(0, 1fr) 80px 36px; padding: 12px 8px; }
+  .stepwise-character-card-wizard .creation-skill-list article > span strong { white-space: normal; font-size: 13px; }
+  .stepwise-character-card-wizard .creation-skill-list article > span small { font-size: 12px; }
+  .stepwise-character-card-wizard .creation-skill-list input { min-height: 44px; font-size: 16px; }
+  .stepwise-character-card-wizard .creation-skill-list .skill-specialization { grid-column: 1 / -1; grid-row: 2; }
+  .stepwise-character-card-wizard .creation-primary-action .button { width: 100%; min-height: 48px; }
+  .stepwise-character-card-wizard .background-dossier-card header, .stepwise-character-card-wizard .weapon-editor-heading { flex-wrap: wrap; gap: 10px; }
+  .stepwise-character-card-wizard .weapon-selector-toolbar { display: grid; gap: 12px; }
+  .stepwise-character-card-wizard .weapon-selector-toolbar nav { flex-wrap: wrap; }
+  .stepwise-character-card-wizard .weapon-option-grid { grid-template-columns: minmax(0, 1fr); }
+  .mobile-creation-preview .creation-live-sheet { display: flex; height: auto; padding: 16px; border: 0; border-radius: 12px; }
+  .mobile-creation-preview .creation-live-sheet > header strong { white-space: normal; font-size: 20px; }
+  .mobile-creation-preview .creation-live-sheet > header span, .mobile-creation-preview .creation-live-sheet > section strong { font-size: 13px; }
+  .mobile-creation-preview .creation-live-sheet > section p { max-height: none; overflow: visible; font-size: 14px; line-height: 1.85; overflow-wrap: anywhere; }
+  .mobile-creation-preview .creation-abandon { min-height: 48px; font-size: 12px; }
+}
+
+/* First mobile edition: plain directory rows, one reading column, independent workflows. */
+@media (max-width: 767px) {
+  .mobile-tools-menu { display:block; }
+  .mobile-tools-intro, .mobile-binding-intro { padding:8px 0 18px; }
+  .mobile-tools-intro > small { font:10px/1.7 ui-monospace,monospace;letter-spacing:1.5px;color:#7a8177; }
+  .mobile-tools-intro h1,.mobile-binding-intro h1 { margin:12px 0 10px;font-size:28px;font-weight:600;letter-spacing:-.6px;line-height:1.35; }
+  .mobile-tools-intro p,.mobile-binding-intro p { margin:0;color:#777970;font-size:13px;line-height:1.8; }
+  .mobile-tools-menu > button { width:100%;min-height:76px;padding:15px 0;gap:12px;border:0;border-bottom:1px solid #dedbd2;border-radius:0;background:transparent;color:#252724;box-shadow:none; }
+  .mobile-tools-menu button > span { display:block; }
+  .mobile-tools-menu strong { display:block;font-size:15px;font-weight:550;line-height:1.5; }
+  .mobile-tools-menu small { display:block;font-size:12px;line-height:1.6;margin-top:4px;color:#777970; }
+  .mobile-tool-avatar { flex:0 0 46px;display:grid;place-items:center;width:46px;height:46px;border-radius:14px;background:#e4ece8;color:#294f49; }
+  .mobile-tools-menu > h3 { margin:23px 0 12px;min-height:30px;display:flex;align-items:center;font-size:16px; }
+  .mobile-tools-menu .mobile-tool-end strong { color:#8a3f48; }
+  .mobile-tools-menu > button > svg { color:#777970;width:14px; }
+  .mobile-tools-notice { font-size:13px!important;line-height:1.8!important;color:#44614f!important;padding:14px;border-radius:11px;background:#e4ece8;margin:16px 0!important;overflow-wrap:anywhere; }
+  .trpg-tools .trpg-runtime-dashboard { padding:0;border:0;background:transparent;box-shadow:none; }
+  .trpg-tools .trpg-runtime-heading { margin:8px 0 16px; }
+  .trpg-tools .trpg-runtime-heading strong { font-size:16px; }
+  .trpg-tools .trpg-runtime-heading small { font-size:12px; }
+  .trpg-tools .trpg-runtime-list { gap:0; }
+  .trpg-tools .trpg-runtime-card { border:0;border-bottom:1px solid #dedbd2;border-radius:0;background:transparent; }
+  .trpg-tools .trpg-runtime-card-summary { min-height:76px;padding:15px 0;gap:12px; }
+  .trpg-tools .trpg-runtime-avatar { width:46px;height:46px;border-radius:14px;background-color:#e4ece8;color:#294f49; }
+  .trpg-tools .trpg-runtime-identity strong { font-size:15px;line-height:1.5; }
+  .trpg-tools .trpg-runtime-identity small { font-size:12px;line-height:1.6; }
+  .trpg-tools .trpg-runtime-mode { font-size:11px;white-space:normal; }
+  .trpg-tools .trpg-runtime-context { padding:0 0 15px 58px; }
+  .mobile-runtime-hero { text-align:center;padding:16px 0 22px; }
+  .mobile-runtime-portrait { display:inline-grid;place-items:center;width:76px;height:84px;border-radius:18px;background:#e4ece8 center/cover;color:#294f49;font:35px Georgia; }
+  .mobile-runtime-hero h1 { margin:12px 0 2px;font-size:28px;line-height:1.35;font-weight:600; }
+  .mobile-runtime-hero p { margin:4px 0;font-size:13px;color:#777970; }
+  .mobile-runtime-dialog .trpg-runtime-editor { display:grid;gap:17px; }
+  .mobile-runtime-dialog .trpg-runtime-field > span { font-size:13px;font-weight:550;margin-bottom:8px; }
+  .mobile-runtime-dialog .trpg-runtime-mode-switch { display:flex;background:#e8e7df;border-radius:10px;padding:3px;gap:3px; }
+  .mobile-runtime-dialog .trpg-runtime-mode-switch button { flex:1;min-height:40px;border-radius:8px;font-size:13px;background:transparent;color:#72786e; }
+  .mobile-runtime-dialog .trpg-runtime-mode-switch button.active { background:#fffefa;color:#294f49;box-shadow:0 2px 6px #22382b0a; }
+  .mobile-runtime-dialog .trpg-runtime-model-select { border-radius:10px;background:#fffefa;padding:12px;min-height:48px;line-height:1.6; }
+  .mobile-runtime-capacity { margin:12px 0;padding:17px;border:1px solid #dedbd2;border-radius:13px;background:#fbfaf6; }
+  .mobile-runtime-capacity > span { display:flex;align-items:center;justify-content:space-between;font-size:13px; }
+  .mobile-runtime-capacity strong { font-size:30px;font-weight:550; }.mobile-runtime-capacity .context-meter { margin-top:12px; }
+  .mobile-progress-archive > .button { width:100%;margin:7px 0; }
+  .mobile-progress-archive > h3 { margin:23px 0 12px;font-size:16px;line-height:1.5; }
+  .mobile-save-record { padding:17px;margin:12px 0;border:1px solid #dedbd2;border-radius:13px;background:#fbfaf6; }
+  .mobile-save-record > small { font:10px/1.7 ui-monospace,monospace;letter-spacing:1px;color:#7a8177; }
+  .mobile-save-record > h4 { font-size:16px;margin:10px 0 6px; }
+  .mobile-save-record p,.mobile-save-empty { font-size:13px;line-height:1.8;color:#777970; }
+  .mobile-save-record .button { width:100%; }.mobile-save-record .danger { color:#8a3f48; }
+  .mobile-save-record.automatic { padding:15px 0;border-width:0 0 1px;border-radius:0;background:transparent; }
+  .rollback-confirmation-dialog .rollback-confirmation-sidebar { display:contents; }
+  .rollback-confirmation-dialog .rollback-confirmation-summary { order:-1;padding:14px;border:0;border-radius:11px;background:#f0e1e2;color:#843d47; }
+  .rollback-confirmation-dialog .rollback-confirmation-summary strong { font-size:14px; }
+  .rollback-confirmation-dialog .rollback-confirmation-summary p { font-size:13px;line-height:1.8; }
+  .rollback-confirmation-dialog .rollback-chat-preview { background:transparent;border:0;border-radius:0;padding:0; }
+  .rollback-confirmation-dialog .rollback-preview-viewport { padding:0; }
+  .rollback-confirmation-dialog .rollback-preview-message p { background:transparent;line-height:1.85;font-size:16px;padding:0; }
+  .rollback-confirmation-dialog .rollback-investigator-panel { padding:0;border:0;border-radius:0;background:transparent; }
+  .rollback-confirmation-dialog .rollback-investigator-list article { padding:15px 0;border:0;border-bottom:1px solid #dedbd2;border-radius:0; }
+  .rollback-confirmation-dialog .rollback-investigator-avatar { width:46px;height:46px;border-radius:14px; }
+  .rollback-confirmation-dialog .rollback-investigator-list strong { font-size:15px; }.rollback-confirmation-dialog .rollback-investigator-list dt,.rollback-confirmation-dialog .rollback-investigator-list dd { font-size:12px; }
+  .trpg-binding-dialog .trpg-binding-list-pane { padding:0;border:0;background:transparent; }
+  .trpg-binding-dialog .character-choice-list,.trpg-tools .character-choice-list { gap:0; }
+  .trpg-binding-dialog .choice-row,.trpg-tools .choice-row { min-height:76px;padding:15px 0;gap:12px;border:0;border-bottom:1px solid #dedbd2;border-radius:0;background:transparent!important;color:#252724;box-shadow:none; }
+  .trpg-binding-dialog .choice-row strong,.trpg-tools .choice-row strong { font-size:15px;font-weight:550;line-height:1.5; }
+  .trpg-binding-dialog .choice-row small,.trpg-tools .choice-row small { font-size:12px;line-height:1.6;margin-top:4px;color:#777970; }
+  .trpg-binding-dialog .character-avatar.small,.trpg-tools .character-avatar.small { width:46px;height:46px;flex:0 0 46px;border-radius:14px;background-color:#e4ece8;color:#294f49; }
+  .trpg-binding-dialog .binding-state,.trpg-tools .binding-state { font-size:11px; }
+  .mobile-binding-later { width:100%; }.mobile-binding-help { font-size:13px;line-height:1.8;color:#777970; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-picker,.trpg-tools .creation-method-picker { min-height:0;align-content:start;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-heading,.trpg-tools .creation-method-heading { display:block;margin:0;padding:8px 0 20px;border:0; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-heading strong,.trpg-tools .creation-method-heading strong { font-size:22px;line-height:1.4;display:block;margin:8px 0;overflow-wrap:anywhere; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-heading p,.trpg-tools .creation-method-heading p { font-size:13px;color:#777970;line-height:1.8; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-heading em,.trpg-tools .creation-method-heading em { display:none; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-grid,.trpg-tools .creation-method-grid { display:block; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-card,.trpg-tools .creation-method-card { position:relative;display:grid;grid-template-columns:40px minmax(0,1fr);align-items:center;width:100%;min-height:90px;gap:12px;padding:15px 20px 15px 0;border:0;border-bottom:1px solid #dedbd2;border-radius:0;background:transparent;color:#252724;box-shadow:none;text-align:left; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-icon,.trpg-tools .creation-method-icon { display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:#e4ece8;color:#294f49;font:18px Georgia; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-copy,.trpg-tools .creation-method-copy { display:block;min-width:0;margin:0; }.creation-method-copy > small,.creation-method-action { display:none!important; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-copy strong,.trpg-tools .creation-method-copy strong { font-size:15px;line-height:1.5;font-weight:600;margin:0; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-copy p,.trpg-tools .creation-method-copy p { font-size:12px;line-height:1.6;margin:4px 0 0;color:#777970; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-card::after,.trpg-tools .creation-method-card::after { content:'→';position:absolute;right:0;top:50%;transform:translateY(-50%);color:#777970; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-footnote,.trpg-tools .creation-method-footnote { font-size:12px;line-height:1.7;margin:18px 0 0;padding:12px 14px;border-radius:10px;background:#e4ece8;color:#44614f;text-align:left; }
+  .dialog-content.trpg-character-creation-dialog .creation-import-editor,.dialog-content.trpg-character-creation-dialog .creation-import-assistant { padding:0;border:0;background:transparent; }
+  .dialog-content.trpg-character-creation-dialog .import-workbench-heading,.dialog-content.trpg-character-creation-dialog .import-process-strip { display:none; }
+  .dialog-content.trpg-character-creation-dialog .creation-import-editor textarea { min-height:230px;border-radius:10px;line-height:1.6; }
+  .mobile-import-tabs { display:flex;background:#e8e7df;border-radius:10px;padding:3px;gap:3px;margin:12px 0 16px; }
+  .mobile-import-tabs button { flex:1;min-width:0;min-height:40px;border:0;border-radius:8px;background:transparent;color:#72786e;font-size:13px;padding:5px; }.mobile-import-tabs button[aria-pressed=true] { background:#fffefa;color:#294f49;font-weight:600;box-shadow:0 2px 6px #22382b0a; }
+  .dialog-content.trpg-character-creation-dialog .import-result-status,.dialog-content.trpg-character-creation-dialog .import-required-checks,.dialog-content.trpg-character-creation-dialog .import-recognized-preview,.dialog-content.trpg-character-creation-dialog .import-optional-checks { margin:12px 0;padding:17px;border:1px solid #dedbd2;border-radius:13px;background:#fbfaf6; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-card::before,
+  .trpg-tools .creation-method-card::before { display:none; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-card:hover:not(:disabled),
+  .trpg-tools .creation-method-card:hover:not(:disabled) { transform:none;box-shadow:none;background:#e4ece84d; }
+  .dialog-content.trpg-character-creation-dialog .creation-method-card:disabled { opacity:.5; }
+  .dialog-content.trpg-character-creation-dialog .creation-import-workbench,
+  .dialog-content.trpg-character-creation-dialog .creation-import-layout { min-height:0;background:transparent;box-shadow:none; }
+  .dialog-content.trpg-character-creation-dialog .creation-import-editor textarea { width:100%;height:clamp(220px,38dvh,320px);min-height:220px;padding:12px;font-size:16px;background:#fffefa; }
+  .dialog-content.trpg-character-creation-dialog .import-format-help { grid-template-columns:minmax(0,1fr);gap:4px;padding:12px;border:0;border-radius:10px;background:#e4ece8; }
+  .dialog-content.trpg-character-creation-dialog .import-format-help strong { font-size:12px;color:#294f49; }
+  .dialog-content.trpg-character-creation-dialog .import-editor-meta { flex-wrap:wrap;gap:6px;font-size:11px; }
+  .dialog-content.trpg-character-creation-dialog .import-recognized-preview > div { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .dialog-content.trpg-character-creation-dialog .import-recognized-preview > div strong { font-size:20px;white-space:nowrap; }
+  .dialog-content.trpg-character-creation-dialog .import-required-checks article > span,
+  .dialog-content.trpg-character-creation-dialog .import-result-status > span { min-width:0;overflow-wrap:anywhere; }
+  .dialog-content.trpg-character-creation-dialog .auto-source-grid { margin-top:12px;gap:0; }
+  .dialog-content.trpg-character-creation-dialog .auto-source-grid small { white-space:normal;overflow:visible;line-height:1.6; }
+  .dialog-content.trpg-character-creation-dialog .auto-dice-disclosure { padding:14px;gap:10px;border:0;background:#f2e8d5; }
+  .dialog-content.trpg-character-creation-dialog .auto-dice-disclosure strong { font-size:13px; }
+  .dialog-content.trpg-character-creation-dialog .auto-dice-disclosure small { font-size:12px;line-height:1.7; }
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-note .dossier-stamp { position:static;display:block;padding:0;border:0;transform:none;font-size:12px;color:#777970;letter-spacing:0; }
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-note > small { margin-top:12px;font-size:12px; }
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-note > strong { font-size:20px; }
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-note dl { margin-top:12px; }
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-note dt,
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-note dd { font-size:12px; }
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-note p { margin-top:12px;font-size:12px;line-height:1.7; }
+  .dialog-content.trpg-character-creation-dialog .auto-generation-loading { min-height:280px;padding:24px 16px;border:0;background:transparent; }
+  .dialog-content.trpg-character-creation-dialog .auto-generation-loading strong { font-size:16px; }
+  .dialog-content.trpg-character-creation-dialog .auto-generation-loading p { font-size:13px;line-height:1.8; }
+  .dialog-content.trpg-character-creation-dialog .auto-loading-steps { flex-wrap:wrap;justify-content:center; }
+  .dialog-content.trpg-character-creation-dialog .auto-loading-steps span { font-size:11px; }
+  .mobile-review-options { margin:15px 0;padding:12px 14px;border:1px solid #dedbd2;border-radius:10px;font-size:12px;color:#777970; }.mobile-review-options summary { min-height:22px; }.mobile-review-options .button { width:100%;margin-top:12px; }
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-layout { display:block;min-height:0; }.dialog-content.trpg-character-creation-dialog .auto-creation-briefing { min-height:0;border:0;border-radius:0;background:transparent;box-shadow:none; }.dialog-content.trpg-character-creation-dialog .auto-briefing-main { padding:0;background:transparent; }.dialog-content.trpg-character-creation-dialog .auto-briefing-note { margin-top:16px;padding:17px;border:1px solid #dedbd2;border-radius:13px;background:#fbfaf6; }
+  .dialog-content.trpg-character-creation-dialog .auto-creation-briefing .creation-process-strip,.dialog-content.trpg-character-creation-dialog .auto-creation-briefing .creation-workbench-actions { display:none; }.dialog-content.trpg-character-creation-dialog .auto-source-grid { grid-template-columns:1fr; }.dialog-content.trpg-character-creation-dialog .auto-source-grid article { border:0;border-bottom:1px solid #dedbd2;background:transparent;padding:15px 0;border-radius:0; }.dialog-content.trpg-character-creation-dialog .auto-source-grid strong { font-size:15px; }.dialog-content.trpg-character-creation-dialog .auto-source-grid small { font-size:12px; }
+  .dialog-content.trpg-character-creation-dialog .auto-briefing-main .creation-workbench-heading h3 { font-size:22px;line-height:1.4;margin:8px 0;overflow-wrap:anywhere; }.dialog-content.trpg-character-creation-dialog .auto-briefing-main .creation-workbench-heading p { font-size:13px;line-height:1.8; }
+}
+@media (max-width: 767px) {
+  .dialog-content.mobile-binding-workflow > .dialog-body { display:flex;flex-direction:column;overflow:hidden;padding:0; }
+  .mobile-binding-workflow .trpg-binding-layout { flex:1;min-height:0;display:flex;flex-direction:column; }
+  .mobile-binding-workflow .trpg-binding-card-pane { flex:1;min-height:0;display:flex;flex-direction:column; }
+  .mobile-binding-workflow .stepwise-character-card-wizard { flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden; }
+  .mobile-binding-workflow .stepwise-character-card-wizard .creation-workbench { flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain; }
+  .mobile-binding-workflow .stepwise-character-card-wizard .creation-step-panel { padding:0 18px 24px;background:transparent;border:0;border-radius:0; }
+  .mobile-wizard-progress { flex:none;padding:18px 18px 12px;color:#777970;font-size:12px; }
+  .mobile-wizard-progress > div { display:flex;justify-content:space-between;align-items:center;gap:12px; }
+  .mobile-wizard-progress span { color:#294f49;font-size:13px;font-weight:550; }
+  .mobile-wizard-progress nav { display:flex;gap:5px;margin-top:13px; }
+  .mobile-wizard-progress nav i { flex:1;height:3px;background:#294f49;border-radius:3px; }.mobile-wizard-progress nav i.current { background:#b98542; }.mobile-wizard-progress nav i.later { background:#dedbd2; }
+  .stepwise-character-card-wizard .creation-primary-action { display:none; }
+  .stepwise-character-card-wizard .creation-identity-form { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px; }
+  .stepwise-character-card-wizard .creation-identity-form > * { grid-column:1/-1; }.stepwise-character-card-wizard .creation-identity-form .mobile-age,.stepwise-character-card-wizard .creation-identity-form .mobile-sex { grid-column:auto; }
+  .stepwise-character-card-wizard .creation-identity-form > .field { margin:17px 0; }
+  .stepwise-character-card-wizard .creation-step-intro { font-size:13px;line-height:1.8; }
+  .stepwise-character-card-wizard .attribute-formula-grid { grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border:1px solid #dedbd2;border-radius:12px;overflow:hidden;margin:14px 0 20px; }
+  .stepwise-character-card-wizard .attribute-formula-grid > span { padding:10px 3px;border:0;border-right:1px solid #dedbd2;border-bottom:1px solid #dedbd2;border-radius:0;background:#fbfaf6; }.stepwise-character-card-wizard .attribute-formula-grid b { font-size:15px; }.stepwise-character-card-wizard .attribute-formula-grid small { font-size:10px; }
+  .stepwise-character-card-wizard .creation-roll-callout { padding:17px;border-radius:13px;border:1px solid #dedbd2;background:#fbfaf6; }.stepwise-character-card-wizard .creation-roll-callout > svg { display:none; }.stepwise-character-card-wizard .creation-roll-callout > .button { display:none; }
+  .stepwise-character-card-wizard .skill-budget-strip { top:0;gap:10px;background:#f4f1ea;box-shadow:none; }
+  .stepwise-character-card-wizard .skill-budget-strip > span { border:1px solid #dedbd2;border-radius:11px;padding:13px;background:#fbfaf6; }.stepwise-character-card-wizard .skill-budget-strip small { font-size:11px; }.stepwise-character-card-wizard .skill-budget-strip strong { font-size:25px;font-weight:550; }
+  .stepwise-character-card-wizard .creation-skill-list { display:grid;gap:12px; }
+  .stepwise-character-card-wizard .creation-skill-list article { display:grid;grid-template-columns:minmax(0,1fr) 78px 56px;gap:10px;padding:17px;border:1px solid #dedbd2;border-radius:13px;background:#fbfaf6; }
+  .stepwise-character-card-wizard .creation-skill-list article > span { grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:10px; }.stepwise-character-card-wizard .creation-skill-list article > span strong { font-size:14px; }.stepwise-character-card-wizard .creation-skill-list article > span small { font-size:11px; }
+  .stepwise-character-card-wizard .creation-skill-list article > label { display:contents; }.stepwise-character-card-wizard .creation-skill-list article > label small { grid-column:1;font-size:13px;color:#777970;align-self:center; }.stepwise-character-card-wizard .creation-skill-list article > label input { grid-column:2;width:78px;min-width:0;text-align:center; }.stepwise-character-card-wizard .creation-skill-list article > b { grid-column:3;font-size:14px;align-self:center; }.stepwise-character-card-wizard .creation-skill-list .skill-specialization { grid-column:1/-1;grid-row:auto;width:100%; }
+  .stepwise-character-card-wizard .background-progress { padding:14px;border-radius:11px;background:#e4ece8;margin:16px 0; }.stepwise-character-card-wizard .background-progress small { font-size:12px;line-height:1.7; }
+  .stepwise-character-card-wizard .background-dossier-card { padding:0;border:0;background:transparent;margin:17px 0;border-radius:0; }.stepwise-character-card-wizard .background-dossier-card header strong { font-size:13px; }.stepwise-character-card-wizard .background-dossier-card textarea { padding:12px;border-radius:10px;line-height:1.6; }
+  .mobile-wizard-row { display:flex;align-items:center;gap:12px;width:100%;min-height:76px;padding:15px 0;border:0;border-bottom:1px solid #dedbd2;background:transparent;text-align:left; }.mobile-wizard-row > span { flex:1;min-width:0; }.mobile-wizard-row strong { display:block;font-size:15px;font-weight:550;line-height:1.5; }.mobile-wizard-row small { display:block;margin-top:4px;font-size:12px;line-height:1.6;color:#777970; }.mobile-wizard-row > svg { transform:rotate(-90deg);color:#777970; }
+  .mobile-wizard-preview { width:100%;margin:18px 0 0; }
+  .mobile-wizard-footer { flex:none;display:flex;gap:10px;padding:12px 18px max(12px,env(safe-area-inset-bottom));border-top:1px solid #dedbd2;background:#fbfaf6; }.mobile-wizard-footer > .button { flex:1;min-height:46px;border-radius:11px; }
+  .mobile-equipment-picker .weapon-selector-toolbar { display:block; }.mobile-equipment-picker .weapon-selector-toolbar nav { display:flex;gap:3px;background:#e8e7df;padding:3px;border-radius:10px; }.mobile-equipment-picker .weapon-selector-toolbar nav button { flex:1;min-height:40px;border-radius:8px;font-size:13px; }.mobile-equipment-picker .weapon-selector-toolbar nav button.active { background:#fffefa;color:#294f49; }.mobile-equipment-picker .weapon-selector-toolbar > label { margin:15px 0;min-height:48px;background:#fffefa;border:1px solid #dedbd2;border-radius:10px; }.mobile-equipment-picker .weapon-selector-toolbar input { min-width:0;font-size:16px; }
+  .mobile-equipment-picker .weapon-option-grid { display:block; }.mobile-equipment-picker .weapon-option-card { margin:12px 0;padding:17px;border-radius:13px;background:#fbfaf6; }.mobile-equipment-picker .weapon-option-title strong { font-size:15px; }.mobile-equipment-picker .weapon-option-title small,.mobile-equipment-picker .weapon-option-stats small,.mobile-equipment-picker .weapon-option-risks { font-size:12px;line-height:1.6; }
+  .mobile-background-detail .background-dossier-card { margin:17px 0;padding:0;border:0;background:transparent; }.mobile-background-detail .background-dossier-card header { display:flex;align-items:center;justify-content:space-between;gap:12px; }.mobile-background-detail .background-dossier-card header strong { font-size:16px; }.mobile-background-detail .key-connection-choice { font-size:13px;padding:12px 0; }
+}
+
+@media (max-width:767px) { .mobile-tools-focus-heading { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0; } }
+
+@media(max-width:767px) { .mobile-wizard-attributes { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:14px 0 20px;border:1px solid #dedbd2;border-radius:12px;overflow:hidden; }.mobile-wizard-attributes>div { text-align:center;padding:10px 3px;border-right:1px solid #dedbd2;border-bottom:1px solid #dedbd2;background:#fbfaf6; }.mobile-wizard-attributes>div:nth-child(4n){border-right:0}.mobile-wizard-attributes>div:nth-last-child(-n+4){border-bottom:0}.mobile-wizard-attributes small{display:block;font-size:11px;color:#777970}.mobile-wizard-attributes strong{display:block;font-size:21px;font-weight:550;margin-top:4px} }
+
+/* Override the later 760px legacy fallback that caps the roster at 210px. */
+@media (max-width: 767px) {
+  .dialog-content .trpg-tools .trpg-tools-card-layout .trpg-binding-targets,
+  .dialog-content.trpg-character-creation-dialog .trpg-binding-layout .trpg-binding-targets {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    flex: 0 0 auto;
+    grid-auto-rows: auto;
+  }
+  .dialog-content .trpg-tools .trpg-tools-card-layout .trpg-binding-list-pane,
+  .dialog-content.trpg-character-creation-dialog .trpg-binding-layout .trpg-binding-list-pane {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    flex: 0 0 auto;
+  }
+}
+
+/* A wizard owns one viewport; inherited desktop panels must not become extra scrollers. */
+@media (max-width: 767px) {
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow[data-mobile-presentation="page"] > .dialog-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0%;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .trpg-binding-layout,
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .trpg-binding-card-pane,
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .stepwise-character-card-wizard {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0%;
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    gap: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: hidden;
+  }
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .creation-workbench {
+    display: block;
+    flex: 1 1 0%;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .creation-step-panel {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    padding: 0 18px 24px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+  }
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .mobile-wizard-footer {
+    flex: 0 0 auto;
+    width: 100%;
+    margin: 0;
+    border-radius: 0;
+  }
+}
+@media (max-width: 767px) {
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .creation-background-step,
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .creation-skill-list,
+  .dialog-content.mobile-equipment-picker .weapon-option-grid {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    padding-right: 0;
+    overflow: visible;
+  }
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .mobile-wizard-preview,
+  .dialog-content.trpg-character-creation-dialog.mobile-binding-workflow .creation-busy {
+    position: static;
+  }
+}
+@media (max-width: 767px) {
+  .dialog-content .trpg-tools .mobile-save-point { display:flex;align-items:center;width:100%;min-height:76px;gap:12px;padding:15px 0;border:0;border-bottom:1px solid #dedbd2;border-radius:0;background:transparent;text-align:left;color:#252724; }
+  .mobile-save-point-icon { display:grid;place-items:center;flex:0 0 46px;width:46px;height:46px;border-radius:14px;background:#e4ece8;color:#294f49; }.mobile-save-point>span:nth-child(2) { flex:1;min-width:0; }.mobile-save-point strong { display:block;font-size:15px;font-weight:550;line-height:1.5; }.mobile-save-point small { display:block;margin-top:4px;font-size:12px;line-height:1.6;color:#777970;overflow-wrap:anywhere; }.mobile-save-point>svg { color:#777970;flex:none; }.mobile-save-point .danger { color:#8a3f48; }
+  .dialog-content.mobile-restore-dialog > .dialog-body { display:block; }
+  .dialog-content.mobile-restore-dialog .dialog-footer > .button { flex:1;min-width:0; }
+  .dialog-content .trpg-tools .mobile-history { height:auto;max-height:none;overflow:visible; }
+}

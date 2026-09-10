@@ -91,7 +91,7 @@ async function renderCharacters(options: {
   const app = createSSRApp({
     components: { BaseDialog, Plus: icon, Trash2: icon, ImageUp: icon, Search: icon },
     setup: () => ({
-      activeTab: 'characters', canFullEdit: options.canFullEdit ?? true,
+      activeTab: 'characters', isMobile: false, mobileParserTab: 'source', canFullEdit: options.canFullEdit ?? true,
       moduleForm: { characters }, characterDialogOpen: options.dialogOpen ?? false,
       isSaving: false,
       characterEditorMode: options.editorMode || 'choose', characterDialogTitle: '新建模组角色卡',
@@ -119,7 +119,7 @@ async function renderCharacters(options: {
   return renderToString(app)
 }
 
-async function renderCreatingOverview() {
+async function renderCreatingOverview(isMobile = false) {
   const source = await readFile(new URL('./CocModuleLibrary.vue', import.meta.url), 'utf8')
   const overview = source.match(/(<section v-if="activeTab === 'overview'"[\s\S]*?<\/section>)/)?.[1]
   assert.ok(overview, 'CocModuleLibrary should contain the overview form')
@@ -136,7 +136,7 @@ async function renderCreatingOverview() {
       ImageUp: icon,
     },
     setup: () => ({
-      activeTab: 'overview', canFullEdit: true, creating: true, isDefault: false, moduleForm,
+      activeTab: 'overview', canFullEdit: true, creating: true, isDefault: false, isMobile, moduleForm,
       uploadingCover: false, uploadCoverImage: () => undefined,
     }),
     render,
@@ -145,7 +145,7 @@ async function renderCreatingOverview() {
   return renderToString(app)
 }
 
-async function renderEditableMaterials(imageUrl = '') {
+async function renderEditableMaterials(imageUrl = '', isMobile = false) {
   const source = await readFile(new URL('./CocModuleLibrary.vue', import.meta.url), 'utf8')
   const materials = source.match(/(<section v-else-if="activeTab === 'materials'"[\s\S]*?<\/section>)/)?.[1]
     ?.replace('v-else-if', 'v-if')
@@ -159,7 +159,7 @@ async function renderEditableMaterials(imageUrl = '') {
   const app = createSSRApp({
     components: { ImageUp: icon, Plus: icon, Trash2: icon },
     setup: () => ({
-      activeTab: 'materials', canFullEdit: true, moduleForm, uploadingMaterial: null,
+      activeTab: 'materials', canFullEdit: true, moduleForm, uploadingMaterial: null, isMobile, mobileEntry: isMobile ? 0 : null,
       uploadMaterialImage: () => undefined, removeMaterialImage: () => undefined,
       removeAt: () => undefined, addMaterial: () => undefined,
     }),
@@ -169,7 +169,7 @@ async function renderEditableMaterials(imageUrl = '') {
   return renderToString(app)
 }
 
-async function renderModuleTabs() {
+async function renderModuleTabs(options: { showManagement?: boolean; locked?: boolean } = {}) {
   const source = await readFile(new URL('./CocModuleLibrary.vue', import.meta.url), 'utf8')
   const template = source.match(/<template>([\s\S]*)<\/template>/)?.[1]
   assert.ok(template, 'CocModuleLibrary should contain a template')
@@ -183,8 +183,9 @@ async function renderModuleTabs() {
   const app = createSSRApp({
     components: { Download: icon, UnlockKeyhole: icon, Save: icon },
     setup: () => ({
-      moduleForm: { name: '雾中来客' }, creating: false, isDefault: false, isLocked: false,
-      activeTab: 'overview', selectedId: 7, canFullEdit: true, busy: false, isSaving: false,
+      moduleForm: { name: '雾中来客' }, creating: false, isDefault: false, isLocked: options.locked ?? false,
+      showModuleManagementActions: options.showManagement ?? true,
+      activeTab: 'overview', selectedId: 7, canFullEdit: !options.locked, busy: false, isSaving: false,
       saveStatus: { kind: 'saved', text: '已保存' }, switchTab: () => undefined,
       exportModule: () => undefined, saveModule: () => undefined,
     }),
@@ -364,4 +365,99 @@ test('uses the character creation skill-list pattern for final values', async ()
   assert.match(html, /射击[\s\S]*?填写专攻/)
   assert.doesNotMatch(html, />选择技能</)
   assert.doesNotMatch(html, /添加技能/)
+})
+
+test('hides module management actions and the empty toolbar in restricted mobile sections', async () => {
+  const html = await renderModuleTabs({ showManagement: false, locked: true })
+  assert.doesNotMatch(html, /导出|解锁|module-tabs/)
+  const directory = await renderModuleTabs({ showManagement: true, locked: true })
+  assert.match(directory, /导出/)
+  assert.match(directory, /解锁/)
+})
+
+test('keeps saving available in editable mobile sections without export', async () => {
+  const html = await renderModuleTabs({ showManagement: false })
+  assert.match(html, /保存全部/)
+  assert.doesNotMatch(html, /导出|解锁/)
+})
+
+
+test('prioritizes the original mobile module fields and keeps additional metadata available', async () => {
+  const html = await renderCreatingOverview(true)
+  assert.ok(html.indexOf('模组名称') < html.indexOf('简介'))
+  assert.ok(html.indexOf('简介') < html.indexOf('可用于新建跑团'))
+  assert.ok(html.indexOf('可用于新建跑团') < html.indexOf('更多基本资料'))
+  assert.match(html, /<details[^>]*>[\s\S]*?更多基本资料[\s\S]*?作者[\s\S]*?调查员创建说明[\s\S]*?<\/details>/)
+  assert.doesNotMatch(html, /<details[^>]*\sopen(?:=|>)/)
+})
+
+async function renderMobileCollection(tab: 'locations' | 'clues' | 'materials', selected: number | null) {
+  const source = await readFile(new URL('./CocModuleLibrary.vue', import.meta.url), 'utf8')
+  const match = source.match(new RegExp(`(<section v-else-if="activeTab === '${tab}'"[\\s\\S]*?<\\/section>)`))?.[1]
+  assert.ok(match)
+  const render = new Function('Vue', compile(match.replace('v-else-if', 'v-if'), { mode: 'function' }).code)(VueRuntime)
+  const icon = { render: () => h('span') }
+  const moduleForm = {
+    locations: [{ id: 1, name: '阅览室', summary: '旧书馆', content: '地点正文内容' }],
+    clues: [{ id: 1, title: '借阅名册', content: '线索正文内容', important: true }],
+    materials: [{ id: 1, title: '旧报纸', imageUrl: '/newspaper.png', description: '图片说明内容' }],
+  }
+  const app = createSSRApp({
+    components: { ChevronRight: icon, Trash2: icon, ImageUp: icon, Plus: icon, Save: icon },
+    setup: () => ({
+      activeTab: tab, isMobile: true, mobileEntry: selected, moduleForm,
+      canFullEdit: false, canRestrictedEdit: false, isDefault: true, uploadingMaterial: null,
+      openMobileEntry: () => undefined,
+    }),
+    render,
+  })
+  app.config.warnHandler = () => undefined
+  return renderToString(app)
+}
+
+test('mobile location, clue and material pages render either list rows or a single detail', async () => {
+  for (const tab of ['locations', 'clues', 'materials'] as const) {
+    const list = await renderMobileCollection(tab, null)
+    assert.match(list, /class="mobile-module-entry-title"/)
+    assert.doesNotMatch(list, /<input|<textarea|<img/)
+    const detail = await renderMobileCollection(tab, 0)
+    assert.doesNotMatch(detail, /class="mobile-module-entry-title"/)
+    if (tab === 'materials') {
+      assert.match(detail, /<img src="\/newspaper.png"/)
+      assert.match(detail, /图片说明内容/)
+      assert.doesNotMatch(detail, /<h2|<input|<textarea/)
+    } else {
+      assert.match(detail, /<textarea/)
+    }
+  }
+})
+
+
+test('mobile material detail displays the image without replacement or overlay controls', async () => {
+  const html = await renderEditableMaterials('/uploads/handout.png', true)
+  assert.match(html, /<img src="\/uploads\/handout.png" alt="旧报纸">/)
+  assert.doesNotMatch(html, /material-image-actions|替换|删除/)
+  assert.match(await renderEditableMaterials('', true), /上传图片/)
+})
+
+test('mobile host settings render only the selected field while desktop retains every field', async () => {
+  const source = await readFile(new URL('./CocModuleLibrary.vue', import.meta.url), 'utf8')
+  const section = source.match(/(<section v-else-if="activeTab === 'context'"[\s\S]*?<\/section>)/)?.[1]
+    ?.replace('v-else-if', 'v-if').replaceAll(' as const', '')
+  assert.ok(section)
+  const render = new Function('Vue', compile(section, { mode: 'function' }).code)(VueRuntime)
+  const fields = ['truthBackground', 'investigatorIntro', 'timeline', 'specialRules', 'keeperGuidance', 'endingContent', 'extraContent']
+  for (const contextField of fields) {
+    const html = await renderToString(createSSRApp({ render, setup: () => ({
+      activeTab: 'context', isMobile: true, canFullEdit: false, contextField,
+      moduleForm: { context: Object.fromEntries(fields.map(key => [key, `content-${key}`])) },
+    }) }))
+    assert.equal((html.match(/<textarea/g) || []).length, 1)
+    assert.match(html, new RegExp(`<textarea[^>]*disabled[^>]*>content-${contextField}</textarea>`))
+    for (const other of fields.filter(key => key !== contextField)) assert.ok(!html.includes(`content-${other}`))
+  }
+  const desktop = await renderToString(createSSRApp({ render, setup: () => ({
+    activeTab: 'context', isMobile: false, canFullEdit: true, contextField: 'specialRules', moduleForm: { context: {} },
+  }) }))
+  assert.equal((desktop.match(/<textarea/g) || []).length, 7)
 })

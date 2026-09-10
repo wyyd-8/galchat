@@ -87,18 +87,18 @@ export async function loadBindingTargetContent<TCard, TDraft>(
 
 export function toggleParticipantSelection(
   selectedIds: number[],
-  _previewId: number | null,
+  previewId: number | null,
   clickedId: number,
 ): ParticipantSelection {
   if (selectedIds.includes(clickedId)) {
     return {
       selectedIds: selectedIds.filter((id) => id !== clickedId),
-      previewId: null,
+      previewId,
     }
   }
   return {
     selectedIds: [...selectedIds, clickedId],
-    previewId: clickedId,
+    previewId,
   }
 }
 

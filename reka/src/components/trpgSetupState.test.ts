@@ -29,17 +29,17 @@ test('allows creating a TRPG run without selecting AI investigators', () => {
   assert.equal(canCreateTrpgRun('孤身调查', 3, true), false)
 })
 
-test('adds multiple investigators and previews the most recently selected one', () => {
-  const first = toggleParticipantSelection([], null, 11)
+test('selecting investigators preserves the independently viewed profile', () => {
+  const first = toggleParticipantSelection([], 33, 11)
   const second = toggleParticipantSelection(first.selectedIds, first.previewId, 22)
 
-  assert.deepEqual(second, { selectedIds: [11, 22], previewId: 22 })
+  assert.deepEqual(second, { selectedIds: [11, 22], previewId: 33 })
 })
 
-test('clears the preview when any selected investigator is deselected', () => {
+test('deselecting an investigator preserves the viewed profile', () => {
   const result = toggleParticipantSelection([11, 22], 22, 11)
 
-  assert.deepEqual(result, { selectedIds: [22], previewId: null })
+  assert.deepEqual(result, { selectedIds: [22], previewId: 22 })
 })
 
 test('builds one player target followed by only the selected AI investigators', () => {

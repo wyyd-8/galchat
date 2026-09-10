@@ -655,14 +655,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .trpg-setup-steps > span.active { color: var(--pine); }
 .trpg-setup-steps > span.active b, .trpg-setup-steps > span.complete b { color: #fff; border-color: var(--pine); background: var(--pine); }
 .trpg-setup-steps > i { height: 1px; background: var(--line); }
-.trpg-participant-picker-layout { min-height: 420px; display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 26px; }
-.trpg-participant-list-pane, .trpg-participant-preview-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .trpg-participant-list { min-height: 0; padding-right: 3px; overflow-y: auto; }
-.trpg-participant-list .choice-row { grid-template-columns: auto minmax(0, 1fr) auto; }
-.participant-selected-mark { width: 21px; height: 21px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--pine); font-size: 10px; }
-.trpg-participant-preview-pane { padding-left: 24px; border-left: 1px solid var(--line); }
-.participant-preview-note { margin-top: auto; padding: 12px; border-radius: 9px; display: grid; gap: 4px; color: var(--muted); background: var(--pine-soft); font-size: 9px; line-height: 1.6; }
-.participant-preview-note strong { color: var(--pine); font-size: 10px; }
 .binding-empty { min-height: 230px; padding: 24px; border: 1px dashed var(--line-strong); border-radius: 10px; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--muted); text-align: center; }
 .binding-empty strong { color: var(--ink); font-size: 12px; }
 .binding-empty span { max-width: 250px; font-size: 9px; line-height: 1.6; }
@@ -1851,7 +1844,6 @@ button.sidebar-recent-item:hover { background: #efede6; }
 }
 
 @media (min-width: 980px) {
-  .trpg-participant-dialog { width: 940px; }
   .trpg-binding-dialog { width: 960px; }
   .character-dialog-moving { left: calc(50% - 470px); transform: translateY(-50%); transition-duration: 180ms; }
   .character-dialog-expanded { width: 940px; left: calc(50% - 470px); transform: translateY(-50%); }
@@ -1921,12 +1913,12 @@ button.sidebar-recent-item:hover { background: #efede6; }
   .model-api-diagnostic { align-items: flex-start; flex-direction: column; gap: 5px; }
   .model-api-curl-actions { align-items: stretch; flex-direction: column; }
   .model-api-curl-actions .button { width: 100%; }
-  .trpg-participant-picker-layout, .trpg-binding-layout { grid-template-columns: 1fr; }
+  .trpg-binding-layout { grid-template-columns: 1fr; }
   .trpg-character-creation-dialog .trpg-binding-layout { grid-template-columns: 1fr; }
   .creation-workbench { grid-template-columns: 1fr; }
   .auto-review-workbench { grid-template-columns: 1fr; }
   .creation-live-sheet { border-top: 1px solid #d8d1c2; border-left: 0; }
-  .trpg-participant-preview-pane, .trpg-binding-card-pane { min-height: 260px; padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+  .trpg-binding-card-pane { min-height: 260px; padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .trpg-setup-steps { gap: 5px; }
   .trpg-setup-steps > span { font-size: 0; }
   .trpg-setup-steps > span b { font-size: 9px; }
@@ -2017,4 +2009,35 @@ button.sidebar-recent-item:hover { background: #efede6; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* Companion history in the TRPG creation dialog. */
+.trpg-participant-dialog { width: min(calc(100vw - 40px), 900px); }
+.trpg-participant-dialog .dialog-header { padding: 22px 28px 16px; }
+.trpg-participant-dialog .dialog-body { padding: 6px 28px 0; }
+.trpg-participant-dialog .trpg-setup-steps { margin-bottom: 18px; }
+.trpg-participant-dialog .trpg-setup-steps > span { font-size: 11px; }
+.trpg-participant-dialog .trpg-setup-steps > span b { width: 20px; height: 20px; font-size: 10px; }
+.trpg-participant-dialog .dialog-title { font-size: 20px; }
+.trpg-participant-dialog .dialog-description { font-size: 12px; }
+.companion-party { display: flex; flex: 1; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; margin-right: auto; font-size: 12px; }
+.companion-party-label { color: var(--muted); }
+.companion-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 7px; border: 0; border-radius: 5px; color: var(--pine); background: var(--pine-soft); cursor: pointer; overflow-wrap: anywhere; }
+.companion-chip svg { flex-shrink: 0; }
+.trpg-participant-dialog .dialog-footer { padding: 14px 28px; align-items: center; }
+.trpg-participant-dialog .dialog-footer > button { flex-shrink: 0; min-height: 34px; padding: 7px 12px; font-size: 12px; }
+@media (max-width: 680px) {
+  .trpg-participant-dialog { width: calc(100vw - 24px); }
+  .trpg-participant-dialog .dialog-header { padding: 16px 16px 12px; }
+  .trpg-participant-dialog .dialog-body { padding-inline: 16px; }
+  .trpg-participant-dialog .dialog-footer { padding: 10px 16px; flex-wrap: wrap; }
+  .companion-party { flex: 0 0 100%; }
+}
+@media (max-width: 380px) {
+  .trpg-participant-dialog .trpg-setup-steps { gap: 4px; }
+  .trpg-participant-dialog .trpg-setup-steps > span { gap: 4px; font-size: 10px; }
+}
+@media (pointer: coarse) {
+  .trpg-participant-dialog .dialog-footer > button { min-height: 44px; }
+  .companion-chip { min-height: 44px; }
 }

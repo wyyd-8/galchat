@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.me.galchat.mapper.TrpgParticipantHistoryMapper">
+    <resultMap id="summary" type="com.me.galchat.domain.vo.TrpgParticipantHistoryVO">
+        <id property="characterId" column="character_id"/>
+        <result property="completedRunCount" column="completed_run_count"/>
+        <association property="latestRun" javaType="com.me.galchat.domain.vo.TrpgParticipantRunVO" notNullColumn="conversation_id">
+            <id property="conversationId" column="conversation_id"/>
+            <result property="title" column="title"/>
+            <result property="moduleId" column="module_id"/>
+            <result property="moduleName" column="module_name"/>
+            <result property="status" column="status"/>
+            <result property="lastPlayedAt" column="last_played_at"/>
+            <result property="completedAt" column="completed_at"/>
+        </association>
+    </resultMap>
+
+    <sql id="isCompleted">
+        conversation.status = 'closed' AND completion.data IS NOT NULL AND conversation.closed_at IS NOT NULL
+    </sql>
+
+    <select id="selectSummaries" resultMap="summary">
+        WITH runs AS (
+            SELECT conversation.id, conversation.title, conversation.module_id,
+                   conversation.status, conversation.closed_at,
+                   (<include refid="isCompleted"/>) AS completed
+            FROM group_conversation conversation
+            LEFT JOIN trpg_completion completion ON completion.conversation_id = conversation.id
+            WHERE conversation.user_world_id = #{userWorldId} AND conversation.mode = 'trpg'
+        ), activity AS (
+            SELECT message.conversation_id, MAX(message.created_at) AS last_played_at
+            FROM group_chat_message message
+            JOIN runs ON runs.id = message.conversation_id
+            WHERE message.visibility = 'public' AND message.status = 'completed'
+              AND message.message_kind != 'system_event'
+            GROUP BY message.conversation_id
+        ), participation AS (
+            SELECT DISTINCT member.actor_id AS character_id, runs.*
+            FROM runs
+            JOIN group_chat_member member ON member.conversation_id = runs.id
+            WHERE member.actor_type = 'character'
+        ), totals AS (
+            SELECT character_id, COUNT(*) FILTER (WHERE completed) AS completed_run_count
+            FROM participation GROUP BY character_id
+        ), recent AS (
+            SELECT participation.*, activity.last_played_at,
+                   ROW_NUMBER() OVER (PARTITION BY participation.character_id
+                       ORDER BY activity.last_played_at DESC, participation.id DESC) AS rn
+            FROM participation
+            JOIN activity ON activity.conversation_id = participation.id
+            WHERE activity.last_played_at IS NOT NULL
+        )
+        SELECT character.character_id, COALESCE(totals.completed_run_count, 0) AS completed_run_count,
+               recent.id AS conversation_id, recent.title, recent.module_id, module.name AS module_name,
+               CASE WHEN recent.completed THEN 'completed' ELSE recent.status END AS status,
+               recent.last_played_at, CASE WHEN recent.completed THEN recent.closed_at END AS completed_at
+        FROM user_character_info character
+        LEFT JOIN totals ON totals.character_id = character.character_id
+        LEFT JOIN recent ON recent.character_id = character.character_id AND recent.rn = 1
+        LEFT JOIN coc_module module ON module.id = recent.module_id
+        WHERE character.user_world_id = #{userWorldId}
+        ORDER BY character.character_id
+    </select>
+
+    <select id="selectCompletedRuns" resultType="com.me.galchat.domain.vo.TrpgParticipantRunVO">
+        SELECT conversation.id AS conversation_id, conversation.title, conversation.module_id,
+               module.name AS module_name, 'completed' AS status, conversation.closed_at AS completed_at
+        FROM group_conversation conversation
+        JOIN trpg_completion completion ON completion.conversation_id = conversation.id
+        LEFT JOIN coc_module module ON module.id = conversation.module_id
+        WHERE conversation.user_world_id = #{userWorldId} AND conversation.mode = 'trpg'
+          AND <include refid="isCompleted"/>
+          AND EXISTS (SELECT 1 FROM group_chat_member member
+              WHERE member.conversation_id = conversation.id
+                AND member.actor_type = 'character' AND member.actor_id = #{characterId})
+        <if test="beforeCompletedAt != null">
+          AND (conversation.closed_at, conversation.id) &lt; (#{beforeCompletedAt}, #{beforeConversationId})
+        </if>
+        ORDER BY conversation.closed_at DESC, conversation.id DESC
+        LIMIT #{limit}
+    </select>
+</mapper>

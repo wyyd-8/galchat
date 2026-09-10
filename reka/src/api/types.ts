@@ -146,6 +146,16 @@ export interface Conversation {
   characterIds?: number[]
   createdAt?: string; updatedAt?: string; closedAt?: string; lastChatContent?: string; lastChatTime?: string
 }
+export interface TrpgParticipantRun {
+  conversationId: number; title: string; moduleId: number | null; moduleName: string | null
+  status: 'active' | 'completed' | 'closed'; lastPlayedAt: string | null; completedAt: string | null
+}
+export interface TrpgParticipantHistory {
+  characterId: number; completedRunCount: number; latestRun: TrpgParticipantRun | null
+}
+export interface TrpgParticipantRunPage {
+  items: TrpgParticipantRun[]; nextCursor: string | null
+}
 export interface GroupMessage {
   id: number; conversationId: number; turnId?: number; replyStepId?: number
   speakerType: 'user' | 'character' | 'kp' | 'narrator'; speakerId?: number; speakerName?: string

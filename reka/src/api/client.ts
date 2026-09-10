@@ -1,5 +1,5 @@
 import type {
-  TrpgCompletionReport, ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
+  TrpgParticipantHistory, TrpgParticipantRunPage, TrpgCompletionReport, ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   SingleChatRuntime, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
@@ -136,6 +136,8 @@ export const api = {
   withdrawMessage: (worldId: number, characterId: number) => request<void>(`/history/withdraw?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId) })}`, { method: 'POST' }),
 
   conversations: (worldId: number, status?: 'active' | 'closed') => request<Conversation[]>(`/group-chat/conversations?${new URLSearchParams({ userWorldId: String(worldId), ...(status ? { status } : {}) })}`),
+  participantHistory: (worldId: number) => request<TrpgParticipantHistory[]>(`/group-chat/participant-history?${new URLSearchParams({ userWorldId: String(worldId) })}`),
+  participantRuns: (worldId: number, characterId: number, cursor?: string) => request<TrpgParticipantRunPage>(`/group-chat/participant-history/${characterId}/runs?${new URLSearchParams({ userWorldId: String(worldId), limit: '10', ...(cursor ? { cursor } : {}) })}`),
   conversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}`),
   createConversation: (payload: { userWorldId: number; moduleId?: number; mode: string; title: string; characterIds: number[] }) => request<Conversation>('/group-chat/conversations', { method: 'POST', body: body(payload) }),
   completionReport: (id: number) => request<TrpgCompletionReport | null>(`/group-chat/conversations/${id}/completion-report`),

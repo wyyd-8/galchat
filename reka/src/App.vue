@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { Database, Download, ImageUp, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/vue'
+import { Database, Download, ImageUp, Pencil, Plus, RotateCcw, Trash2, X } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import AppSidebar from '@/components/AppSidebar.vue'
 import CocModuleLibrary from '@/components/CocModuleLibrary.vue'
@@ -10,6 +10,7 @@ import GroupChatStage from '@/components/GroupChatStage.vue'
 import TrpgCompletionStage from '@/components/TrpgCompletionStage.vue'
 import ModelApiManagerDialog from '@/components/ModelApiManagerDialog.vue'
 import TrpgCharacterBindingDialog from '@/components/TrpgCharacterBindingDialog.vue'
+import TrpgParticipantPicker from '@/components/TrpgParticipantPicker.vue'
 import TrpgToolsDialog from '@/components/TrpgToolsDialog.vue'
 import DicePlayerDialog from '@/dice/components/DicePlayerDialog.vue'
 import WorldHome from '@/components/WorldHome.vue'
@@ -24,7 +25,7 @@ import type {
 import { useDirectChat } from '@/composables/useDirectChat'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
-import { canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
+import { canCreateTrpgRun, hasMissingBindings } from '@/components/trpgSetupState'
 import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
 import { mergeAutoAdvanceDiceSummaryIds } from '@/components/trpgTurnExperiments'
 import { mergeGenerationResponseEvents } from '@/components/generationErrorFormatting'
@@ -116,7 +117,6 @@ const worldForm = reactive({ worldId: '', name: '', acitvePushStatus: true, dail
 const templateForm = reactive<WorldTemplate>({ name: '', author: '', image: '', background: '', visible: true })
 const conversationForm = reactive({ title: '', mode: 'chat' as 'chat' | 'trpg', moduleId: '', characterIds: [] as number[] })
 const conversationStep = ref<1 | 2>(1)
-const conversationPreviewCharacterId = ref<number | null>(null)
 const characterChoice = ref('')
 const characterPrompt = ref('')
 const characterChoicePreview = ref<CharacterTemplate | null>(null)
@@ -395,7 +395,6 @@ const templateReplacementReport = ref<WorldArchiveReplaceResult | null>(null)
 const availableTemplates = computed(() => workspace.characterTemplates.value.filter((template) => template.id && !workspace.characters.value.some((character) => character.characterId === template.id)))
 const selectedConversationFormModule = computed(() => workspace.modules.value.find((item) => item.id === Number(conversationForm.moduleId)) || null)
 const selectedConversationModule = computed(() => workspace.modules.value.find((item) => item.id === workspace.selectedConversation.value?.moduleId) || null)
-const conversationPreviewCharacter = computed(() => workspace.characters.value.find((item) => item.characterId === conversationPreviewCharacterId.value) || null)
 const selectedCharacter = computed(() => workspace.characters.value.find((item) => item.characterId === selectedCharacterId.value) || null)
 const templateDialogTitle = computed(() => templateMode.value === 'edit' ? '修改世界模板' : '创建世界模板')
 const templateDialogDescription = computed(() => templateMode.value === 'edit'
@@ -501,23 +500,12 @@ function createFromPreview() {
 function openNewConversation() {
   Object.assign(conversationForm, { title: '', mode: 'chat', moduleId: '', characterIds: [] })
   conversationStep.value = 1
-  conversationPreviewCharacterId.value = null
   dialogs.conversation = true
 }
 function setConversationMode(mode: 'chat' | 'trpg') {
   conversationForm.mode = mode
   conversationStep.value = 1
-  conversationPreviewCharacterId.value = null
   conversationForm.characterIds = []
-}
-function toggleConversationParticipant(characterId: number) {
-  const next = toggleParticipantSelection(
-    conversationForm.characterIds,
-    conversationPreviewCharacterId.value,
-    characterId,
-  )
-  conversationForm.characterIds = next.selectedIds
-  conversationPreviewCharacterId.value = next.previewId
 }
 async function createNormalConversation() {
   const success = await run(() => workspace.createConversation({
@@ -870,16 +858,16 @@ async function changePassword() {
   <BaseDialog
     v-model="dialogs.conversation"
     :title="conversationForm.mode === 'trpg' ? '建立 CoC 跑团' : '建立会话'"
-    :description="conversationForm.mode === 'trpg' ? `第 ${conversationStep} 阶段，共 3 阶段` : '选择参与角色，创建多人对话。'"
+    :description="conversationForm.mode === 'trpg' ? (conversationStep === 2 ? '选择本次与你同行的角色' : '第 1 阶段，共 3 阶段') : '选择参与角色，创建多人对话。'"
     size="lg"
     :content-class="conversationForm.mode === 'trpg' && conversationStep === 2 ? 'trpg-participant-dialog' : ''"
   >
     <div v-if="conversationForm.mode === 'trpg'" class="trpg-setup-steps" aria-label="跑团创建进度">
-      <span :class="{ active: conversationStep === 1, complete: conversationStep > 1 }"><b>1</b>跑团信息</span>
+      <span :class="{ active: conversationStep === 1, complete: conversationStep > 1 }"><b>{{ conversationStep > 1 ? '✓' : '1' }}</b>跑团信息</span>
       <i />
       <span :class="{ active: conversationStep === 2 }"><b>2</b>选择参与者</span>
       <i />
-      <span><b>3</b>分配调查员人物卡</span>
+      <span><b>3</b>分配人物卡</span>
     </div>
 
     <div v-if="conversationStep === 1" class="form-stack">
@@ -889,48 +877,24 @@ async function changePassword() {
       <div v-if="conversationForm.mode === 'chat'" class="field"><span>参与角色</span><div class="check-grid"><label v-for="item in workspace.characters.value" :key="item.characterId" class="check-card"><input v-model="conversationForm.characterIds" type="checkbox" :value="item.characterId" /><span class="reply-avatar" :style="item.characterImage ? { backgroundImage: `url(${item.characterImage})` } : {}">{{ item.characterImage ? '' : item.characterName.slice(0,1) }}</span><strong>{{ item.characterName }}</strong></label></div></div>
     </div>
 
-    <div v-else class="trpg-participant-picker-layout">
-      <section class="trpg-participant-list-pane">
-        <header class="settings-section-heading">
-          <span><strong>选择 AI 调查员</strong><small>可以不选并以单人团开始，也可以多选 AI 调查员</small></span>
-          <em>{{ conversationForm.characterIds.length }} 位已选</em>
-        </header>
-        <div v-if="workspace.characters.value.length" class="character-choice-list trpg-participant-list" role="group" aria-label="AI 调查员角色">
-          <button
-            v-for="item in workspace.characters.value"
-            :key="item.characterId"
-            type="button"
-            class="choice-row"
-            :class="{ active: conversationForm.characterIds.includes(item.characterId) }"
-            role="checkbox"
-            :aria-checked="conversationForm.characterIds.includes(item.characterId)"
-            @click="toggleConversationParticipant(item.characterId)"
-          >
-            <span class="character-avatar small" :style="item.characterImage ? { backgroundImage: `url(${item.characterImage})` } : {}">{{ item.characterImage ? '' : item.characterName.slice(0, 1) }}</span>
-            <span><strong>{{ item.characterName }}</strong><small>{{ conversationForm.characterIds.includes(item.characterId) ? '已选择，再次点击取消' : '加入本次跑团' }}</small></span>
-            <b v-if="conversationForm.characterIds.includes(item.characterId)" class="participant-selected-mark">✓</b>
-          </button>
-        </div>
-        <div v-else class="empty-panel compact"><p>当前世界还没有可选角色。</p></div>
-      </section>
-      <aside class="trpg-participant-preview-pane">
-        <template v-if="conversationPreviewCharacter">
-          <div class="character-preview-heading">
-            <span class="character-preview-image" :style="conversationPreviewCharacter.characterImage ? { backgroundImage: `url(${conversationPreviewCharacter.characterImage})` } : {}">{{ conversationPreviewCharacter.characterImage ? '' : conversationPreviewCharacter.characterName.slice(0, 1) }}</span>
-            <span><small>最近选择</small><strong>{{ conversationPreviewCharacter.characterName }}</strong></span>
-          </div>
-          <section class="character-background-preview"><strong>当前世界中的角色资料</strong><p>{{ conversationPreviewCharacter.userInfoPrompt || '暂未记录希望角色记住的事。' }}</p></section>
-          <div class="participant-preview-note"><strong>下一阶段</strong><span>跑团创建后，需要为该角色绑定一张独立的 AI 调查员人物卡。</span></div>
-        </template>
-        <div v-else class="binding-empty"><strong>单人团</strong><span>不选择 AI 调查员，将由玩家独自进入本次跑团。</span></div>
-      </aside>
-    </div>
+    <TrpgParticipantPicker
+      v-else
+      v-model="conversationForm.characterIds"
+      :world-id="workspace.selectedWorldId.value"
+      :characters="workspace.characters.value"
+      :busy="busy"
+    />
 
     <template #footer>
+      <div v-if="conversationForm.mode === 'trpg' && conversationStep === 2" class="companion-party" aria-live="polite">
+        <span class="companion-party-label">本次同行</span><span>你</span>
+        <button v-for="character in workspace.characters.value.filter(item => conversationForm.characterIds.includes(item.characterId))" :key="character.characterId" type="button" class="companion-chip" :disabled="busy" :aria-label="`移除${character.characterName}`" @click="conversationForm.characterIds = conversationForm.characterIds.filter(id => id !== character.characterId)">{{ character.characterName }}<X :size="13" /></button>
+        <span v-if="!conversationForm.characterIds.length" class="companion-party-label">· 单人团</span>
+      </div>
       <button class="button ghost" :disabled="busy" @click="conversationStep === 2 ? (conversationStep = 1) : (dialogs.conversation = false)">{{ conversationStep === 2 ? '上一步' : '取消' }}</button>
       <button v-if="conversationForm.mode === 'chat'" class="button primary" :disabled="!conversationForm.title || !conversationForm.characterIds.length || busy" @click="createNormalConversation">创建并进入</button>
       <button v-else-if="conversationStep === 1" class="button primary" :disabled="!conversationForm.title || !Number(conversationForm.moduleId) || busy" @click="conversationStep = 2">下一步：选择参与者</button>
-      <button v-else class="button primary" :disabled="!canCreateTrpgRun(conversationForm.title, Number(conversationForm.moduleId), busy)" @click="createTrpgConversation">创建跑团并绑定人物卡</button>
+      <button v-else class="button primary" :disabled="!canCreateTrpgRun(conversationForm.title, Number(conversationForm.moduleId), busy)" @click="createTrpgConversation">创建跑团并继续</button>
     </template>
   </BaseDialog>
 

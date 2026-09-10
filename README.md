@@ -122,8 +122,8 @@ KP 请求结束跑团后，系统先完成最后场景的公开叙述与摘要�
 ├── python/
 │   ├── bert.py                # 输入完整性判断，localhost:8081
 │   ├── reranker_server.py     # 检索重排，localhost:8082
-│   ├── character_card_pdf.py  # 角色卡 PDF 命令入口
-│   └── character_card/        # PDF 实现、资源、依赖、示例和测试
+│   ├── character_card_pdf.py  # 角色卡 PDF 服务（渲染、接口、启动）
+│   └── character_card/        # 字体、模板与字体许可证
 ├── data/
 │   ├── worlds/                # 世界 JSON 数据
 │   └── modules/               # 模组 SQL / JSON 数据
@@ -256,15 +256,16 @@ reranker 还支持 `RERANKER_DEVICE`、`RERANKER_MAX_LENGTH`、`RERANKER_BATCH_S
 
 ### 可选：生成角色卡 PDF
 
-这是独立的命令行工具，使用角色卡 JSON 生成 PDF。详细说明见 [角色卡 PDF 工具](python/character_card/README.md)。
+在「跑团工具 → 人物卡」右上角导出 PDF。前端直接调用可选 Python 服务，服务不可用时隐藏按钮。全部代码位于 `python/character_card_pdf.py`，所需字体和模板位于同级 `character_card/` 文件夹。
 
 ```bash
-python -m pip install -r python/character_card/requirements.txt
-python python/character_card_pdf.py \
-  python/character_card/examples/character-card.sample.json \
-  /tmp/galchat-character-card.pdf \
-  --background modern --font-index 0
+python -m pip install Pillow reportlab fastapi uvicorn
+python python/character_card_pdf.py
 ```
+
+默认监听 `127.0.0.1:8083`，可通过 `--host`、`--port` 调整。在 `reka/.env.local` 中配置 `VITE_CHARACTER_CARD_PDF_URL=http://127.0.0.1:8083` 后重启前端。生产构建前须使用浏览器可访问的 HTTPS 服务地址或同域代理路径；跨域时通过 `CHARACTER_CARD_ALLOWED_ORIGINS` 设置允许的前端来源（逗号分隔，默认允许 `http://localhost:5173` 和 `http://127.0.0.1:5173`）。
+
+`GET /health` 检查资源是否齐全；`POST /export` 接收人物卡 `card`、模板 `background`（`1920s` / `modern`）和字体 `fontIndex`（0 / 1 / 2），返回双页 PDF。前端提交当前查看的人物卡，不携带主系统 token 或 cookies；头像由浏览器转为内嵌图片，读取失败时提示并导出无头像版本。PDF 会省略部分长文本，最多绘制 10 行武器且不包含调查员笔记，用于打印而非完整数据备份。
 
 ## 主要接口
 
@@ -321,10 +322,3 @@ npm run build
 ```
 
 `npm run build` 已包含类型检查；前端测试直接使用 Node 的测试运行器执行 TypeScript 文件，需要使用支持直接运行 TypeScript 的 Node 版本。`npm run preview` 可预览构建产物；部署时需配置 `/api`、`/ws` 后端路由，并支持 WebSocket 和 SSE 长连接。
-
-角色卡 PDF 工具测试：
-
-```bash
-cd python
-python -m unittest discover -s character_card/tests
-```

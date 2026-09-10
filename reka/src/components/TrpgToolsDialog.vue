@@ -4,6 +4,7 @@ import { Activity, ArrowDown, ArrowRight, ArrowUp, BookUser, Check, ChevronDown,
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import WeaponRiskNotice from '@/components/WeaponRiskNotice.vue'
+import CharacterCardExport from '@/components/CharacterCardExport.vue'
 import { api } from '@/api/client'
 import type {
   Character, CharacterCard, CharacterCardCreationDraft, CocModule, ContextWindowOverview, ContextWindowUsage, Conversation, DiceRollAggregate,
@@ -708,8 +709,11 @@ watch(selectedSheetTab, (tab) => {
                   <p>{{ shown(card.character.sex) }} · {{ shown(card.character.age) }} 岁 · {{ card.character.era || '时代未填' }}</p>
                   <p v-if="profileText(card.character.birthplace) !== '暂未填写' && card.character.birthplace?.trim() !== '无'">出身地：{{ profileText(card.character.birthplace) }}</p><p v-if="profileText(card.character.residence) !== '暂未填写' && card.character.residence?.trim() !== '无'">居住地：{{ profileText(card.character.residence) }}</p>
                 </div>
-                <div class="sheet-statuses" aria-label="调查员状态">
-                  <em v-for="status in characterStatuses" :key="status.label" :class="status.tone">{{ status.label }}</em>
+                <div class="sheet-overview-actions">
+                  <CharacterCardExport :card="card" :active="open && selectedToolTab === 'card'" />
+                  <div class="sheet-statuses" aria-label="调查员状态">
+                    <em v-for="status in characterStatuses" :key="status.label" :class="status.tone">{{ status.label }}</em>
+                  </div>
                 </div>
               </header>
 

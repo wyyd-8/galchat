@@ -1311,6 +1311,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .sheet-identity h3 { margin: 2px 0 3px; overflow: hidden; font-family: var(--font-display); font-size: 23px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-identity p { margin: 2px 0 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-statuses { max-width: 145px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.sheet-overview-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .sheet-statuses em { padding: 4px 7px; border-radius: 999px; font-size: 9px; font-style: normal; font-weight: 700; white-space: nowrap; }
 .sheet-statuses em.safe { color: var(--pine); background: var(--pine-soft); }
 .sheet-statuses em.warning { color: #88642f; background: #f4e8d4; }
@@ -1940,6 +1941,7 @@ button.sidebar-recent-item:hover { background: #efede6; }
   .sheet-detail-tabs.skill-panel-expanded { padding: 0; position: static; z-index: auto; border: 0; border-radius: 0; background: transparent; box-shadow: none; animation: none; }
   .sheet-skill-expand-toggle, .sheet-skill-toolbar { display: none; }
   .sheet-overview { grid-template-columns: auto minmax(0, 1fr); }
+  .sheet-overview-actions { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; }
   .sheet-statuses { max-width: none; grid-column: 1 / -1; justify-content: flex-start; }
   .sheet-resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sheet-attribute-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }

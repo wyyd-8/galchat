@@ -11,6 +11,13 @@
   .chat-page .mobile-chat-title { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; }
   .mobile-chat-title strong { display: block; font-size: 17px; font-weight: 600; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mobile-chat-title small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+  .mobile-execution-strip { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px 18px; border: 0; border-bottom: 1px solid var(--line); background: #e9ede5; color: var(--pine); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+  .mobile-execution-strip > svg, .mobile-execution-arrow { flex-shrink: 0; }
+  .mobile-execution-scene, .mobile-execution-actor { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mobile-execution-scene { flex: 0 1 auto; max-width: 50%; font-weight: 600; }
+  .mobile-execution-actor { flex: 0 1 auto; }
+  .mobile-execution-arrow { margin-left: auto; font-size: 18px; line-height: 1; }
+  .mobile-execution-strip:focus-visible { outline: 2px solid var(--pine); outline-offset: -2px; }
   .chat-page .chat-layout, .chat-page .direct-chat-layout { flex: 1; display: flex; min-height: 0; }
   .chat-page .chat-main { flex: 1; width: 100%; height: auto; overflow: hidden; }
   .chat-page .message-scroll { min-height: 0; }

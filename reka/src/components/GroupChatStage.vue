@@ -45,6 +45,7 @@ const modelActor = ref<TrpgExecutionActor | null>(null)
 const modelDialogOpen = computed({ get: () => modelActor.value != null, set: (value: boolean) => { if (!value) modelActor.value = null } })
 watch(panelOpen, visible => { if (!visible) modelActor.value = null })
 const turnSettingsOpen = ref(false)
+const autoExpandKpReasoning = ref(false)
 const selectedReplyActor = ref('')
 const mobileSelectedActor = computed(() => items.value.find(item => `${item.actorType}:${item.actorId}` === selectedReplyActor.value) || items.value[0])
 const mobileScenes = computed(() => trpgExecution.value.scenes)
@@ -58,6 +59,13 @@ const mobileSceneStatus = computed(() => {
   if (props.currentTurn?.waitingForUser) return props.currentTurn.inputType === 'selection' ? '等待选择场景' : '等待你的回应'
   if (props.sending || props.currentTurn?.status === 'running') return '行动轮进行中'
   return props.currentTurn ? '等待继续行动轮' : '等待开始下一行动轮'
+})
+const mobileExecutingActor = computed(() => {
+  if (props.conversation.status !== 'active' || !props.currentTurn || ['completed', 'cancelled'].includes(props.currentTurn.status)) return mobileSceneStatus.value
+  const scene = mobileScenes.value.flatMap(scene => [scene, ...scene.childScenes]).find(scene => scene.status === 'current')
+  const routedActor = scene?.activeActors.find(actor => actor.routedActor)?.routedActor
+  const actor = routedActor || scene?.activeActors.find(actor => ['running', 'waiting_input', 'waiting_dice', 'paused', 'failed', 'blocked'].includes(actor.status))
+  return actor ? actor.name : mobileSceneStatus.value
 })
 function openScene() {
   panelOpen.value = true
@@ -155,6 +163,12 @@ const composerPlaceholder = computed(() => {
 let latestScrollFrame = 0
 
 watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(props.reasoning[message.id])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
+watch(autoExpandKpReasoning, (enabled) => {
+  if (props.conversation.mode !== 'trpg') return
+  props.messages.forEach((message) => {
+    if (message.speakerType === 'kp') reasoningOpen[message.id] = enabled && reasoningPhase.get(message.id) === 'thinking'
+  })
+})
 watch(() => props.replyPlan, (plan) => { loadedPlanSignature.value = replyPlanSignature(plan.items) }, { immediate: true, flush: 'sync' })
 watch(() => props.conversation.id, () => {
   panelOpen.value = false
@@ -197,8 +211,9 @@ function syncReasoningState() {
     if (!props.reasoning[messageId]) return
     const phase = message.status === 'streaming' && !message.content.trim() ? 'thinking' : message.content.trim() ? 'main' : 'idle'
     const firstSeenOnMobile = isMobile.value && !reasoningPhase.has(messageId)
-    syncReasoningDisclosure(reasoningOpen, reasoningPhase, messageId, phase)
-    if (firstSeenOnMobile) reasoningOpen[messageId] = false
+    const autoExpand = props.conversation.mode !== 'trpg' || message.speakerType !== 'kp' || autoExpandKpReasoning.value
+    syncReasoningDisclosure(reasoningOpen, reasoningPhase, messageId, phase, autoExpand)
+    if (firstSeenOnMobile && !(props.conversation.mode === 'trpg' && message.speakerType === 'kp' && autoExpandKpReasoning.value)) reasoningOpen[messageId] = false
   })
 }
 
@@ -348,6 +363,14 @@ function handleReasoningScroll(event: Event) {
   <main class="chat-page group-chat-page">
     <header class="chat-header"><template v-if="isMobile"><button class="icon-button" aria-label="返回当前世界" @click="emit('back')"><ArrowLeft :size="23" /></button><div class="mobile-chat-title"><strong>{{ conversation.title }}</strong><small>{{ conversation.status === 'active' ? '进行中' : '已结束' }} · {{ conversation.mode === 'trpg' ? 'CoC 跑团' : '群聊' }}</small></div><button class="icon-button" :aria-label="conversation.mode === 'trpg' ? '跑团工具' : '回复顺序'" @click="conversation.mode === 'trpg' ? emit('openTools') : panelOpen = true"><span v-if="conversation.mode === 'trpg'">工具</span><MoreHorizontal v-else :size="22" /></button></template><div v-else><button class="text-button" @click="emit('back')">返回当前世界</button><h1>{{ conversation.title }}</h1></div><div v-if="!isMobile" class="chat-header-actions"><span class="live-status" :class="conversation.status"><i />{{ conversation.status === 'active' ? '进行中' : '已结束' }}</span><button v-if="conversation.mode === 'trpg'" class="button ghost" @click="emit('openTools')"><Archive :size="16" />跑团工具</button><button class="button ghost" :disabled="sending || (conversation.mode === 'trpg' && !!currentTurn && !['completed', 'failed', 'blocked', 'cancelled'].includes(currentTurn.status))" @click="emit('end')"><CircleStop :size="16" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></div></header>
 
+    <button v-if="isMobile && conversation.mode === 'trpg'" class="mobile-execution-strip" type="button" :aria-label="`${mobileSceneName}－${mobileExecutingActor}，查看场景与执行状态`" @click="openScene">
+      <CircleDot :size="14" aria-hidden="true" />
+      <span class="mobile-execution-scene">{{ mobileSceneName }}</span>
+      <span aria-hidden="true">－</span>
+      <span class="mobile-execution-actor">{{ mobileExecutingActor }}</span>
+      <span class="mobile-execution-arrow" aria-hidden="true">›</span>
+    </button>
+
     <BaseDialog v-model="moreOpen" title="会话操作" mobile-presentation="sheet" content-class="mobile-chat-menu"><button v-if="conversation.mode === 'chat'" class="mobile-chat-row" :disabled="sending || conversation.status !== 'active'" @click="moreOpen = false; withdrawOpen = true"><span><strong>撤回上一轮</strong></span><RotateCcw :size="18" /></button><button class="mobile-chat-row" :disabled="loading || !hasOlderMessages" @click="moreOpen = false; emit('loadEarlier')"><span><strong>加载更早记录</strong></span><History :size="18" /></button><p class="mobile-chat-status">{{ conversation.status === 'active' ? '会话进行中' : '会话已结束' }}</p><button class="button secondary" @click="moreOpen = false; panelOpen = true"><UsersRound :size="18" />{{ conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序' }}</button><button v-if="conversation.mode === 'trpg'" class="button secondary" @click="moreOpen = false; emit('openTools')"><Archive :size="18" />跑团工具</button><button class="button ghost" :disabled="sending || (conversation.mode === 'trpg' && !!currentTurn && !['completed', 'failed', 'blocked', 'cancelled'].includes(currentTurn.status))" @click="moreOpen = false; emit('end')"><CircleStop :size="18" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></BaseDialog>
     <div class="chat-layout">
       <section class="chat-main">
@@ -420,6 +443,10 @@ function handleReasoningScroll(event: Event) {
             <PopoverTrigger as-child><button class="icon-button bordered turn-experiment-settings" type="button" title="行动轮设置" aria-label="行动轮设置"><Settings2 :size="17" /></button></PopoverTrigger>
             <PopoverPortal><PopoverContent class="turn-experiment-popover" side="top" align="end" :side-offset="10">
               <header><span><strong>行动轮设置</strong><small>实验功能</small></span></header>
+              <label class="turn-experiment-option">
+                <span><strong>自动展开 KP 思考</strong><small>剧透风险：思考内容可能透露隐藏线索、剧情真相或后续安排。默认关闭，仍可手动展开。</small></span>
+                <input v-model="autoExpandKpReasoning" type="checkbox" />
+              </label>
               <label class="turn-experiment-option">
                 <span><strong>自动推进</strong><small>行动轮之间及非用户掷骰后，倒计时 3 秒继续。</small></span>
                 <input v-model="autoAdvance" type="checkbox" />
@@ -522,6 +549,7 @@ function handleReasoningScroll(event: Event) {
 
     <BaseDialog v-if="isMobile" v-model="turnSettingsOpen" title="行动轮设置" mobile-presentation="page" content-class="mobile-turn-settings">
       <p class="mobile-chat-notice">实验功能 · 仅在当前页面生效，刷新后重置。</p>
+      <label class="mobile-chat-toggle"><span><strong>自动展开 KP 思考</strong><small>剧透风险：思考内容可能透露隐藏线索、剧情真相或后续安排。默认关闭，仍可手动展开。</small></span><input v-model="autoExpandKpReasoning" type="checkbox" /><i /></label>
       <label class="mobile-chat-toggle"><span><strong>自动推进</strong><small>行动轮之间及非用户掷骰后，倒计时 3 秒继续。</small></span><input v-model="autoAdvance" type="checkbox" /><i /></label>
       <label class="mobile-chat-toggle"><span><strong>修正方向</strong><small>仅影响下一轮 AI 调查员</small></span><input v-model="directionEnabled" type="checkbox" /><i /></label>
       <label v-if="directionEnabled" class="field"><span>下一轮探索或战斗方向</span><textarea v-model="investigatorDirection" maxlength="1000" rows="5" placeholder="例如：优先确认地下室入口，不要继续与门卫纠缠。" /><small>{{ investigatorDirection.length }}/1000 · 仅下一行动轮的 AI 调查员可见</small></label>

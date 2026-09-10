@@ -526,11 +526,11 @@ public class TrpgRunMemoryService {
                 .sorted(Comparator.comparingInt(card ->
                         "PLAYER".equals(card.getActorType()) ? 0 : 1))
                 .forEach(card -> {
-                    String controller = StringUtils.hasText(
+                    String controller = "PLAYER".equals(card.getActorType())
+                            ? "用户" : StringUtils.hasText(
                             card.getPlayerName())
                             ? card.getPlayerName().trim()
-                            : "PLAYER".equals(card.getActorType())
-                            ? "用户" : "角色";
+                            : "角色";
                     result.put(controller, card.getName());
                 });
         return Map.copyOf(result);

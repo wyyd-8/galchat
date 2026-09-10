@@ -92,7 +92,7 @@ class TrpgRunMemoryServiceTest {
                 new CocModule().setId(4L).setName("雾中车站")));
         when(characterMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
                 new CocCharacter().setId(101L).setRunId(71L)
-                        .setActorType("PLAYER").setPlayerName("玩家")
+                        .setActorType("PLAYER").setPlayerName("account_123")
                         .setName("林恩"),
                 new CocCharacter().setId(102L).setRunId(71L)
                         .setActorType("BOT").setParticipantId(9L)
@@ -105,7 +105,7 @@ class TrpgRunMemoryServiceTest {
             assertThat(run.moduleName()).isEqualTo("雾中车站");
             assertThat(run.names()).containsExactlyEntriesOf(
                     new LinkedHashMap<>(Map.of(
-                            "玩家", "林恩", "艾琳", "威尔")));
+                            "用户", "林恩", "艾琳", "威尔")));
         });
     }
 

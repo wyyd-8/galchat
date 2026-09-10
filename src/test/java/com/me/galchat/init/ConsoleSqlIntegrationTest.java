@@ -6,19 +6,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static com.me.galchat.support.ConsoleSqlTestSupport.initializeSchema;
 
 @SpringBootTest
 @Transactional
 class ConsoleSqlIntegrationTest {
-
-    private static final Path CONSOLE_SQL = Path.of(
-            "src/test/java/com/me/galchat/init/console.sql");
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -26,13 +21,7 @@ class ConsoleSqlIntegrationTest {
     @Test
     void createsTheCompleteCurrentSchemaFromAnEmptyNamespace()
             throws Exception {
-        String schema = "console_sql_" + UUID.randomUUID()
-                .toString().replace("-", "");
-        jdbcTemplate.execute("CREATE SCHEMA \"" + schema + "\"");
-        jdbcTemplate.execute("SET LOCAL search_path TO \"" + schema
-                + "\", public");
-
-        jdbcTemplate.execute(Files.readString(CONSOLE_SQL));
+        String schema = initializeSchema(jdbcTemplate);
 
         assertThat(jdbcTemplate.queryForList("""
                 SELECT table_name
@@ -41,13 +30,15 @@ class ConsoleSqlIntegrationTest {
                   AND table_type = 'BASE TABLE'
                 ORDER BY table_name
                 """, String.class, schema))
-                .hasSize(46)
+                .hasSize(47)
                 .contains(
                         "group_actor_runtime_config",
                         "trpg_investigator_suspension",
                         "trpg_weapon_stash",
-                        "user_model_api")
+                        "user_model_api", "trpg_completion")
                 .doesNotContain(
+                        "world_detail_vector_store", "chat_history_vector_store",
+                        "group_topic_vector_store", "trpg_turn_vector_store",
                         "world_event_log",
                         "world_story_event",
                         "world_story_event_character");
@@ -58,6 +49,15 @@ class ConsoleSqlIntegrationTest {
                 "execution_mode", "model_api_id");
         assertThat(columns(schema, "user_character_info"))
                 .contains("model_api_id");
+        assertThat(columns(schema, "trpg_completion"))
+                .containsExactly("conversation_id", "turn_id", "data");
+        for (var table : com.baomidou.mybatisplus.core.metadata.TableInfoHelper.getTableInfos()) {
+            assertThat(columns(schema, table.getTableName()))
+                    .as("Columns for %s", table.getTableName())
+                    .contains(table.getKeyColumn())
+                    .containsAll(table.getFieldList().stream()
+                            .map(com.baomidou.mybatisplus.core.metadata.TableFieldInfo::getColumn).toList());
+        }
         assertThat(columns(schema, "trpg_investigator_suspension"))
                 .containsExactly(
                         "id", "conversation_id", "subject_character_id",
@@ -75,6 +75,10 @@ class ConsoleSqlIntegrationTest {
                 "idx_reply_step_prompt_message",
                 "idx_binding_chat",
                 "uk_tool_call_id");
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT base_value FROM coc_skill_def WHERE name = '侦查'", Integer.class))
+                .isEqualTo(25);
     }
 
     private List<String> columns(String schema, String table) {

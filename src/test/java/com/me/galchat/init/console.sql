@@ -1,8 +1,10 @@
 -- Canonical test/development database initialization script.
--- Includes the complete schema after all changes made since origin/main.
+-- Includes all business tables and CoC skill definitions.
+-- Vector tables and indexes are created by Spring AI through VectorConfiguration.
 -- Run against an empty PostgreSQL database; incremental migration fragments are not required.
+-- Optional module seed data is maintained separately in data/modules/.
 
--- 1. Ensure pgvector is available.
+-- Ensure pgvector is available.
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE user_info (
@@ -985,4 +987,12 @@ CREATE TABLE trpg_auto_save (
     format_version INT NOT NULL,
     snapshot JSONB NOT NULL,
     PRIMARY KEY (conversation_id, checkpoint_type)
+);
+
+-- One completion per run. Generation/retry status belongs to the action turn;
+-- archive time is group_conversation.closed_at.
+CREATE TABLE trpg_completion (
+    conversation_id BIGINT PRIMARY KEY,
+    turn_id BIGINT NOT NULL,
+    data JSONB
 );

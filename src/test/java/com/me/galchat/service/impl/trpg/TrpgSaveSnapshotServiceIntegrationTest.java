@@ -51,8 +51,7 @@ class TrpgSaveSnapshotServiceIntegrationTest {
 
     @Test
     void restoreDatabaseClearsAConversationStateValueSavedAsNull() throws Exception {
-        jdbcTemplate.execute(java.nio.file.Files.readString(java.nio.file.Path.of("data/maintenance/2026-09-07-trpg-completion.sql"))
-                .replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE").replace("\n);", "\n) ON COMMIT DROP;"));
+        com.me.galchat.support.ConsoleSqlTestSupport.initializeSchema(jdbcTemplate);
         jdbcTemplate.execute("""
                 CREATE TEMP TABLE group_conversation (
                     id BIGINT PRIMARY KEY,

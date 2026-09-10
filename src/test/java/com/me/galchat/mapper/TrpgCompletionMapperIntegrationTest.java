@@ -76,20 +76,6 @@ class TrpgCompletionMapperIntegrationTest {
 
 
     @Test
-    void legacySchemaUpgradeDiscardsPartialResultsAndKeepsOnlyNecessaryColumns() throws Exception {
-        jdbc.execute("CREATE TEMP TABLE trpg_completion (conversation_id BIGINT PRIMARY KEY, turn_id BIGINT, data JSONB, status TEXT, completed_at TIMESTAMP, archived_at TIMESTAMP) ON COMMIT DROP");
-        jdbc.execute("INSERT INTO trpg_completion VALUES (1,2,'{\"epilogues\":[],\"overview\":null}', 'failed', NULL, NULL), (3,4,'{\"epilogues\":[],\"overview\":{}}', 'ready', now(), now())");
-        String sql = java.nio.file.Files.readString(java.nio.file.Path.of("data/maintenance/2026-09-08-trpg-summary-turn.sql"))
-                .replace("BEGIN;", "").replace("COMMIT;", "");
-        jdbc.execute(sql);
-        jdbc.execute(sql);
-        assertThat(jdbc.queryForObject("SELECT data IS NULL FROM trpg_completion WHERE conversation_id = 1", Boolean.class)).isTrue();
-        assertThat(jdbc.queryForObject("SELECT data IS NOT NULL FROM trpg_completion WHERE conversation_id = 3", Boolean.class)).isTrue();
-        assertThat(jdbc.queryForList("SELECT attname FROM pg_attribute WHERE attrelid = 'trpg_completion'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum", String.class))
-                .containsExactly("conversation_id", "turn_id", "data");
-    }
-
-    @Test
     void finishBoundaryWaitsForTheRequestingKpReplyToComplete() {
         jdbc.execute("CREATE TEMP TABLE group_chat_reply_step (id BIGINT, turn_id BIGINT, status TEXT) ON COMMIT DROP");
         jdbc.execute("CREATE TEMP TABLE group_chat_tool_call (reply_step_id BIGINT, tool_name TEXT, tool_result TEXT) ON COMMIT DROP");
@@ -107,12 +93,8 @@ class TrpgCompletionMapperIntegrationTest {
 
     @Test
     void finalTransactionFailureRollsBackPublicationAndRetryRegeneratesEverything() throws Exception {
-        String sql = java.nio.file.Files.readString(java.nio.file.Path.of("data/maintenance/2026-09-07-trpg-completion.sql"))
-                .replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE").replace("\n);", "\n) ON COMMIT DROP;");
-        jdbc.execute(sql);
+        com.me.galchat.support.ConsoleSqlTestSupport.initializeSchema(jdbc);
         jdbc.execute("CREATE TEMP TABLE completion_publication (content TEXT) ON COMMIT DROP");
-        jdbc.execute("CREATE TEMP TABLE group_chat_turn (LIKE public.group_chat_turn INCLUDING ALL) ON COMMIT DROP");
-        jdbc.execute("CREATE TEMP TABLE group_chat_reply_step (LIKE public.group_chat_reply_step INCLUDING ALL) ON COMMIT DROP");
         var turns = turnMapper;
         var conversations = org.mockito.Mockito.mock(com.me.galchat.service.impl.group.GroupConversationService.class);
         var locks = org.mockito.Mockito.mock(com.me.galchat.service.impl.group.GroupConversationLockService.class);
@@ -168,9 +150,7 @@ class TrpgCompletionMapperIntegrationTest {
 
     @Test
     void persistsFinalResultWithTypedJsonbAndReplacesItOnRestore() throws Exception {
-        String sql = java.nio.file.Files.readString(java.nio.file.Path.of("data/maintenance/2026-09-07-trpg-completion.sql"))
-                .replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE").replace("\n);", "\n) ON COMMIT DROP;");
-        jdbc.execute(sql);
+        com.me.galchat.support.ConsoleSqlTestSupport.initializeSchema(jdbc);
         var saved = new TrpgCompletion().setConversationId(-92001L).setTurnId(-92002L);
         mapper.insert(saved);
         assertThat(mapper.selectById(-92001L).getData()).isNull();

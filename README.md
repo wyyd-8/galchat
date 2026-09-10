@@ -112,7 +112,7 @@ KP 请求结束跑团后，系统先完成最后场景的公开叙述与摘要�
 │   ├── application.yaml
 │   └── mapper/                 # SQL 映射
 ├── src/test/java/com/me/galchat/
-│   └── init/console.sql        # 基础建表脚本；需配合下文的补充建表步骤
+│   └── init/console.sql        # 空数据库的完整建表与技能种子脚本
 ├── reka/
 │   ├── public/templates/      # 可下载的人物卡表格模板
 │   ├── src/api/                # 请求客户端与接口类型
@@ -126,8 +126,7 @@ KP 请求结束跑团后，系统先完成最后场景的公开叙述与摘要�
 │   └── character_card/        # PDF 实现、资源、依赖、示例和测试
 ├── data/
 │   ├── worlds/                # 世界 JSON 数据
-│   ├── modules/               # 模组 SQL 数据
-│   └── maintenance/           # 特定数据维护脚本
+│   └── modules/               # 模组 SQL / JSON 数据
 ├── dice/                      # 骰子 Blender 源文件
 └── output/                    # 规则资料、转换结果及素材输出
 ```
@@ -167,12 +166,9 @@ KP 请求结束跑团后，系统先完成最后场景的公开叙述与摘要�
 ```bash
 psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
   -f src/test/java/com/me/galchat/init/console.sql
-
-psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
-  -f data/maintenance/2026-09-07-trpg-completion.sql
 ```
 
-`console.sql` 包含基础业务表、索引和 `vector` 扩展，面向空数据库，不是已有数据库的增量升级脚本；当前还必须执行第二条命令，补建完成报告与参团履历查询依赖的 `trpg_completion` 表。后端的 `VectorConfiguration` 会初始化以下 1024 维向量表：
+`console.sql` 一次性建立当前全部 47 张业务表（含 `trpg_completion`）、业务索引和 CoC 技能定义种子数据，并安装 `vector` 扩展，无需额外维护脚本。该脚本面向空数据库，不是已有数据库的增量升级脚本。以下四张向量表及其索引由后端启动时通过 `VectorConfiguration` 的 Spring AI 自动初始化，使用 UUID 主键、1024 维向量及 HNSW 余弦索引：
 
 - `world_detail_vector_store`
 - `chat_history_vector_store`
@@ -190,19 +186,7 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
 
 《太阳与九英镑》提供[个人模组导入 JSON](data/modules/sun-and-nine-pounds.json) 和[系统默认模组 SQL](data/modules/sun-and-nine-pounds.sql)，两种方式任选其一。该模组按可回访的地点网络组织，保留场景原文并补充 AI 主持说明；封面与 10 份展示材料已填写上传地址。
 
-#### 已有数据库升级
-
-不要在已有业务数据的数据库上重跑 `console.sql`。按已安装的表结构选择补充脚本：
-
-| 情况 | 操作 |
-| --- | --- |
-| 尚无 `trpg_completion` 表 | 执行 `data/maintenance/2026-09-07-trpg-completion.sql` |
-| 已安装早期完成报告表，仍有 `status`、`completed_at`、`archived_at` 列 | 执行 `data/maintenance/2026-09-08-trpg-summary-turn.sql`；保留完整报告，清空不完整生成数据并删除旧状态列 |
-| 使用最新补充脚本新建数据库 | 无需再执行 `2026-09-08-trpg-summary-turn.sql` |
-
-升级前备份数据库。仓库没有统一的自动迁移流程，其他历史版本差异仍需对照当前表结构核验。
-
-`data/maintenance/2026-09-09-amidst-final-scene-guidance.sql` 用于更新已导入《古树林中》的最终场景主持说明，默认演练并回滚；核对结果后，通过 `psql -v commit_migration=true` 执行该脚本才会提交。其他场景拆分、武器规范化脚本也只适用于各自对应的数据，不应批量作为初始化步骤运行。
+模组与用户世界数据按需导入，不随建表自动创建。《古树林中》的当前导入 SQL 已包含七个时间场景及最终场景主持说明。历史武器修正和跑团重置属于旧数据维护，不参与空库初始化。已有数据库升级需备份后对照当前结构处理，不要重跑 `console.sql`。
 
 ### 2. 准备 Redis、Ollama 和后端配置
 

@@ -106,7 +106,7 @@ async function download() {
               <option :value="2">马善政 · 毛笔风格</option>
             </select>
           </label>
-          <p class="card-export-hint">导出当前查看的人物卡，长文本可能省略。</p>
+          <p class="card-export-hint">技能仅填写与基础值不同的项目；固定两页，超出卡面容量的内容将省略。</p>
           <p v-if="error" class="card-export-error" role="alert">{{ error }}</p>
           <footer>
             <button class="button ghost" type="button" @click="cancelDownload">取消</button>

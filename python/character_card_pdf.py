@@ -55,15 +55,12 @@ MODERN_SKILL_ROWS = {
     "妙手": (1, 10), "攀爬": (1, 11), "汽车驾驶": (1, 12), "潜行": (1, 13),
     "乔装": (1, 14),
     "取悦": (2, 0), "人类学": (2, 1), "闪避": (2, 2), "射击:手枪": (2, 3),
-    "射击:弓": (2, 5), "弓箭": (2, 5), "神秘学": (2, 6), "生存": (2, 7),
+    "射击:步枪/霰弹枪": (2, 4), "神秘学": (2, 6),
     "说服": (2, 8), "锁匠": (2, 9), "跳跃": (2, 10), "投掷": (2, 11),
     "图书馆使用": (2, 12), "心理学": (2, 13), "信用评级": (2, 14),
-    "医学": (3, 0), "艺术和手艺": (3, 1), "游泳": (3, 4), "语言": (3, 5),
-    "母语": (3, 6), "侦查": (3, 7), "追踪": (3, 8),
+    "医学": (3, 0), "游泳": (3, 4),
+    "母语": (3, 7), "侦查": (3, 8), "追踪": (3, 9),
 }
-MODERN_CUSTOM_SKILL_CELLS = [
-    (0, 8), (0, 9), (3, 2), (3, 3), (3, 9), (3, 10), (3, 11), (3, 12), (3, 13), (3, 14),
-]
 SKILL_ROWS_1920S = {
     "博物学": (0, 0), "操纵": (0, 1), "操作重型机械": (0, 2), "导航": (0, 3),
     "电气维修": (0, 4), "法律": (0, 5), "斗殴": (0, 6), "格斗:斗殴": (0, 6),
@@ -72,17 +69,49 @@ SKILL_ROWS_1920S = {
     "科学": (1, 0), "克苏鲁神话": (1, 3), "恐吓": (1, 4), "会计": (1, 5),
     "历史": (1, 6), "聆听": (1, 7), "妙手": (1, 8), "攀爬": (1, 9),
     "骑术": (1, 10), "汽车驾驶": (1, 11), "潜行": (1, 12), "乔装": (1, 13), "取悦": (1, 14),
-    "人类学": (2, 0), "闪避": (2, 1), "射击:手枪": (2, 2), "射击:弓": (2, 6),
-    "弓箭": (2, 6), "神秘学": (2, 4), "生存": (2, 5), "说服": (2, 7),
+    "人类学": (2, 0), "闪避": (2, 1), "射击:手枪": (2, 2),
+    "射击:步枪/霰弹枪": (2, 3), "神秘学": (2, 5), "说服": (2, 7),
     "锁匠": (2, 8), "跳跃": (2, 9), "投掷": (2, 10), "图书馆使用": (2, 11),
     "心理学": (2, 12), "信用评级": (2, 13), "医学": (2, 14),
-    "艺术和手艺": (3, 0), "游泳": (3, 3), "语言": (3, 4), "母语": (3, 6),
-    "侦查": (3, 7), "追踪": (3, 8),
+    "游泳": (3, 3), "母语": (3, 7),
+    "侦查": (3, 8), "追踪": (3, 9),
 }
-CUSTOM_SKILL_CELLS_1920S = [
-    (0, 7), (0, 8), (1, 1), (1, 2), (3, 1), (3, 2), (3, 5),
-    (3, 9), (3, 10), (3, 11), (3, 12), (3, 13), (3, 14),
-]
+# Category headings have a writable line beneath them. Only the five bottom-right
+# rows are general-purpose overflow; other blank lines belong to their category.
+SKILL_CATEGORY_CELLS = {
+    "1920s": {
+        "操纵": [(0, 1)], "格斗": [(0, 7), (0, 8)],
+        "科学": [(1, 0), (1, 1), (1, 2)], "射击": [(2, 4)],
+        "生存": [(2, 6)], "艺术和手艺": [(3, 0), (3, 1), (3, 2)],
+        "语言": [(3, 4), (3, 5), (3, 6)],
+    },
+    "modern": {
+        "操纵": [(0, 1)], "格斗": [(0, 8), (0, 9)],
+        "科学": [(1, 2), (1, 3), (1, 4)], "射击": [(2, 5)],
+        "生存": [(2, 7)], "艺术和手艺": [(3, 1), (3, 2), (3, 3)],
+        "语言": [(3, 5), (3, 6)],
+    },
+}
+SKILL_OVERFLOW_CELLS = [(3, row) for row in range(10, 15)]
+# Fallback for older/imported cards without baseValue, matching the app's catalog.
+SKILL_BASE_VALUES = {
+    "会计": 5, "人类学": 1, "估价": 5, "考古学": 1, "取悦": 15,
+    "攀爬": 20, "信用评级": 0, "克苏鲁神话": 0, "乔装": 5,
+    "汽车驾驶": 20, "电气维修": 10, "话术": 5, "急救": 30,
+    "历史": 5, "恐吓": 15, "跳跃": 20, "法律": 5, "图书馆使用": 20,
+    "聆听": 20, "锁匠": 1, "机械维修": 10, "医学": 1, "博物学": 10,
+    "导航": 10, "神秘学": 5, "操作重型机械": 1, "说服": 10,
+    "精神分析": 1, "心理学": 10, "骑术": 5, "妙手": 10,
+    "侦查": 25, "潜行": 20, "游泳": 20, "投掷": 20, "追踪": 10,
+    "艺术和手艺": 5, "格斗:斧": 15, "斗殴": 25, "格斗:链锯": 10,
+    "格斗:连枷": 10, "格斗:绞索": 15, "格斗:矛": 20,
+    "格斗:刀剑": 20, "格斗:鞭": 5, "射击:弓": 15,
+    "射击:火焰喷射器": 10, "射击:手枪": 20, "射击:重武器": 10,
+    "射击:机枪": 10, "射击:步枪/霰弹枪": 25, "射击:冲锋枪": 15,
+    "语言": 1, "科学": 1, "科学:数学": 10, "生存": 10, "操纵": 1,
+    "计算机使用": 5, "电子学": 1, "动物驯养": 5, "爆破": 1,
+    "潜水": 1, "催眠": 1, "读唇": 1, "学识": 1, "炮术": 1,
+}
 SKILL_VALUE_X = (157.3, 279.2, 401.2, 523.2)
 SKILL_LABEL_X = (79.5, 201.5, 323.5, 445.5)
 
@@ -97,7 +126,20 @@ def text(data: dict[str, Any] | None, name: str) -> str:
 
 
 def normalized_skill(name: str) -> str:
-    return name.strip().replace("：", ":")
+    name = ":".join(part.strip() for part in name.replace("：", ":").split(":"))
+    return {"格斗:斗殴": "斗殴", "弓箭": "射击:弓", "艺术/手艺": "艺术和手艺",
+            "射击:步枪/散弹枪": "射击:步枪/霰弹枪"}.get(name, name)
+
+
+def skill_name(skill: dict[str, Any]) -> str:
+    name = normalized_skill(text(skill, "displayName"))
+    specialization = text(skill, "specialization").strip()
+    category = normalized_skill(text(skill, "category"))
+    if ":" not in name and category in SKILL_CATEGORY_CELLS["modern"] and name != category and name != "母语":
+        name = category + ":" + (specialization or name)
+    elif specialization and ":" not in name and name in {*SKILL_CATEGORY_CELLS["modern"], "母语"}:
+        name += ":" + specialization
+    return normalized_skill(name)
 
 
 class Renderer:
@@ -108,38 +150,110 @@ class Renderer:
         self.weapons = value(card, "weapons", []) or []
         self.profile = value(card, "profile", {})
         self.sheet_era = sheet_era
-        pdfmetrics.registerFont(TTFont("Handwriting", str(font_path)))
+        # ReportLab ignores a second TTFont registered with an existing name.
+        # Keep registration and all measurements bound to the selected font.
+        self.font_name = f"CharacterCard-{font_path.stem}"
+        if self.font_name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(self.font_name, str(font_path)))
 
-    @staticmethod
-    def fit(raw: str, max_width: float, size: float) -> str:
-        if pdfmetrics.stringWidth(raw, "Handwriting", size) <= max_width:
+    def font_runs(self, raw: str):
+        # The bundled Chinese fonts omit Latin punctuation such as the middle dot.
+        # PDF's standard Helvetica supplies those glyphs without another asset.
+        glyphs = pdfmetrics.getFont(self.font_name).face.charToGlyph
+        runs = []
+        for char in raw:
+            font = self.font_name if ord(char) in glyphs else "Helvetica"
+            if runs and runs[-1][0] == font:
+                runs[-1] = (font, runs[-1][1] + char)
+            else:
+                runs.append((font, char))
+        return runs
+
+    def width(self, raw: str, size: float) -> float:
+        return sum(pdfmetrics.stringWidth(part, font, size) for font, part in self.font_runs(raw))
+
+    def fit(self, raw: str, max_width: float, size: float) -> str:
+        if self.width(raw, size) <= max_width:
             return raw
         ellipsis = "…"
-        while raw and pdfmetrics.stringWidth(raw + ellipsis, "Handwriting", size) > max_width:
+        while raw and self.width(raw + ellipsis, size) > max_width:
             raw = raw[:-1]
         return raw + ellipsis
+
+    def write(self, c: canvas.Canvas, raw: str, x: float, y: float, size: float) -> None:
+        obj = c.beginText(x, y)
+        for font, part in self.font_runs(raw):
+            obj.setFont(font, size)
+            obj.textOut(part)
+        c.drawText(obj)
+
+    def fitted(self, raw: Any, max_width: float, size: float) -> tuple[str, float]:
+        raw = str(raw).replace("\n", " ")
+        width = self.width(raw, size)
+        if width > max_width:
+            size = max(size * 0.65, size * max_width / width)
+        shown = self.fit(raw, max_width, size)
+        return shown, size
 
     def centered(self, c: canvas.Canvas, raw: Any, cx: float, baseline: float, size: float,
                  max_width: float, bold: bool = False) -> None:
         if raw is None or raw == "":
             return
-        shown = self.fit(str(raw), max_width, size)
-        width = pdfmetrics.stringWidth(shown, "Handwriting", size)
+        shown, size = self.fitted(raw, max_width, size)
+        width = self.width(shown, size)
         x = cx - width / 2
-        c.setFont("Handwriting", size)
-        c.drawString(x, baseline, shown)
+        self.write(c, shown, x, baseline, size)
         if bold:
-            c.drawString(x + 0.16, baseline, shown)
+            self.write(c, shown, x + 0.16, baseline, size)
 
     def left(self, c: canvas.Canvas, raw: Any, x: float, baseline: float, size: float,
              max_width: float, bold: bool = False) -> None:
         if raw is None or raw == "":
             return
-        shown = self.fit(str(raw), max_width, size)
-        c.setFont("Handwriting", size)
-        c.drawString(x, baseline, shown)
+        shown, size = self.fitted(raw, max_width, size)
+        self.write(c, shown, x, baseline, size)
         if bold:
-            c.drawString(x + 0.16, baseline, shown)
+            self.write(c, shown, x + 0.16, baseline, size)
+
+    def wrapped(self, raw: str, widths: list[float], size: float) -> list[str]:
+        lines, line = [], ""
+        for char in raw.replace("\r\n", "\n").replace("\r", "\n"):
+            width = widths[min(len(lines), len(widths) - 1)]
+            if char == "\n":
+                lines.append(line)
+                line = ""
+            elif line and self.width(line + char, size) > width:
+                carry = ""
+                if len(line) > 1 and (char in "，。！？；：、）》】”’…,.!?;:)" or line[-1] in "（《【“‘("):
+                    line, carry = line[:-1], line[-1]
+                lines.append(line)
+                line = carry + char
+            else:
+                line += char
+        if line:
+            lines.append(line)
+        return lines
+
+    def paragraph(self, c: canvas.Canvas, raw: str, first_x: float,
+                  x: float, right: float, y: float, rows: int, size: float = 9) -> None:
+        if not raw:
+            return
+        lines = self.wrapped(raw, [right - first_x, right - x], size)
+        if len(lines) > rows:
+            lines = lines[:rows]
+            lines[-1] = self.fit(lines[-1] + "…", right - (first_x if rows == 1 else x), size)
+        for row, line in enumerate(lines):
+            self.write(c, line, first_x if row == 0 else x, y - row * 14.4, size)
+
+    def state_heading(self, c: canvas.Canvas, label: str, number: Any,
+                      x: float, y: float, width: float) -> None:
+        c.saveState()
+        c.setFillColorRGB(1, 1, 1)
+        c.rect(x, y - 1, width, 11, stroke=0, fill=1)
+        c.setFillColorRGB(.04, .04, .04)
+        self.write(c, label, x + 1, y + 2, 5.4)
+        self.centered(c, number, x + width - 7, y, 8.7, 13)
+        c.restoreState()
 
     @staticmethod
     def ellipse(c: canvas.Canvas, cx: float, cy: float, rx: float, ry: float) -> None:
@@ -207,10 +321,11 @@ class Renderer:
             self.centered(c, number // 5, sub_x, fifth_y, 6.8, 16)
         self.centered(c, value(ch, "mov"), 413.5, 636.5, 11, 28, bold=True)
 
-        self.centered(c, value(ch, "hpCurrent"), 130.7, 609.0, 8.7, 24, bold=True)
-        self.centered(c, value(ch, "sanCurrent"), 318.8, 609.0, 8.7, 26, bold=True)
-        self.centered(c, value(ch, "sanMax"), 364.7, 609.0, 8.7, 26, bold=True)
-        self.centered(c, value(ch, "mpCurrent"), 483.5, 551.4, 8.7, 24, bold=True)
+        self.state_heading(c, "HP上限", value(ch, "hpMax"), 113, 609, 36)
+        # The app stores current SAN, not historical starting SAN; label it honestly.
+        self.state_heading(c, "当前", value(ch, "sanCurrent"), 301, 609, 36)
+        self.state_heading(c, "上限", value(ch, "sanMax"), 345, 609, 38)
+        self.state_heading(c, "MP上限", value(ch, "mpMax"), 466, 552, 35)
 
         self.draw_states(c)
         self.draw_skills(c)
@@ -235,6 +350,15 @@ class Renderer:
         if mp is not None and 0 <= int(mp) <= 24:
             cx, cy = self.mp_track_position(int(mp))
             self.ellipse(c, cx, cy, 8.5, 5.25)
+        luck = value(ch, "luckCurrent")
+        if luck is not None and 0 <= int(luck) <= 99:
+            n = int(luck)
+            if n <= 7:
+                cx, cy = (268.0 if n == 0 else 310.7 + n * 14.07), 530.1
+            else:
+                row, column = divmod(n - 8, 23)
+                cx, cy = 85.4 + column * 14.07, 520.0 - row * 10.1
+            self.ellipse(c, cx, cy, 7.0, 4.6)
         if value(ch, "dying", False):
             self.ellipse(c, 98.4, 596.4, 14.0, 5.2)
         if value(ch, "unconscious", False):
@@ -250,31 +374,28 @@ class Renderer:
     @staticmethod
     def hp_track_position(number: int) -> tuple[float, float]:
         if number <= 2:
-            return 128.8 + number * 19.2, 597.2
+            return 128.6 + number * 20.9, 598.8
         if number <= 5:
-            return 128.8 + (number - 3) * 19.2, 585.4
+            return 128.6 + (number - 3) * 20.9, 585.9
         row, column = divmod(number - 6, 5)
-        return 90.4 + column * 19.2, 573.6 - row * 11.6
+        return 86.8 + column * 20.9, 573.0 - row * 12.9
 
     @staticmethod
     def san_track_position(number: int) -> tuple[float, float]:
-        if number <= 30:
-            return 79.6 + number * 14.4, 605.6
-        if number <= 53:
-            return 214.0 + (number - 31) * 14.4, 593.6
-        if number <= 76:
-            return 214.0 + (number - 54) * 14.4, 581.6
-        return 214.0 + (number - 77) * 14.4, 569.6
+        if number <= 7:
+            return (414.5 if number == 0 else 441.5 + (number - 1) * 14.07), 611.1
+        row, column = divmod(number - 8, 23)
+        return 216.8 + column * 14.07, 600.6 - row * 10.1
 
     @staticmethod
     def mp_track_position(number: int) -> tuple[float, float]:
         row, column = divmod(number, 5)
-        return 450.0 + column * 18.4, 539.0 - row * 11.3
+        return 443.3 + column * 20.5, 541.5 - row * 12.9
 
     def skill_value(self, name: str, default: int = 0) -> int:
         aliases = {normalized_skill(name), name}
         for skill in self.skills:
-            if normalized_skill(text(skill, "displayName")) in aliases:
+            if skill_name(skill) in aliases:
                 return int(value(skill, "value", default))
         return default
 
@@ -286,78 +407,117 @@ class Renderer:
 
     def draw_skills(self, c: canvas.Canvas) -> None:
         skill_rows = SKILL_ROWS_1920S if self.sheet_era == "1920s" else MODERN_SKILL_ROWS
-        custom_cells = CUSTOM_SKILL_CELLS_1920S if self.sheet_era == "1920s" else MODERN_CUSTOM_SKILL_CELLS
-        occupied: set[tuple[int, int]] = set()
-        custom_index = 0
+        categories = SKILL_CATEGORY_CELLS[self.sheet_era]
+        changed = {}
         for skill in self.skills:
-            name = normalized_skill(text(skill, "displayName"))
-            cell = skill_rows.get(name)
-            custom = False
-            if cell is None or cell in occupied:
-                while custom_index < len(custom_cells) and custom_cells[custom_index] in occupied:
-                    custom_index += 1
-                if custom_index >= len(custom_cells):
-                    continue
-                cell = custom_cells[custom_index]
-                custom_index += 1
-                custom = True
+            name = skill_name(skill)
+            if not name or value(skill, "value") is None:
+                continue
+            base = value(skill, "baseValue")
+            if base is None:
+                if name == "闪避":
+                    base = int(value(self.character, "dex", 0) or 0) // 2
+                elif name == "母语" or name.startswith("母语:"):
+                    base = int(value(self.character, "edu", 0) or 0)
+                else:
+                    base = SKILL_BASE_VALUES.get(name, SKILL_BASE_VALUES.get(name.split(":")[0], 0))
+            score = int(skill["value"])
+            if score != int(base):
+                changed[name] = score
+
+        # Reserve printed skills first so input ordering cannot steal their cells.
+        placements = []
+        occupied = set()
+        pending = []
+        for name, score in changed.items():
+            group = name.split(":")[0]
+            cell = skill_rows.get("母语" if name.startswith("母语:") else name)
+            if cell is not None and group not in categories:
+                occupied.add(cell)
+                placements.append((name, score, cell, name if name.startswith("母语:") else ""))
+            elif cell is not None and name in {"射击:手枪", "射击:步枪/霰弹枪"}:
+                occupied.add(cell)
+                placements.append((name, score, cell, ""))
+            else:
+                pending.append((name, score))
+        overflow = []
+        for name, score in pending:
+            group, _, specialization = name.partition(":")
+            cell = next((cell for cell in categories.get(group, []) if cell not in occupied), None)
+            if cell is None:
+                overflow.append((name, score))
+                continue
             occupied.add(cell)
+            placements.append((name, score, cell, name if specialization else ""))
+        for index, (name, score) in enumerate(overflow):
+            if index >= len(SKILL_OVERFLOW_CELLS):
+                continue
+            placements.append((name, score, SKILL_OVERFLOW_CELLS[index], name))
+        for name, score, cell, label in placements:
             column, row = cell
             top = 333.0 + row * 19.35
             main_y = PAGE_HEIGHT - top - 7.13
             half_y = PAGE_HEIGHT - (top - 3.63) - 5.19
             fifth_y = PAGE_HEIGHT - (top + 5.82) - 5.19
-            score = int(value(skill, "value", 0))
             self.skill_triplet(c, score, SKILL_VALUE_X[column], main_y, 8.1,
                                SKILL_VALUE_X[column] + 16.4, half_y, fifth_y)
-            if custom or ((":" in name or name == "弓箭") and name != "格斗:斗殴"):
-                self.left(c, name, SKILL_LABEL_X[column], main_y + 0.2, 7.2, 66)
+            if label:
+                self.left(c, label, SKILL_LABEL_X[column], main_y - 0.5, 7.2, 64)
 
     def draw_weapons(self, c: canvas.Canvas) -> None:
-        skill_scores = {normalized_skill(text(skill, "displayName")): int(value(skill, "value", 0))
+        skill_scores = {skill_name(skill): int(value(skill, "value", 0))
                         for skill in self.skills}
-        for row, weapon in enumerate(self.weapons[:10]):
-            baseline = 133.8 - row * 13.5
+        unarmed = next((w for w in self.weapons if text(w, "name") in {"斗殴", "徒手战斗"}), None)
+        weapons = [{"name": "徒手战斗", "skillName": "斗殴", "damage": "1D3+DB",
+                    "range": "-", "attacksPerRound": "1", **(unarmed or {})}]
+        weapons.extend(w for w in self.weapons if w is not unarmed)
+        for row, weapon in enumerate(weapons[:6]):
+            baseline = 133.8 - row * 14.2
             name = text(weapon, "name")
-            skill_name = normalized_skill(text(weapon, "skillName") or name)
-            score = skill_scores.get(skill_name, skill_scores.get(name, 0))
-            if row != 0 or name not in {"斗殴", "徒手战斗"}:
+            weapon_skill = normalized_skill(text(weapon, "skillName") or name)
+            score = skill_scores.get(weapon_skill, SKILL_BASE_VALUES.get(weapon_skill))
+            if row != 0:
                 self.left(c, name, 73.5, baseline, 7.8, 70)
-            self.centered(c, score, 164.0, baseline, 7.8, 24)
-            self.centered(c, score // 2, 196.0, baseline, 7.8, 24)
-            self.centered(c, score // 5, 228.0, baseline, 7.8, 24)
-            if row != 0 or name not in {"斗殴", "徒手战斗"}:
-                self.centered(c, value(weapon, "damage"), 274.0, baseline, 6.8, 55)
-            self.centered(c, value(weapon, "range"), 315.0, baseline, 7.2, 30)
-            self.centered(c, value(weapon, "attacksPerRound"), 353.0, baseline, 7.2, 30)
-            self.centered(c, value(weapon, "ammoCapacity"), 393.0, baseline, 7.2, 30)
-            self.centered(c, value(weapon, "malfunction"), 434.0, baseline, 7.2, 31)
+            offset = 2.2 if self.sheet_era == "modern" else 0
+            self.centered(c, score, 162.8 + offset, baseline, 7.8, 24)
+            self.centered(c, score // 2 if score is not None else None, 193.4 + offset, baseline, 7.8, 24)
+            self.centered(c, score // 5 if score is not None else None, 224.6 + offset, baseline, 7.8, 24)
+            if row == 0:
+                c.saveState()
+                c.setFillColorRGB(1, 1, 1)
+                c.rect(244 + offset, 131.3, 203, 12.5, fill=1, stroke=0)
+                c.restoreState()
+            self.centered(c, value(weapon, "damage"), 266.6 + offset, baseline, 6.8, 44)
+            self.centered(c, value(weapon, "range"), 312.6 + offset, baseline, 7.2, 30)
+            self.centered(c, value(weapon, "attacksPerRound"), 350.6 + offset, baseline, 7.2, 28)
+            self.centered(c, value(weapon, "ammoCapacity"), 390.4 + offset, baseline, 7.2, 30)
+            self.centered(c, value(weapon, "malfunction"), 430.1 + offset, baseline, 7.2, 28)
 
     def page_two(self, c: canvas.Canvas) -> None:
         p = self.profile
         fields = [
-            ("appearance", 133, 699.0, 10.2, 166), ("traits", 359, 699.0, 10.2, 103),
-            ("ideology", 146, 641.9, 10.2, 153), ("injuriesAndScars", 406, 641.9, 10.2, 137),
-            ("significantPeople", 133, 584.7, 10.2, 166), ("phobiasAndManias", 418, 584.7, 10.2, 125),
-            ("meaningfulLocations", 158, 527.6, 10.2, 141),
-            ("treasuredPossessions", 133, 470.4, 10.2, 166),
+            ("appearance", 116, 70, 299, 699.0),
+            ("traits", 333, 312, 464, 699.0),
+            ("ideology", 127, 70, 299, 641.9),
+            ("injuriesAndScars", 368, 312, 542, 641.9),
+            ("significantPeople", 117, 70, 299, 584.7),
+            ("phobiasAndManias", 391, 312, 542, 584.7),
+            ("meaningfulLocations", 137, 70, 299, 527.6),
+            ("treasuredPossessions", 117, 70, 299, 470.4),
         ]
-        for field, x, baseline, size, width in fields:
-            self.left(c, value(p, field), x, baseline, size, width)
+        for field, first_x, x, right, y in fields:
+            self.paragraph(c, text(p, field), first_x, x, right, y, 4)
 
-        equipment = text(p, "equipmentText").splitlines()
-        left_count = min(10, (len(equipment) + 1) // 2)
-        for index, line in enumerate(equipment[:20]):
-            if index < left_count:
-                column, row = 0, index
-            else:
-                column, row = 1, index - left_count
-            self.left(c, line, 90 + column * 137, 352.7 - row * 14.4, 9.8, 116)
+        equipment = self.wrapped(text(p, "equipmentText"), [122], 9)
+        if len(equipment) > 20:
+            equipment = equipment[:20]
+            equipment[-1] = self.fit(equipment[-1] + "…", 122, 9)
+        for index, line in enumerate(equipment):
+            column, row = divmod(index, 10)
+            self.write(c, line, 76 + column * 137, 352.7 - row * 14.4, 9)
         self.left(c, value(p, "spendingLevel"), 417, 352.7, 9.8, 85)
         self.left(c, value(p, "cash"), 397, 338.3, 9.8, 105)
-        assets = text(p, "assetsText").splitlines()
-        for index, line in enumerate(assets[:8]):
-            self.left(c, line, 397, 323.9 - index * 14.4, 9.8, 105)
+        self.paragraph(c, text(p, "assetsText"), 382, 356, 542, 323.9, 8)
 
     def render(self, output_pdf: Path, backgrounds: tuple[Path, Path]) -> None:
         output_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -399,7 +559,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
-# ReportLab's named font registry is shared between requests using different fonts.
+# Serialize rendering and registration, since ReportLab's font registry is shared.
 render_lock = Lock()
 
 

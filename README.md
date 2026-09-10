@@ -265,7 +265,7 @@ python python/character_card_pdf.py
 
 默认监听 `127.0.0.1:8083`，可通过 `--host`、`--port` 调整。在 `reka/.env.local` 中配置 `VITE_CHARACTER_CARD_PDF_URL=http://127.0.0.1:8083` 后重启前端。生产构建前须使用浏览器可访问的 HTTPS 服务地址或同域代理路径；跨域时通过 `CHARACTER_CARD_ALLOWED_ORIGINS` 设置允许的前端来源（逗号分隔，默认允许 `http://localhost:5173` 和 `http://127.0.0.1:5173`）。
 
-`GET /health` 检查资源是否齐全；`POST /export` 接收人物卡 `card`、模板 `background`（`1920s` / `modern`）和字体 `fontIndex`（0 / 1 / 2），返回双页 PDF。前端提交当前查看的人物卡，不携带主系统 token 或 cookies；头像由浏览器转为内嵌图片，读取失败时提示并导出无头像版本。PDF 会省略部分长文本，最多绘制 10 行武器且不包含调查员笔记，用于打印而非完整数据备份。
+`GET /health` 检查资源是否齐全；`POST /export` 接收人物卡 `card`、模板 `background`（`1920s` / `modern`）和字体 `fontIndex`（0 / 1 / 2），返回固定双页 PDF。前端提交当前查看的人物卡，不携带主系统 token 或 cookies；头像由浏览器转为内嵌图片，读取失败时提示并导出无头像版本。技能仅填写当前值与基础值不同的项目（包括降低后的值）；专攻优先填写所属大类的空位，放不下再使用右下角 5 个通用空位，其余舍弃。背景和装备按可用行数换行，超过容量的内容截断，不增加补充页。武器区保留徒手战斗首行及另外 5 行，不包含调查员笔记等模板没有对应位置的资料，用于打印而非完整数据备份。
 
 ## 主要接口
 

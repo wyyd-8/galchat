@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { baseParse, NodeTypes, type ElementNode, type RootNode } from '@vue/compiler-dom'
 
-function findElementByClass(root: RootNode, className: string): ElementNode | undefined {
+function findElementByClass(root: RootNode | ElementNode, className: string): ElementNode | undefined {
   const visit = (node: unknown): ElementNode | undefined => {
     if (!node || typeof node !== 'object') return undefined
     const candidate = node as { type?: number, children?: unknown[] }
@@ -56,12 +56,29 @@ test('shows the experiment settings entry only between turns while auto advance 
   assert.ok(template)
 
   const root = baseParse(template)
-  const settings = findElementByClass(root, 'turn-experiment-settings')
-  const settingsRoot = findElementByTag(root, 'PopoverRoot')
-
-  assert.ok(settings)
-  assert.ok(settingsRoot)
-  assert.equal(directive(settingsRoot, 'if'), 'betweenTrpgTurns && !autoAdvance')
+  const mobileSettings = findElementByClass(root, 'turn-experiment-settings')
+  const desktopPopover = findElementByTag(root, 'PopoverRoot')
+  assert.ok(mobileSettings, 'mobile should have its own settings button')
+  assert.ok(desktopPopover, 'desktop should retain its settings popover')
+  assert.ok(findElementByClass(desktopPopover, 'turn-experiment-settings'), 'the desktop entry must remain inside its popover')
+  const mobileCondition = directive(mobileSettings, 'if')
+  const desktopCondition = directive(desktopPopover, 'if')
+  assert.ok(mobileCondition)
+  assert.ok(desktopCondition)
+  const visible = (condition: string, isMobile: boolean, betweenTrpgTurns: boolean, autoAdvance: boolean) =>
+    Boolean(new Function('isMobile', 'betweenTrpgTurns', 'autoAdvance', `return (${condition})`)(isMobile, betweenTrpgTurns, autoAdvance))
+  for (const isMobile of [false, true]) {
+    for (const betweenTrpgTurns of [false, true]) {
+      for (const autoAdvance of [false, true]) {
+        const state = { isMobile, betweenTrpgTurns, autoAdvance }
+        const eligible = betweenTrpgTurns && !autoAdvance
+        assert.equal(visible(mobileCondition, isMobile, betweenTrpgTurns, autoAdvance), isMobile && eligible, `mobile entry: ${JSON.stringify(state)}`)
+        assert.equal(visible(desktopCondition, isMobile, betweenTrpgTurns, autoAdvance), !isMobile && eligible, `desktop popover: ${JSON.stringify(state)}`)
+      }
+    }
+  }
+  assert.equal(directive(mobileSettings, 'on'), 'turnSettingsOpen = true', 'mobile opens its independent full-page settings')
+  assert.match(template, /v-model="turnSettingsOpen"[^>]*mobile-presentation="page"/, 'mobile settings must use a page instead of the desktop popover')
 })
 
 test('replaces the between-turn action with start countdown and cancel controls', async () => {

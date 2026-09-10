@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useMobileViewport } from '@/composables/useMobileViewport'
 import { Check, HelpCircle, LoaderCircle, Minus, Pencil, Play, Trash2, X } from '@lucide/vue'
 import type { ModelApi, ModelApiCapability, ReasoningOutputStatus } from '@/api/types'
 
+const { isMobile } = useMobileViewport()
 const props = defineProps<{ model: ModelApi, testing: boolean }>()
-const emit = defineEmits<{ test: []; edit: []; delete: [] }>()
+const emit = defineEmits<{ test: []; edit: []; delete: []; details: [] }>()
 
 const statusView = computed(() => ({
   UNTESTED: { label: '未测试', tone: 'neutral' },
@@ -61,7 +63,14 @@ function formatTestTime(value?: string) {
 </script>
 
 <template>
-  <article class="model-api-card" :class="`is-${statusView.tone}`">
+  <article v-if="isMobile" class="mobile-model-card">
+    <header><strong>{{ model.name }}</strong><button class="mobile-model-tag mobile-model-result-link" :class="{ failed: model.status === 'FAILED' }" :disabled="model.status === 'UNTESTED'" :aria-label="`查看 ${model.name} 的测试结果`" @click="emit('details')">{{ model.status === 'SUCCESS' ? '连接正常' : statusView.label }}</button></header>
+    <p>{{ model.modelName }} · 密钥末四位 {{ model.apiKeyHint.replace(/^…+/, '') }}</p>
+    <div class="mobile-model-chips"><span class="mobile-model-tag">推理{{ reasoningView(model.reasoningOutputStatus).label }}</span><span v-if="overrideCount" class="mobile-model-tag">{{ overrideCount }} 项额外参数</span></div>
+
+    <div class="mobile-model-buttons"><button class="button secondary" :aria-label="`编辑 ${model.name}`" @click="emit('edit')">编辑</button><button class="button secondary" :disabled="testing" :aria-label="`测试 ${model.name}`" @click="emit('test')"><LoaderCircle v-if="testing" :size="14" class="spin" />{{ testing ? '测试中…' : model.status === 'FAILED' ? '重新测试' : '测试连接' }}</button></div>
+  </article>
+  <article v-else class="model-api-card" :class="`is-${statusView.tone}`">
     <header class="model-api-card-header">
       <div class="model-api-identity">
         <div class="model-api-title-line">
@@ -101,3 +110,17 @@ function formatTestTime(value?: string) {
     </footer>
   </article>
 </template>
+
+<style scoped>
+.mobile-model-card { margin: 12px 0; padding: 17px; background: var(--surface); border: 1px solid var(--line); border-radius: 13px; }
+.mobile-model-card > header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; }
+.mobile-model-card header strong { font-weight: 550; overflow-wrap: anywhere; }
+.mobile-model-card p { font-size: 13px; line-height: 1.8; color: var(--muted); margin: 8px 0 12px; overflow-wrap: anywhere; }
+.mobile-model-tag { font-size: 11px; color: var(--pine); background: var(--pine-soft); padding: 4px 8px; border-radius: 6px; line-height: 1.6; flex-shrink: 0; }
+.mobile-model-tag.failed { background: #f0e0e2; color: var(--wine); }
+.mobile-model-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.mobile-model-buttons { display: flex; gap: 10px; margin-top: 16px; }
+.mobile-model-buttons > button { flex: 1; min-width: 0; }
+.mobile-model-result-link { border: 0; font-weight: 400; }
+.mobile-model-result-link:disabled { opacity: 1; }
+</style>

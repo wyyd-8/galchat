@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowRight, CircleAlert, Dices, LoaderCircle, RotateCcw, Swords } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
+import MobileDicePlayer from './MobileDicePlayer.vue'
+import { useMobileViewport } from '@/composables/useMobileViewport'
 import DiceModifierNotice from '@/dice/components/DiceModifierNotice.vue'
 import diceCriticalSuccessUrl from '@/dice/assets/audio/dice_superwin.mp3'
 import diceFailureUrl from '@/dice/assets/audio/dice_lose.mp3'
@@ -56,6 +58,7 @@ import type {
 } from '@/dice/renderer/ThreeDice'
 
 const open = defineModel<boolean>({ required: true })
+const { isMobile } = useMobileViewport()
 const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean }>()
 const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: [] }>()
 
@@ -459,6 +462,7 @@ function prepareDiceValueMerges(request: DicePlaybackRequest, playGeneration: nu
 }
 
 async function prepare(request: DicePlaybackRequest) {
+  if (isMobile.value) { open.value = true; return }
   const currentGeneration = ++generation
   diceAudio.stop()
   diceOutcomeAudio.stop()
@@ -600,7 +604,7 @@ watch(() => props.request?.id, () => {
   if (props.request) void prepare(props.request)
 }, { immediate: true })
 watch(
-  () => open.value && showContinueAction.value && props.autoContinue === true,
+  () => !isMobile.value && open.value && showContinueAction.value && props.autoContinue === true,
   (eligible) => {
     continueCountdownController.cancel()
     continueCountdown.value = 0
@@ -608,6 +612,7 @@ watch(
   },
 )
 watch(open, (visible, wasVisible) => {
+  if (isMobile.value) return
   if (!visible) {
     const cancelledByUser = wasVisible
       && props.autoContinue === true
@@ -617,6 +622,11 @@ watch(open, (visible, wasVisible) => {
     retireBoard()
     if (cancelledByUser) emit('cancelAutoContinue')
   }
+})
+
+watch(isMobile, mobile => {
+  retireBoard()
+  if (!mobile && open.value && props.request) void prepare(props.request)
 })
 
 onBeforeUnmount(() => {
@@ -634,7 +644,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <MobileDicePlayer v-if="isMobile" v-model="open" :request="request" :show-continue="showContinue" :auto-continue="autoContinue" @roll="emit('roll')" @complete="emit('complete')" @continue="emit('continue')" @cancel-auto-continue="emit('cancelAutoContinue')" />
   <BaseDialog
+    v-else
     v-model="open"
     :title="request?.reason || '掷骰判定'"
     :description="dialogDescription"

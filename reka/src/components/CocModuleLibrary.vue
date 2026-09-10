@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AlertTriangle, BookCopy, Download, FileUp, ImageUp, LockKeyhole, Plus, Save, Search, Trash2, UnlockKeyhole } from '@lucide/vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { AlertTriangle, ArrowLeft, ChevronRight, Ellipsis, BookCopy, Download, FileUp, ImageUp, LockKeyhole, Plus, Save, Search, Trash2, UnlockKeyhole } from '@lucide/vue'
 import { api, uploadImage } from '@/api/client'
 import type {
   CharacterCardCreationRules, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleMaterial,
@@ -11,6 +11,7 @@ import { automaticDerivedFields, syncAutomaticDerivedValues, type CharacterDeriv
 import { prioritizeNonBaseSkills } from './cocModuleCharacterSkills'
 import { cloneCocModuleData } from './cocModuleData'
 import { cocModulePayloadFingerprint, createCocModuleSaveQueue, saveCocModuleIfNeeded } from './cocModuleAutosave'
+import { useMobileViewport } from '@/composables/useMobileViewport'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 
 type Tab = 'overview' | 'context' | 'locations' | 'clues' | 'materials' | 'characters'
@@ -18,7 +19,82 @@ type ImportedDraft = DraftCharacterCard & { profile: NonNullable<DraftCharacterC
 type CharacterEditorMode = 'choose' | 'parse' | 'edit'
 type CharacterEditorTab = 'basics' | 'skills' | 'weapons' | 'background'
 
-const emit = defineEmits<{ changed: [] }>()
+const emit = defineEmits<{ changed: []; detailOpenChange: [open: boolean] }>()
+const { isMobile } = useMobileViewport()
+const mobileView = ref<'list' | 'directory' | 'section'>('list')
+const showModuleManagementActions = computed(() => !isMobile.value || mobileView.value !== 'section')
+const mobileEntry = ref<number | null>(null)
+const moduleScroller = ref<HTMLElement | null>(null)
+let mobileListScrollTop = 0
+const mobilePageTitle = computed(() => {
+  if (mobileView.value === 'directory') return '模组详情'
+  const index = mobileEntry.value
+  if (index !== null) {
+    if (activeTab.value === 'locations') return moduleForm.value?.locations[index]?.name || '编辑地点'
+    if (activeTab.value === 'clues') return moduleForm.value?.clues[index]?.title || '编辑线索'
+    if (activeTab.value === 'materials') return moduleForm.value?.materials[index]?.title || '编辑素材'
+  }
+  return sectionLabels[activeTab.value]
+})
+async function openMobileEntry(index: number) {
+  mobileListScrollTop = moduleScroller.value?.scrollTop || 0
+  mobileEntry.value = index
+  await nextTick()
+  if (moduleScroller.value) moduleScroller.value.scrollTop = 0
+}
+function deleteMobileEntry() {
+  const index = mobileEntry.value
+  if (index == null || !canFullEdit.value || !moduleForm.value) return
+  if (activeTab.value === 'locations') removeAt(moduleForm.value.locations, index)
+  else if (activeTab.value === 'clues') removeAt(moduleForm.value.clues, index)
+  else if (activeTab.value === 'materials') removeAt(moduleForm.value.materials, index)
+}
+
+const moduleActionsOpen = ref(false)
+const contextField = ref('truthBackground')
+const featuredModule = computed(() => ownedModules.value[0] || null)
+const mobileModuleRows = computed(() => [...ownedModules.value.slice(featuredModule.value ? 1 : 0), ...defaultModules.value])
+function moduleSectionDescription(tab: Tab) {
+  const form = moduleForm.value
+  if (!form) return ''
+  return { overview: '名称、简介、可见性', context: '真相、流程与特殊规则', locations: `${form.locations.length} 个调查地点`, clues: `${form.clues.length} 条 · 含关键线索`, materials: `${form.materials.length} 份图片资料`, characters: `${form.characters.length} 位登场人物` }[tab]
+}
+function moduleSectionCount(tab: Tab) {
+  return tab === 'overview' || tab === 'context' ? undefined : moduleForm.value?.[tab].length
+}
+function moduleSummary(module: CocModule) { return module.introduction.replace(/(^|\n)\s*[#>]+\s*/g, ' ').replace(/[*_`]/g, '').trim() }
+
+const leaveOpen = ref(false)
+const pendingDestination = ref<'list' | 'directory'>('list')
+const sectionLabels = { overview: '基本资料', context: '主持人设定', locations: '地点', clues: '线索', materials: '素材', characters: '模组角色卡' }
+watch([isMobile, mobileView], () => emit('detailOpenChange', isMobile.value && mobileView.value !== 'list'), { immediate: true })
+onUnmounted(() => emit('detailOpenChange', false))
+async function mobileBack() {
+  if (mobileEntry.value !== null) { mobileEntry.value = null; await nextTick(); if (moduleScroller.value) moduleScroller.value.scrollTop = mobileListScrollTop; return }
+  const destination = mobileView.value === 'section' && !creating.value ? 'directory' : 'list'
+  if (hasUnsavedChanges.value && (canFullEdit.value || canRestrictedEdit.value)) {
+    if (creating.value || canRestrictedEdit.value || !await persistCurrentModule()) {
+      pendingDestination.value = destination
+      leaveOpen.value = true
+      return
+    }
+  }
+  mobileView.value = destination
+}
+function discardAndLeave() {
+  if (savedPayload.value && !creating.value) editing.value = cloneCocModuleData(savedPayload.value)
+  else { editing.value = null; selected.value = null; creating.value = false }
+  mobileView.value = pendingDestination.value
+  leaveOpen.value = false
+}
+async function openMobileSection(tab: Tab) {
+  switchTab(tab)
+  mobileEntry.value = null
+  mobileView.value = 'section'
+  await nextTick()
+  document.querySelector<HTMLElement>('.mobile-module-heading')?.focus({ preventScroll: true })
+}
+
 
 const ownedModules = ref<CocModule[]>([])
 const defaultModules = ref<CocModule[]>([])
@@ -39,12 +115,14 @@ const uploadingCover = ref(false)
 const weaponError = ref('')
 const characterDialogOpen = ref(false)
 const characterEditorMode = ref<CharacterEditorMode>('choose')
+const mobileParserTab = ref<'source' | 'result'>('source')
 const characterEditorTab = ref<CharacterEditorTab>('basics')
 const editingCharacterIndex = ref<number | null>(null)
 const characterSkillSearch = ref('')
 const characterSkillSpecializations = reactive<Record<number, string>>({})
 const automaticCharacterDerivedFields = ref<Set<CharacterDerivedField>>(new Set())
 const weaponForm = reactive({ name: '', skillName: '斗殴', damage: '', range: '', attacksPerRound: '', ammoCapacity: '', remainingAmmo: '', malfunction: '', canImpale: false, notes: '' })
+const savedPayload = ref<CocModuleSavePayload | null>(null)
 const savedFingerprint = ref('')
 const failedFingerprint = ref('')
 const pendingSaveCount = ref(0)
@@ -120,24 +198,27 @@ async function loadModules(preferredId?: number) {
     ownedModules.value = mine
     defaultModules.value = visible.filter((item) => item.ownerUserId == null)
     const id = preferredId || selected.value?.module.id || mine[0]?.id || defaultModules.value[0]?.id
-    if (id) await openModule(id)
+    if (id) await openModule(id, Boolean(preferredId))
     else { selected.value = null; editing.value = null }
   } catch (error) { showError(error) }
   finally { loading.value = false }
 }
 
-async function openModule(id: number) {
+async function openModule(id: number, reveal = true) {
   busy.value = true
   try {
     const detail = await api.manageCocModule(id)
     const payload = detailToPayload(detail)
     selected.value = detail
     editing.value = payload
+    savedPayload.value = cloneCocModuleData(payload)
     savedFingerprint.value = cocModulePayloadFingerprint(cleanPayload(payload))
     failedFingerprint.value = ''
     creating.value = false
     unlockConfirm.value = false
     activeTab.value = 'overview'
+    mobileEntry.value = null
+    if (reveal) mobileView.value = 'directory'
     characterDialogOpen.value = false
     clearCharacterImport()
   } catch (error) { showError(error) }
@@ -145,6 +226,8 @@ async function openModule(id: number) {
 }
 
 function newModule() {
+  mobileView.value = 'section'
+  mobileEntry.value = null
   creating.value = true
   selected.value = {
     module: { id: 0, name: '未命名模组', introduction: '', visible: true, ownerUserId: -1, editLocked: false },
@@ -197,6 +280,7 @@ async function persistCurrentModule(successMessage?: string): Promise<boolean> {
       return false
     }
     if (result.status === 'saved' && selectedId.value === moduleId) {
+      savedPayload.value = cloneCocModuleData(payload)
       savedFingerprint.value = result.fingerprint
       failedFingerprint.value = ''
       syncModuleSummary(payload)
@@ -277,7 +361,7 @@ async function saveLockedLocation(index: number) {
   const location = editing.value?.locations[index]
   if (!location?.id || !selectedId.value) return
   busy.value = true
-  try { await api.updateCocModuleLocationContent(selectedId.value, location.id, location.content); showMessage(`地点“${location.name}”已更新`) }
+  try { const content = location.content; await api.updateCocModuleLocationContent(selectedId.value, location.id, content); const baseline = savedPayload.value?.locations.find(item => item.id === location.id); if (baseline) { baseline.content = content; savedFingerprint.value = cocModulePayloadFingerprint(cleanPayload(savedPayload.value!)) } showMessage(`地点“${location.name}”已更新`) }
   catch (error) { showError(error) }
   finally { busy.value = false }
 }
@@ -286,7 +370,7 @@ async function saveLockedClue(index: number) {
   const clue = editing.value?.clues[index]
   if (!clue?.id || !selectedId.value) return
   busy.value = true
-  try { await api.updateCocModuleClueContent(selectedId.value, clue.id, clue.content); showMessage(`线索“${clue.title}”已更新`) }
+  try { const content = clue.content; await api.updateCocModuleClueContent(selectedId.value, clue.id, content); const baseline = savedPayload.value?.clues.find(item => item.id === clue.id); if (baseline) { baseline.content = content; savedFingerprint.value = cocModulePayloadFingerprint(cleanPayload(savedPayload.value!)) } showMessage(`线索“${clue.title}”已更新`) }
   catch (error) { showError(error) }
   finally { busy.value = false }
 }
@@ -296,7 +380,7 @@ async function addLockedClue() {
   const clue = editing.value.clues.at(-1)
   if (!clue || clue.id || !clue.title.trim() || !clue.content.trim()) return showMessage('请先填写新线索的标题和正文')
   busy.value = true
-  try { await api.addCocModuleClue(selectedId.value, clue); showMessage('新线索已添加'); await openModule(selectedId.value); activeTab.value = 'clues' }
+  try { await api.addCocModuleClue(selectedId.value, clue); showMessage('新线索已添加'); await openModule(selectedId.value, false); activeTab.value = 'clues'; mobileEntry.value = null }
   catch (error) { showError(error) }
   finally { busy.value = false }
 }
@@ -304,7 +388,7 @@ async function addLockedClue() {
 function addLocation() { editing.value?.locations.push({ name: '', summary: '', content: '' }) }
 function addClue() { editing.value?.clues.push({ title: '', content: '', important: false }) }
 function addMaterial() { editing.value?.materials.push({ title: '', description: '', imageUrl: '' }) }
-function removeAt<T>(list: T[], index: number) { list.splice(index, 1) }
+function removeAt<T>(list: T[], index: number) { list.splice(index, 1); mobileEntry.value = null }
 function removeMaterialImage(index: number) {
   const material = editing.value?.materials[index]
   if (material) material.imageUrl = ''
@@ -355,6 +439,7 @@ function openNewCharacterDialog() {
 
 function chooseCharacterEntry(mode: 'manual' | 'parse') {
   clearCharacterImport()
+  mobileParserTab.value = 'source'
   if (mode === 'manual') {
     importedCard.value = emptyCharacterDraft()
     automaticCharacterDerivedFields.value = automaticDerivedFields(importedCard.value.character)
@@ -544,15 +629,28 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
 </script>
 
 <template>
-  <main class="module-library-page">
+  <main class="module-library-page" :class="`mobile-module-${mobileView}`">
     <div v-if="message" class="module-toast" role="status">{{ message }}</div>
     <div class="module-workspace">
-      <nav class="module-switcher" aria-label="选择模组">
+      <section v-if="isMobile && mobileView === 'list'" class="v1-module-library">
+        <header class="v1-module-library-header"><span class="v1-module-brand">✦</span><div><strong>模组库</strong><small>CoC 跑团内容</small></div><button class="icon-button" aria-label="创建模组" :disabled="busy" @click="newModule"><Plus :size="21" /></button></header>
+        <div class="v1-module-library-content">
+          <div class="v1-module-intro"><span class="eyebrow">SCENARIOS</span><h1>每一个谜团，<br />都有它的开端。</h1></div>
+          <button class="button primary v1-module-wide" :disabled="busy" @click="newModule"><Plus :size="16" />创建模组</button>
+          <div class="v1-module-sectionline"><h3>模组列表</h3><label class="v1-module-import file-button">导入模组<input type="file" accept="application/json,.json" :disabled="busy" @change="importModule" /></label></div>
+          <p v-if="loading" role="status">正在载入模组…</p>
+          <article v-if="featuredModule" class="v1-module-featured"><small>CoC · 我的模组{{ featuredModule.editLocked ? ' · 受限编辑' : '' }}</small><h2>{{ featuredModule.name }}</h2><p>{{ moduleSummary(featuredModule) }}</p><div class="v1-module-meta">{{ [featuredModule.era, featuredModule.playerCount, featuredModule.estimatedDuration].filter(Boolean).join(' · ') }}</div><button class="button secondary v1-module-wide" @click="openModule(featuredModule.id)">查看与编辑</button></article>
+          <button v-for="item in mobileModuleRows" :key="item.id" class="v1-module-row" @click="openModule(item.id)"><span class="v1-module-avatar" :style="item.coverUrl ? { backgroundImage: `url(${item.coverUrl})` } : undefined"><BookCopy v-if="!item.coverUrl" :size="21" /></span><span><strong>{{ item.name }}</strong><small>{{ item.ownerUserId == null ? '系统提供 · 只读' : item.editLocked ? '我的模组 · 受限编辑' : '我的模组' }}</small></span><ChevronRight :size="16" /></button>
+          <p v-if="!loading && !featuredModule && !mobileModuleRows.length" class="v1-module-empty">还没有模组，创建或导入一份模组开始准备故事。</p>
+        </div>
+      </section>
+      <nav v-if="!isMobile" class="module-switcher" aria-label="选择模组">
         <div class="module-switcher-heading">
           <h1>模组库</h1>
           <small>{{ ownedModules.length }} 个自建 · {{ defaultModules.length }} 个默认</small>
         </div>
         <div class="module-switcher-track">
+          <p v-if="loading" class="mobile-module-loading" role="status">正在载入模组…</p>
           <button v-if="creating" class="module-switcher-item active draft" type="button">
             <span class="module-switcher-cover"><Plus :size="18" /></span>
             <span><small>正在创建</small><strong>{{ moduleForm?.name || '未命名模组' }}</strong></span>
@@ -576,10 +674,16 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
       </nav>
 
       <section class="module-editor-pane">
+        <header v-if="isMobile && mobileView !== 'list'" class="mobile-module-header"><button class="icon-button" aria-label="返回上一层" :disabled="busy || isSaving" @click="mobileBack"><ArrowLeft :size="20" /></button><h2 class="mobile-module-heading" tabindex="-1">{{ mobilePageTitle }}</h2><button v-if="mobileView === 'directory'" class="icon-button" aria-label="模组更多选项" @click="moduleActionsOpen = true"><Ellipsis :size="21" /></button><button v-else-if="mobileEntry !== null && canFullEdit && activeTab !== 'materials'" class="icon-button danger-text" aria-label="删除当前条目" :disabled="busy || isSaving" @click="deleteMobileEntry"><Trash2 :size="18" /></button><span v-else-if="canFullEdit && !creating" class="module-save-status" :class="saveStatus.kind" role="status">{{ saveStatus.text }}</span></header>
+        <nav v-if="isMobile && mobileView === 'directory'" class="mobile-module-directory-list" aria-label="模组目录">
+          <div class="v1-module-intro"><span class="eyebrow">{{ isDefault ? '系统模组 · 只读' : isLocked ? '我的模组 · 受限编辑' : '我的模组 · 可编辑' }}</span><h1>{{ moduleForm?.name || '未命名模组' }}</h1><p v-if="canFullEdit" class="module-save-status" :class="saveStatus.kind" role="status">{{ saveStatus.text }}</p></div>
+          <button v-for="(label, tab) in sectionLabels" :key="tab" @click="openMobileSection(tab)"><span><strong>{{ label }}</strong><small>{{ moduleSectionDescription(tab) }}</small></span><span v-if="moduleSectionCount(tab) !== undefined" class="v1-module-count">{{ moduleSectionCount(tab) }}</span><ChevronRight v-else :size="16" /></button>
+          <p v-if="!isLocked" class="v1-module-notice">{{ isDefault ? '这份模组由系统提供，内容只读。' : '这份模组由你创建，可维护全部内容。' }}</p>
+        </nav>
         <div v-if="loading" class="module-empty">正在载入模组…</div>
         <div v-else-if="!moduleForm" class="module-empty"><BookCopy :size="34" /><strong>还没有可管理的模组</strong><span>新建一个模组，或导入已有 JSON 文件。</span></div>
         <template v-else>
-          <nav class="module-tabs">
+          <nav v-if="showModuleManagementActions || canFullEdit" class="module-tabs">
             <div class="module-tab-identity">
               <span class="module-state" :class="{ locked: isLocked, readonly: isDefault }">{{ creating ? '新模组' : isDefault ? '默认模组 · 只读' : isLocked ? '已被跑团引用 · 受限编辑' : '自建模组 · 完整编辑' }}</span>
               <strong>{{ moduleForm.name || '未命名模组' }}</strong>
@@ -589,8 +693,8 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
             </div>
             <div class="module-editor-actions">
               <span v-if="canFullEdit && !creating" class="module-save-status" :class="saveStatus.kind" role="status">{{ saveStatus.text }}</span>
-              <button v-if="selectedId" class="button secondary" :disabled="busy" @click="exportModule"><Download :size="16" />导出</button>
-              <button v-if="isLocked" class="button secondary" :disabled="busy" @click="unlockConfirm = true"><UnlockKeyhole :size="16" />解锁</button>
+              <button v-if="selectedId && showModuleManagementActions" class="button secondary" :disabled="busy" @click="exportModule"><Download :size="16" />导出</button>
+              <button v-if="isLocked && showModuleManagementActions" class="button secondary" :disabled="busy" @click="unlockConfirm = true"><UnlockKeyhole :size="16" />解锁</button>
               <button v-if="canFullEdit" class="button primary" :disabled="busy || isSaving" @click="saveModule"><Save :size="16" />{{ creating ? '创建模组' : isSaving ? '保存中…' : '保存全部' }}</button>
             </div>
           </nav>
@@ -598,8 +702,21 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
           <div v-if="isLocked" class="module-lock-notice"><LockKeyhole :size="17" /><span><strong>当前为受限编辑</strong><small>只能修改地点正文、新增线索或修改线索正文。其他内容保持只读。</small></span></div>
           <div v-if="unlockConfirm" class="module-unlock-warning"><AlertTriangle :size="19" /><div><strong>解锁会影响所有引用此模组的跑团</strong><p>活动跑团会重置到初始状态；已完成跑团除初始状态外的存档会失效。仅绑定角色卡、尚未开始第一次行动轮的跑团不受影响。</p></div><button class="button ghost" @click="unlockConfirm = false">取消</button><button class="button danger" :disabled="busy" @click="unlockModule">确认解锁</button></div>
 
-          <div class="module-editor-scroll">
+          <div ref="moduleScroller" class="module-editor-scroll" :class="{ 'mobile-has-entry': mobileEntry !== null }">
             <section v-if="activeTab === 'overview'" class="module-form-grid overview-grid">
+              <template v-if="isMobile">
+                <label class="field full"><span>模组名称</span><input v-model="moduleForm.name" :disabled="!canFullEdit" /></label>
+                <label class="field full"><span>简介</span><textarea v-model="moduleForm.introduction" rows="5" :disabled="!canFullEdit" /></label>
+                <label v-if="!isDefault" class="switch-row full"><span><strong>可用于新建跑团</strong><small>关闭后不出现在新建跑团的模组列表中。</small></span><input v-model="moduleForm.visible" type="checkbox" :disabled="!canFullEdit" /></label>
+                <details class="v1-module-details full"><summary>更多基本资料</summary><div class="module-form-grid">
+                  <label class="field"><span>作者</span><input v-model="moduleForm.author" :disabled="!canFullEdit" /></label>
+                  <label class="field"><span>时代</span><input v-if="isDefault" :value="moduleForm.era" disabled /><select v-else v-model="moduleForm.era" :disabled="!canFullEdit"><option value="1920s">1920s</option><option value="现代">现代</option></select></label>
+                  <label class="field"><span>玩家人数</span><input v-model="moduleForm.playerCount" :disabled="!canFullEdit" /></label><label class="field"><span>预计时长</span><input v-model="moduleForm.estimatedDuration" :disabled="!canFullEdit" /></label>
+                  <div class="field"><span>模组封面</span><img v-if="moduleForm.coverUrl" class="v1-module-cover-preview" :src="moduleForm.coverUrl" alt="模组封面" /><label v-if="canFullEdit" class="button secondary file-button"><ImageUp :size="15" />{{ uploadingCover ? '上传中…' : '上传封面' }}<input type="file" accept="image/*" :disabled="uploadingCover" @change="uploadCoverImage" /></label></div>
+                  <label class="field"><span>调查员创建说明</span><textarea v-model="moduleForm.investigatorCreation" rows="5" :disabled="!canFullEdit" /></label>
+                </div></details>
+              </template>
+              <template v-else>
               <header class="editor-section-heading full"><span v-if="creating" class="eyebrow">第 1 步，共 2 步</span><h3>{{ creating ? '填写基本资料' : '基本资料' }}</h3><p>{{ creating ? '先填写名称和简介并创建模组，创建后即可继续补充其他内容。' : '这些信息会展示在新建跑团时的模组选择页面。' }}</p></header>
               <label class="field full"><span>模组名称 *</span><input v-model="moduleForm.name" :disabled="!canFullEdit" /></label>
               <label class="field"><span>作者</span><input v-model="moduleForm.author" :disabled="!canFullEdit" /></label>
@@ -610,37 +727,44 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
               <label class="field full"><span>模组简介 *</span><textarea v-model="moduleForm.introduction" rows="6" :disabled="!canFullEdit" /></label>
               <label class="field full"><span>调查员创建说明</span><textarea v-model="moduleForm.investigatorCreation" rows="5" :disabled="!canFullEdit" /></label>
               <label v-if="!isDefault" class="switch-row full"><span><strong>可用于新建跑团</strong><small>关闭后，该模组仍保留，但不会出现在新建跑团的模组列表中。</small></span><input v-model="moduleForm.visible" type="checkbox" :disabled="!canFullEdit" /></label>
+              </template>
             </section>
 
             <section v-else-if="activeTab === 'context'" class="module-form-grid">
+              <label v-if="isMobile" class="field"><span>设定内容</span><select v-model="contextField"><option v-for="field in (['truthBackground','investigatorIntro','timeline','specialRules','keeperGuidance','endingContent','extraContent'] as const)" :key="field" :value="field">{{ ({ truthBackground: '真相与背景', investigatorIntro: '调查员开场', timeline: '时间线', specialRules: '特殊规则', keeperGuidance: '守秘人指引', endingContent: '结局内容', extraContent: '补充内容' })[field] }}</option></select></label>
               <header class="editor-section-heading full"><h3>主持人设定</h3><p>整理只供主持人查看的真相、流程与特殊规则。</p></header>
-              <label v-for="field in ([['truthBackground','真相与背景'],['investigatorIntro','调查员开场'],['timeline','时间线'],['specialRules','特殊规则'],['keeperGuidance','守秘人指引'],['endingContent','结局内容'],['extraContent','补充内容']] as const)" :key="field[0]" class="field full"><span>{{ field[1] }}</span><textarea v-model="moduleForm.context[field[0]]" rows="6" :disabled="!canFullEdit" /></label>
+              <label v-for="field in ([['truthBackground','真相与背景'],['investigatorIntro','调查员开场'],['timeline','时间线'],['specialRules','特殊规则'],['keeperGuidance','守秘人指引'],['endingContent','结局内容'],['extraContent','补充内容']] as const).filter(field => !isMobile || contextField === field[0])" :key="field[0]" class="field full"><span>{{ field[1] }}</span><textarea v-model="moduleForm.context[field[0]]" :rows="isMobile ? 12 : 6" :disabled="!canFullEdit" /></label>
             </section>
 
             <section v-else-if="activeTab === 'locations'" class="module-collection">
               <header class="editor-section-heading"><h3>地点</h3><p>按调查顺序维护场景摘要与主持正文。</p></header>
-              <article v-for="(location, index) in moduleForm.locations" :key="location.id || index" class="module-entry-card">
-                <header><strong>地点 {{ index + 1 }}</strong><button v-if="canFullEdit" class="icon-button" title="删除地点" @click="removeAt(moduleForm.locations, index)"><Trash2 :size="15" /></button></header>
+              <template v-for="(location, index) in moduleForm.locations" :key="location.id || index"><article v-if="!isMobile || mobileEntry === null || mobileEntry === index" class="module-entry-card" :class="{ 'mobile-entry-selected': mobileEntry === index }">
+                <header v-if="!isMobile || mobileEntry === null"><button v-if="isMobile" class="mobile-module-entry-title" @click="openMobileEntry(index)">{{ location.name || `地点 ${index + 1}` }}<ChevronRight :size="17" /></button><strong v-else>地点 {{ index + 1 }}</strong><button v-if="canFullEdit && !isMobile" class="icon-button" title="删除地点" @click="removeAt(moduleForm.locations, index)"><Trash2 :size="15" /></button></header>
+                <template v-if="!isMobile || mobileEntry === index">
                 <div class="module-form-grid"><label class="field"><span>名称 *</span><input v-model="location.name" :disabled="!canFullEdit" /></label><label class="field"><span>摘要 *</span><input v-model="location.summary" :disabled="!canFullEdit" /></label><label class="field full"><span>地点正文 *</span><textarea v-model="location.content" rows="8" :disabled="isDefault" /></label></div>
                 <button v-if="canRestrictedEdit" class="button secondary entry-save" :disabled="busy" @click="saveLockedLocation(index)"><Save :size="15" />保存地点正文</button>
-              </article>
-              <button v-if="canFullEdit" class="module-add-card" @click="addLocation"><Plus :size="18" />新增地点</button>
+                </template>
+              </article></template>
+              <button v-if="canFullEdit" class="module-add-card" @click="addLocation(); openMobileEntry(moduleForm.locations.length - 1)"><Plus :size="18" />新增地点</button>
             </section>
 
             <section v-else-if="activeTab === 'clues'" class="module-collection">
               <header class="editor-section-heading"><h3>线索</h3><p>管理玩家可能获取的信息以及关键线索标记。</p></header>
-              <article v-for="(clue, index) in moduleForm.clues" :key="clue.id || `new-${index}`" class="module-entry-card">
-                <header><strong>{{ clue.id ? `线索 ${index + 1}` : '新线索' }}</strong><button v-if="canFullEdit" class="icon-button" title="删除线索" @click="removeAt(moduleForm.clues, index)"><Trash2 :size="15" /></button></header>
+              <template v-for="(clue, index) in moduleForm.clues" :key="clue.id || `new-${index}`"><article v-if="!isMobile || mobileEntry === null || mobileEntry === index" class="module-entry-card" :class="{ 'mobile-entry-selected': mobileEntry === index }">
+                <header v-if="!isMobile || mobileEntry === null"><button v-if="isMobile" class="mobile-module-entry-title" @click="openMobileEntry(index)">{{ clue.title || `线索 ${index + 1}` }}<ChevronRight :size="17" /></button><strong v-else>{{ clue.id ? `线索 ${index + 1}` : '新线索' }}</strong><button v-if="canFullEdit && !isMobile" class="icon-button" title="删除线索" @click="removeAt(moduleForm.clues, index)"><Trash2 :size="15" /></button></header>
+                <template v-if="!isMobile || mobileEntry === index">
                 <div class="module-form-grid"><label class="field full"><span>标题 *</span><input v-model="clue.title" :disabled="!canFullEdit && Boolean(clue.id)" /></label><label class="field full"><span>线索正文 *</span><textarea v-model="clue.content" rows="7" :disabled="isDefault" /></label><label class="switch-row full"><span><strong>重要线索</strong></span><input v-model="clue.important" type="checkbox" :disabled="!canFullEdit && Boolean(clue.id)" /></label></div>
                 <button v-if="canRestrictedEdit" class="button secondary entry-save" :disabled="busy" @click="clue.id ? saveLockedClue(index) : addLockedClue()"><Save :size="15" />{{ clue.id ? '保存线索正文' : '添加线索' }}</button>
-              </article>
-              <button v-if="canFullEdit || (canRestrictedEdit && !moduleForm.clues.some((clue) => !clue.id))" class="module-add-card" @click="addClue"><Plus :size="18" />新增线索</button>
+                </template>
+              </article></template>
+              <button v-if="canFullEdit || (canRestrictedEdit && !moduleForm.clues.some((clue) => !clue.id))" class="module-add-card" @click="addClue(); openMobileEntry(moduleForm.clues.length - 1)"><Plus :size="18" />新增线索</button>
             </section>
 
             <section v-else-if="activeTab === 'materials'" class="module-collection material-grid">
               <header class="editor-section-heading collection-heading"><h3>素材</h3><p>上传可在跑团过程中展示给玩家的图片资料。</p></header>
-              <article v-for="(material, index) in moduleForm.materials" :key="material.id || index" class="module-entry-card material-card">
-                <header><strong>素材 {{ index + 1 }}</strong><button v-if="canFullEdit" class="icon-button" title="删除素材" @click="removeAt(moduleForm.materials, index)"><Trash2 :size="15" /></button></header>
+              <template v-for="(material, index) in moduleForm.materials" :key="material.id || index"><article v-if="!isMobile || mobileEntry === null || mobileEntry === index" class="module-entry-card material-card" :class="{ 'mobile-entry-selected': mobileEntry === index }">
+                <header v-if="!isMobile || mobileEntry === null"><button v-if="isMobile" class="mobile-module-entry-title" @click="openMobileEntry(index)">{{ material.title || `素材 ${index + 1}` }}<ChevronRight :size="17" /></button><strong v-else>素材 {{ index + 1 }}</strong><button v-if="canFullEdit && !isMobile" class="icon-button" title="删除素材" @click="removeAt(moduleForm.materials, index)"><Trash2 :size="15" /></button></header>
+                <template v-if="!isMobile || mobileEntry === index">
                 <label v-if="canFullEdit && !material.imageUrl" class="material-image-frame empty" :class="{ uploading: uploadingMaterial === index }">
                   <ImageUp :size="28" />
                   <strong>{{ uploadingMaterial === index ? '正在上传…' : '上传图片' }}</strong>
@@ -650,7 +774,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
                 <div v-else class="material-image-frame" :class="{ 'has-image': material.imageUrl, empty: !material.imageUrl, uploading: uploadingMaterial === index }">
                   <img v-if="material.imageUrl" :src="material.imageUrl" :alt="material.title || `素材 ${index + 1}`" />
                   <template v-else><ImageUp :size="28" /><strong>暂无图片</strong></template>
-                  <div v-if="canFullEdit && material.imageUrl" class="material-image-actions">
+                  <div v-if="!isMobile && canFullEdit && material.imageUrl" class="material-image-actions">
                     <label class="material-image-action">
                       <ImageUp :size="16" />{{ uploadingMaterial === index ? '上传中…' : '替换' }}
                       <input type="file" accept="image/*" :disabled="uploadingMaterial !== null" @change="uploadMaterialImage($event, index)" />
@@ -658,21 +782,24 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
                     <button class="material-image-action danger" type="button" :disabled="uploadingMaterial !== null" @click="removeMaterialImage(index)"><Trash2 :size="16" />删除</button>
                   </div>
                 </div>
-                <label class="field"><span>标题 *</span><input v-model="material.title" :disabled="!canFullEdit" /></label>
-                <label class="field"><span>介绍 *</span><textarea v-model="material.description" rows="4" :disabled="!canFullEdit" /></label>
-              </article>
-              <button v-if="canFullEdit" class="module-add-card" @click="addMaterial"><Plus :size="18" />新增素材</button>
+                <div v-if="isMobile && !canFullEdit" class="v1-material-reading"><p>{{ material.description }}</p></div>
+                <label v-if="!isMobile || canFullEdit" class="field"><span>标题 *</span><input v-model="material.title" :disabled="!canFullEdit" /></label>
+                <label v-if="!isMobile || canFullEdit" class="field"><span>介绍 *</span><textarea v-model="material.description" rows="4" :disabled="!canFullEdit" /></label>
+                </template>
+              </article></template>
+              <button v-if="canFullEdit" class="module-add-card" @click="addMaterial(); openMobileEntry(moduleForm.materials.length - 1)"><Plus :size="18" />新增素材</button>
             </section>
 
             <section v-else class="module-character-section">
               <header class="editor-section-heading"><h3>模组角色卡</h3><p>查看或维护模组中的人物、怪物和其他登场角色。</p></header>
               <div v-if="moduleForm.characters.length || canFullEdit" class="preset-character-list">
                 <article v-for="(card, index) in moduleForm.characters" :key="index"><button class="preset-character-main" type="button" @click="openCharacterEditor(index)"><span class="preset-avatar">{{ card.character.name.slice(0, 1) }}</span><span><strong>{{ card.character.name }}</strong><small>{{ card.skills.length }} 项技能 · {{ card.weapons.length }} 件武器</small></span></button><button v-if="canFullEdit" class="icon-button" aria-label="删除模组角色卡" @click="removeAt(moduleForm.characters, index)"><Trash2 :size="15" /></button></article>
-                <button v-if="canFullEdit" class="preset-character-create-card" type="button" @click="openNewCharacterDialog"><Plus :size="18" /><strong>新建模组角色卡</strong></button>
+                <button v-if="canFullEdit && !isMobile" class="preset-character-create-card" type="button" @click="openNewCharacterDialog"><Plus :size="18" /><strong>新建模组角色卡</strong></button>
               </div>
               <div v-else class="module-empty small">此模组尚未添加角色卡。</div>
+              <div v-if="isMobile && canFullEdit" class="v1-module-character-actions"><button class="button secondary" @click="openNewCharacterDialog(); chooseCharacterEntry('parse')">粘贴导入人物数据</button><button class="button secondary" @click="openNewCharacterDialog(); chooseCharacterEntry('manual')">新建人物 / 技能 / 武器</button></div>
 
-              <BaseDialog v-model="characterDialogOpen" :title="characterDialogTitle" :description="characterDialogDescription" size="lg" :content-class="characterDialogContentClass">
+              <BaseDialog v-model="characterDialogOpen" mobile-presentation="page" :title="characterDialogTitle" :description="isMobile ? undefined : characterDialogDescription" :mobile-back="isMobile && characterEditorMode === 'parse' && mobileParserTab === 'result' ? () => mobileParserTab = 'source' : undefined" size="lg" :content-class="characterDialogContentClass">
                 <div class="character-editor-content">
                   <section v-if="characterEditorMode === 'choose'" class="character-entry-choice">
                     <button type="button" @click="chooseCharacterEntry('manual')"><span class="character-entry-icon"><Plus :size="22" /></span><strong>手动录入</strong><small>从空白人物卡开始，逐项填写属性、技能、武器与背景。</small></button>
@@ -680,12 +807,13 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
                   </section>
 
                   <section v-else-if="characterEditorMode === 'parse'" class="character-parser-layout">
-                    <div class="character-parser-source">
+                    <nav v-if="isMobile" class="v1-parser-tabs" aria-label="导入人物资料"><button :class="{ active: mobileParserTab === 'source' }" @click="mobileParserTab = 'source'">粘贴原文</button><button :class="{ active: mobileParserTab === 'result' }" :disabled="!importedCard" @click="mobileParserTab = 'result'">识别结果</button></nav>
+                    <div v-show="!isMobile || mobileParserTab === 'source'" class="character-parser-source">
                       <h3>粘贴人物数据</h3>
                       <p>属性支持中文名和 STR 等缩写；技能按中文名称匹配。武器只标记原文，不会自动建立。</p>
-                      <textarea v-model="importingText" rows="18" placeholder="粘贴图片示例中的文字格式…" />
+                      <textarea v-model="importingText" :rows="isMobile ? 7 : 18" placeholder="粘贴图片示例中的文字格式…" />
                     </div>
-                    <div class="character-parser-result">
+                    <div v-show="!isMobile || mobileParserTab === 'result'" class="character-parser-result">
                       <h3>解析结果</h3>
                       <div v-if="importedCard" class="parse-result-summary">
                         <div class="review-heading"><div><strong>{{ importedCard.character.name || '未识别姓名' }}</strong><small>{{ importedCard.skills.length }} 项技能已匹配</small></div><span v-if="missingAttributes.length" class="validation-badge error">缺少 {{ missingAttributes.join('、') }}</span><span v-else class="validation-badge">核心属性完整</span></div>
@@ -746,17 +874,25 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
                   </section>
                 </div>
                 <template #footer>
-                  <template v-if="characterEditorMode === 'choose'"><button class="button ghost" type="button" @click="closeCharacterDialog">取消</button></template>
+                  <template v-if="isMobile && characterEditorMode === 'parse'"><button v-if="mobileParserTab === 'source'" class="button primary" :disabled="!importingText.trim()" @click="parseCharacter(); importedCard && (mobileParserTab = 'result')">{{ importedCard ? '重新解析' : '开始解析' }}</button><button v-else class="button primary" :disabled="!importedCard" @click="continueParsedCharacter">填入人物卡并继续完善</button></template>
+                  <template v-else-if="isMobile && characterEditorMode === 'edit'"><button v-if="canFullEdit" class="button primary" :disabled="isSaving" @click="confirmImportedCharacter">{{ isSaving ? '保存中…' : '保存角色' }}</button><button v-else class="button primary" @click="closeCharacterDialog">返回模组</button></template>
+                  <template v-else-if="characterEditorMode === 'choose'"><button class="button ghost" type="button" @click="closeCharacterDialog">取消</button></template>
                   <template v-else-if="characterEditorMode === 'parse'"><button class="button ghost" type="button" @click="characterEditorMode = 'choose'">返回</button><span class="dialog-footer-spacer" /><button class="button secondary" type="button" :disabled="!importingText.trim()" @click="parseCharacter">{{ importedCard ? '重新解析' : '开始解析' }}</button><button class="button primary" type="button" :disabled="!importedCard" @click="continueParsedCharacter">填入人物卡并继续完善</button></template>
                   <template v-else><button class="button ghost" type="button" @click="closeCharacterDialog">{{ canFullEdit ? '取消' : '关闭' }}</button><span class="dialog-footer-spacer" /><button v-if="canFullEdit" class="button primary" type="button" :disabled="isSaving" @click="confirmImportedCharacter"><Save :size="15" />{{ isSaving ? '保存中…' : '保存角色' }}</button></template>
                 </template>
               </BaseDialog>
             </section>
           </div>
-          <footer v-if="canFullEdit && !creating" class="module-danger-zone"><span><strong>删除模组</strong><small>仅未锁定的自建模组可以删除。</small></span><button class="button ghost danger-text" :disabled="busy" @click="deleteModule"><Trash2 :size="15" />删除</button></footer>
+          <footer v-if="isMobile && mobileView === 'section'" class="v1-module-footer"><button v-if="activeTab === 'materials' && mobileEntry !== null && canFullEdit" class="button secondary mobile-material-delete" :disabled="busy || isSaving || uploadingMaterial !== null" @click="deleteMobileEntry"><Trash2 :size="16" />删除素材</button><button v-if="creating" class="button primary" :disabled="busy || isSaving" @click="saveModule">创建模组</button><button v-else class="button primary" :disabled="busy || isSaving" @click="mobileBack">{{ mobileEntry !== null ? `返回${sectionLabels[activeTab]}列表` : '返回模组' }}</button></footer>
+          <footer v-if="!isMobile && canFullEdit && !creating" class="module-danger-zone"><span><strong>删除模组</strong><small>仅未锁定的自建模组可以删除。</small></span><button class="button ghost danger-text" :disabled="busy" @click="deleteModule"><Trash2 :size="15" />删除</button></footer>
         </template>
       </section>
     </div>
+    <BaseDialog v-model="leaveOpen" title="仍有未保存的修改" description="修改仍保留在当前页面。可以返回继续编辑，或明确放弃这次修改。" layer="foreground"><template #footer><button class="button secondary" @click="leaveOpen = false">继续编辑</button><button class="button danger" @click="discardAndLeave">放弃修改并返回</button></template></BaseDialog>
+    <BaseDialog v-model="moduleActionsOpen" title="模组选项" mobile-presentation="sheet">
+      <nav class="v1-module-action-list"><button v-if="selectedId" :disabled="busy" @click="exportModule(); moduleActionsOpen = false"><Download :size="18" />导出模组</button><button v-if="isLocked" :disabled="busy" @click="unlockConfirm = true; moduleActionsOpen = false"><UnlockKeyhole :size="18" />解锁模组</button><button v-if="canFullEdit && !creating" class="danger-text" :disabled="busy" @click="moduleActionsOpen = false; deleteModule()"><Trash2 :size="18" />删除模组</button></nav>
+      <template #footer><button class="button secondary" @click="moduleActionsOpen = false">取消</button></template>
+    </BaseDialog>
   </main>
 </template>
 
@@ -1012,5 +1148,185 @@ button.material-image-action { font-family: inherit; }
   .character-skill-list article { grid-template-columns: minmax(0, 1fr) 90px 42px; }
   .character-skill-list .skill-specialization { grid-column: 1 / -1; grid-row: 2; }
   .attribute-editor-grid, .parsed-attribute-grid, .character-background-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 767px) {
+  :global(.dialog-content.module-character-editor-dialog.character-dialog-workspace) { height: var(--app-viewport-height, 100dvh); }
+  .module-library-page { padding: 0; height: auto; min-height: var(--app-viewport-height, 100dvh); }
+  .module-workspace { display: block; height: auto; min-height: 0; }
+  .module-switcher { display: flex; flex-direction: column; align-items: stretch; grid-template-columns: minmax(0, 1fr); padding: 26px 16px; width: 100%; height: auto; border: 0; background: var(--paper); }
+  .module-switcher-heading { padding: 0 0 20px; }
+  .module-switcher-heading h1 { font-size: 24px; }
+  .module-switcher-track { display: grid; grid-template-columns: minmax(0, 1fr); padding: 0; overflow: visible; }
+  .module-switcher-item { min-width: 0; width: 100%; padding: 16px; min-height: 90px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+  .module-switcher-item > span { min-width: 0; }
+  .module-switcher-item strong { white-space: normal; overflow-wrap: anywhere; font-size: 14px; }
+  .module-switcher-item small { font-size: 12px; }
+  .module-switcher-group { margin: 12px 0 4px; font-size: 12px; }
+  .module-switcher-actions { display: flex; gap: 8px; padding: 18px 0; }
+  .module-switcher-actions > * { flex: 1; }
+  .mobile-module-list .module-editor-pane { display: none; }
+  .mobile-module-list .module-switcher:has(.module-switcher-track:empty)::after { content: '还没有模组，可以新建或导入。'; display: block; color: var(--muted); padding: 25px 0; }
+  .mobile-module-directory .module-switcher, .mobile-module-section .module-switcher { display: none; }
+  .module-editor-pane { display: flex; flex-direction: column; height: var(--app-viewport-height, 100dvh); min-height: 0; }
+  .mobile-module-header { min-height: 60px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: max(8px, env(safe-area-inset-top)) 12px 8px; border-bottom: 1px solid var(--line); background: var(--paper); }
+  .mobile-module-heading { flex: 1; min-width: 0; font-size: 14px; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
+  .mobile-module-header .module-save-status { max-width: 80px; text-align: right; font-size: 10px; }
+  .mobile-module-directory-list { padding: 16px; overflow-y: auto; flex: 1; }
+  .mobile-module-directory-list > p { color: var(--muted); line-height: 1.85; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .mobile-module-directory-list > button { width: 100%; min-height: 62px; display: flex; justify-content: space-between; align-items: center; border: 0; border-bottom: 1px solid var(--line); background: none; font-size: 14px; color: var(--pine); text-align: left; }
+  .module-tabs { padding: 12px 16px; min-height: 0; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; position: static; }
+  .module-tab-links, .module-tab-identity { display: none; }
+  .module-editor-actions { width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+  .module-editor-actions .button { flex: 1; }
+  .module-editor-actions .module-save-status { display: none; }
+  .mobile-module-directory .module-tabs { order: 4; padding-bottom: max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .mobile-module-directory .module-editor-scroll { display: none; }
+  .module-editor-scroll { padding: 16px 16px max(24px, env(safe-area-inset-bottom)); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .module-form-grid, .material-grid, .character-parser-layout, .character-entry-choice, .character-profile-grid { grid-template-columns: minmax(0, 1fr); }
+  .module-form-grid .field { min-width: 0; }
+  .field input, .field textarea, .field select, .character-parser-source textarea { font-size: 16px; }
+  .field > span, .switch-row strong, .switch-row small, .editor-section-heading p { font-size: 12px; }
+  .module-lock-notice, .module-unlock-warning { margin: 0 16px; padding: 12px; flex-shrink: 0; flex-wrap: wrap; }
+  .module-lock-notice small, .module-unlock-warning p { font-size: 12px; }
+  .module-lock-notice { width: 100%; margin: 0; padding: 12px 16px; flex-wrap: nowrap; border-top: 1px solid #e4d4b9; }
+  .module-lock-notice > svg { flex-shrink: 0; }
+  .module-lock-notice > span { flex: 1; min-width: 0; line-height: 1.5; }
+  .mobile-module-section .module-lock-notice { order: 5; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .module-entry-card { padding: 10px 0; }
+  .module-entry-card > header { margin: 0; gap: 8px; }
+  .mobile-module-entry-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex: 1; min-width: 0; min-height: 54px; border: 0; background: none; text-align: left; font-size: 14px; color: var(--pine); overflow-wrap: anywhere; }
+  .module-entry-card:not(.mobile-entry-selected) > :not(header) { display: none; }
+  .mobile-has-entry .module-entry-card:not(.mobile-entry-selected), .mobile-has-entry .module-add-card { display: none; }
+  .module-entry-selected > header { margin-bottom: 14px; }
+  .module-add-card { min-height: 52px; font-size: 13px; }
+  .material-image-actions { opacity: 1; transform: none; }
+  .character-editor-tabs { overflow-x: auto; display: flex; }
+  .character-editor-tabs button { min-height: 44px; flex-shrink: 0; }
+  .module-toast { max-width: calc(100vw - 24px); overflow-wrap: anywhere; }
+}
+
+@media (max-width: 767px) {
+  .module-library-page { height: 100%; min-height: 0; overflow: hidden; }
+  .module-workspace { height: 100%; min-height: 0; overflow: hidden; }
+  .v1-module-library { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+  .v1-module-library-header { min-height: 64px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px 10px; border-bottom: 1px solid var(--line); }
+  .v1-module-library-header > div { flex: 1; min-width: 0; }
+  .v1-module-library-header strong { display: block; font-size: 17px; line-height: 1.5; font-weight: 600; }
+  .v1-module-library-header small { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .v1-module-brand { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px; background: var(--pine); color: #fff; margin: 0 9px; font-size: 22px; }
+  .v1-module-library-content { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 18px 24px; }
+  .v1-module-intro { padding: 8px 0 18px; }
+  .v1-module-intro .eyebrow { font: 10px/1.7 ui-monospace, monospace; letter-spacing: 1.5px; }
+  .v1-module-intro h1 { font-size: 28px; font-weight: 600; letter-spacing: -.6px; line-height: 1.35; margin: 12px 0 10px; overflow-wrap: anywhere; }
+  .v1-module-intro p { color: var(--muted); margin: 0; font-size: 13px; line-height: 1.8; }
+  .v1-module-wide { width: 100%; margin: 7px 0; }
+  .v1-module-sectionline { display: flex; justify-content: space-between; align-items: center; min-height: 30px; margin: 23px 0 12px; }
+  .v1-module-sectionline h3 { font-size: 16px; font-weight: 600; margin: 0; }
+  .v1-module-import { color: var(--pine); font-size: 12px; min-height: 44px; display: inline-flex; align-items: center; }
+  .v1-module-featured { border: 1px solid var(--line); border-radius: 13px; padding: 17px; margin: 12px 0; background: var(--surface); }
+  .v1-module-featured > small { color: var(--wine); font-size: 11px; letter-spacing: .5px; }
+  .v1-module-featured h2 { font-size: 23px; font-weight: 550; line-height: 1.4; margin: 12px 0; }
+  .v1-module-featured p { font-size: 13px; line-height: 1.8; color: var(--muted); margin: 8px 0 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .v1-module-meta { font-size: 11px; color: var(--muted); margin: 16px 0; }
+  .v1-module-row { width: 100%; min-height: 76px; padding: 15px 0; display: flex; align-items: center; gap: 12px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; color: var(--ink); }
+  .v1-module-row > span:nth-child(2) { flex: 1; min-width: 0; }
+  .v1-module-row strong { display: block; font-size: 15px; font-weight: 550; line-height: 1.5; }
+  .v1-module-row small { display: block; color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 4px; }
+  .v1-module-row > svg { color: var(--muted); flex-shrink: 0; }
+  .v1-module-avatar { width: 46px; height: 46px; border-radius: 14px; background: var(--pine-soft) center/cover; display: grid; place-items: center; color: var(--pine); flex-shrink: 0; }
+  .v1-module-empty { color: var(--muted); font-size: 13px; line-height: 1.8; padding: 24px 0; }
+  .mobile-module-header { min-height: 64px; padding: 6px 12px 10px; }
+  .mobile-module-heading { font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mobile-module-directory-list { padding: 18px 18px 24px; min-height: 0; }
+  .mobile-module-directory-list > button { min-height: 76px; padding: 15px 0; gap: 12px; color: var(--ink); }
+  .mobile-module-directory-list > button > span:first-child { flex: 1; min-width: 0; }
+  .mobile-module-directory-list strong { display: block; font-size: 15px; font-weight: 550; line-height: 1.5; }
+  .mobile-module-directory-list small { display: block; color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 4px; }
+  .v1-module-count { font-size: 11px; color: var(--muted); }
+  .mobile-module-directory-list > .v1-module-notice { font-size: 13px; line-height: 1.8; color: #44614f; padding: 14px; border-radius: 11px; background: var(--pine-soft); margin: 16px 0; white-space: normal; }
+  .module-tabs { display: none; }
+  .module-lock-notice { order: 5; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); margin: 0; width: 100%; }
+  .module-lock-notice strong { font-size: 13px; }
+  .module-editor-scroll { padding: 18px 18px 24px; }
+  .module-editor-scroll .editor-section-heading { display: none; }
+  .module-form-grid, .module-collection, .material-grid { display: block; }
+  .module-form-grid .field { margin: 17px 0; }
+  .module-form-grid > .field:first-child { margin-top: 0; }
+  .module-form-grid .field > span { font-size: 13px; font-weight: 550; margin-bottom: 8px; }
+  .module-form-grid .field input, .module-form-grid .field textarea, .module-form-grid .field select { padding: 12px; border-radius: 10px; min-height: 48px; font-size: 16px; line-height: 1.6; }
+  .module-form-grid .field small { font-size: 12px; line-height: 1.7; }
+  .v1-module-details { margin: 15px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; color: var(--muted); }
+  .v1-module-details summary { min-height: 22px; }
+  .v1-module-cover-preview { display: block; width: 100%; max-height: 180px; object-fit: contain; margin-bottom: 12px; }
+  .module-entry-card { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 0; }
+  .mobile-module-entry-title { min-height: 76px; padding: 15px 0; font-size: 15px; color: var(--ink); font-weight: 550; }
+  .module-entry-selected { border: 0; }
+  .module-entry-selected > header { margin: 0 0 12px; }
+  .module-entry-selected .mobile-module-entry-title { min-height: 30px; padding: 0; font-size: 12px; font-weight: 400; color: var(--muted); }
+  .module-entry-selected .mobile-module-entry-title > svg { display: none; }
+  .module-add-card { width: 100%; min-height: 46px; margin: 16px 0; padding: 10px 16px; border: 1px solid var(--line); border-radius: 11px; font-size: 14px; }
+  .v1-module-footer { display: flex; gap: 10px; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); flex-shrink: 0; order: 4; }
+  .v1-module-footer > button { flex: 1; }
+  .v1-module-action-list > button { width: 100%; min-height: 64px; padding: 15px 0; display: flex; align-items: center; gap: 12px; border: 0; border-bottom: 1px solid var(--line); font-size: 15px; background: transparent; text-align: left; }
+  .v1-module-footer:has(.mobile-material-delete) { flex-direction: column; }
+  .v1-module-footer:has(.mobile-material-delete) > button { flex: auto; width: 100%; }
+  .v1-module-footer .mobile-material-delete { width: 100%; color: var(--wine); border-color: #dec6c8; background: #faf0ef; }
+  .v1-material-reading h2 { font-size: 23px; font-weight: 550; line-height: 1.4; margin: 12px 0; }
+  .v1-material-reading p { font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .material-image-frame.has-image { aspect-ratio: auto; min-height: 0; background: transparent; border: 0; }
+  .material-image-frame.has-image img { position: static; height: auto; max-height: none; width: 100%; object-fit: contain; }
+  .preset-character-list { display: block; }
+  .preset-character-list > article { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 15px 0; min-height: 76px; background: transparent; }
+  .preset-character-main { min-height: 46px; padding: 0; gap: 12px; }
+  .preset-character-main strong { font-size: 15px; font-weight: 550; }
+  .preset-character-main small { font-size: 12px; line-height: 1.6; margin-top: 4px; }
+  .preset-avatar { width: 46px; height: 46px; border-radius: 14px; font-size: 19px; }
+  .preset-character-create-card { margin: 16px 0; min-height: 46px; width: 100%; border: 1px solid var(--line); border-radius: 11px; font-size: 14px; }
+  .character-editor-tabs { padding: 0 18px; gap: 18px; }
+  .character-editor-tabs button { font-size: 13px; }
+  .character-card-editor fieldset { padding: 18px; }
+  .character-skills-editor { height: auto; display: block; }
+  .character-skill-list { overflow: visible; display: block; }
+  .character-skill-list article { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; min-height: 76px; padding: 12px 0; background: none; }
+  .character-skill-list article > span strong { font-size: 14px; }
+  .character-skill-list article > span small { font-size: 11px; line-height: 1.6; }
+  .character-skill-list input { font-size: 16px; height: 45px; }
+  .character-skill-list article > label small { font-size: 11px; }
+  .character-skill-list article > b { font-size: 16px; }
+  .character-skills-editor > header small, .character-skills-editor > header > span { font-size: 12px; }
+  .character-skill-search input { font-size: 16px; }
+  .v1-module-character-actions > button { width: 100%; margin: 7px 0; }
+  .character-entry-choice { padding: 18px; gap: 12px; }
+  .character-entry-choice > button { min-height: 100px; }
+  .character-entry-choice strong { font-size: 16px; }
+  .character-entry-choice small { font-size: 12px; line-height: 1.7; }
+  .character-parser-layout { display: block; }
+  .character-parser-source, .character-parser-result { padding: 18px; }
+  .character-parser-source textarea { min-height: 240px; border-radius: 10px; padding: 12px; line-height: 1.6; }
+  .character-parser-source h3, .character-parser-result h3 { font-size: 16px; }
+  .character-parser-source p { font-size: 12px; line-height: 1.7; }
+  .v1-parser-tabs { display: flex; margin: 12px 18px 16px; gap: 3px; border-radius: 10px; padding: 3px; background: #e8e7df; }
+  .v1-parser-tabs button { flex: 1; min-height: 40px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; }
+  .v1-parser-tabs button.active { background: var(--surface-strong); color: var(--pine); }
+  .attribute-editor-grid, .parsed-attribute-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .attribute-editor-grid label > span, .parsed-attribute-grid small { font-size: 11px; }
+  .attribute-editor-grid label small { display: block; font-size: 10px; }
+  .attribute-editor-grid input { min-height: 40px; font-size: 18px; }
+  .parsed-attribute-grid strong { font-size: 21px; font-weight: 550; }
+  .parsed-skills > strong, .unresolved-lines > strong, .weapon-builder > strong { font-size: 14px; }
+  .parsed-skills > span, .validation-badge, .review-heading small { font-size: 11px; line-height: 1.6; }
+  .review-heading strong { font-size: 16px; }
+  .weapon-record-list article { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 15px 0; }
+  .weapon-record-list strong { font-size: 14px; }
+  .weapon-record-list small { font-size: 12px; line-height: 1.6; }
+  .module-form-grid .switch-row { padding: 17px 14px; border-bottom: 1px solid var(--line); }
+  .module-form-grid .switch-row strong { font-size: 14px; font-weight: 550; }
+  .module-form-grid .switch-row small { font-size: 11px; line-height: 1.7; }
+  .module-form-grid .switch-row input[type=checkbox] { appearance: none; width: 42px; height: 25px; flex-shrink: 0; position: relative; border: 0; border-radius: 20px; background: #c8cbbf; }
+  .module-form-grid .switch-row input[type=checkbox]::after { content: ''; width: 19px; height: 19px; border-radius: 50%; position: absolute; top: 3px; left: 3px; background: var(--surface-strong); }
+  .module-form-grid .switch-row input[type=checkbox]:checked { background: var(--pine); }
+  .module-form-grid .switch-row input[type=checkbox]:checked::after { left: 20px; }
+
 }
 </style>

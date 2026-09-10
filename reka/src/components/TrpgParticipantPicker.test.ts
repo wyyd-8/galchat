@@ -14,8 +14,8 @@ test('participant picker keeps selection available while history loads and rende
   })
   context.after(() => vite.close())
   const { default: Picker } = await vite.ssrLoadModule('/src/components/TrpgParticipantPicker.vue')
-  const render = (characters: unknown[], selected: number[]) => renderToString(createSSRApp({ render: () => h(Picker, {
-    worldId: 1, characters, modelValue: selected, busy: false,
+  const render = (characters: unknown[], selected: number[], busy = false) => renderToString(createSSRApp({ render: () => h(Picker, {
+    worldId: 1, characters, modelValue: selected, busy,
   }) }))
   const html = await render([{ characterId: 11, characterName: '格兰特利' }], [11])
   assert.match(html, /type="checkbox"[^>]*checked/)
@@ -24,6 +24,9 @@ test('participant picker keeps selection available while history loads and rende
   assert.match(html, /加载同行记录/)
   assert.doesNotMatch(html, /尚未一起跑团/)
   assert.doesNotMatch(html, /type="checkbox"[^>]*disabled/)
+  const busy = await render([{ characterId: 11, characterName: '格兰特利' }], [11], true)
+  assert.match(busy, /type="checkbox"[^>]*checked[^>]*disabled/)
+  assert.match(busy, /查看格兰特利的同行档案/)
   const solo = await render([], [])
   assert.match(solo, /单人团/)
   assert.doesNotMatch(solo, /type="checkbox"/)

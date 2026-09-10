@@ -65,3 +65,11 @@ test('reports when the last staggered physical die will settle', () => {
   ]), 4_000)
   assert.equal(createDicePhysicalSettleDelay([2, 1], undefined, true), 360)
 })
+
+test('mobile simultaneous mode removes every per-die and per-participant delay', () => {
+  const delays = rollRotation.createDiceStartDelays as (...args: unknown[]) => number[]
+  assert.deepEqual(delays([4, 0, 2, 1], [
+    { moduleStart: 0, moduleCount: 1, startDelayMs: 900 },
+    { moduleStart: 2, moduleCount: 2, startDelayMs: 1500 },
+  ], true), [0, 0, 0, 0, 0, 0, 0])
+})

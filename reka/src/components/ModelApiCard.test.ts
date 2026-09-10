@@ -6,12 +6,16 @@ import { renderToString } from '@vue/server-renderer'
 import { createServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-async function renderCard(model: Record<string, unknown>) {
+async function renderCard(model: Record<string, unknown>, mobile = false) {
   const vite = await createServer({
     appType: 'custom',
     configFile: false,
     root: fileURLToPath(new URL('../..', import.meta.url)),
-    plugins: [vue()],
+    plugins: [vue(), {
+      name: 'test-mobile-viewport',
+      enforce: 'pre',
+      transform(_code, id) { if (id.endsWith('/composables/useMobileViewport.ts')) return `import { ref } from 'vue'; export function useMobileViewport() { return { isMobile: ref(${mobile}) } }` },
+    }],
     resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },
     server: { middlewareMode: true, hmr: false, ws: false },
   })
@@ -86,4 +90,21 @@ test('keeps a failed model actionable and exposes the latest diagnostic', async 
   assert.match(html, /API Key 无效/)
   assert.match(html, /AUTH_FAILED/)
   assert.match(html, />重新测试</)
+})
+
+
+test('mobile model summary provides edit, test and diagnostics without the desktop detail stack', async () => {
+  const html = await renderCard({
+    id: 7, name: '主模型', baseUrl: 'https://api.example.com/v1', modelName: 'chat-model',
+    apiKeyHint: '…1234', requestOverrides: { temperature: 0.7 }, status: 'SUCCESS',
+    chatCapability: 'SUPPORTED', streamingCapability: 'SUPPORTED', toolCallingCapability: 'UNKNOWN',
+    reasoningOutputStatus: 'DETECTED', lastTestMessage: '测试通过',
+  }, true)
+  assert.match(html, /连接正常/)
+  assert.match(html, /密钥末四位 1234/)
+  assert.match(html, /1 项额外参数/)
+  assert.match(html, /aria-label="查看 主模型 的测试结果"/)
+  assert.match(html, /aria-label="编辑 主模型"/)
+  assert.match(html, /aria-label="测试 主模型"/)
+  assert.doesNotMatch(html, /https:\/\/api.example.com|model-api-capabilities|最近测试|aria-label="删除/)
 })

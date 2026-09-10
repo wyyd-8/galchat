@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  ArrowLeft, Check, Dices, FileCheck2, LoaderCircle, Minus, Plus, RotateCw, Search,
+  ArrowLeft, BookUser, Check, ChevronDown, Dices, FileCheck2, LoaderCircle, Minus, Plus, RotateCw, Search,
   TriangleAlert,
 } from '@lucide/vue'
+import BaseDialog from '@/components/ui/BaseDialog.vue'
+import { useMobileViewport } from '@/composables/useMobileViewport'
+import './mobile-tools.css'
 import { api } from '@/api/client'
 import type {
   CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules,
@@ -32,10 +35,19 @@ const props = defineProps<{
   defaultEra?: string
   diceSkin?: string
 }>()
-const emit = defineEmits<{ complete: [card: CharacterCard]; abandoned: [] }>()
+const emit = defineEmits<{ complete: [card: CharacterCard]; abandoned: []; busyChange: [busy: boolean] }>()
 
+const { isMobile } = useMobileViewport()
+const stepsExpanded = ref(false)
+const previewOpen = ref(false)
+const backgroundDetail = ref<'connections' | 'memories' | null>(null)
+const equipmentPickerOpen = ref(false)
+const backgroundDetailOpen = computed({ get: () => backgroundDetail.value !== null, set: (open: boolean) => { if (!open) backgroundDetail.value = null } })
+const stepHeading = ref<HTMLElement | null>(null)
 const rules = ref<CharacterCardCreationRules | null>(null)
 const busy = ref(false)
+watch(busy, value => emit('busyChange', value), { flush: 'sync' })
+onBeforeUnmount(() => emit('busyChange', false))
 const failure = ref('')
 const diceOpen = ref(false)
 const diceRequest = ref<DicePlaybackRequest | null>(null)
@@ -123,6 +135,17 @@ const canCreate = computed(() => identity.name.trim() && identity.occupation.tri
 const canConfirmSkills = computed(() => skillSpent.value <= skillBudget.value
   && Object.entries(skillInputs).every(([id, input]) => input.points <= 0
     || !rulesBySkillId.value.get(Number(id))?.allowSpecialization || input.specialization.trim()))
+const mobileNextLabel = computed(() => !draft.value ? '下一步：生成属性' : currentStep.value === 'ATTRIBUTES' ? (draft.value.nextAction === 'ROLL_ATTRIBUTES' ? '掷骰生成属性' : '确认年龄调整') : currentStep.value === 'OCCUPATION' ? '下一步：分配技能' : currentStep.value === 'SKILLS' ? '下一步：填写背景' : currentStep.value === 'BACKGROUND' ? '下一步：添加装备' : '检查并绑定人物卡')
+const mobileNextDisabled = computed(() => busy.value || (!draft.value ? !canCreate.value : currentStep.value === 'ATTRIBUTES' ? draft.value.nextAction === 'RESTART_REQUIRED' || (draft.value.nextAction === 'SUBMIT_AGE_ADJUSTMENT' && assignedAgePenalty.value !== requiredAgePenalty.value) : currentStep.value === 'OCCUPATION' ? !occupationText.value.trim() : currentStep.value === 'SKILLS' ? !canConfirmSkills.value : false))
+async function mobileNext() {
+  if (!draft.value) return createDraft()
+  if (draft.value.status === 'PREVIEW_READY') return completeDraft()
+  if (currentStep.value === 'ATTRIBUTES') return draft.value.nextAction === 'ROLL_ATTRIBUTES' ? rollAttributes() : submitAgeAdjustment()
+  if (currentStep.value === 'OCCUPATION') return confirmOccupation()
+  if (currentStep.value === 'SKILLS') return confirmSkills()
+  if (currentStep.value === 'BACKGROUND') return confirmBackground()
+  if (currentStep.value === 'EQUIPMENT') return confirmEquipment()
+}
 function requestId() {
   return crypto.randomUUID?.() || 'step-card-' + Date.now() + '-' + Math.random().toString(36).slice(2)
 }
@@ -306,6 +329,13 @@ async function abandonDraft() {
   emit('abandoned')
 }
 
+watch(currentStep, async () => {
+  stepsExpanded.value = false
+  if (!isMobile.value) return
+  await nextTick()
+  stepHeading.value?.closest('.dialog-body')?.scrollTo({ top: 0 })
+  stepHeading.value?.focus({ preventScroll: true })
+})
 watch(draft, syncFromDraft, { immediate: true })
 watch(() => equipment.era, () => {
   const availableCodes = new Set(eraWeapons.value.map((weapon) => weapon.code))
@@ -320,7 +350,8 @@ onMounted(() => execute(async () => {
 
 <template>
   <section class="stepwise-character-card-wizard">
-    <nav class="creation-dossier-tabs" aria-label="建卡进度">
+    <div v-if="isMobile" class="mobile-wizard-progress"><div>第 {{ activeStepIndex + 1 }} 步 / 6 <span>{{ STEP_META[activeStepIndex]?.label }}</span></div><nav aria-label="建卡进度"><i v-for="(_, index) in STEP_META" :key="index" :class="{ current: index === activeStepIndex, later: index > activeStepIndex }" /></nav></div>
+    <nav v-show="!isMobile" class="creation-dossier-tabs" aria-label="建卡进度">
       <span
         v-for="(step, index) in STEP_META"
         :key="step.code"
@@ -332,17 +363,17 @@ onMounted(() => execute(async () => {
 
     <div class="creation-workbench">
       <main class="creation-step-panel">
-        <header class="creation-step-heading">
-          <span><small>第 {{ activeStepIndex + 1 }} 步，共 6 步</small><h3>{{ STEP_META[activeStepIndex]?.label }}</h3></span>
-          <em v-if="draft">进度已自动保存</em>
+        <header v-if="!isMobile" class="creation-step-heading">
+          <span><small>第 {{ activeStepIndex + 1 }} 步，共 6 步</small><h3 ref="stepHeading" tabindex="-1">{{ STEP_META[activeStepIndex]?.label }}</h3></span>
+          <em v-if="draft" aria-live="polite">{{ busy ? '正在保存…' : failure ? '保存失败，请重试' : '已保存步骤可恢复' }}</em>
         </header>
 
         <form v-if="!draft" class="creation-identity-form" @submit.prevent="execute(createDraft)">
-          <p class="creation-step-intro">先填写调查员的基本信息。年龄会决定后续属性调整与教育成长次数。</p>
+          <p v-if="!isMobile" class="creation-step-intro">先填写调查员的基本信息。年龄会决定后续属性调整与教育成长次数。</p>
           <label class="field field-wide"><span>调查员姓名</span><input v-model.trim="identity.name" maxlength="255" /></label>
-          <label class="field"><span>职业</span><input v-model.trim="identity.occupation" maxlength="255" placeholder="记者、乡村医生、退役水手…" /></label>
-          <label class="field"><span>年龄</span><input v-model.number="identity.age" type="number" min="15" max="90" /></label>
-          <label class="field"><span>性别</span><input v-model.trim="identity.sex" maxlength="255" /></label>
+          <label class="field mobile-occupation"><span>职业</span><input v-model.trim="identity.occupation" maxlength="255" placeholder="记者、乡村医生、退役水手…" /></label>
+          <label class="field mobile-age"><span>年龄</span><input v-model.number="identity.age" type="number" min="15" max="90" /></label>
+          <label class="field mobile-sex"><span>性别</span><input v-model.trim="identity.sex" maxlength="255" /></label>
           <label class="field"><span>住地</span><input v-model.trim="identity.residence" maxlength="255" /></label>
           <label class="field"><span>出生地</span><input v-model.trim="identity.birthplace" maxlength="255" /></label>
           <p v-if="!canCreate" class="creation-action-hint">请填写完整基本信息后继续；年龄须在 15–90 岁之间。</p>
@@ -350,6 +381,7 @@ onMounted(() => execute(async () => {
         </form>
 
         <section v-else-if="currentStep === 'ATTRIBUTES'" class="creation-attributes-step">
+          <div v-if="isMobile && attributes" class="mobile-wizard-attributes" aria-label="基础属性"><div v-for="[code, name] in [['STR', '力量'], ['CON', '体质'], ['SIZ', '体型'], ['DEX', '敏捷'], ['APP', '外貌'], ['INT', '智力'], ['POW', '意志'], ['EDU', '教育']]" :key="code"><small>{{ name }}</small><strong>{{ finalAttributes[code] ?? '—' }}</strong></div></div>
           <template v-if="draft.nextAction === 'ROLL_ATTRIBUTES'">
             <p class="creation-step-intro">一次掷出八项属性和幸运值，骰子会分三轮展示。掷骰结果会自动保存在当前建卡进度中。</p>
             <div class="attribute-formula-grid">
@@ -390,17 +422,19 @@ onMounted(() => execute(async () => {
               <b>{{ Math.min(99, skillBase(skill) + (skillInputs[skill.skillDefId]?.points || 0)) }}%</b>
             </article>
           </div>
+          <p v-if="skillSpent > skillBudget" class="creation-error" role="alert">已超出 {{ skillSpent - skillBudget }} 点，请减少投入后继续。</p>
           <div class="creation-primary-action"><button class="button primary" :disabled="!canConfirmSkills || busy" @click="execute(confirmSkills)">确认技能分配</button></div>
         </section>
 
         <section v-else-if="currentStep === 'BACKGROUND'" class="creation-background-step">
           <div class="background-progress"><span>已填写 {{ backgroundCount }}/6 项</span><small>所有项目均可留空；未选择关键连接时，系统会自动指定。</small></div>
-          <article v-for="item in BACKGROUND_META" :key="item.code" class="background-dossier-card">
+          <article v-for="item in BACKGROUND_META.filter(item => !isMobile || ['APPEARANCE', 'IDEOLOGY'].includes(item.code))" :key="item.code" class="background-dossier-card">
             <header><span><strong>{{ item.label }}</strong></span><button v-if="item.rollable" class="button ghost" :disabled="busy" @click="execute(() => rollBackground(item.code))"><RotateCw :size="13" />{{ backgroundPrompts[item.code] ? '重新掷提示' : '掷骰提示' }}</button></header>
             <div v-if="backgroundPrompts[item.code]" class="background-prompt"><Dices :size="14" /><span><small>随机提示 · {{ backgroundPrompts[item.code].rolls.join(' / ') }}</small><p>{{ backgroundPrompts[item.code].prompts.join('；') }}</p></span></div>
             <textarea v-model="backgroundEntries[item.code]" rows="3" maxlength="1000" :placeholder="item.placeholder" />
             <label v-if="item.code !== 'APPEARANCE' && backgroundEntries[item.code]?.trim()" class="key-connection-choice"><input v-model="keyConnectionCategory" type="radio" :value="item.code" />设为关键连接</label>
           </article>
+          <template v-if="isMobile"><button type="button" class="mobile-wizard-row" @click="backgroundDetail = 'connections'"><span><strong>重要之人 / 意义非凡之地</strong><small>填写联系并标记关键联系</small></span><ChevronDown :size="18" /></button><button type="button" class="mobile-wizard-row" @click="backgroundDetail = 'memories'"><span><strong>宝贵之物 / 特质</strong><small>整理人物的随身记忆</small></span><ChevronDown :size="18" /></button></template>
           <div class="creation-primary-action"><button class="button primary" :disabled="busy" @click="execute(confirmBackground)">确认背景并继续</button></div>
         </section>
 
@@ -413,6 +447,8 @@ onMounted(() => execute(async () => {
             <label class="field field-wide"><span>资产</span><textarea v-model="equipment.assetsText" rows="3" /></label>
           </div>
           <div class="weapon-editor-heading"><span><strong>携带的武器</strong><small>从当前时代的常用武器中选择，至多 3 件；伤害、射程和弹药等数据会自动带入。</small></span><em>已选择 {{ selectedWeaponCodes.length }}/{{ MAX_STEPWISE_WEAPONS }} 件</em></div>
+          <button v-if="isMobile" type="button" class="mobile-wizard-row" @click="equipmentPickerOpen = true"><span><strong>选择武器</strong><small>已选择 {{ selectedWeaponCodes.length }} / {{ MAX_STEPWISE_WEAPONS }} 件 · 按现有武器目录校验</small></span><ChevronDown :size="18" /></button>
+          <component :is="isMobile ? BaseDialog : 'div'" v-bind="isMobile ? { modelValue: equipmentPickerOpen, title: '选择武器', mobilePresentation: 'page', layer: 'foreground', contentClass: 'mobile-equipment-picker' } : {}" @update:model-value="equipmentPickerOpen = $event">
           <div class="weapon-selector-toolbar">
             <nav aria-label="武器分类">
               <button v-for="category in WEAPON_CATEGORY_META" :key="category.code" type="button" :class="{ active: weaponCategory === category.code }" @click="weaponCategory = category.code">{{ category.label }}</button>
@@ -429,6 +465,8 @@ onMounted(() => execute(async () => {
             </label>
             <p v-if="!availableWeapons.length" class="weapon-option-empty">当前筛选条件下没有可选武器。</p>
           </div>
+          <template v-if="isMobile" #footer><button class="button primary" @click="equipmentPickerOpen = false">确认选择 · {{ selectedWeaponCodes.length }} 件</button></template>
+          </component>
           <div class="creation-primary-action"><button class="button primary" :disabled="busy" @click="execute(confirmEquipment)"><FileCheck2 :size="15" />保存装备并完成绑定</button></div>
         </section>
 
@@ -440,10 +478,14 @@ onMounted(() => execute(async () => {
           <button v-if="!busy" class="button primary" @click="execute(() => completeDraft(draft))">重试绑定</button>
         </section>
 
-        <p v-if="failure" class="creation-error">{{ failure }}</p>
-        <div v-if="busy" class="creation-busy"><LoaderCircle class="spin" :size="15" />正在保存当前步骤…</div>
+        <button v-if="isMobile" type="button" class="button secondary mobile-wizard-preview" @click="previewOpen = true">预览完整人物卡</button>
+        <p v-if="failure" class="creation-error" role="alert">{{ failure }}</p>
+        <div v-if="busy" class="creation-busy" role="status"><LoaderCircle class="spin" :size="15" />正在保存当前步骤…</div>
       </main>
 
+      <component :is="isMobile ? BaseDialog : 'div'"
+        v-bind="isMobile ? { modelValue: previewOpen, title: '人物卡预览', description: '查看当前建卡内容，返回后继续编辑。', mobilePresentation: 'page', layer: 'foreground', contentClass: 'mobile-creation-preview' } : { class: 'creation-preview-container' }"
+        @update:model-value="previewOpen = $event">
       <aside class="creation-live-sheet">
         <header><small>人物卡预览</small><strong>{{ state?.identity.name || identity.name || '未命名调查员' }}</strong><span>{{ state?.identity.occupation || identity.occupation || '职业待定' }} · {{ age }} 岁</span></header>
         <div class="creation-live-attributes">
@@ -455,8 +497,19 @@ onMounted(() => execute(async () => {
         <section><strong>装备摘要</strong><p>{{ equipment.equipmentText || '尚未填写' }}</p></section>
         <button v-if="draft" class="creation-abandon" :class="{ confirm: confirmAbandon }" :disabled="busy" @click="execute(abandonDraft)"><ArrowLeft :size="13" />{{ confirmAbandon ? '再次点击确认放弃草稿' : '放弃并重新选择建卡方式' }}</button>
       </aside>
+      </component>
     </div>
+    <footer v-if="isMobile" class="mobile-wizard-footer"><button class="button primary" :disabled="mobileNextDisabled" @click="execute(mobileNext)"><LoaderCircle v-if="busy" class="spin" :size="15" />{{ mobileNextLabel }}</button></footer>
   </section>
+  <BaseDialog v-if="isMobile" v-model="backgroundDetailOpen" :title="backgroundDetail === 'connections' ? '重要联系' : '宝贵之物与特质'" mobile-presentation="page" layer="foreground" content-class="mobile-background-detail">
+    <article v-for="item in BACKGROUND_META.filter(item => (backgroundDetail === 'connections' ? ['SIGNIFICANT_PEOPLE', 'MEANINGFUL_LOCATIONS'] : ['TREASURED_POSSESSIONS', 'TRAITS']).includes(item.code))" :key="item.code" class="background-dossier-card">
+      <header><strong>{{ item.label }}</strong><button class="button ghost" :disabled="busy" @click="execute(() => rollBackground(item.code))"><Dices :size="14" />掷骰提示</button></header>
+      <p v-if="backgroundPrompts[item.code]" class="mobile-tools-notice">{{ backgroundPrompts[item.code].prompts.join('；') }}</p>
+      <label class="field"><span>{{ item.label }}</span><textarea v-model="backgroundEntries[item.code]" rows="5" maxlength="1000" :placeholder="item.placeholder" /></label>
+      <label v-if="backgroundEntries[item.code]?.trim()" class="key-connection-choice"><input v-model="keyConnectionCategory" type="radio" :value="item.code" />设为关键连接</label>
+    </article>
+    <template #footer><button class="button primary" @click="backgroundDetail = null">完成</button></template>
+  </BaseDialog>
 
   <DicePlayerDialog v-model="diceOpen" :request="diceRequest" />
 </template>

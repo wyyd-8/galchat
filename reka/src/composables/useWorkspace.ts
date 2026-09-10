@@ -11,6 +11,8 @@ import { decodeParticipantIds, encodeParticipantIds, resolveParticipantIds } fro
 import { applyGameTimeEvent } from '@/components/gameTimeState'
 import { applyCurrentTurnEvent } from '@/components/trpgExecutionState'
 import { hydrateDiceMessage } from '@/dice/domain/dicePlayback'
+import { clearChatReadingPositions } from '@/components/chatReadingPosition'
+import { useScopedChatDraft } from '@/components/chatInputState'
 import { errorMessage, notify } from './useNotice'
 
 let tempMessageId = -1
@@ -42,6 +44,7 @@ export function useWorkspace() {
   const modelApis = ref<ModelApi[]>([])
   const inquiryInput = ref('')
   const composerIntent = ref<TrpgComposerIntent>('action')
+  const chatDrafts = useScopedChatDraft(computed(() => selectedWorldId.value != null && selectedConversationId.value != null ? `world:${selectedWorldId.value}:group:${selectedConversationId.value}` : null), { action: messageInput, inquiry: inquiryInput, intent: composerIntent })
   const combatOverview = ref<TrpgCombatParticipantOverview[]>([])
   const investigatorCards = ref<InvestigatorCardSummary[]>([])
   const replyTurnState = ref<ReplyTurnState | null>(null)
@@ -94,6 +97,8 @@ export function useWorkspace() {
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
     conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; modules.value = []
     latestDiceRoll.value = null; incomingDiceRolls.value = []; hasOlderGroupMessages.value = false; diceRollCache.clear()
+    chatDrafts.clear()
+    clearChatReadingPositions()
   }
 
   function setReplyPlans(plans: ReplyPlan[]) {
@@ -285,13 +290,17 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
+    const worldId = selectedWorldId.value
     selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRolls.value = []; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
       const [conversationDetail, history, plans, turn, runtimes, models, overview, cards] = await Promise.all([
         api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), api.actorRuntimes(id), api.modelApis(), loadCombatOverview(id), loadInvestigatorCards(id),
       ])
+      if (selectedConversationId.value !== id || selectedWorldId.value !== worldId) return
+      const hydrated = await hydrateGroupMessages(history)
+      if (selectedConversationId.value !== id || selectedWorldId.value !== worldId) return
       conversations.value = conversations.value.map((item) => item.id === id ? { ...item, ...conversationDetail } : item)
-      messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
+      messages.value = hydrated.sort((a, b) => a.sequenceNo - b.sequenceNo)
       hasOlderGroupMessages.value = history.length === 50
       setReplyPlans(plans)
       currentTurn.value = turn
@@ -319,7 +328,7 @@ export function useWorkspace() {
       }
       await scrollToBottom(true)
     } catch (error) { notify('会话加载失败', errorMessage(error), 'danger') }
-    finally { loading.chat = false }
+    finally { if (selectedConversationId.value === id && selectedWorldId.value === worldId) loading.chat = false }
     if (selectedConversationId.value === id && storedGeneration(id)) {
       void resumeGeneration(id)
     }
@@ -336,6 +345,7 @@ export function useWorkspace() {
     localStorage.removeItem(`galchat:trpg-participants:${conversationId}`)
     conversations.value = await api.conversations(selectedWorldId.value)
     selectedConversationId.value = null
+    chatDrafts.forget(`world:${selectedWorldId.value}:group:${conversationId}`)
     messages.value = []
     Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     replyPlans.value = []

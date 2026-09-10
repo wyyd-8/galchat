@@ -2,6 +2,8 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch, type ComputedRef
 import { api, createChatSocket, streamChat } from '@/api/client'
 import type { Character, ChatHistory, ChatMessagePayload, DirectMessage, ModelApi, UserWorld } from '@/api/types'
 import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/components/reasoningScroll'
+import { clearChatReadingPositions } from '@/components/chatReadingPosition'
+import { useScopedChatDraft } from '@/components/chatInputState'
 import { errorMessage, notify } from './useNotice'
 
 interface DirectChatContext {
@@ -20,6 +22,7 @@ export function useDirectChat(context: DirectChatContext) {
   const selectedCharacterId = ref<number | null>(null)
   const messages = ref<DirectMessage[]>([])
   const input = ref('')
+  const chatDrafts = useScopedChatDraft(computed(() => context.world.value && selectedCharacterId.value != null ? `world:${context.world.value.id}:direct:${selectedCharacterId.value}` : null), { input })
   const scroller = ref<HTMLElement | null>(null)
   const modelApis = ref<ModelApi[]>([])
   const loading = reactive({ history: false, sending: false, withdrawing: false, model: false })
@@ -113,7 +116,7 @@ export function useDirectChat(context: DirectChatContext) {
   }
 
   async function selectCharacter(id: number) {
-    selectedCharacterId.value = id; input.value = ''; messages.value = []; hasOlderMessages.value = false; closeSocket()
+    selectedCharacterId.value = id; messages.value = []; hasOlderMessages.value = false; closeSocket()
     const world = context.world.value
     if (!world) return
     loading.history = true
@@ -122,13 +125,14 @@ export function useDirectChat(context: DirectChatContext) {
         api.history(world.id, id),
         api.modelApis(),
       ])
+      if (world.id !== context.world.value?.id || id !== selectedCharacterId.value) return
       messages.value = historyMessages(history)
       modelApis.value = models
       hasOlderMessages.value = history.length === 30
       if (world.thinkStatus === false) void ensureSocket(world.id).catch(() => undefined)
       await scrollToBottom(true)
     } catch (error) { notify('单聊记录加载失败', errorMessage(error), 'danger') }
-    finally { loading.history = false }
+    finally { if (world.id === context.world.value?.id && id === selectedCharacterId.value) loading.history = false }
   }
   async function loadEarlier() {
     const world = context.world.value; const character = selectedCharacter.value
@@ -149,7 +153,8 @@ export function useDirectChat(context: DirectChatContext) {
     } catch (error) { notify('更早记录加载失败', errorMessage(error), 'danger') }
     finally { loading.history = false }
   }
-  function close() { selectedCharacterId.value = null; messages.value = []; modelApis.value = []; input.value = ''; hasOlderMessages.value = false; closeSocket() }
+  function clearDrafts() { chatDrafts.clear(); input.value = ''; clearChatReadingPositions() }
+  function close() { selectedCharacterId.value = null; loading.history = false; messages.value = []; modelApis.value = []; hasOlderMessages.value = false; closeSocket() }
   function closeSocket() {
     connecting = null; socketWorldId = null; lastTypingKey = null
     if (socket) { socket.close(); socket = null }
@@ -277,5 +282,5 @@ export function useDirectChat(context: DirectChatContext) {
   }
 
   onUnmounted(closeSocket)
-  return { selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, selectCharacter, selectModel, loadEarlier, close, send, withdraw, focus, setComposing }
+  return { selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, selectCharacter, selectModel, loadEarlier, close, clearDrafts, send, withdraw, focus, setComposing }
 }

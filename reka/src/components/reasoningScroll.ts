@@ -16,6 +16,10 @@ export function updateReasoningScrollFollowing(reasoning: HTMLElement) {
   updateScrollFollowing(reasoningFollowing, reasoning)
 }
 
+export function pauseConversationScrollFollowing(viewport: HTMLElement) {
+  conversationFollowing.set(viewport, { following: false, lastScrollTop: viewport.scrollTop })
+}
+
 export function resetConversationScrollFollowing(viewport: HTMLElement) {
   conversationFollowing.set(viewport, { following: true, lastScrollTop: viewport.scrollTop })
 }

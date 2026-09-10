@@ -27,21 +27,36 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 跑团使用独立的 `trpg` 会话模式，围绕模组、KP、调查员、场景和行动轮组织流程。
 
 - **模组管理**：浏览、创建、编辑、导入和导出模组，管理地点、线索、展示材料与人物设定。
-- **角色准备**：支持角色卡导入、自动生成和分步创建；分步流程覆盖身份、属性掷骰、年龄调整、职业、技能、背景及装备。
+- **角色准备**：支持角色卡文本导入、自动生成和分步创建；提供可下载的人物卡表格模板与导入预检查。分步流程覆盖身份、属性掷骰、年龄调整、职业、技能、背景及装备。
+- **同伴选择**：可选择多位 AI 同伴，也可独自开始；选人时可查看角色的同行档案、最近参团状态、已完成次数及分页完成记录。
 - **场景探索**：支持场景选择、运行时子场景、调查员向 KP 提问、探索结束、场景总结及游戏内时间维护。
 - **行动执行**：展示当前行动轮与步骤，支持继续、提交行动、手动发言和失败步骤重试。
 - **规则与战斗**：提供技能、理智、近战、枪械及伤害等规则处理，记录掷骰明细，维护角色状态和战斗概览；前端使用 Three.js 展示骰子并支持皮肤切换。
-- **跑团记忆**：结合模组信息、探索记录、上下文摘要与行动轮检索，为后续行动提供历史依据。
-- **结局与恢复**：支持结局生成、手动存档，以及行动轮、场景和初始状态的自动存档回滚。
+- **跑团记忆**：结合模组信息、探索记录、上下文摘要与行动轮检索，为后续行动提供历史依据。子场景摘要分别记录可用线索与剧情经过，覆盖对应消息区间内的战斗结果和战后叙述。
+- **结局与恢复**：通过独立总结行动轮生成完成报告与调查员后传，支持失败重试、手动存档，以及行动轮、场景和初始状态的自动存档回滚。
 
 前端另有标记为“实验功能”的自动推进和下一轮方向修正：自动推进可在行动轮之间及非用户掷骰后倒计时继续；方向修正用于临时调整下一轮 AI 调查员的探索或战斗方向。
+
+#### 人物卡导入
+
+在角色卡绑定窗口选择导入，下载人物卡模板，用 Excel 或 WPS 完成表格中的“建卡”步骤，再从“txt输出”复制人物卡文本并粘贴到页面。当前入口接收文本，不直接上传或解析 `.xlsx` 文件。
+
+第一行需要姓名、职业、性别和年龄，正文需要 STR、CON、SIZ、DEX、APP、INT、POW、EDU 八项属性；技能与背景可以选填。页面会预览已识别内容并提示缺项，检查后点击“导入并绑定人物卡”。模板文件位于 `reka/public/templates/`。
+
+#### 完成报告与归档
+
+KP 请求结束跑团后，系统先完成最后场景的公开叙述与摘要，再进入独立的总结行动轮，生成跑团概览和调查员后传。总结使用 KP 当前配置的模型；成功后保存报告并自动关闭、归档会话，失败时可通过行动轮重试。
+
+完成报告包含跑团概览、共同旅程、调查员后传、掷骰回顾和战斗回顾五部分：可展开完整场景摘要，查看调查员结束时的状态及 HP / SAN 变化，按团队或个人统计公开且已结算的检定，并回顾已完成战斗的结算记录。
+
+手动结束或跳过总结会直接关闭会话，不生成完成报告；同行档案中的“已完成次数”只统计已关闭且保存了完成报告的跑团。旧的已结束会话不会自动补生成报告。
 
 ### 存档与回档
 
 | 类型 | 范围 | 接口前缀 |
 | --- | --- | --- |
 | 世界存档 | 角色状态、单聊历史边界和最近轮次、普通群聊的历史边界、最近轮次及发言计划 | `/world-saves/{userWorldId}` |
-| 跑团存档 | 指定跑团的会话状态、角色卡、装备、战斗、行动轮、掷骰、执行检查点及相关 Redis 状态 | `/trpg-saves/{conversationId}` |
+| 跑团存档 | 指定跑团的会话状态、角色卡、装备、战斗、行动轮、掷骰、完成报告、执行检查点及相关 Redis 状态 | `/trpg-saves/{conversationId}` |
 
 读档会清理存档点之后的数据，并恢复快照和相关派生状态。世界存档保留每个角色最近 3 轮单聊的恢复数据；跑团通过独立接口恢复，不应把世界存档视为跑团全量备份。存读档过程使用分布式锁协调并发操作。
 
@@ -97,8 +112,9 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 │   ├── application.yaml
 │   └── mapper/                 # SQL 映射
 ├── src/test/java/com/me/galchat/
-│   └── init/console.sql        # 空数据库的完整建表脚本；同目录树含后端测试
+│   └── init/console.sql        # 基础建表脚本；需配合下文的补充建表步骤
 ├── reka/
+│   ├── public/templates/      # 可下载的人物卡表格模板
 │   ├── src/api/                # 请求客户端与接口类型
 │   ├── src/components/         # 世界、单聊、群聊、跑团、角色卡等界面
 │   ├── src/dice/               # 骰子展示与播放逻辑
@@ -135,7 +151,7 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 | `spring.ai.deepseek.base-url` / `api-key` / `chat.model` | 内置模型服务与模型名 |
 | `spring.ai.ollama.base-url` / `embedding.model` | Ollama 地址与 embedding 模型 |
 | `galchat.model-api.master-key` | 加密用户自定义模型 API Key 的主密钥 |
-| `galchat.model-api.request-timeout` | 自定义模型请求超时，当前为 `30s` |
+| `galchat.model-api.request-timeout` | 自定义模型请求超时，当前为 `120s` |
 | `galchat.alioss.*` / `galchat.aliemail.*` | OSS 与邮件业务配置；OSS 使用环境变量凭据，邮件使用阿里云默认凭据链 |
 
 主密钥必须是 **32 字节随机数据的 Base64 编码**。首次部署时可用 `openssl rand -base64 32` 生成，并通过外部配置持久保存；配置读取也支持 `GALCHAT_MODEL_API_MASTER_KEY` 作为回退值。已有加密数据需要同一把密钥才能解密。数据库连接、API Key 等敏感值请使用环境变量或外部配置覆盖。
@@ -151,9 +167,12 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 ```bash
 psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
   -f src/test/java/com/me/galchat/init/console.sql
+
+psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
+  -f data/maintenance/2026-09-07-trpg-completion.sql
 ```
 
-该脚本包含当前业务表、索引和 `vector` 扩展，面向空数据库，不是已有数据库的增量升级脚本。后端的 `VectorConfiguration` 会初始化以下 1024 维向量表：
+`console.sql` 包含基础业务表、索引和 `vector` 扩展，面向空数据库，不是已有数据库的增量升级脚本；当前还必须执行第二条命令，补建完成报告与参团履历查询依赖的 `trpg_completion` 表。后端的 `VectorConfiguration` 会初始化以下 1024 维向量表：
 
 - `world_detail_vector_store`
 - `chat_history_vector_store`
@@ -167,9 +186,23 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
   -f data/modules/15-01-amidst-the-ancient-trees.sql
 ```
 
-该脚本导入《古树林中》，重复导入会报错。`data/modules/00-debug-combat-arena.sql` 用于战斗调试；`data/maintenance/` 中的脚本针对特定数据维护，不属于首次启动必需步骤。世界 JSON 可通过前端导入。
+该脚本导入《古树林中》，重复导入会报错。`data/modules/00-debug-combat-arena.sql` 用于战斗调试。世界 JSON 可通过前端导入。
 
-《太阳与九英镑》提供[个人模组导入 JSON](data/modules/sun-and-nine-pounds.json) 和[系统默认模组 SQL](data/modules/sun-and-nine-pounds.sql)，两种方式任选其一。该模组按可回访的地点网络组织，保留场景原文并补充 AI 主持说明；封面与10份展示材料已填写上传地址。组织方式、材料取舍和验证结果见[导入说明](data/modules/sun-and-nine-pounds.md)。
+《太阳与九英镑》提供[个人模组导入 JSON](data/modules/sun-and-nine-pounds.json) 和[系统默认模组 SQL](data/modules/sun-and-nine-pounds.sql)，两种方式任选其一。该模组按可回访的地点网络组织，保留场景原文并补充 AI 主持说明；封面与 10 份展示材料已填写上传地址。
+
+#### 已有数据库升级
+
+不要在已有业务数据的数据库上重跑 `console.sql`。按已安装的表结构选择补充脚本：
+
+| 情况 | 操作 |
+| --- | --- |
+| 尚无 `trpg_completion` 表 | 执行 `data/maintenance/2026-09-07-trpg-completion.sql` |
+| 已安装早期完成报告表，仍有 `status`、`completed_at`、`archived_at` 列 | 执行 `data/maintenance/2026-09-08-trpg-summary-turn.sql`；保留完整报告，清空不完整生成数据并删除旧状态列 |
+| 使用最新补充脚本新建数据库 | 无需再执行 `2026-09-08-trpg-summary-turn.sql` |
+
+升级前备份数据库。仓库没有统一的自动迁移流程，其他历史版本差异仍需对照当前表结构核验。
+
+`data/maintenance/2026-09-09-amidst-final-scene-guidance.sql` 用于更新已导入《古树林中》的最终场景主持说明，默认演练并回滚；核对结果后，通过 `psql -v commit_migration=true` 执行该脚本才会提交。其他场景拆分、武器规范化脚本也只适用于各自对应的数据，不应批量作为初始化步骤运行。
 
 ### 2. 准备 Redis、Ollama 和后端配置
 
@@ -262,6 +295,9 @@ python python/character_card_pdf.py \
 | 世界存档 | `GET/POST /world-saves/{userWorldId}`、`POST /world-saves/{userWorldId}/load` |
 | 模型 API | `GET/POST /model-apis`、`PUT/DELETE /model-apis/{id}`、`POST /model-apis/{id}/test` |
 | 群聊会话 | `GET/POST /group-chat/conversations`、`GET/DELETE /group-chat/conversations/{conversationId}` |
+| 关闭会话 | `POST /group-chat/conversations/{conversationId}/close`（手动关闭，不生成完成报告） |
+| 同行档案 | `GET /group-chat/participant-history?userWorldId=…`、`GET /group-chat/participant-history/{characterId}/runs?userWorldId=…`（完成记录支持 `cursor`、`limit` 分页） |
+| 跑团完成报告 | `GET /group-chat/conversations/{conversationId}/completion-report` |
 | 群聊消息 | `GET/POST /group-chat/conversations/{conversationId}/messages`、`POST /group-chat/conversations/{conversationId}/withdraw` |
 | 生成流恢复 | `GET /group-chat/conversations/{conversationId}/generations/{clientRequestId}` |
 | 参与者与计划 | `/group-chat/conversations/{conversationId}/actor-runtimes`、`/group-chat/conversations/{conversationId}/reply-plan` |

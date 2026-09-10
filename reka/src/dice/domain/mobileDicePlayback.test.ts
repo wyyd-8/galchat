@@ -25,3 +25,13 @@ test('overlapping result ranges share one scroll stop and retain both results', 
     { moduleStart: 0, moduleCount: 2 }, { moduleStart: 1, moduleCount: 1 },
   ]), [{ moduleIndex: 1, resultIndexes: [0, 1] }])
 })
+
+ test('aggregate reveal follows every individual result as a separate final stop', () => {
+  assert.deepEqual(createMobileDiceRevealSteps(2, [
+    { moduleStart: 0, moduleCount: 1 }, { moduleStart: 1, moduleCount: 1 },
+  ], true), [
+    { moduleIndex: 0, resultIndexes: [0] },
+    { moduleIndex: 1, resultIndexes: [1] },
+    { moduleIndex: 1, resultIndexes: [], final: true },
+  ])
+})

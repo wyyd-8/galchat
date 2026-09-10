@@ -276,6 +276,7 @@ export interface ToolRollbackMessagePreview {
 }
 
 export function formatRollbackPreviewMessage(message: GroupMessage): string {
+  if (message.messageKind === 'epilogue') return '跑团总结与人物后传'
   if (message.messageKind === 'dice_roll') {
     const title = message.diceRoll
       ? createDiceMessagePresentation(message.diceRoll).title

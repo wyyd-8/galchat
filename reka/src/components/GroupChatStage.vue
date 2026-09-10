@@ -377,7 +377,7 @@ function handleReasoningScroll(event: Event) {
           </article>
           <template v-if="isMobile && conversation.status !== 'active'"><p class="mobile-chat-notice">本次{{ conversation.mode === 'trpg' ? '跑团' : '会话' }}已经结束，你可以继续查看聊天记录{{ conversation.mode === 'trpg' ? '与调查档案' : '' }}。</p><button v-if="conversation.mode === 'trpg'" class="mobile-chat-row" @click="emit('openTools')"><span class="mobile-chat-avatar"><Archive :size="21" /></span><span><strong>跑团档案</strong><small>人物卡、掷骰与恢复点</small></span><span>›</span></button><button class="mobile-chat-row mobile-chat-danger" @click="emit('end')"><span><strong>会话管理</strong><small>查看永久删除与关联数据范围</small></span><span>›</span></button></template>
         </div></div></div>
-        <button v-if="awayFromLatest" class="chat-jump-latest" @click="returnToLatest"><ArrowDown :size="16" />回到最新</button>
+        <button v-if="awayFromLatest" class="chat-jump-latest" aria-label="回到最新" title="回到最新" @click="returnToLatest"><ArrowDown :size="16" /><span class="chat-jump-latest-label">回到最新</span></button>
         <div v-if="conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'selection'" class="scene-selection-panel">
           <strong>选择调查地点</strong><span>{{ currentTurn.sceneName || 'KP 已给出本轮可选地点' }}</span>
           <div class="scene-selection-options"><button v-for="[number, name] in selectionOptions" :key="number" class="button secondary" :disabled="sending" @click="emit('selectScene', number)"><b>{{ number }}</b>{{ name }}</button></div>

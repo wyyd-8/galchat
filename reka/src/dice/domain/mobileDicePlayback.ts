@@ -2,7 +2,8 @@
 export function createMobileDiceRevealSteps(
   moduleCount: number,
   groups?: Array<{ moduleStart: number; moduleCount: number }>,
-): Array<{ moduleIndex: number; resultIndexes: number[] }> {
+  finalOutcome = false,
+): Array<{ moduleIndex: number; resultIndexes: number[]; final?: boolean }> {
   if (moduleCount <= 0) return []
   const ranges = groups?.length ? groups : [{ moduleStart: 0, moduleCount }]
   const steps = new Map<number, number[]>()
@@ -10,5 +11,7 @@ export function createMobileDiceRevealSteps(
     const end = Math.min(moduleCount - 1, Math.max(0, group.moduleStart + group.moduleCount - 1))
     steps.set(end, [...(steps.get(end) || []), resultIndex])
   })
-  return [...steps].sort(([a], [b]) => a - b).map(([moduleIndex, resultIndexes]) => ({ moduleIndex, resultIndexes }))
+  const reveals: Array<{ moduleIndex: number; resultIndexes: number[]; final?: boolean }> = [...steps].sort(([a], [b]) => a - b).map(([moduleIndex, resultIndexes]) => ({ moduleIndex, resultIndexes }))
+  if (finalOutcome) reveals.push({ moduleIndex: moduleCount - 1, resultIndexes: [], final: true })
+  return reveals
 }

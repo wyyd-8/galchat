@@ -24,7 +24,8 @@ test('mobile restore follows warning, retained boundary, deleted range and inves
   assert.ok(html.indexOf('大门终于打开') < html.indexOf('以下进度将被删除'))
   assert.ok(html.indexOf('以下进度将被删除') < html.indexOf('调查员快照'))
   assert.match(html, /还将删除该手动存档/)
-  assert.match(html, /查看将删除的附近消息/)
+  assert.ok(html.indexOf('门厅的前文') < html.indexOf('大门终于打开'))
+  assert.doesNotMatch(html, /<details/)
   assert.match(html, /进入之后的行动/)
   assert.match(html, /HP 0 \/ 11/)
   assert.match(html, /濒死/)
@@ -67,7 +68,7 @@ test('mobile history promotes a concise single-person title and renders individu
   assert.match(html, /陈默 · 侦查[^]*?80[^]*?(?:history-tag danger|danger history-tag)[^>]*>失败/)
 })
 
-test('long restore boundary is collapsed to six lines with a full-text toggle and no nested scroll viewport', async context => {
+test('long restore boundary is collapsed to three lines with a full-text toggle and no nested scroll viewport', async context => {
   const vite = await createServer({ appType: 'custom', configFile: false,
     root: fileURLToPath(new URL('../..', import.meta.url)), plugins: [vue()],
     resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },

@@ -36,6 +36,7 @@ const error = ref('')
 const activeModule = ref(0)
 const follow = ref(true)
 const finished = ref<number[]>([])
+const finalRevealed = ref(false)
 const mounts = shallowRef<Array<{ module: number; header: HTMLElement; details: HTMLElement }>>([])
 interface OutcomeEffect {
   id: string
@@ -73,7 +74,7 @@ const modifierNotice = computed(() => createDiceModifierNotice(props.request?.pr
 const specialOutcome = computed(() => props.request?.presentation?.kind === 'opposed-check'
   || ['ANY_SUCCESS', 'ALL_SUCCESS'].includes(props.request?.presentation?.groupRule || ''))
 const stateLabel = computed(() => status.value === 'complete' ? '全部展示完成'
-  : status.value === 'playing' ? flowPhase.value === 'rolling' ? '所有骰子同时投掷中' : `正在展示第 ${activeModule.value + 1} 组结果`
+  : status.value === 'playing' ? flowPhase.value === 'rolling' ? '所有骰子同时投掷中' : finalRevealed.value ? '正在展示最终结果' : `正在展示第 ${activeModule.value + 1} 组结果`
     : presentation.value.label)
 const showRollAction = computed(() => props.request
   && shouldShowDiceRollAction(status.value, props.request.result, props.request.completionAction))
@@ -87,8 +88,9 @@ const originalDisplay = (group: DicePlaybackGroupPresentation) => createDiceGrou
   originalSummary.value?.groups[records.value.indexOf(group)]?.result ?? '—', isRevealed(group))
 const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms))
 
-async function focusResult(moduleIndex: number) {
-  const target = mounts.value.find(host => host.module === moduleIndex)?.details
+async function focusResult(moduleIndex: number, final = false) {
+  const details = mounts.value.find(host => host.module === moduleIndex)?.details
+  const target = details?.querySelector<HTMLElement>(final ? '.mobile-inline-verdict' : '.mobile-inline-result')
   if (!follow.value || !stageScroll.value || !target) return
   scrollController?.abort()
   scrollController = new AbortController()
@@ -107,7 +109,7 @@ function pauseForKeyboard(event: KeyboardEvent) {
 }
 async function resumeFollow() {
   follow.value = true
-  if (flowPhase.value === 'revealing') await focusResult(activeModule.value)
+  if (flowPhase.value === 'revealing') await focusResult(activeModule.value, finalRevealed.value)
 }
 function buildRows() {
   if (!tray.value) return
@@ -177,6 +179,7 @@ async function prepare() {
   if (!request) return
   status.value = 'loading'
   finished.value = []
+  finalRevealed.value = false
   mounts.value = []
   error.value = ''
   follow.value = true
@@ -206,6 +209,7 @@ async function prepare() {
     if (stageScroll.value) stageScroll.value.scrollTop = 0
     if (mode === 'settled') {
       finished.value = modules.value.map((_, index) => index)
+      finalRevealed.value = true
       status.value = 'complete'
       return
     }
@@ -231,6 +235,7 @@ async function play() {
   continueCountdown.value = 0
   status.value = 'playing'
   finished.value = []
+  finalRevealed.value = false
   follow.value = true
   outcomeEffects.value = []
   flowPhase.value = 'rolling'
@@ -251,10 +256,19 @@ async function play() {
     if (token !== generation) return
     diceAudio.stop()
     flowPhase.value = 'revealing'
-    const steps = createMobileDiceRevealSteps(modules.value.length, records.value)
+    const steps = createMobileDiceRevealSteps(modules.value.length, records.value, specialOutcome.value)
     for (const step of steps) {
       if (token !== generation) return
       activeModule.value = step.moduleIndex
+      if (step.final) {
+        finalRevealed.value = true
+        await nextTick()
+        await focusResult(step.moduleIndex, true)
+        if (token !== generation) return
+        await wait(1300)
+        if (token !== generation) return
+        continue
+      }
       finished.value = modules.value.flatMap((_, index) => index <= step.moduleIndex ? [index] : [])
       await nextTick()
       await focusResult(step.moduleIndex)
@@ -269,6 +283,7 @@ async function play() {
       outcomeEffects.value = []
     }
     finished.value = modules.value.map((_, index) => index)
+    finalRevealed.value = true
     status.value = 'complete'
     emit('complete')
   } catch (cause) {
@@ -336,7 +351,7 @@ onBeforeUnmount(() => { retire(); disposeSharedRenderer?.() })
     </article>
    </template>
    <p v-if="!endsAt(host.module).length" class="mobile-range-note">{{finished.includes(host.module)?'本组骰子已展示。':''}}检定结果将在第 {{(groupAt(host.module)?.moduleStart || 0)+(groupAt(host.module)?.moduleCount || 0)}} 组下方显示。</p>
-   <article v-if="specialOutcome&&host.module===modules.length-1" class="mobile-inline-verdict" aria-live="polite"><div class="inline-original-context"><span>{{originalSummary?.formulaLabel}}</span><strong>{{originalSummary?.formulaValue}}</strong></div><small>{{request?.presentation?.resultLabel}}</small><strong>{{finished.length===modules.length?(request?.presentation?.resultHeadline||request?.presentation?.resultValue):'等待覆盖组全部完成'}}</strong><p v-if="finished.length===modules.length">{{request?.presentation?.resultDetail||request?.presentation?.formulaValue}}</p></article>
+   <article v-if="specialOutcome&&host.module===modules.length-1" class="mobile-inline-verdict" aria-live="polite"><div class="inline-original-context"><span>{{originalSummary?.formulaLabel}}</span><strong>{{originalSummary?.formulaValue}}</strong></div><small>{{request?.presentation?.resultLabel}}</small><strong>{{finalRevealed?(request?.presentation?.resultHeadline||request?.presentation?.resultValue):'等待覆盖组全部完成'}}</strong><p v-if="finalRevealed">{{request?.presentation?.resultDetail||request?.presentation?.formulaValue}}</p></article>
   </Teleport>
  </template>
 </BaseDialog>

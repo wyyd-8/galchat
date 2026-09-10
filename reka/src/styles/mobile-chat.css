@@ -1,7 +1,10 @@
 .chat-side-host { min-width: 0; min-height: 0; display: flex; }
 .chat-side-host > aside { width: 100%; }
 .chat-jump-latest { align-self: center; display: flex; align-items: center; gap: 6px; min-height: 38px; margin: -45px 0 7px; padding: 6px 14px; z-index: 2; border: 1px solid var(--line); border-radius: 24px; color: var(--pine); background: var(--surface-strong); box-shadow: 0 3px 12px #25272415; cursor: pointer; }
+.chat-jump-latest-label { display: none; }
+@media (min-width: 768px) { .chat-jump-latest { width: 38px; padding: 0; justify-content: center; } }
 @media (max-width: 767px) {
+  .chat-jump-latest-label { display: inline; }
   .chat-page.direct-chat-page, .chat-page.group-chat-page { height: var(--app-viewport-height, 100dvh); overflow: hidden; background: #f4f1ea; }
   .chat-page .chat-header { flex: 0 0 auto; min-height: 64px; padding: calc(6px + env(safe-area-inset-top)) 12px 10px; gap: 8px; background: #f4f1ea; }
   .chat-page .chat-header .icon-button { flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; font-size: 15px; }

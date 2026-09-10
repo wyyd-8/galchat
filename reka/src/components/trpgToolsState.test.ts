@@ -556,3 +556,11 @@ test('resolves a weapon success rate from its normalized skill name', () => {
   assert.equal(resolveWeaponCheckValue({ name: '徒手格斗' }, skills), 65)
   assert.equal(resolveWeaponCheckValue({ name: '未知武器' }, skills), undefined)
 })
+
+test('restore previews replace epilogue JSON with its readable title', () => {
+  assert.equal(trpgToolsState.formatRollbackPreviewMessage({
+    ...groupMessage(61),
+    messageKind: 'epilogue',
+    content: '{"schemaVersion":1,"entries":[{"characterId":20,"investigatorName":"沃尔顿","lead":"归来"}]}',
+  }), '跑团总结与人物后传')
+})

@@ -66,6 +66,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
+    environment:
+      GALCHAT_MODEL_API_MASTER_KEY: ${GALCHAT_MODEL_API_MASTER_KEY:-}
     network_mode: service:web
     volumes:
       - uploads-data:/app/uploads

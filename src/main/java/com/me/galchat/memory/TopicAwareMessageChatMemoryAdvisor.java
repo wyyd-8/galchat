@@ -19,7 +19,6 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
@@ -32,6 +31,12 @@ import reactor.core.scheduler.Scheduler;
 import java.util.*;
 
 public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor {
+
+    private static final String DEFAULT_CONVERSATION_ID = "default";
+
+    private static final TopicWindowPolicy WINDOW_POLICY =
+            new TopicWindowPolicy(ChatConstant.CONTEXT_TOPIC_COUNT,
+                    ChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT);
 
     private final UserChatMemory chatMemory;
     private final TopicBoundaryService topicBoundaryService;
@@ -56,7 +61,10 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
 
     @Override
     public ChatClientRequest before(ChatClientRequest chatClientRequest, AdvisorChain advisorChain) {
-        String conversationId = getConversationId(chatClientRequest.context(), this.defaultConversationId);
+        Object contextConversationId = chatClientRequest.context().get(ChatMemory.CONVERSATION_ID);
+        String conversationId = contextConversationId == null
+                ? this.defaultConversationId
+                : contextConversationId.toString();
         ConversationInfo baseConversation = new ConversationInfo(conversationId);
 
         Message userMessage = chatClientRequest.prompt().getLastUserOrToolResponseMessage();
@@ -66,7 +74,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
                 ? topicBoundaryService.updateAfterUserMessage(baseConversation, savedUserMessage)
                 : topicBoundaryService.getBoundary(baseConversation);
         ConversationInfo windowConversation = new ConversationInfo(baseConversation.getUserWorldId(),
-                baseConversation.getCharacterId(), boundary.windowStartId());
+                baseConversation.getCharacterId(), WINDOW_POLICY.contextStart(boundary.startIds()));
 
         List<UserChatHistory> windowHistories = chatMemory.listHistories(windowConversation);
         notifyUserMessageSaved(chatClientRequest.prompt().getOptions(), savedUserMessage.getId(),
@@ -117,7 +125,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
                 .publishOn(getScheduler())
                 .map(request -> before(request, streamAdvisorChain))
                 .flatMapMany(streamAdvisorChain::nextStream)
-                .transform(flux -> new DeepSeekChatClientMessageAggregator()
+                .transform(flux -> new ChatClientMessageAggregator()
                         .aggregateChatClientResponse(flux, response -> after(response, streamAdvisorChain)));
     }
 
@@ -300,16 +308,6 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
     }
 
     private static Message copyWithText(Message message, String text) {
-        if (message instanceof DeepSeekAssistantMessage deepSeekAssistantMessage) {
-            return new DeepSeekAssistantMessage.Builder()
-                    .content(text)
-                    .reasoningContent(deepSeekAssistantMessage.getReasoningContent())
-                    .prefix(deepSeekAssistantMessage.getPrefix())
-                    .properties(deepSeekAssistantMessage.getMetadata())
-                    .toolCalls(deepSeekAssistantMessage.getToolCalls())
-                    .media(deepSeekAssistantMessage.getMedia())
-                    .build();
-        }
         if (message instanceof AssistantMessage assistantMessage) {
             return AssistantMessage.builder()
                     .content(text)
@@ -350,16 +348,17 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
     }
 
     private ChatOptions putToolContext(ChatOptions options, Long userMessageId) {
-        ChatOptions copiedOptions = options.copy();
-        if (copiedOptions instanceof ToolCallingChatOptions copiedToolCallingOptions) {
+        if (options instanceof ToolCallingChatOptions toolCallingOptions) {
             Map<String, Object> toolContext = new HashMap<>();
-            if (copiedToolCallingOptions.getToolContext() != null) {
-                toolContext.putAll(copiedToolCallingOptions.getToolContext());
+            if (toolCallingOptions.getToolContext() != null) {
+                toolContext.putAll(toolCallingOptions.getToolContext());
             }
             toolContext.put(ChatToolContextConstant.USER_MESSAGE_ID_KEY, userMessageId);
-            copiedToolCallingOptions.setToolContext(toolContext);
+            return toolCallingOptions.mutate()
+                    .toolContext(toolContext)
+                    .build();
         }
-        return copiedOptions;
+        return options.mutate().build();
     }
 
     private void notifyUserMessageSaved(ChatOptions options, Long userMessageId, ConversationInfo conversationInfo,
@@ -388,7 +387,7 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         private final UserChatMemory chatMemory;
         private final TopicBoundaryService topicBoundaryService;
         private final MutiSearchService mutiSearchService;
-        private String defaultConversationId = ChatMemory.DEFAULT_CONVERSATION_ID;
+        private String defaultConversationId = DEFAULT_CONVERSATION_ID;
         private int order = Advisor.DEFAULT_CHAT_MEMORY_PRECEDENCE_ORDER;
         private Scheduler scheduler = BaseChatMemoryAdvisor.DEFAULT_SCHEDULER;
 

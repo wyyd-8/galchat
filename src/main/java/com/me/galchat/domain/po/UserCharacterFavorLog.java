@@ -34,6 +34,8 @@ public class UserCharacterFavorLog implements Serializable {
 
     private Integer favorUpdate;
 
+    private String bindingType;
+
     private Long bindingChat;
 
     private LocalDateTime timestamp;

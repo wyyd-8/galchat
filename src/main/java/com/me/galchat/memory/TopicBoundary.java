@@ -1,11 +1,14 @@
 package com.me.galchat.memory;
 
-public record TopicBoundary(Long previousStartId, Long currentStartId, Long lastCheckedMessageId) {
+import java.util.List;
 
-    public Long windowStartId() {
-        if (previousStartId != null) {
-            return previousStartId;
-        }
-        return currentStartId;
+public record TopicBoundary(List<Long> startIds, Long lastCheckedMessageId) {
+
+    public TopicBoundary {
+        startIds = startIds == null ? List.of() : List.copyOf(startIds);
+    }
+
+    public Long currentStartId() {
+        return startIds.isEmpty() ? null : startIds.getLast();
     }
 }

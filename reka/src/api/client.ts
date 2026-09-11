@@ -1,0 +1,310 @@
+import type {
+  TrpgParticipantHistory, TrpgParticipantRunPage, TrpgCompletionReport, ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
+  DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
+  SingleChatRuntime, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
+  WorldTemplate, WorldTemplateUsage,
+} from './types'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+const TOKEN_KEY = 'galchat.token'
+export const UNAUTHORIZED_EVENT = 'galchat:unauthorized'
+
+function endpoint(path: string) { return `${API_BASE}${path}` }
+function token() { return localStorage.getItem(TOKEN_KEY) }
+function wsEndpoint(path: string) {
+  const url = API_BASE.startsWith('http://') || API_BASE.startsWith('https://')
+    ? new URL(path, API_BASE)
+    : new URL(path, window.location.href)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
+
+async function readError(response: Response) {
+  const text = await response.text()
+  if (!text) return `${response.status} ${response.statusText}`
+  try { return (JSON.parse(text) as ApiResult<unknown>).msg || text } catch { return text }
+}
+
+function headers(init?: HeadersInit, json = false) {
+  const result = new Headers(init)
+  if (json) result.set('Content-Type', 'application/json')
+  const current = token()
+  if (current) result.set('token', current)
+  return result
+}
+
+async function raw(path: string, init: RequestInit = {}) {
+  const response = await fetch(endpoint(path), { ...init, headers: headers(init.headers, Boolean(init.body) && !(init.body instanceof FormData)) })
+  if (response.status === 401) {
+    clearSession(); window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); throw new Error('登录状态已失效')
+  }
+  if (!response.ok) throw new Error(await readError(response))
+  return response
+}
+
+async function request<T>(path: string, init: RequestInit = {}) {
+  const response = await raw(path, init)
+  const result = await response.json() as ApiResult<T>
+  if (result.code !== 1) throw new Error(result.msg || '请求失败')
+  return result.data as T
+}
+
+const body = (value: unknown) => JSON.stringify(value)
+
+export function saveSession(value: UserToken) {
+  localStorage.setItem(TOKEN_KEY, value.token)
+  localStorage.setItem('galchat.userId', String(value.id))
+  localStorage.setItem('galchat.username', value.username)
+}
+export function clearSession() {
+  Object.keys(localStorage).filter((key) => key.startsWith('galchat.')).forEach((key) => localStorage.removeItem(key))
+}
+export function currentSession(): Session {
+  const id = Number(localStorage.getItem('galchat.userId'))
+  return { token: token() || '', id: Number.isFinite(id) && id > 0 ? id : null, username: localStorage.getItem('galchat.username') || '' }
+}
+
+export const api = {
+  login: (email: string, password: string) => request<UserToken>('/user/login', { method: 'POST', body: body({ email, password }) }),
+  register: (email: string, password: string, verificationCode: string) => request<UserToken>('/user/register', { method: 'POST', body: body({ email, password, verificationCode }) }),
+  sendRegisterCode: (email: string) => request<string>('/user/register/email-code', { method: 'POST', body: body({ email }) }),
+  userInfo: () => request<UserInfo>('/user/info'),
+  updateUserInfo: (payload: Partial<UserInfo>) => request<void>('/user/info', { method: 'PUT', body: body(payload) }),
+  sendPasswordCode: (email: string) => request<void>('/user/password/email-code', { method: 'POST', body: body({ email }) }),
+  updatePassword: (payload: { email: string; newPassword: string; verificationCode: string }) => request<void>('/user/password', { method: 'PUT', body: body(payload) }),
+
+  modelApis: () => request<ModelApi[]>('/model-apis'),
+  createModelApi: (payload: ModelApiSavePayload) => request<ModelApi>('/model-apis', { method: 'POST', body: body(payload) }),
+  updateModelApi: (id: number, payload: ModelApiSavePayload) => request<ModelApi>(`/model-apis/${id}`, { method: 'PUT', body: body(payload) }),
+  testModelApi: (id: number) => request<ModelApi>(`/model-apis/${id}/test`, { method: 'POST' }),
+  deleteModelApi: (id: number) => request<void>(`/model-apis/${id}`, { method: 'DELETE' }),
+
+  worldTemplates: () => request<WorldTemplate[]>('/world/templates'),
+  worldTemplate: (id: number) => request<WorldTemplate>(`/world/templates/${id}`),
+  myWorldTemplate: (id: number) => request<WorldTemplate>(`/world/templates/my/${id}`),
+  createWorldTemplate: (payload: WorldTemplate) => request<void>('/world/templates', { method: 'POST', body: body(payload) }),
+  updateWorldTemplate: (id: number, payload: WorldTemplate) => request<void>(`/world/templates/my/${id}`, { method: 'PUT', body: body(payload) }),
+  userWorlds: (userId: number) => request<UserWorld[]>(`/world/user/${userId}`),
+  userWorld: (id: number) => request<UserWorld>(`/world/${id}`),
+  createWorld: (payload: Partial<UserWorld> & { worldId: number }) => request<void>('/world', { method: 'POST', body: body(payload) }),
+  updateWorld: (id: number, payload: Partial<UserWorld>) => request<void>(`/world/${id}`, { method: 'PUT', body: body(payload) }),
+  deleteWorld: (id: number) => request<void>(`/world/${id}`, { method: 'DELETE' }),
+  worldDetails: (worldId: number) => request<WorldDetail[]>(`/world/templates/${worldId}/details`),
+  addWorldDetail: (worldId: number, payload: WorldDetail) => request<void>(`/world/templates/${worldId}/details`, { method: 'POST', body: body(payload) }),
+  deleteWorldDetail: (worldId: number, detailId: number) => request<void>(`/world/templates/${worldId}/${detailId}`, { method: 'DELETE' }),
+  exportWorld: async (id: number) => (await raw(`/world/templates/my/${id}/export`)).text(),
+  importWorld: (payload: WorldArchive) => request<WorldArchiveResult>('/world/import', { method: 'POST', body: body(payload) }),
+  worldTemplateUsage: (id: number) => request<WorldTemplateUsage>(`/world/templates/${id}/usage`),
+  replaceWorldTemplate: (id: number, payload: WorldArchive, confirmLowMatch = false) =>
+    request<WorldArchiveReplaceResult>(`/world/templates/${id}/replace?confirmLowMatch=${confirmLowMatch}`, {
+      method: 'PUT', body: body(payload),
+    }),
+  deleteWorldTemplate: (id: number) => request<void>(`/world/templates/${id}`, { method: 'DELETE' }),
+  worldSave: (id: number) => request<WorldSave | null>(`/world-saves/${id}`),
+  saveWorld: (id: number, remark: string) => request<WorldSave>(`/world-saves/${id}`, { method: 'POST', body: body({ remark }) }),
+  loadWorld: (id: number) => request<void>(`/world-saves/${id}/load`, { method: 'POST' }),
+
+  characters: (worldId: number) => request<Character[]>(`/character/${worldId}`),
+  characterTemplates: (worldId: number) => request<CharacterTemplate[]>(`/character/templates/${worldId}`),
+  addCharacter: (worldId: number, characterId: number) => request<void>(`/character/${worldId}/${characterId}`, { method: 'POST' }),
+  deleteCharacter: (worldId: number, characterId: number) => request<void>(`/character/${worldId}/${characterId}`, { method: 'DELETE' }),
+  updatePrompt: (worldId: number, characterId: number, userInfoPrompt: string) => request<void>(`/character/${worldId}/${characterId}/prompt`, { method: 'PUT', body: body({ userInfoPrompt }) }),
+  updateCharacterModel: (worldId: number, characterId: number, modelApiId?: number) => request<SingleChatRuntime>(`/character/${worldId}/${characterId}/model`, { method: 'PUT', body: body({ modelApiId }) }),
+  updateFavor: (worldId: number, characterId: number, favorValue: number) => request<void>(`/character/my/${worldId}/${characterId}/favor`, { method: 'PUT', body: body({ favorValue }) }),
+  createCharacterTemplate: (worldId: number, payload: CharacterTemplate) => request<void>(`/character/templates/${worldId}`, { method: 'POST', body: body(payload) }),
+  myCharacterTemplate: (worldId: number, characterId: number) => request<CharacterTemplate>(`/character/templates/my/${worldId}/${characterId}`),
+  updateCharacterTemplate: (worldId: number, characterId: number, payload: CharacterTemplate) => request<void>(`/character/templates/my/${worldId}/${characterId}`, { method: 'PUT', body: body(payload) }),
+
+  cocModules: () => request<CocModule[]>('/coc-modules'),
+  cocModule: (id: number) => request<CocModule>(`/coc-modules/${id}`),
+  myCocModules: () => request<CocModule[]>('/coc-modules/mine'),
+  manageCocModule: (id: number) => request<CocModuleDetail>(`/coc-modules/${id}/manage`),
+  createCocModule: (payload: CocModuleSavePayload) => request<CocModule>('/coc-modules', { method: 'POST', body: body(payload) }),
+  updateCocModule: (id: number, payload: CocModuleSavePayload) => request<CocModule>(`/coc-modules/${id}`, { method: 'PUT', body: body(payload) }),
+  deleteCocModule: (id: number) => request<void>(`/coc-modules/${id}`, { method: 'DELETE' }),
+  exportCocModule: (id: number) => raw(`/coc-modules/${id}/export`).then((response) => response.blob()),
+  importCocModule: (archive: CocModuleArchive) => request<CocModule>('/coc-modules/import', { method: 'POST', body: body(archive) }),
+  updateCocModuleLocationContent: (moduleId: number, locationId: number, content: string) =>
+    request<CocModuleLocation>(`/coc-modules/${moduleId}/locations/${locationId}/content`, { method: 'PUT', body: body({ content }) }),
+  addCocModuleClue: (moduleId: number, clue: CocModuleClue) =>
+    request<CocModuleClue>(`/coc-modules/${moduleId}/clues`, { method: 'POST', body: body(clue) }),
+  updateCocModuleClueContent: (moduleId: number, clueId: number, content: string) =>
+    request<CocModuleClue>(`/coc-modules/${moduleId}/clues/${clueId}/content`, { method: 'PUT', body: body({ content }) }),
+  unlockCocModule: (id: number) => request<void>(`/coc-modules/${id}/unlock`, { method: 'POST' }),
+
+  history: (worldId: number, characterId: number, size = 30, beforeId?: number) => request<ChatHistory[]>(`/history?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId), size: String(size), ...(beforeId ? { id: String(beforeId) } : {}) })}`),
+  withdrawMessage: (worldId: number, characterId: number) => request<void>(`/history/withdraw?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId) })}`, { method: 'POST' }),
+
+  conversations: (worldId: number, status?: 'active' | 'closed') => request<Conversation[]>(`/group-chat/conversations?${new URLSearchParams({ userWorldId: String(worldId), ...(status ? { status } : {}) })}`),
+  participantHistory: (worldId: number) => request<TrpgParticipantHistory[]>(`/group-chat/participant-history?${new URLSearchParams({ userWorldId: String(worldId) })}`),
+  participantRuns: (worldId: number, characterId: number, cursor?: string) => request<TrpgParticipantRunPage>(`/group-chat/participant-history/${characterId}/runs?${new URLSearchParams({ userWorldId: String(worldId), limit: '10', ...(cursor ? { cursor } : {}) })}`),
+  conversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}`),
+  createConversation: (payload: { userWorldId: number; moduleId?: number; mode: string; title: string; characterIds: number[] }) => request<Conversation>('/group-chat/conversations', { method: 'POST', body: body(payload) }),
+  completionReport: (id: number) => request<TrpgCompletionReport | null>(`/group-chat/conversations/${id}/completion-report`),
+  closeConversation: (id: number) => request<Conversation>(`/group-chat/conversations/${id}/close`, { method: 'POST' }),
+  deleteConversation: (id: number) => request<void>(`/group-chat/conversations/${id}`, { method: 'DELETE' }),
+  contextWindow: (id: number) => request<ContextWindowOverview | null>(`/group-chat/conversations/${id}/context-window`),
+  updateGameTime: (id: number, payload: { dayNo: number; period: TrpgGameTimePeriod; revision: number }) =>
+    request<TrpgGameTime>(`/group-chat/conversations/${id}/game-time`, { method: 'PUT', body: body(payload) }),
+  groupMessages: (id: number, beforeId?: number, size = 50) => request<GroupMessage[]>(`/group-chat/conversations/${id}/messages?size=${size}${beforeId ? `&beforeId=${beforeId}` : ''}`),
+  withdrawGroupTurn: (id: number) => request<void>(`/group-chat/conversations/${id}/withdraw`, { method: 'POST' }),
+  replyPlan: (id: number) => request<ReplyPlan[]>(`/group-chat/conversations/${id}/reply-plan`),
+  saveReplyPlan: (id: number, plan: ReplyPlanRequest) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
+  finishReplyPlan: (id: number) => request<ReplyPlan | null>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),
+  currentTurn: (id: number) => request<CurrentTurn | null>(`/group-chat/conversations/${id}/turns/current`),
+  actorRuntimes: (id: number) => request<GroupActorRuntime[]>(`/group-chat/conversations/${id}/actor-runtimes`),
+  saveActorRuntime: (id: number, payload: GroupActorRuntimeSavePayload) =>
+    request<GroupActorRuntime>(`/group-chat/conversations/${id}/actor-runtimes`, { method: 'PUT', body: body(payload) }),
+  combatOverview: (id: number) => request<TrpgCombatParticipantOverview[]>(`/group-chat/conversations/${id}/combat-overview`),
+
+  investigatorCards: (runId: number) => request<InvestigatorCardSummary[]>(`/character-cards/investigators?${new URLSearchParams({ runId: String(runId) })}`),
+  characterCardById: (id: number) => request<CharacterCard>(`/character-cards/${id}`),
+  createCharacterCard: (payload: { runId: number; participantId?: number; characterText: string }) => request<CharacterCard>('/character-cards', { method: 'POST', body: body(payload) }),
+  deleteCharacterCard: (id: number) => request<void>(`/character-cards/${id}`, { method: 'DELETE' }),
+  rollCharacterLuck: (id: number) => request<DiceResult>(`/character-cards/${id}/luck`, { method: 'POST' }),
+  createAutoCharacterCardDraft: (payload: { runId: number; participantId: number; requestId: string }) =>
+    request<CharacterCardCreationDraft>('/character-card-creation/drafts/auto', { method: 'POST', body: body(payload) }),
+  characterCardCreationRules: () => request<CharacterCardCreationRules>('/character-card-creation/rules'),
+  createStepCharacterCardDraft: (payload: {
+    runId: number; participantId?: number; name: string; occupation: string; age: number; sex: string; residence: string; birthplace: string
+  }) => request<CharacterCardCreationDraft>('/character-card-creation/drafts/step', { method: 'POST', body: body(payload) }),
+  characterCardCreationDraft: (id: number) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}`),
+  activeCharacterCardDraft: (runId: number, participantId?: number) =>
+    request<CharacterCardCreationDraft | null>(`/character-card-creation/drafts/active?${new URLSearchParams({ runId: String(runId), ...(participantId === undefined ? {} : { participantId: String(participantId) }) })}`),
+  abandonCharacterCardDraft: (id: number, expectedVersion: number) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}?${new URLSearchParams({ expectedVersion: String(expectedVersion) })}`, { method: 'DELETE' }),
+  updateCharacterCardDraftIdentity: (id: number, payload: {
+    name: string; occupation: string; age: number; sex: string; residence: string; birthplace: string; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/identity`, { method: 'PATCH', body: body(payload) }),
+  rollCharacterCardDraftAttributes: (id: number, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/attributes/roll`, { method: 'POST', body: body(payload) }),
+  saveCharacterCardDraftAgeAdjustment: (id: number, payload: {
+    strPenalty: number; conPenalty: number; sizPenalty: number; dexPenalty: number; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/age-adjustment`, { method: 'PUT', body: body(payload) }),
+  saveCharacterCardDraftOccupation: (id: number, payload: { occupation: string; confirmed: boolean; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/occupation`, { method: 'PUT', body: body(payload) }),
+  saveCharacterCardDraftSkills: (id: number, payload: {
+    allocations: Array<{ skillDefId: number; specialization?: string; allocatedPoints: number }>; confirmed: boolean; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/skills`, { method: 'PUT', body: body(payload) }),
+  rollCharacterCardDraftBackground: (id: number, category: string, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/background/${encodeURIComponent(category)}/roll`, { method: 'POST', body: body(payload) }),
+  saveCharacterCardDraftBackground: (id: number, payload: {
+    entries: Record<string, string>; keyConnectionCategory?: string; confirmed: boolean; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/background`, { method: 'PUT', body: body(payload) }),
+  saveCharacterCardDraftEquipment: (id: number, payload: {
+    era?: string; equipmentText?: string; assetsText?: string; spendingLevel?: string; cash?: string
+    weapons: Array<{ code: string }>
+    confirmed: boolean; expectedVersion: number
+  }) => request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/equipment`, { method: 'PUT', body: body(payload) }),
+  regenerateCharacterCardDraft: (id: number, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/regenerate`, { method: 'POST', body: body(payload) }),
+  rewriteCharacterCardBackground: (id: number, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCardCreationDraft>(`/character-card-creation/drafts/${id}/rewrite-background`, { method: 'POST', body: body(payload) }),
+  completeCharacterCardDraft: (id: number, payload: { requestId: string; expectedVersion: number }) =>
+    request<CharacterCard>(`/character-card-creation/drafts/${id}/complete`, { method: 'POST', body: body(payload) }),
+
+  diceSummary: (id: number) => request<DiceRollSummary>(`/dice-rolls/${id}`),
+  diceResults: (id: number) => request<DiceRollDetail[]>(`/dice-rolls/${id}/results`),
+  rollDiceResult: (id: number) => request<DiceRollProgress>(`/dice-roll-results/${id}/roll`, { method: 'POST' }),
+
+  trpgSave: (id: number) => request<TrpgSave | null>(`/trpg-saves/${id}`),
+  saveTrpg: (id: number, remark: string) => request<TrpgSave>(`/trpg-saves/${id}`, { method: 'POST', body: body({ remark }) }),
+  loadTrpg: (id: number) => request<void>(`/trpg-saves/${id}/load`, { method: 'POST' }),
+  trpgRollbackStatus: (id: number) => request<TrpgRollbackOverview>(`/trpg-saves/${id}/rollback-status`),
+  rollbackTrpgTurn: (id: number) => request<TrpgRollbackResult>(`/trpg-saves/${id}/rollback-turn`, { method: 'POST' }),
+  rollbackTrpgScene: (id: number) => request<TrpgRollbackResult>(`/trpg-saves/${id}/rollback-scene`, { method: 'POST' }),
+  rollbackTrpgInitial: (id: number) => request<TrpgRollbackResult>(`/trpg-saves/${id}/rollback-initial`, { method: 'POST' }),
+}
+
+export async function streamChat(payload: ChatMessagePayload, onMessage: (message: ChatFlux) => void) {
+  const response = await raw('/ai/chat', { method: 'POST', body: body(payload) })
+  if (!response.body) return
+  const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
+  const consume = (rawLine: string) => {
+    const line = rawLine.trim()
+    if (!line || line.startsWith(':')) return
+    const data = line.startsWith('data:') ? line.slice(5).trim() : line
+    if (!data || data === '[DONE]') return
+    try { onMessage(JSON.parse(data) as ChatFlux) } catch { onMessage({ type: 'response', content: data }) }
+  }
+  while (true) {
+    const { done, value } = await reader.read(); if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split(/\r?\n/); buffer = lines.pop() || ''
+    lines.forEach(consume)
+  }
+  buffer += decoder.decode(); if (buffer.trim()) consume(buffer)
+}
+
+export function createChatSocket(userWorldId: number) {
+  const sid = crypto.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const url = new URL(wsEndpoint(`/ws/${encodeURIComponent(sid)}`))
+  url.searchParams.set('userWorldId', String(userWorldId))
+  const current = token(); if (current) url.searchParams.set('token', current)
+  return new WebSocket(url.toString())
+}
+
+export async function uploadImage(file: File) {
+  if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/x-ms-bmp'].includes(file.type)) throw new Error('仅支持 JPG、PNG、GIF、WEBP、BMP 图片')
+  if (file.size > 4 * 1024 * 1024) throw new Error('图片不能超过 4MB')
+  const data = new FormData(); data.append('file', file)
+  const result = await (await raw('/upload', { method: 'POST', body: data })).json() as ApiResult<string>
+  if (result.code !== 1) throw new Error(result.msg || '上传失败')
+  return result.data || ''
+}
+
+export async function streamGroupMessage(id: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) {
+  return streamGroupTurn(`/group-chat/conversations/${id}/messages`, payload, onEvent)
+}
+
+export async function streamManualGroupMessage(
+  id: number,
+  turnId: number,
+  stepId: number,
+  payload: { clientRequestId: string; content: string },
+  onEvent: (event: GroupChatEvent) => void,
+) {
+  return streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/manual-message`, payload, onEvent)
+}
+
+async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: GroupChatEvent) => void, method = 'POST') {
+  const response = await raw(path, { method, body: payload === undefined ? undefined : body(payload), headers: { Accept: 'text/event-stream' } })
+  if (!response.body) return
+  const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
+  const consume = (block: string) => {
+    const data = block.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('\n')
+    if (!data || data === '[DONE]') return
+    onEvent(JSON.parse(data) as GroupChatEvent)
+  }
+  while (true) {
+    const { done, value } = await reader.read(); if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const blocks = buffer.split(/\r?\n\r?\n/); buffer = blocks.pop() || ''
+    blocks.forEach(consume)
+  }
+  buffer += decoder.decode(); if (buffer.trim()) consume(buffer)
+}
+
+export const streamGroupGeneration = {
+  resume: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/generations/${encodeURIComponent(clientRequestId)}`, undefined, onEvent, 'GET'),
+}
+
+export const streamTrpgTurn = {
+  continue: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void, investigatorDirection?: string) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/continue`, {
+      clientRequestId,
+      ...(investigatorDirection ? { investigatorDirection } : {}),
+    }, onEvent),
+  message: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/message`, payload, onEvent),
+  inquiry: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; question: string }, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/inquiry`, payload, onEvent),
+  selection: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; optionNo: string }, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/selection`, payload, onEvent),
+  endExploration: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/end-exploration`, { clientRequestId }, onEvent),
+  retry: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/retry`, { clientRequestId }, onEvent),
+}

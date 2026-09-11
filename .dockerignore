@@ -8,8 +8,8 @@ target
 build
 dist
 
-vue/node_modules
-vue/dist
+reka/node_modules
+reka/dist
 
 python/venv
 python/.idea

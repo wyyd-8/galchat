@@ -57,7 +57,7 @@ class TopicAwareMessageChatMemoryAdvisorTest {
                         new UserChatHistory().setId(12L).setType(MessageType.USER.getValue()).setContent("上一轮用户"),
                         new UserChatHistory().setId(13L).setType(MessageType.ASSISTANT.getValue()).setContent("上一轮AI"),
                         new UserChatHistory().setId(14L).setType(MessageType.USER.getValue()).setContent("这一轮用户")),
-                new TopicBoundary(10L, 10L, 14L),
+                new TopicBoundary(List.of(10L), 14L),
                 new UserChatHistory().setId(14L).setType(MessageType.USER.getValue()).setContent("这一轮用户"));
 
         assertThat(query).doesNotContain("更早用户");
@@ -72,7 +72,7 @@ class TopicAwareMessageChatMemoryAdvisorTest {
                         new UserChatHistory().setId(12L).setType(MessageType.USER.getValue()).setContent("上一轮用户"),
                         new UserChatHistory().setId(13L).setType(MessageType.ASSISTANT.getValue()).setContent("上一轮AI"),
                         new UserChatHistory().setId(14L).setType(MessageType.USER.getValue()).setContent("这一轮用户")),
-                new TopicBoundary(12L, 14L, 14L),
+                new TopicBoundary(List.of(12L, 14L), 14L),
                 new UserChatHistory().setId(14L).setType(MessageType.USER.getValue()).setContent("这一轮用户"));
 
         assertThat(query).doesNotContain("上一轮用户");

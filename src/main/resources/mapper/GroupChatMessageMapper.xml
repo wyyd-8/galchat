@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.me.galchat.mapper.GroupChatMessageMapper">
+
+    <select id="selectLatestCompletedByConversationIds"
+            resultType="com.me.galchat.domain.po.GroupChatMessage">
+        SELECT id, conversation_id, content, created_at
+        FROM (
+            SELECT id,
+                   conversation_id,
+                   content,
+                   created_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY conversation_id
+                       ORDER BY sequence_no DESC, id DESC
+                   ) AS rn
+            FROM group_chat_message
+            WHERE conversation_id IN
+            <foreach collection="conversationIds" item="conversationId" open="(" separator="," close=")">
+                #{conversationId}
+            </foreach>
+              AND visibility = 'public'
+              AND status = 'completed'
+        ) latest
+        WHERE rn = 1
+    </select>
+</mapper>

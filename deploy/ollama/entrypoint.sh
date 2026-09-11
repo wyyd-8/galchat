@@ -15,8 +15,8 @@ until ollama list >/dev/null 2>&1; do
     sleep 1
 done
 
-if ! ollama show qwen3-embedding:4b >/dev/null 2>&1; then
-    ollama pull qwen3-embedding:4b || echo "Unable to pull qwen3-embedding:4b automatically; Ollama is still running."
+if ! ollama show bge-m3 >/dev/null 2>&1; then
+    ollama pull bge-m3 || echo "Unable to pull bge-m3 automatically; Ollama is still running."
 fi
 
 wait "$pid"

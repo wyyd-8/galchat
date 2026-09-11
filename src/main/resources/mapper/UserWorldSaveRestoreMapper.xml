@@ -40,24 +40,96 @@
           AND id &gt; #{maxUserEventLogId}
     </delete>
 
-    <delete id="deleteWorldEventsAfter">
-        DELETE FROM world_event_log
-        WHERE user_world_id = #{userWorldId}
-          AND id &gt; #{maxWorldEventLogId}
+    <delete id="deleteGroupMessagesAfter">
+        DELETE FROM group_chat_message message
+        USING group_conversation conversation
+        WHERE message.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND message.id &gt; #{maxGroupMessageId}
     </delete>
 
-    <delete id="deleteStoryEventCharactersAfter">
-        DELETE FROM world_story_event_character character_link
-        USING world_story_event story_event
-        WHERE character_link.story_event_id = story_event.id
-          AND story_event.user_world_id = #{userWorldId}
-          AND character_link.id &gt; #{maxStoryEventCharacterId}
+    <delete id="deleteGroupToolCallsAfter">
+        DELETE FROM group_chat_tool_call tool_call
+        USING group_chat_reply_step step, group_chat_turn turn_row, group_conversation conversation
+        WHERE tool_call.reply_step_id = step.id
+          AND step.turn_id = turn_row.id
+          AND turn_row.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND step.id &gt; #{maxGroupReplyStepId}
     </delete>
 
-    <delete id="deleteStoryEventsAfter">
-        DELETE FROM world_story_event
+    <delete id="deleteGroupReplyStepsAfter">
+        DELETE FROM group_chat_reply_step step
+        USING group_chat_turn turn_row, group_conversation conversation
+        WHERE step.turn_id = turn_row.id
+          AND turn_row.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND step.id &gt; #{maxGroupReplyStepId}
+    </delete>
+
+    <delete id="deleteGroupTurnsAfter">
+        DELETE FROM group_chat_turn turn_row
+        USING group_conversation conversation
+        WHERE turn_row.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND turn_row.id &gt; #{maxGroupTurnId}
+    </delete>
+
+    <delete id="deleteGroupSummariesAfter">
+        DELETE FROM group_context_summary summary
+        USING group_conversation conversation
+        WHERE summary.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND summary.id &gt; #{maxGroupContextSummaryId}
+    </delete>
+
+    <delete id="deleteGroupTopicsAfter">
+        DELETE FROM group_chat_topic topic
+        USING group_conversation conversation
+        WHERE topic.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND topic.id &gt; #{maxGroupTopicId}
+    </delete>
+
+    <delete id="deleteReplyPlanItemsAfterConversation">
+        DELETE FROM group_reply_plan_item item
+        USING group_reply_plan plan, group_conversation conversation
+        WHERE item.plan_id = plan.id
+          AND plan.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND conversation.id &gt; #{maxGroupConversationId}
+    </delete>
+
+    <delete id="deleteReplyPlansAfterConversation">
+        DELETE FROM group_reply_plan plan
+        USING group_conversation conversation
+        WHERE plan.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND conversation.id &gt; #{maxGroupConversationId}
+    </delete>
+
+    <delete id="deleteGroupMembersAfterConversation">
+        DELETE FROM group_chat_member member
+        USING group_conversation conversation
+        WHERE member.conversation_id = conversation.id
+          AND conversation.user_world_id = #{userWorldId}
+          AND conversation.mode = 'chat'
+          AND conversation.id &gt; #{maxGroupConversationId}
+    </delete>
+
+    <delete id="deleteGroupConversationsAfter">
+        DELETE FROM group_conversation
         WHERE user_world_id = #{userWorldId}
-          AND id &gt; #{maxStoryEventId}
+          AND mode = 'chat'
+          AND id &gt; #{maxGroupConversationId}
     </delete>
 
     <delete id="deleteChatHistoryByIds">
@@ -78,10 +150,11 @@
         WHERE user_message_id = #{userMessageId}
     </delete>
 
-    <delete id="deleteFavorLogsByBindingChat">
+    <delete id="deleteFavorLogsByBinding">
         DELETE FROM user_character_favor_log
         WHERE user_world_id = #{userWorldId}
           AND character_id = #{characterId}
+          AND binding_type = #{bindingType}
           AND binding_chat = #{bindingChat}
     </delete>
 
@@ -150,6 +223,7 @@
             user_world_id,
             character_id,
             favor_update,
+            binding_type,
             binding_chat,
             timestamp
         )
@@ -158,36 +232,10 @@
             #{favorLog.userWorldId},
             #{favorLog.characterId},
             #{favorLog.favorUpdate},
+            #{favorLog.bindingType},
             #{favorLog.bindingChat},
             #{favorLog.timestamp}
         )
     </insert>
 
-    <insert id="upsertWorldEventLogWithId">
-        INSERT INTO world_event_log (
-            id,
-            user_world_id,
-            event_description,
-            visible_characters,
-            timestamp,
-            title,
-            story_event_id
-        )
-        VALUES (
-            #{worldEventLog.id},
-            #{worldEventLog.userWorldId},
-            #{worldEventLog.eventDescription},
-            #{worldEventLog.visibleCharacters,jdbcType=ARRAY,typeHandler=org.apache.ibatis.type.ArrayTypeHandler},
-            #{worldEventLog.timestamp},
-            #{worldEventLog.title},
-            #{worldEventLog.storyEventId}
-        )
-        ON CONFLICT (id) DO UPDATE SET
-            user_world_id = EXCLUDED.user_world_id,
-            event_description = EXCLUDED.event_description,
-            visible_characters = EXCLUDED.visible_characters,
-            timestamp = EXCLUDED.timestamp,
-            title = EXCLUDED.title,
-            story_event_id = EXCLUDED.story_event_id
-    </insert>
 </mapper>

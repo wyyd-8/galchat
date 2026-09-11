@@ -2,6 +2,7 @@ package com.me.galchat.tool;
 
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.FavorConstant;
+import com.me.galchat.constant.FavorBindingType;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.utils.TypeConvertUtils;
 import lombok.RequiredArgsConstructor;
@@ -40,13 +41,17 @@ public class UserCharacterFavorTools {
         Long userWorldId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.USER_WORLD_ID_KEY));
         Long characterId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.CHARACTER_ID_KEY));
         Long userMessageId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.USER_MESSAGE_ID_KEY));
+        Long replyStepId = TypeConvertUtils.asLong(map.get(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY));
         String favorSystemStatus = TypeConvertUtils.asString(map.get(ChatToolContextConstant.FAVOR_SYSTEM_STATUS_KEY));
-        if (userWorldId == null || characterId == null || userMessageId == null) {
+        Long bindingChat = replyStepId == null ? userMessageId : replyStepId;
+        String bindingType = replyStepId == null
+                ? FavorBindingType.SINGLE_MESSAGE : FavorBindingType.GROUP_REPLY_STEP;
+        if (userWorldId == null || characterId == null || bindingChat == null) {
             return;
         }
 
         userCharacterInfoService.updateFavorValue(userWorldId, characterId,
-                applyFavorSystemCoefficient(favorChange, favorSystemStatus), userMessageId);
+                applyFavorSystemCoefficient(favorChange, favorSystemStatus), bindingType, bindingChat);
     }
 
     private Integer applyFavorSystemCoefficient(Integer favorChange, String favorSystemStatus) {

@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.ObjectMapper;
 
@@ -97,6 +98,28 @@ public class UserWorldController {
     @PostMapping("/import")
     public Result importWorld(@RequestBody WorldArchiveDTO archive) {
         return Result.success(worldArchiveService.importWorld(currentUserId(), archive));
+    }
+
+    @GetMapping("/templates/{id}/usage")
+    public Result getWorldTemplateUsage(@PathVariable Long id) {
+        checkWorldTemplateId(id);
+        return Result.success(worldArchiveService.getWorldTemplateUsage(currentUserId(), id));
+    }
+
+    @PutMapping("/templates/{id}/replace")
+    public Result replaceWorldTemplate(@PathVariable Long id,
+                                       @RequestParam(defaultValue = "false") boolean confirmLowMatch,
+                                       @RequestBody WorldArchiveDTO archive) {
+        checkWorldTemplateId(id);
+        return Result.success(worldArchiveService.replaceWorldTemplate(
+                currentUserId(), id, archive, confirmLowMatch));
+    }
+
+    @DeleteMapping("/templates/{id}")
+    public Result deleteWorldTemplate(@PathVariable Long id) {
+        checkWorldTemplateId(id);
+        worldArchiveService.deleteWorldTemplate(currentUserId(), id);
+        return Result.success();
     }
 
     @GetMapping("/templates/{worldId}/details")
@@ -174,6 +197,12 @@ public class UserWorldController {
     private void checkUserWorldId(Long userWorldId) {
         if (userWorldId == null) {
             throw new UserRequestException("用户世界id不能为空");
+        }
+    }
+
+    private void checkWorldTemplateId(Long worldId) {
+        if (worldId == null) {
+            throw new UserRequestException("世界模板id不能为空");
         }
     }
 

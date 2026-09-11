@@ -4,7 +4,6 @@ import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
-import com.me.galchat.domain.po.WorldEventLog;
 import org.apache.ibatis.annotations.Param;
 
 public interface UserWorldSaveRestoreMapper {
@@ -19,12 +18,35 @@ public interface UserWorldSaveRestoreMapper {
 
     int deleteUserEventsAfter(@Param("userWorldId") Long userWorldId, @Param("maxUserEventLogId") Long maxUserEventLogId);
 
-    int deleteWorldEventsAfter(@Param("userWorldId") Long userWorldId, @Param("maxWorldEventLogId") Long maxWorldEventLogId);
+    int deleteGroupMessagesAfter(@Param("userWorldId") Long userWorldId,
+                                 @Param("maxGroupMessageId") Long maxGroupMessageId);
 
-    int deleteStoryEventCharactersAfter(@Param("userWorldId") Long userWorldId,
-                                        @Param("maxStoryEventCharacterId") Long maxStoryEventCharacterId);
+    int deleteGroupToolCallsAfter(@Param("userWorldId") Long userWorldId,
+                                  @Param("maxGroupReplyStepId") Long maxGroupReplyStepId);
 
-    int deleteStoryEventsAfter(@Param("userWorldId") Long userWorldId, @Param("maxStoryEventId") Long maxStoryEventId);
+    int deleteGroupReplyStepsAfter(@Param("userWorldId") Long userWorldId,
+                                   @Param("maxGroupReplyStepId") Long maxGroupReplyStepId);
+
+    int deleteGroupTurnsAfter(@Param("userWorldId") Long userWorldId,
+                              @Param("maxGroupTurnId") Long maxGroupTurnId);
+
+    int deleteGroupSummariesAfter(@Param("userWorldId") Long userWorldId,
+                                  @Param("maxGroupContextSummaryId") Long maxGroupContextSummaryId);
+
+    int deleteGroupTopicsAfter(@Param("userWorldId") Long userWorldId,
+                               @Param("maxGroupTopicId") Long maxGroupTopicId);
+
+    int deleteReplyPlanItemsAfterConversation(@Param("userWorldId") Long userWorldId,
+                                              @Param("maxGroupConversationId") Long maxGroupConversationId);
+
+    int deleteReplyPlansAfterConversation(@Param("userWorldId") Long userWorldId,
+                                          @Param("maxGroupConversationId") Long maxGroupConversationId);
+
+    int deleteGroupMembersAfterConversation(@Param("userWorldId") Long userWorldId,
+                                            @Param("maxGroupConversationId") Long maxGroupConversationId);
+
+    int deleteGroupConversationsAfter(@Param("userWorldId") Long userWorldId,
+                                      @Param("maxGroupConversationId") Long maxGroupConversationId);
 
     int deleteChatHistoryByIds(@Param("ids") Iterable<Long> ids);
 
@@ -32,9 +54,10 @@ public interface UserWorldSaveRestoreMapper {
 
     int deleteToolCallsByUserMessageId(@Param("userMessageId") Long userMessageId);
 
-    int deleteFavorLogsByBindingChat(@Param("userWorldId") Long userWorldId,
-                                     @Param("characterId") Long characterId,
-                                     @Param("bindingChat") Long bindingChat);
+    int deleteFavorLogsByBinding(@Param("userWorldId") Long userWorldId,
+                                 @Param("characterId") Long characterId,
+                                 @Param("bindingType") String bindingType,
+                                 @Param("bindingChat") Long bindingChat);
 
     int insertChatHistoryWithId(@Param("history") UserChatHistory history);
 
@@ -44,5 +67,4 @@ public interface UserWorldSaveRestoreMapper {
 
     int insertFavorLogWithId(@Param("favorLog") UserCharacterFavorLog favorLog);
 
-    int upsertWorldEventLogWithId(@Param("worldEventLog") WorldEventLog worldEventLog);
 }

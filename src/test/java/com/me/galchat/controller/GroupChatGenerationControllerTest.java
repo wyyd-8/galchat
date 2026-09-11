@@ -1,0 +1,187 @@
+package com.me.galchat.controller;
+
+import com.me.galchat.domain.dto.GroupChatRequestDTO;
+import com.me.galchat.domain.dto.GroupEndExplorationDTO;
+import com.me.galchat.domain.dto.GroupSceneSelectionDTO;
+import com.me.galchat.domain.dto.GroupTurnContinueDTO;
+import com.me.galchat.domain.dto.TrpgInvestigatorInquiryDTO;
+import com.me.galchat.domain.vo.GroupChatEvent;
+import com.me.galchat.exception.UserAuthException;
+import com.me.galchat.service.impl.group.GroupChatService;
+import com.me.galchat.service.impl.group.GroupChatWithdrawalService;
+import com.me.galchat.service.impl.group.GroupConversationLifecycleService;
+import com.me.galchat.service.impl.group.GroupConversationDeletionService;
+import com.me.galchat.service.impl.group.GroupConversationService;
+import com.me.galchat.service.impl.group.GroupGenerationStreamRegistry;
+import com.me.galchat.service.impl.group.GroupReplyPlanService;
+import com.me.galchat.service.impl.trpg.TrpgContextWindowService;
+import com.me.galchat.service.impl.trpg.TrpgGameTimeService;
+import com.me.galchat.service.impl.trpg.TrpgTurnExecutionService;
+import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
+import java.util.List;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+class GroupChatGenerationControllerTest {
+
+    @Test
+    void resumesTheGenerationRegisteredByTheMessageEndpoint() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatService groupChatService = mock(GroupChatService.class);
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry();
+        GroupChatController controller = new GroupChatController(
+                conversationService,
+                mock(GroupConversationLifecycleService.class),
+                groupChatService,
+                registry,
+                mock(GroupChatWithdrawalService.class),
+                mock(GroupReplyPlanService.class),
+                mock(TrpgContextWindowService.class),
+                mock(TrpgTurnExecutionService.class),
+                mock(TrpgGameTimeService.class),
+                mock(GroupConversationDeletionService.class));
+        GroupChatRequestDTO request = new GroupChatRequestDTO();
+        request.setClientRequestId("generation-7");
+        request.setContent("继续调查");
+        GroupChatEvent delta = GroupChatEvent.builder()
+                .eventType("message.delta")
+                .conversationId(7L)
+                .delta("脚步声")
+                .build();
+        when(groupChatService.chat(7L, request))
+                .thenReturn(Flux.just(delta));
+
+        controller.chat(7L, request).collectList().block();
+        List<GroupChatEvent> resumed = controller.resumeGeneration(
+                7L, "generation-7").collectList().block();
+
+        assertThat(resumed).extracting(GroupChatEvent::getEventType)
+                .containsExactly("message.delta", "stream.caught_up");
+    }
+
+    @Test
+    void authenticatesBeforeStartingEveryGenerationEndpoint() {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupChatService groupChatService = mock(GroupChatService.class);
+        TrpgTurnExecutionService turnExecutionService =
+                mock(TrpgTurnExecutionService.class);
+        GroupChatController controller = new GroupChatController(
+                conversationService,
+                mock(GroupConversationLifecycleService.class),
+                groupChatService,
+                new GroupGenerationStreamRegistry(),
+                mock(GroupChatWithdrawalService.class),
+                mock(GroupReplyPlanService.class),
+                mock(TrpgContextWindowService.class),
+                turnExecutionService,
+                mock(TrpgGameTimeService.class),
+                mock(GroupConversationDeletionService.class));
+        UserAuthException unauthorized =
+                new UserAuthException("用户未登录");
+        doThrow(unauthorized).when(conversationService)
+                .requireAuthorized(7L);
+
+        assertThatThrownBy(() -> controller.chat(
+                7L, new GroupChatRequestDTO())).isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.continueTurn(
+                7L, new GroupTurnContinueDTO())).isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.retryTurnStep(
+                7L, 8L, 9L, new GroupTurnContinueDTO()))
+                .isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.submitTurnMessage(
+                7L, 8L, 9L, new GroupChatRequestDTO()))
+                .isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.submitSceneSelection(
+                7L, 8L, 9L, new GroupSceneSelectionDTO()))
+                .isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.endExploration(
+                7L, 8L, 9L, new GroupEndExplorationDTO()))
+                .isSameAs(unauthorized);
+        assertThatThrownBy(() -> controller.submitInquiry(
+                7L, 8L, 9L, new TrpgInvestigatorInquiryDTO()))
+                .isSameAs(unauthorized);
+
+        verifyNoInteractions(groupChatService, turnExecutionService);
+    }
+
+    @Test
+    void userInquiryUsesTheGenerationRegistry() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        TrpgTurnExecutionService turns =
+                mock(TrpgTurnExecutionService.class);
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry();
+        GroupChatController controller = new GroupChatController(
+                conversations,
+                mock(GroupConversationLifecycleService.class),
+                mock(GroupChatService.class), registry,
+                mock(GroupChatWithdrawalService.class),
+                mock(GroupReplyPlanService.class),
+                mock(TrpgContextWindowService.class), turns,
+                mock(TrpgGameTimeService.class),
+                mock(GroupConversationDeletionService.class));
+        TrpgInvestigatorInquiryDTO request =
+                new TrpgInvestigatorInquiryDTO();
+        request.setClientRequestId("ask-1");
+        request.setQuestion("门还开着吗？");
+        GroupChatEvent answer = GroupChatEvent.builder()
+                .eventType("message.completed")
+                .conversationId(7L).turnId(8L).replyStepId(10L)
+                .content("门仍然开着。").build();
+        when(turns.submitInquiry(7L, 8L, 9L, request))
+                .thenReturn(Flux.just(answer));
+
+        controller.submitInquiry(7L, 8L, 9L, request)
+                .collectList().block();
+        List<GroupChatEvent> resumed = controller.resumeGeneration(
+                7L, "ask-1").collectList().block();
+
+        assertThat(resumed).extracting(GroupChatEvent::getContent)
+                .containsExactly("门仍然开着。", null);
+    }
+
+    @Test
+    void generationFailureShowsTheSanitizedHttpRequestContext() {
+        GroupConversationService conversations =
+                mock(GroupConversationService.class);
+        TrpgTurnExecutionService turns =
+                mock(TrpgTurnExecutionService.class);
+        GroupGenerationStreamRegistry registry =
+                new GroupGenerationStreamRegistry();
+        GroupChatController controller = new GroupChatController(
+                conversations,
+                mock(GroupConversationLifecycleService.class),
+                mock(GroupChatService.class), registry,
+                mock(GroupChatWithdrawalService.class),
+                mock(GroupReplyPlanService.class),
+                mock(TrpgContextWindowService.class), turns,
+                mock(TrpgGameTimeService.class),
+                mock(GroupConversationDeletionService.class));
+        GroupTurnContinueDTO request = new GroupTurnContinueDTO();
+        request.setClientRequestId("continue-7");
+        when(turns.continueTurn(7L, request)).thenReturn(
+                Flux.error(new IllegalStateException("model failed")));
+
+        GroupChatEvent failure = controller.continueTurn(7L, request)
+                .filter(event -> "generation.failed".equals(
+                        event.getEventType()))
+                .blockFirst();
+
+        assertThat(failure).isNotNull();
+        assertThat(failure.getErrorDetail().getOperation())
+                .isEqualTo("continue-trpg-turn");
+        assertThat(failure.getErrorDetail().getRequest().toString())
+                .contains("POST")
+                .contains("/group-chat/conversations/7/turns/continue")
+                .contains("continue-7");
+    }
+}

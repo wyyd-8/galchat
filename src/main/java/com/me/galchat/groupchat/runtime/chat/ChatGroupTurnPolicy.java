@@ -1,0 +1,28 @@
+package com.me.galchat.groupchat.runtime.chat;
+
+import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.groupchat.runtime.GroupActionSpec;
+import com.me.galchat.groupchat.runtime.GroupReplyPlanSelection;
+import com.me.galchat.groupchat.runtime.GroupTurnPolicy;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+
+@Component
+public class ChatGroupTurnPolicy implements GroupTurnPolicy {
+
+    @Override
+    public List<GroupActionSpec> plan(GroupConversation conversation, GroupReplyPlanSelection selection) {
+        return selection.items().stream()
+                .map(item -> new GroupActionSpec(
+                        GroupChatConstant.ACTION_CHAT_REPLY,
+                        item.getActorType(),
+                        item.getActorId(),
+                        selection.executionKey(),
+                        selection.displayName(),
+                        1,
+                        item.getItemOrder()))
+                .toList();
+    }
+}

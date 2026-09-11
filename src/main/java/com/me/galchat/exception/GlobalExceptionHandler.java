@@ -6,9 +6,24 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler
+    public Result handleCharacterCardCreationException(
+            CharacterCardCreationException e) {
+        log.warn("人物卡创建异常 [{}]：{}", e.getErrorCode(), e.getMessage());
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("errorCode", e.getErrorCode());
+        if (e.getVersion() != null) data.put("version", e.getVersion());
+        if (e.getCurrentStep() != null) data.put("currentStep", e.getCurrentStep());
+        if (e.getNextAction() != null) data.put("nextAction", e.getNextAction());
+        return Result.error(e.getMessage(), Map.copyOf(data));
+    }
 
     @ExceptionHandler
     public Result handleUserRequestException(UserRequestException e) {

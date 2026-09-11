@@ -20,7 +20,6 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.Assert;
@@ -280,19 +279,18 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 如果 assistant 消息是 DeepSeekAssistantMessage 且带 reasoning_content，则保存推理内容。
+     * 如果 assistant 消息带有推理内容，则保存推理内容供历史界面展示。
      *
      * @param userMessageId 用户消息 id
      * @param stepNo assistant 输出步骤号
      * @param assistantMessage assistant 消息
      */
     private void saveThinkingIfPresent(Long userMessageId, int stepNo, AssistantMessage assistantMessage) {
-        if (!(assistantMessage instanceof DeepSeekAssistantMessage deepSeekAssistantMessage)
-                || userChatThinkingHistoryMapper == null) {
+        if (userChatThinkingHistoryMapper == null) {
             return;
         }
 
-        String reasoningContent = deepSeekAssistantMessage.getReasoningContent();
+        String reasoningContent = AssistantReasoning.get(assistantMessage);
         reasoningContent = trimAlreadySavedReasoning(userMessageId, reasoningContent);
         if (!StringUtils.hasText(reasoningContent)) {
             return;
@@ -506,7 +504,8 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 将 UserChatHistory 列表转换为模型消息，并按需插入辅助表中的 reasoning/tool calls/tool responses。
+     * 将 UserChatHistory 列表转换为模型消息，并按需插入工具调用与工具响应。
+     * 已保存的推理内容只用于历史展示，绝不回传给下一轮模型。
      *
      * @param histories 按时间正序排列的可见历史
      * @param includeAuxiliaryMessages 是否追加非 UserChatHistory 的辅助消息
@@ -523,24 +522,20 @@ public class UserChatMemory implements ChatMemory {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<Long, List<UserChatToolCall>> toolCallsByUserMessageId = listToolCalls(userMessageIds);
-        Map<Long, List<UserChatThinkingHistory>> thinkingByUserMessageId =
-                listThinking(userMessageIds);
-
         List<Message> messages = new ArrayList<>();
         Set<AssistantStep> emittedSteps = new HashSet<>();
         Long currentUserMessageId = null;
         for (UserChatHistory history : histories) {
             if (isUserHistory(history)) {
                 emitAuxiliaryMessages(currentUserMessageId, null, emittedSteps, messages,
-                        thinkingByUserMessageId, toolCallsByUserMessageId);
+                        toolCallsByUserMessageId);
                 messages.add(toMessage(history));
                 currentUserMessageId = history.getId();
             }
             else if (isLinkedAssistantHistory(history)) {
                 emitAuxiliaryMessages(history.getUserMessageId(), history.getStepNo(), emittedSteps, messages,
-                        thinkingByUserMessageId, toolCallsByUserMessageId);
-                messages.add(toAssistantMessage(history.getContent(), reasoningContent(history.getUserMessageId(),
-                        history.getStepNo(), thinkingByUserMessageId), stepToolCalls(history.getUserMessageId(),
+                        toolCallsByUserMessageId);
+                messages.add(toAssistantMessage(history.getContent(), stepToolCalls(history.getUserMessageId(),
                         history.getStepNo(), toolCallsByUserMessageId)));
                 addToolResponsesIfPresent(history.getUserMessageId(), history.getStepNo(), messages,
                         toolCallsByUserMessageId);
@@ -551,7 +546,7 @@ public class UserChatMemory implements ChatMemory {
             }
         }
         emitAuxiliaryMessages(currentUserMessageId, null, emittedSteps, messages,
-                thinkingByUserMessageId, toolCallsByUserMessageId);
+                toolCallsByUserMessageId);
         return messages;
     }
 
@@ -562,18 +557,16 @@ public class UserChatMemory implements ChatMemory {
      * @param beforeStepNo 只发出小于该 step 的辅助消息；为 null 时发出全部剩余 step
      * @param emittedSteps 已经发出的 step 集合，用于去重
      * @param messages 正在组装的消息数组
-     * @param thinkingByUserMessageId reasoning 内容分组
      * @param toolCallsByUserMessageId tool call 内容分组
      */
     private void emitAuxiliaryMessages(Long userMessageId, Integer beforeStepNo, Set<AssistantStep> emittedSteps,
                                        List<Message> messages,
-                                       Map<Long, List<UserChatThinkingHistory>> thinkingByUserMessageId,
                                        Map<Long, List<UserChatToolCall>> toolCallsByUserMessageId) {
         if (userMessageId == null) {
             return;
         }
 
-        stepNos(userMessageId, thinkingByUserMessageId, toolCallsByUserMessageId)
+        stepNos(userMessageId, toolCallsByUserMessageId)
                 .stream()
                 .filter(stepNo -> beforeStepNo == null || stepNo < beforeStepNo)
                 .sorted()
@@ -583,7 +576,7 @@ public class UserChatMemory implements ChatMemory {
                         return;
                     }
 
-                    messages.add(toAssistantMessage("", reasoningContent(userMessageId, stepNo, thinkingByUserMessageId),
+                    messages.add(toAssistantMessage("",
                             stepToolCalls(userMessageId, stepNo, toolCallsByUserMessageId)));
                     addToolResponsesIfPresent(userMessageId, stepNo, messages, toolCallsByUserMessageId);
                 });
@@ -593,43 +586,16 @@ public class UserChatMemory implements ChatMemory {
      * 计算某条用户消息下所有有辅助内容的 stepNo。
      *
      * @param userMessageId 用户消息 id
-     * @param thinkingByUserMessageId reasoning 内容分组
      * @param toolCallsByUserMessageId tool call 内容分组
      * @return stepNo 集合
      */
     private Set<Integer> stepNos(Long userMessageId,
-                                 Map<Long, List<UserChatThinkingHistory>> thinkingByUserMessageId,
                                  Map<Long, List<UserChatToolCall>> toolCallsByUserMessageId) {
-        Set<Integer> stepNos = thinkingByUserMessageId.getOrDefault(userMessageId, List.of())
-                .stream()
-                .map(UserChatThinkingHistory::getStepNo)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        toolCallsByUserMessageId.getOrDefault(userMessageId, List.of())
+        return toolCallsByUserMessageId.getOrDefault(userMessageId, List.of())
                 .stream()
                 .map(UserChatToolCall::getStepNo)
                 .filter(Objects::nonNull)
-                .forEach(stepNos::add);
-        return stepNos;
-    }
-
-    /**
-     * 查找指定 userMessageId/stepNo 对应的 reasoning_content。
-     *
-     * @param userMessageId 用户消息 id
-     * @param stepNo assistant 输出步骤号
-     * @param thinkingByUserMessageId reasoning 内容分组
-     * @return reasoning_content；不存在时返回 null
-     */
-    private String reasoningContent(Long userMessageId, Integer stepNo,
-                                    Map<Long, List<UserChatThinkingHistory>> thinkingByUserMessageId) {
-        return thinkingByUserMessageId.getOrDefault(userMessageId, List.of())
-                .stream()
-                .filter(thinking -> Objects.equals(stepNo, thinking.getStepNo()))
-                .map(UserChatThinkingHistory::getReasoningContent)
-                .filter(StringUtils::hasText)
-                .findFirst()
-                .orElse(null);
+                .collect(Collectors.toSet());
     }
 
     /**
@@ -651,23 +617,14 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 根据 content/reasoning/toolCalls 构造 assistant 消息。
+     * 根据 content/toolCalls 构造通用 assistant 消息。
      *
      * @param content assistant 可见内容
-     * @param reasoningContent DeepSeek reasoning_content，可为 null
      * @param toolCalls assistant tool_calls
-     * @return AssistantMessage 或 DeepSeekAssistantMessage
+     * @return 通用 AssistantMessage
      */
-    private Message toAssistantMessage(String content, String reasoningContent,
-                                       List<AssistantMessage.ToolCall> toolCalls) {
+    private Message toAssistantMessage(String content, List<AssistantMessage.ToolCall> toolCalls) {
         String text = content == null ? "" : content;
-        if (StringUtils.hasText(reasoningContent)) {
-            return new DeepSeekAssistantMessage.Builder()
-                    .content(text)
-                    .reasoningContent(reasoningContent)
-                    .toolCalls(toolCalls)
-                    .build();
-        }
         return AssistantMessage.builder()
                 .content(text)
                 .toolCalls(toolCalls)
@@ -773,25 +730,6 @@ public class UserChatMemory implements ChatMemory {
                 .orderByAsc(UserChatToolCall::getStepNo)
                 .orderByAsc(UserChatToolCall::getId));
         return toolCalls.stream().collect(Collectors.groupingBy(UserChatToolCall::getUserMessageId));
-    }
-
-    /**
-     * 批量查询用户消息下的 reasoning_content。
-     *
-     * @param userMessageIds 用户消息 id 集合
-     * @return 按 userMessageId 分组的 thinking 列表
-     */
-    private Map<Long, List<UserChatThinkingHistory>> listThinking(Set<Long> userMessageIds) {
-        if (userChatThinkingHistoryMapper == null || userMessageIds.isEmpty()) {
-            return Map.of();
-        }
-
-        List<UserChatThinkingHistory> thinkingHistories = userChatThinkingHistoryMapper.selectList(
-                new LambdaQueryWrapper<UserChatThinkingHistory>()
-                        .in(UserChatThinkingHistory::getUserMessageId, userMessageIds)
-                        .orderByAsc(UserChatThinkingHistory::getStepNo)
-                        .orderByAsc(UserChatThinkingHistory::getId));
-        return thinkingHistories.stream().collect(Collectors.groupingBy(UserChatThinkingHistory::getUserMessageId));
     }
 
     /**

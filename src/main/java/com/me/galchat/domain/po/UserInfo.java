@@ -37,6 +37,8 @@ public class UserInfo implements Serializable {
 
     private LocalDate birthday;
 
+    private String diceSkin;
+
     private LocalDateTime createTime;
 
 

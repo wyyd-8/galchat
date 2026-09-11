@@ -4,9 +4,12 @@ import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
-import com.me.galchat.domain.po.WorldEventLog;
-import com.me.galchat.domain.po.WorldStoryEvent;
-import com.me.galchat.domain.po.WorldStoryEventCharacter;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.me.galchat.domain.po.GroupChatMessage;
+import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatToolCall;
+import com.me.galchat.domain.po.GroupChatTopic;
+import com.me.galchat.domain.po.GroupChatTurn;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.Data;
@@ -14,6 +17,7 @@ import lombok.experimental.Accessors;
 
 @Data
 @Accessors(chain = true)
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class UserWorldSaveSnapshotDTO {
 
     private Integer formatVersion;
@@ -30,11 +34,17 @@ public class UserWorldSaveSnapshotDTO {
 
     private Long maxUserEventLogId;
 
-    private Long maxWorldEventLogId;
+    private Long maxGroupConversationId;
 
-    private Long maxStoryEventId;
+    private Long maxGroupMessageId;
 
-    private Long maxStoryEventCharacterId;
+    private Long maxGroupTurnId;
+
+    private Long maxGroupReplyStepId;
+
+    private Long maxGroupContextSummaryId;
+
+    private Long maxGroupTopicId;
 
     private List<CharacterStateSnapshot> characterStates;
 
@@ -42,9 +52,9 @@ public class UserWorldSaveSnapshotDTO {
 
     private List<CharacterChatRoundsSnapshot> recentChatRoundsByCharacter;
 
-    private WorldEventLog lastWorldEventLog;
+    private List<GroupConversationTurnsSnapshot> recentGroupTurnsByConversation;
 
-    private WorldStorySnapshot activeStory;
+    private List<GroupConversationPlanSnapshot> conversationPlans;
 
     @Data
     @Accessors(chain = true)
@@ -62,11 +72,8 @@ public class UserWorldSaveSnapshotDTO {
     @Accessors(chain = true)
     public static class TopicBoundarySnapshot {
         private Long characterId;
-        private Long previousStartId;
-        private Long currentStartId;
+        private List<Long> startIds;
         private Long lastCheckedMessageId;
-        private Long activeStoryEventId;
-        private Long activeStoryStartMessageId;
     }
 
     @Data
@@ -79,7 +86,7 @@ public class UserWorldSaveSnapshotDTO {
     @Data
     @Accessors(chain = true)
     public static class ChatRoundSnapshot {
-        private Long userMessageId;
+        private Long anchorMessageId;
         private List<UserChatHistory> historyRows;
         private List<UserChatThinkingHistory> thinkingRows;
         private List<UserChatToolCall> toolCallRows;
@@ -88,8 +95,43 @@ public class UserWorldSaveSnapshotDTO {
 
     @Data
     @Accessors(chain = true)
-    public static class WorldStorySnapshot {
-        private WorldStoryEvent storyEvent;
-        private List<WorldStoryEventCharacter> characters;
+    public static class GroupConversationTurnsSnapshot {
+        private Long conversationId;
+        private List<GroupTurnSnapshot> turns;
+        private List<GroupChatTopic> topicRows;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class GroupTurnSnapshot {
+        private GroupChatTurn turn;
+        private List<GroupChatMessage> messages;
+        private List<GroupChatReplyStep> replySteps;
+        private List<GroupChatToolCall> toolCalls;
+        private List<UserCharacterFavorLog> favorLogs;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class GroupConversationPlanSnapshot {
+        private Long conversationId;
+        private ReplyPlanSnapshot activePlan;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class ReplyPlanSnapshot {
+        private String source;
+        private String executionKey;
+        private String displayName;
+        private List<ReplyPlanItemSnapshot> items;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    public static class ReplyPlanItemSnapshot {
+        private Integer order;
+        private String actorType;
+        private Long actorId;
     }
 }

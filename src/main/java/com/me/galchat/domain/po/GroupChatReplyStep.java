@@ -1,0 +1,42 @@
+package com.me.galchat.domain.po;
+
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+import lombok.experimental.Accessors;
+
+import java.io.Serializable;
+import java.time.LocalDateTime;
+
+@Data
+@Accessors(chain = true)
+@TableName("group_chat_reply_step")
+public class GroupChatReplyStep implements Serializable {
+
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
+    private Long turnId;
+    private String groupKey;
+    private String groupName;
+    private Integer groupOrder;
+    private Integer itemOrder;
+    private Integer stepNo;
+    private Long parentStepId;
+    private Long rootStepId;
+    private String interactionType;
+    private Integer interactionSeq;
+    private Long promptMessageId;
+    private String actionType;
+    private String speakerType;
+    private Long speakerId;
+    private Long subjectCharacterId;
+    private Boolean forceReply;
+    private String executionMode;
+    private Long modelApiId;
+    private String status;
+    private Long outputMessageId;
+    private String errorMessage;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+}

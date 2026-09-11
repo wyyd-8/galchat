@@ -2,6 +2,7 @@ package com.me.galchat.mapper;
 
 import com.me.galchat.domain.po.WorldTemplate;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * <p>
@@ -13,4 +14,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
  */
 public interface WorldTemplateMapper extends BaseMapper<WorldTemplate> {
 
+    WorldTemplate selectAccessibleByIdForCreate(@Param("id") Long id, @Param("userId") Long userId);
+
+    int deleteOwnedTemplateIfUnused(@Param("id") Long id, @Param("authorId") Long authorId);
 }

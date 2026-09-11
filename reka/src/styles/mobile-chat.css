@@ -1,0 +1,184 @@
+.chat-side-host { min-width: 0; min-height: 0; display: flex; }
+.chat-side-host > aside { width: 100%; }
+.chat-jump-latest { align-self: center; display: flex; align-items: center; gap: 6px; min-height: 38px; margin: -45px 0 7px; padding: 6px 14px; z-index: 2; border: 1px solid var(--line); border-radius: 24px; color: var(--pine); background: var(--surface-strong); box-shadow: 0 3px 12px #25272415; cursor: pointer; }
+.chat-jump-latest-label { display: none; }
+@media (min-width: 768px) { .chat-jump-latest { width: 38px; padding: 0; justify-content: center; } }
+@media (max-width: 767px) {
+  .chat-jump-latest-label { display: inline; }
+  .chat-page.direct-chat-page, .chat-page.group-chat-page { height: var(--app-viewport-height, 100dvh); overflow: hidden; background: #f4f1ea; }
+  .chat-page .chat-header { flex: 0 0 auto; min-height: 64px; padding: calc(6px + env(safe-area-inset-top)) 12px 10px; gap: 8px; background: #f4f1ea; }
+  .chat-page .chat-header .icon-button { flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; font-size: 15px; }
+  .chat-page .mobile-chat-title { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; }
+  .mobile-chat-title strong { display: block; font-size: 17px; font-weight: 600; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mobile-chat-title small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+  .mobile-execution-strip { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 8px 18px; border: 0; border-bottom: 1px solid var(--line); background: #e9ede5; color: var(--pine); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+  .mobile-execution-strip > svg, .mobile-execution-arrow { flex-shrink: 0; }
+  .mobile-execution-scene, .mobile-execution-actor { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mobile-execution-scene { flex: 0 1 auto; max-width: 50%; font-weight: 600; }
+  .mobile-execution-actor { flex: 0 1 auto; }
+  .mobile-execution-arrow { margin-left: auto; font-size: 18px; line-height: 1; }
+  .mobile-execution-strip:focus-visible { outline: 2px solid var(--pine); outline-offset: -2px; }
+  .chat-page .chat-layout, .chat-page .direct-chat-layout { flex: 1; display: flex; min-height: 0; }
+  .chat-page .chat-main { flex: 1; width: 100%; height: auto; overflow: hidden; }
+  .chat-page .message-scroll { min-height: 0; }
+  .chat-page .message-viewport { overscroll-behavior-y: contain; overflow-anchor: none; }
+  .chat-page .message-viewport > div { max-width: 680px; margin-inline: auto; padding: 18px 18px 24px !important; }
+  .chat-page .chat-message { position: relative; gap: 9px; margin: 22px 0; align-items: flex-start; }
+  .chat-page .chat-message:has(~ .chat-message)::after { content: ''; position: absolute; bottom: -12px; left: 50%; transform: translateX(-50%); width: 80%; height: 1px; background: #dcdcd6; pointer-events: none; }
+  .chat-page .chat-message.user:has(~ .chat-message)::after { left: calc(50% - 19px); width: calc(80% + 30.4px); }
+  .chat-page .chat-message.user { margin-left: 38px; }
+  .chat-page .message-content, .chat-page .chat-message.kp .message-content, .chat-page .chat-message.narrator .message-content { flex: 1; min-width: 0; max-width: calc(100% - 41px); text-align: left; overflow-wrap: anywhere; }
+  .chat-page .chat-message.user .message-content { max-width: 100%; }
+  .chat-page .message-content > p { padding: 0; border: 0; border-radius: 0; background: transparent; color: #313b32; font-family: inherit; font-size: 16px; line-height: 1.85; }
+  .chat-page .chat-message.user .message-content > p { padding: 13px 16px; border-radius: 14px 14px 3px 14px; background: #e1e9e1; color: #313b32; line-height: 1.75; }
+  .chat-page .message-avatar { width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; font-size: 15px; background-color: #e4ece8; color: var(--pine); }
+  .chat-page .message-meta { flex-wrap: wrap; gap: 4px 8px; justify-content: space-between; margin-bottom: 8px; color: #4e594f; }
+  .chat-page .chat-message.user .message-meta { justify-content: flex-end; }
+  .chat-page .message-meta strong { font-size: 12px; font-weight: 500; }
+  .chat-page .message-meta > span, .chat-page .message-time { color: var(--muted); font-size: 10px; }
+  .chat-page .reasoning-block, .chat-page .direct-thinking { margin: 15px 0; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--muted); }
+  .chat-page .reasoning-trigger { min-height: 44px; padding: 10px 0; font-size: 12px; }
+  .chat-page .reasoning-content { font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+  .chat-page .decision-block p { font-size: 14px; line-height: 1.8; }
+  .chat-page .direct-tool { max-width: 100%; font-size: 12px; overflow-wrap: anywhere; }
+  .chat-page .load-earlier-button { min-height: 44px; font-size: 12px; }
+  .chat-page .chat-jump-latest { min-height: 44px; margin-top: -51px; font-size: 12px; }
+  .chat-page .composer { flex: 0 0 auto; min-width: 0; width: 100%; max-width: none; margin: 0; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--line); border-radius: 0; background: #fbfaf6; box-shadow: none; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; }
+  .chat-page .composer textarea { width: 100%; min-width: 0; min-height: 48px; max-height: 132px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: #fffefa; font-size: 16px; line-height: 1.5; overflow-y: auto; }
+  .chat-page .composer .send-button { width: 44px; height: 48px; min-height: 48px; padding: 0; border-radius: 12px; }
+  .chat-page .composer .icon-button { min-width: 44px; min-height: 44px; border: 0; background: transparent; }
+  .chat-page .composer.has-intent-toggle { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .chat-page .composer.has-turn-experiments { grid-template-columns: minmax(0, 1fr) auto; }
+  .chat-page .composer-intent-toggle { grid-column: 1 / -1; justify-self: start; width: 176px; padding: 0; margin: 0; border: 0; background: transparent; box-shadow: none; grid-template-columns: 1fr 1fr; }
+  .chat-page .composer-intent-toggle button { min-height: 36px; min-width: 0; padding: 5px; font-size: 12px; }
+  .chat-page .composer-intent-toggle button.active { color: var(--pine); background: #e4ece8; }
+  .chat-page .composer-actions { flex-wrap: nowrap; }
+  .chat-page .composer .turn-start-button { grid-column: 1 / -1; min-height: 46px; justify-content: center; white-space: normal; }
+  .chat-page .composer.has-turn-experiments .turn-start-button { grid-column: auto; }
+  .mobile-closed-chat-footer { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: #fbfaf6; }
+  .mobile-closed-chat-footer > .button { flex: 1; justify-content: center; }
+  .chat-page .scene-selection-panel { flex: 0 1 auto; max-height: 32dvh; overflow-y: auto; margin: 6px 18px; font-size: 13px; }
+  .chat-page .scene-selection-options { display: grid; grid-template-columns: 1fr; }
+  .chat-page .scene-selection-options .button { justify-content: flex-start; min-height: 46px; white-space: normal; text-align: left; }
+  .chat-page .clarification-prompt { flex: 0 1 auto; max-height: 25dvh; overflow-y: auto; margin: 6px 18px; }
+  .chat-page .turn-completion-actions { grid-template-columns: 1fr; }
+  .chat-page .turn-completion-actions .button { min-height: 46px; }
+  .chat-page .turn-completion-error { margin: 0 18px 8px; font-size: 13px; }
+  .chat-page .turn-auto-advance-actions { flex-wrap: wrap; grid-column: 1 / -1; }
+  .chat-page .turn-auto-advance-actions .button { min-height: 46px; white-space: normal; }
+  .mobile-pending-dice { display: flex; flex: 0 0 auto; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 18px; padding: 14px; border-radius: 11px; background: #e4ece8; color: var(--pine); font-size: 13px; }
+  .mobile-pending-dice .button { min-height: 46px; }
+  .mobile-scene-strip { display: grid; grid-template-columns: minmax(0,1fr) auto; padding: 0 2px 14px; border-bottom: 1px solid var(--line); gap: 0 10px; }
+  .mobile-scene-strip > span { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+  .mobile-scene-strip strong { align-self: center; font-size: 13px; overflow-wrap: anywhere; }
+  .mobile-scene-strip .text-button { min-height: 44px; padding: 4px 0; font-size: 11px; }
+  .mobile-chat-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 15px 0; min-height: 76px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; color: var(--ink); }
+  .mobile-chat-row > span:not(.mobile-chat-avatar):first-child, .mobile-chat-row > .mobile-chat-avatar + span { flex: 1; min-width: 0; }
+  .mobile-chat-row strong { display: block; font-size: 15px; font-weight: 550; line-height: 1.5; }
+  .mobile-chat-row small { display: block; margin-top: 4px; font-size: 12px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
+  .mobile-chat-row > span:last-child:not(:first-child):not(:nth-child(2)) { font-size: 11px; color: var(--muted); }
+  .mobile-chat-avatar { flex-shrink: 0; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: #e4ece8 center / cover; color: var(--pine); font-size: 19px; }
+  .mobile-chat-avatar.sand { background-color: #f1e5d4; color: #87602f; }
+  .mobile-chat-menu .dialog-body { display: block; }
+  .mobile-chat-menu .dialog-body > .button { width: 100%; min-height: 64px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; justify-content: flex-start; }
+  .mobile-chat-status, .mobile-chat-muted { margin: 8px 0 12px; font-size: 13px; line-height: 1.8; color: var(--muted); overflow-wrap: anywhere; }
+  .mobile-chat-error { color: var(--wine); font-size: 13px; line-height: 1.8; }
+  .mobile-chat-danger, .mobile-chat-danger strong { color: var(--wine); }
+  .mobile-profile-hero { text-align: center; padding: 16px 0 22px; }
+  .mobile-profile-hero .character-avatar.portrait { display: inline-grid; width: 76px; height: 84px; margin: 0; border-radius: 18px; font-size: 35px; }
+  .mobile-profile-hero h1 { margin: 12px 0 2px; font-size: 28px; font-weight: 600; }
+  .mobile-profile-hero p { margin: 4px 0; font-size: 13px; color: var(--muted); }
+  .mobile-favor-card, .mobile-chat-card { padding: 17px; margin: 12px 0; border: 1px solid var(--line); border-radius: 13px; background: #fbfaf6; }
+  .mobile-favor-card > div { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+  .mobile-favor-card strong { font-size: 30px; font-weight: 550; }
+  .mobile-favor-card strong small { color: var(--muted); font-size: 13px; }
+  .mobile-favor-card progress { display: block; width: 100%; height: 4px; margin: 12px 0 4px; border: 0; border-radius: 5px; accent-color: var(--pine); }
+  .mobile-favor-card progress::-webkit-progress-bar { background: #e0e3d9; border-radius: 5px; }
+  .mobile-favor-card progress::-webkit-progress-value { background: var(--pine); border-radius: 5px; }
+  .mobile-favor-card p, .mobile-chat-card p { margin: 8px 0 0; font-size: 13px; line-height: 1.8; color: var(--muted); }
+  .mobile-chat-notice { margin: 0 0 16px; padding: 14px; border-radius: 11px; background: #e4ece8; color: #44614f; font-size: 13px; line-height: 1.8; }
+  .mobile-reply-page h3 { margin: 23px 0 12px; font-size: 16px; font-weight: 600; }
+  .mobile-order-card { padding: 6px 12px; }
+  .mobile-order-item { display: flex; align-items: center; gap: 7px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .mobile-order-item:last-child { border: 0; }
+  .mobile-order-name { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 9px; border: 0; padding: 0; text-align: left; background: transparent; font-size: 14px; overflow-wrap: anywhere; }
+  .mobile-order-name.selected { color: var(--pine); font-weight: 600; }
+  .mobile-order-name small { color: var(--muted); font-size: 12px; }
+  .mobile-order-item .button { min-height: 44px; padding: 8px 10px; font-size: 13px; }
+  .mobile-chat-toggle { position: relative; display: flex; align-items: center; gap: 12px; padding: 17px 0; border-bottom: 1px solid var(--line); }
+  .mobile-chat-toggle > span { flex: 1; }
+  .mobile-chat-toggle strong { font-size: 14px; font-weight: 550; }
+  .mobile-chat-toggle small { display: block; margin-top: 5px; font-size: 11px; line-height: 1.7; color: var(--muted); }
+  .mobile-chat-toggle input { position: absolute; right: 0; width: 45px; height: 44px; opacity: 0; }
+  .mobile-chat-toggle i { width: 42px; height: 25px; flex-shrink: 0; position: relative; border-radius: 20px; background: #c8cbbf; pointer-events: none; }
+  .mobile-chat-toggle i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 19px; height: 19px; border-radius: 50%; background: #fffefa; box-shadow: 0 1px 3px #0002; }
+  .mobile-chat-toggle input:checked + i { background: var(--pine); }
+  .mobile-chat-toggle input:checked + i::after { left: 20px; }
+  .mobile-chat-toggle input:focus-visible + i { outline: 2px solid #b98542; outline-offset: 3px; }
+  .mobile-turn-settings .mobile-chat-card .button { width: 100%; margin-top: 14px; }
+  .mobile-withdraw-notice { background: #f0e1e2; color: #843d47; }
+  .mobile-chat-confirm h3 { font-size: 16px; margin: 23px 0 12px; }
+  .mobile-chat-confirm .button.danger { background: var(--wine); color: white; border-color: var(--wine); }
+  /* The scene page owns its layout; desktop roster grids and routed indents must not leak in. */
+  .mobile-scene-page { width: 100%; min-width: 0; --scene-accent: #315b52; }
+  .mobile-scene-summary { padding: 19px 18px 0; border: 1px solid #d9dfd5; border-radius: 15px; background: linear-gradient(135deg, #e9eee5, #f5f5ed); }
+  .mobile-scene-eyebrow { color: #63776a; font-size: 10px; letter-spacing: 1.5px; }
+  .mobile-scene-summary h2 { margin: 9px 0 8px; color: #29483f; font-size: 21px; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+  .mobile-time-link { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 44px; padding: 4px 0; border: 0; background: transparent; text-align: left; color: #69776b; font-size: 12px; }
+  .mobile-time-link span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .mobile-time-link svg { flex-shrink: 0; }
+  .mobile-scene-status { display: flex; align-items: center; gap: 7px; margin: 8px 0 0; padding: 13px 0; border-top: 1px solid #d8dfd4; color: #315b52; font-size: 12px; line-height: 1.6; }
+  .mobile-scene-status svg { flex-shrink: 0; }
+  .mobile-scene-section-title { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 25px 0 12px; }
+  .mobile-scene-section-title h3 { margin: 0; font-size: 15px; }
+  .mobile-scene-section-title > span { color: var(--muted); font-size: 11px; }
+  .mobile-scene-roster { min-width: 0; margin-bottom: 14px; padding: 0 12px 9px; border: 1px solid var(--line); border-radius: 14px; background: #fbfaf6; }
+  .mobile-scene-roster > header, .mobile-child-scene > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 15px 2px 12px; border-bottom: 1px solid var(--line); }
+  .mobile-scene-roster header strong { display: block; min-width: 0; font-size: 13px; line-height: 1.6; font-weight: 600; overflow-wrap: anywhere; }
+  .mobile-scene-roster header > small { flex-shrink: 0; padding: 3px 7px; border-radius: 5px; background: #eeede6; color: var(--muted); font-size: 10px; line-height: 1.6; }
+  .mobile-scene-roster header > small.current { background: #e4ece3; color: #315b52; }
+  .mobile-child-scene { margin: 14px 0 0; padding-top: 3px; border-top: 1px dashed #d5d8ce; }
+  .mobile-child-scene > header > span { min-width: 0; }
+  .mobile-child-scene > header > span small { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; }
+  .mobile-scene-page .trpg-actor-roster, .mobile-scene-page .trpg-participant-list { grid-template-columns: minmax(0, 1fr); gap: 3px; margin-top: 5px; }
+  .mobile-scene-page .trpg-actor-stack { width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .mobile-scene-page .mobile-actor-disclosure { width: 100%; min-width: 0; }
+  .mobile-chat-panel .mobile-scene-page .trpg-actor-row { box-sizing: border-box; width: 100%; min-width: 0; min-height: 76px; display: grid; grid-template-columns: 38px minmax(0, 1fr) 16px; align-items: center; gap: 11px; padding: 12px 8px; margin: 0; border: 1px solid transparent; border-radius: 10px; background: transparent; box-shadow: none; text-align: left; color: #315b52; opacity: 1; }
+  .mobile-scene-page .trpg-actor-row::before { content: none; }
+  .mobile-scene-page .mobile-scene-avatar { width: 38px; height: 38px; display: grid; place-items: center; align-self: start; margin-top: 3px; border-radius: 12px; color: #3d655a; background: #e6ece5; font-size: 17px; font-weight: 500; }
+  .mobile-scene-page .trpg-actor-row .trpg-actor-name { min-width: 0; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; color: #303c33; font-size: 14px; font-weight: 550; line-height: 1.5; }
+  .mobile-scene-page .mobile-actor-caption { display: block; margin-top: 5px; color: #7b8175; font-size: 11px; line-height: 1.6; font-weight: 400; }
+  .mobile-scene-page .trpg-actor-row:is(.running, .waiting_input, .waiting_dice) { border-color: #d3dfd0; background: #eaf0e6; }
+  .mobile-scene-page .trpg-actor-row:is(.running, .waiting_input, .waiting_dice) .mobile-actor-caption { color: #315b52; }
+  .mobile-scene-page .trpg-actor-row:is(.failed, .blocked) { background: #f5eaea; border-color: #e2cece; }
+  .mobile-scene-page .trpg-actor-row:is(.failed, .blocked) .mobile-actor-caption { color: var(--wine); }
+  .mobile-scene-page .trpg-actor-row:focus-visible { outline: 2px solid #7e9b8b; outline-offset: 2px; }
+  .mobile-scene-page .mobile-actor-chevron { transition: transform 160ms ease; color: #829084; }
+  .mobile-scene-page .trpg-actor-row[data-state=open] .mobile-actor-chevron { transform: rotate(180deg); }
+  .mobile-scene-page .trpg-routed-actor { min-width: 0; width: 100%; margin: 0 0 8px; padding: 0; }
+  .mobile-scene-page .trpg-routed-actor::before { content: none; }
+  .mobile-scene-page .mobile-route-label { margin: 0; padding: 2px 8px 8px; color: #6c7d6e; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+  .mobile-scene-page .mobile-route-label::before { content: '↳ '; }
+  .mobile-scene-page .trpg-participant-group { margin-top: 9px; padding: 12px 0 0; border-top: 1px solid var(--line); gap: 3px; }
+  .mobile-scene-page .trpg-participant-label { padding-inline: 8px; }
+  .mobile-scene-page .trpg-participant-label strong, .mobile-scene-page .trpg-participant-label small { font-size: 11px; font-weight: 400; }
+  .mobile-scene-page .mobile-actor-overview { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; margin: 0 0 9px; padding: 13px; border: 1px solid #dce2d6; border-radius: 10px; background: #f1f3eb; box-shadow: none; }
+  .mobile-scene-page .mobile-actor-overview > header { flex-wrap: wrap; gap: 8px; }
+  .mobile-scene-page .mobile-actor-overview > header strong { white-space: normal; font-size: 14px; overflow-wrap: anywhere; }
+  .mobile-scene-page .mobile-actor-overview > header small, .mobile-scene-page .mobile-actor-overview > header em { color: #637966; font-size: 10px; }
+  .mobile-scene-page .trpg-combat-overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .mobile-scene-page .trpg-combat-overview-metrics > div { padding: 9px; border: 0; border-radius: 7px; background: #fcfcf6; }
+  .mobile-scene-page .trpg-combat-overview-metrics dt { font-size: 10px; white-space: normal; }
+  .mobile-scene-page .trpg-combat-overview-metrics dd { font-size: 15px; white-space: normal; overflow-wrap: anywhere; }
+  .mobile-scene-page .trpg-exploration-overview-section > small, .mobile-scene-page .trpg-combat-overview-statuses > small { font-size: 11px; }
+  .mobile-scene-page .trpg-combat-overview-statuses p, .mobile-scene-page .trpg-combat-overview-statuses span { font-size: 11px; }
+  .mobile-scene-page .mobile-actor-overview > .button { width: 100%; min-height: 44px; margin-top: 13px; justify-content: center; font-size: 12px; }
+  .mobile-scene-page .mobile-model-unavailable { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+  .mobile-scene-links { margin-top: 20px; }
+  .mobile-scene-links .mobile-chat-row { gap: 10px; padding: 15px 2px; }
+  .mobile-scene-links .mobile-chat-row strong { font-size: 14px; }
+  .mobile-scene-links .mobile-chat-row small { font-size: 11px; }
+  .mobile-scene-empty { margin: 0; padding: 22px 18px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+  .chat-page .combat-result-list p, .chat-page .epilogue-message-card p, .chat-page .material-message-copy p { font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+  .material-image-viewer .dialog-footer .button { min-width: 44px; min-height: 46px; }
+}

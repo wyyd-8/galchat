@@ -21,7 +21,8 @@ public interface IUserCharacterInfoService extends IService<UserCharacterInfo> {
 
     List<UserCharacterInfo> listByUserWorldId(Long userWorldId);
 
-    void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange, Long bindingChat);
+    void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange,
+                          String bindingType, Long bindingChat);
 
     void setFavorValue(Long userWorldId, Long characterId, Integer favorValue);
 

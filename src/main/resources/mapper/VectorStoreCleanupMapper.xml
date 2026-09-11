@@ -2,6 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.me.galchat.mapper.VectorStoreCleanupMapper">
 
+    <delete id="deleteWorldDetailsByWorldId">
+        DELETE FROM public.world_detail_vector_store
+        WHERE metadata::jsonb @> CONCAT('{"worldId":', #{worldId}, '}')::jsonb
+    </delete>
+
     <delete id="deleteChatHistoryByConversation">
         DELETE FROM public.chat_history_vector_store
         WHERE metadata::jsonb @> CONCAT(
@@ -17,25 +22,72 @@
           AND (metadata::jsonb ->> 'endMessageId')::bigint &gt; #{thresholdEndMessageId}
     </delete>
 
-    <delete id="deleteWorldEventByUserWorldId">
-        DELETE FROM public.world_event_vector_store
-        WHERE metadata::jsonb @> CONCAT(
+    <delete id="deleteGroupTopicsAfterId">
+        DELETE FROM public.group_topic_vector_store vector
+        WHERE vector.metadata::jsonb @> CONCAT(
             '{"userWorldId":', #{userWorldId}, '}'
+        )::jsonb
+          AND (vector.metadata::jsonb ->> 'groupTopicId')::bigint &gt; #{maxGroupTopicId}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM group_chat_topic topic
+              JOIN group_conversation conversation
+                ON conversation.id = topic.conversation_id
+              WHERE topic.id = (vector.metadata::jsonb ->> 'groupTopicId')::bigint
+                AND conversation.mode = 'trpg'
+          )
+    </delete>
+
+    <delete id="deleteGroupTopicsByConversation">
+        DELETE FROM public.group_topic_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
         )::jsonb
     </delete>
 
-    <delete id="deleteWorldEventByUserWorldIdAfterLogId">
-        DELETE FROM public.world_event_vector_store
+    <delete id="deleteGroupTopicsByConversationAfterEnd">
+        DELETE FROM public.group_topic_vector_store
         WHERE metadata::jsonb @> CONCAT(
-            '{"userWorldId":', #{userWorldId}, '}'
+            '{"conversationId":', #{conversationId}, '}'
         )::jsonb
-          AND (metadata::jsonb ->> 'worldEventLogId')::bigint &gt; #{worldEventLogId}
+          AND (metadata::jsonb ->> 'endSequence')::bigint &gt; #{thresholdEndSequence}
     </delete>
 
-    <delete id="deleteWorldEventByLogId">
-        DELETE FROM public.world_event_vector_store
+    <delete id="deleteGroupTopicsByConversationAfterTopicId">
+        DELETE FROM public.group_topic_vector_store
         WHERE metadata::jsonb @> CONCAT(
-            '{"userWorldId":', #{userWorldId}, ',"worldEventLogId":', #{worldEventLogId}, '}'
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+          AND (metadata::jsonb -&gt;&gt; 'groupTopicId')::bigint
+              &gt; #{maxGroupTopicId}
+    </delete>
+
+    <delete id="deleteTrpgTurnsByConversation">
+        DELETE FROM public.trpg_turn_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
         )::jsonb
     </delete>
+
+    <delete id="deleteTrpgTurnsByConversationAfterTurnId">
+        DELETE FROM public.trpg_turn_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+          AND (metadata::jsonb -&gt;&gt; 'turnId')::bigint
+              &gt; #{maxTurnId}
+    </delete>
+
+    <delete id="deleteTrpgTurnsByConversationAndTurnIds">
+        DELETE FROM public.trpg_turn_vector_store
+        WHERE metadata::jsonb @> CONCAT(
+            '{"conversationId":', #{conversationId}, '}'
+        )::jsonb
+          AND (metadata::jsonb -&gt;&gt; 'turnId')::bigint IN
+        <foreach collection="turnIds" item="turnId"
+                 open="(" separator="," close=")">
+            #{turnId}
+        </foreach>
+    </delete>
+
 </mapper>

@@ -1,5 +1,6 @@
 package com.me.galchat.domain.po;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -29,6 +30,7 @@ public class UserWorldSave implements Serializable {
 
     private Long userWorldId;
 
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String remark;
 
     private LocalDateTime savedAt;

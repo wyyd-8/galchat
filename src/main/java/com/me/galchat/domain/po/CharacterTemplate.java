@@ -40,6 +40,8 @@ public class CharacterTemplate implements Serializable {
 
     private String personality;
 
+    private String cocPlayStyle;
+
     @TableField(typeHandler = JsonbTypeHandler.class)
     private Map<String, String> favorability;
 

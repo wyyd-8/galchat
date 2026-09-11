@@ -8,6 +8,7 @@ import com.me.galchat.service.IWorldArchiveService;
 import com.me.galchat.service.IWorldDetailService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
+import com.me.galchat.service.archive.ArchiveZipService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
@@ -67,7 +68,7 @@ class UserWorldControllerTest {
     }
 
     private UserWorldController controller(IWorldArchiveService archiveService) {
-        return new UserWorldController(
+        return new UserWorldController(mock(ArchiveZipService.class),
                 mock(IUserWorldPrefixService.class),
                 mock(IWorldTemplateService.class),
                 mock(IWorldDetailService.class),

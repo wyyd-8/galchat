@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ARCHIVE_ACCEPT, downloadArchive } from '@/api/archiveFiles'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ArrowLeft, BookOpen, ChevronRight, Ellipsis, Database, Download, ImageUp, Pencil, Plus, RotateCcw, Trash2, X } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
@@ -22,7 +23,7 @@ import BaseDialog from '@/components/ui/BaseDialog.vue'
 import NoticeToast from '@/components/ui/NoticeToast.vue'
 import { api, uploadImage } from '@/api/client'
 import type {
-  TrpgCompletionReport, CharacterTemplate, DiceRollAggregate, TrpgGameTimePeriod, UserInfo, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldDetail,
+  TrpgCompletionReport, CharacterTemplate, DiceRollAggregate, TrpgGameTimePeriod, UserInfo, UserWorld, WorldArchiveReplaceResult, WorldDetail,
   WorldTemplate, WorldTemplateUsage,
 } from '@/api/types'
 import { useDirectChat } from '@/composables/useDirectChat'
@@ -155,6 +156,7 @@ async function skipCompletion() {
 }
 const dialogs = reactive({ world: false, template: false, templatePreview: false, templateDelete: false, templateReplaceConfirm: false, conversation: false, trpgBinding: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, modelApis: false, end: false, deleteConversation: false, trpgTools: false })
 const busy = ref(false)
+const archiveOperation = ref('')
 const canRetryGenerationFailure = computed(() => {
   const failure = workspace.generationFailure.value
   const conversation = workspace.selectedConversation.value
@@ -448,7 +450,7 @@ const accountForm = reactive({ username: '', email: '', birthday: '', diceSkin: 
 const passwordForm = reactive({ email: '', newPassword: '', confirmPassword: '', code: '' })
 const selectedTemplatePreview = ref<WorldTemplate | null>(null)
 const selectedTemplateUsage = ref<WorldTemplateUsage | null>(null)
-const pendingTemplateReplacement = ref<WorldArchive | null>(null)
+const pendingTemplateReplacement = ref<{ id: number; file: File } | null>(null)
 const templateReplacementReport = ref<WorldArchiveReplaceResult | null>(null)
 
 const availableTemplates = computed(() => workspace.characterTemplates.value.filter((template) => template.id && !workspace.characters.value.some((character) => character.characterId === template.id)))
@@ -740,7 +742,25 @@ async function handleImage(event: Event, target: 'world' | 'character') {
   catch (error) { notify('图片上传失败', errorMessage(error), 'danger') }
   finally { uploading.value = null }
 }
-async function importWorld(file: File) { await run(async () => { const archive = JSON.parse(await file.text()) as WorldArchive; const result = await api.importWorld(archive); await workspace.loadTemplates(); notify('模板导入完成', `${result.name} · ${result.characterCount} 位角色`, 'success') }) }
+async function runArchive(label: string, action: () => Promise<unknown>) {
+  if (archiveOperation.value || busy.value) return false
+  archiveOperation.value = label
+  try { return await run(action) }
+  finally { archiveOperation.value = '' }
+}
+async function importWorld(file: File) {
+  await runArchive('正在导入世界和图片…', async () => {
+    const result = await api.importWorldFile(file)
+    await workspace.loadTemplates()
+    notify('模板导入完成', `${result.name} · ${result.characterCount} 位角色`, 'success')
+  })
+}
+function pickWorldArchive(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (file) void importWorld(file)
+}
 async function finishTemplateReplacement(result: WorldArchiveReplaceResult) {
   await workspace.loadTemplates()
   selectedTemplatePreview.value = await api.worldTemplate(result.worldId)
@@ -752,11 +772,11 @@ async function replaceTemplateFromFile(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file || !selectedTemplatePreview.value?.id || !ownsSelectedTemplate.value) return
-  await run(async () => {
-    const archive = JSON.parse(await file.text()) as WorldArchive
-    const result = await api.replaceWorldTemplate(selectedTemplatePreview.value!.id!, archive)
+  const id = selectedTemplatePreview.value.id
+  await runArchive('正在校验模板和图片…', async () => {
+    const result = await api.replaceWorldTemplateFile(id, file)
     if (result.confirmationRequired) {
-      pendingTemplateReplacement.value = archive
+      pendingTemplateReplacement.value = { id, file }
       templateReplacementReport.value = result
       dialogs.templatePreview = false
       dialogs.templateReplaceConfirm = true
@@ -766,11 +786,10 @@ async function replaceTemplateFromFile(event: Event) {
   })
 }
 async function confirmTemplateReplacement() {
-  const id = selectedTemplatePreview.value?.id
-  const archive = pendingTemplateReplacement.value
-  if (!id || !archive) return
-  const success = await run(async () => {
-    const result = await api.replaceWorldTemplate(id, archive, true)
+  const pending = pendingTemplateReplacement.value
+  if (!pending) return
+  const success = await runArchive('正在替换模板和图片…', async () => {
+    const result = await api.replaceWorldTemplateFile(pending.id, pending.file, true)
     await finishTemplateReplacement(result)
   })
   if (success) {
@@ -781,11 +800,18 @@ async function confirmTemplateReplacement() {
   }
 }
 function cancelTemplateReplacement() {
+  if (archiveOperation.value) return
   dialogs.templateReplaceConfirm = false
   dialogs.templatePreview = true
   pendingTemplateReplacement.value = null
   templateReplacementReport.value = null
 }
+watch(() => dialogs.templateReplaceConfirm, (open) => {
+  if (!open && !archiveOperation.value) {
+    pendingTemplateReplacement.value = null
+    templateReplacementReport.value = null
+  }
+})
 function openTemplateDeleteConfirmation() {
   dialogs.templatePreview = false
   dialogs.templateDelete = true
@@ -811,7 +837,11 @@ async function deleteSelectedTemplate() {
 }
 async function exportWorld() {
   const id = workspace.selectedWorldId.value; if (!id) return
-  await run(async () => { const text = await api.exportWorld(id); const blob = new Blob([text], { type: 'application/json' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `${workspace.selectedWorld.value?.name || 'galchat-world'}.json`; link.click(); URL.revokeObjectURL(link.href) })
+  const name = workspace.selectedWorld.value?.name || 'galchat-world'
+  await runArchive('正在打包世界和图片…', async () => {
+    downloadArchive(await api.exportWorldZip(id), name)
+    notify('ZIP 已生成', '已发起下载，包含世界设定、角色和图片', 'success')
+  })
 }
 async function openAccount() { await run(async () => { await workspace.loadUserInfo(); const info = workspace.userInfo.value; Object.assign(accountForm, { username: info?.username || '', email: info?.email || '', birthday: info?.birthday || '', diceSkin: resolveDiceSkin(info?.diceSkin) }); dialogs.account = true }) }
 async function openPassword() { await run(async () => { await workspace.loadUserInfo(); Object.assign(passwordForm, { email: workspace.userInfo.value?.email || '', newPassword: '', confirmPassword: '', code: '' }); dialogs.password = true }) }
@@ -829,7 +859,7 @@ async function changePassword() {
       <div v-if="!online" class="connection-banner" role="status">当前网络已断开，连接恢复后再继续操作。</div>
 
       <MobileProfile v-if="view === 'profile'" :username="workspace.session.username" @account="openAccount" @models="dialogs.modelApis = true" @password="openPassword" @logout="logout" />
-      <WorldLibrary v-else-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
+      <WorldLibrary v-else-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" :archive-busy="Boolean(archiveOperation)" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
       <CocModuleLibrary v-else-if="view === 'modules'" @changed="workspace.loadModules" @detail-open-change="moduleDetailOpen = $event" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @back="home" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage ref="directStage" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
@@ -839,6 +869,8 @@ async function changePassword() {
     <MobileNavigation v-if="rootNavigationVisible" :current="view === 'modules' ? 'modules' : view === 'profile' ? 'profile' : 'library'" @navigate="navigateMobile" />
   </div>
   <div v-else class="signed-out"><span class="brand-glyph large">✦</span><h1>GalChat</h1><p>一个安静的角色与群像叙事工作台。</p><button class="button primary" @click="authOpen = true">登录或注册</button></div>
+
+  <div v-if="archiveOperation" class="archive-operation-status" role="status" aria-live="polite">{{ archiveOperation }} 请稍候。</div>
 
   <AuthDialog v-model="authOpen" @submit="authenticate" />
 
@@ -879,8 +911,8 @@ async function changePassword() {
           <Trash2 :size="16" />删除模板
         </button>
         <label class="button secondary file-button" :class="{ disabled: busy }">
-          <RotateCcw :size="16" />上传并替换
-          <input type="file" accept="application/json,.json" :disabled="busy" @change="replaceTemplateFromFile" />
+          <RotateCcw :size="16" />上传 ZIP / JSON 替换
+          <input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="replaceTemplateFromFile" />
         </label>
       </div>
       <div class="dialog-inline-actions">
@@ -908,10 +940,12 @@ async function changePassword() {
   <BaseDialog
     v-model="dialogs.templateReplaceConfirm" mobile-presentation="page"
     title="角色匹配度过低"
-    description="尚未替换。请核对下方角色匹配结果后再确认。"
+    description="尚未替换。请核对角色匹配结果；确认后将重新导入原文件及图片。"
+    :mobile-back="cancelTemplateReplacement"
     size="lg"
   >
     <div v-if="templateReplacementReport" class="replacement-report">
+      <p class="archive-file-name">待导入：{{ pendingTemplateReplacement?.file.name }}</p>
       <section class="replacement-rate">
         <span>角色匹配度</span>
         <strong>{{ Math.round(templateReplacementReport.matchRate * 100) }}%</strong>
@@ -1101,7 +1135,7 @@ async function changePassword() {
       </TabsContent>
 
       <TabsContent value="data" class="tabs-content">
-        <div v-if="isMobile"><p class="mobile-v1-notice">当前世界：{{ workspace.selectedWorld.value?.name }}</p><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="openEditTemplate"><span><strong>编辑世界模板</strong><small>名称、封面与背景</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" :disabled="!workspace.canEditSelectedWorld.value" @click="exportWorld"><span><strong>导出世界模板</strong><small>{{ workspace.canEditSelectedWorld.value ? '下载背景、设定和角色的 JSON' : '只有模板作者可以导出' }}</small></span><Download :size="18" /></button><label class="mobile-v1-row file-button"><span><strong>导入世界模板</strong><small>选择已有的 JSON 文件</small></span><Plus :size="18" /><input type="file" accept="application/json,.json" @change="($event.target as HTMLInputElement).files?.[0] && importWorld(($event.target as HTMLInputElement).files![0]!)" /></label><div class="mobile-v1-section"><h3>危险操作</h3></div><button class="mobile-v1-row danger-text" @click="mobileDeleteWorldOpen = true"><span><strong>删除当前世界</strong><small>需要先移出世界内的所有角色</small></span><ChevronRight :size="16" /></button></div>
+        <div v-if="isMobile"><p class="mobile-v1-notice">当前世界：{{ workspace.selectedWorld.value?.name }}</p><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="openEditTemplate"><span><strong>编辑世界模板</strong><small>名称、封面与背景</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" :disabled="!workspace.canEditSelectedWorld.value || busy" @click="exportWorld"><span><strong>导出世界模板</strong><small>{{ workspace.canEditSelectedWorld.value ? '下载 ZIP，包含设定、角色和图片' : '只有模板作者可以导出' }}</small></span><Download :size="18" /></button><label class="mobile-v1-row file-button"><span><strong>导入世界模板</strong><small>选择 ZIP（含图片）或旧 JSON</small></span><Plus :size="18" /><input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="pickWorldArchive" /></label><div class="mobile-v1-section"><h3>危险操作</h3></div><button class="mobile-v1-row danger-text" @click="mobileDeleteWorldOpen = true"><span><strong>删除当前世界</strong><small>需要先移出世界内的所有角色</small></span><ChevronRight :size="16" /></button></div>
         <div v-else class="settings-data">
           <section class="data-world-summary">
             <span class="data-summary-icon"><Database :size="20" /></span>
@@ -1112,7 +1146,7 @@ async function changePassword() {
           <section class="data-action-card">
             <span class="data-card-icon"><Download :size="18" /></span>
             <span class="data-card-copy"><strong>导出世界模板</strong><small v-if="workspace.canEditSelectedWorld.value">导出模板、世界设定和角色模板；聊天与存档不会包含在内。</small><small v-else>当前世界基于他人的模板创建，源模板不能在这里编辑或导出。</small></span>
-            <button v-if="workspace.canEditSelectedWorld.value" class="button secondary" @click="exportWorld">导出 JSON</button>
+            <button v-if="workspace.canEditSelectedWorld.value" class="button secondary" :disabled="busy" @click="exportWorld">导出 ZIP（含图片）</button>
             <span v-else class="data-status">不可导出</span>
           </section>
 
@@ -1199,7 +1233,7 @@ async function changePassword() {
   />
   <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" @turn-settings="openMobileTurnSettings" @open-scene="openMobileScene" @end-trpg="dialogs.end = true" @restored="restoreTrpg" @open-dice="openDiceMessage" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
   <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" :auto-continue="diceAutoContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" @cancel-auto-continue="cancelDiceAutoAdvance" />
-  <BaseDialog v-if="isMobile" v-model="mobileTemplateMenu" title="模板操作" content-class="mobile-v1-menu"><template v-if="ownsSelectedTemplate"><label class="mobile-v1-row file-button"><RotateCcw :size="20" /><span><strong>上传并替换模板</strong><small>按角色名称匹配，确认后替换</small></span><input type="file" accept="application/json,.json" :disabled="busy" @change="mobileTemplateMenu = false; replaceTemplateFromFile($event)" /></label><button class="mobile-v1-row danger-text" :disabled="!selectedTemplateUsage?.deletable || busy" @click="mobileTemplateMenu = false; openTemplateDeleteConfirmation()"><Trash2 :size="20" /><span><strong>删除模板</strong><small>{{ selectedTemplateUsage?.deletable ? '永久删除模板及其设定和角色' : `已有 ${selectedTemplateUsage?.associatedWorldCount || 0} 个世界使用，不能删除` }}</small></span></button></template><p v-else class="mobile-v1-notice">这是其他作者的模板。可以查看资料并使用它创建世界。</p></BaseDialog>
+  <BaseDialog v-if="isMobile" v-model="mobileTemplateMenu" title="模板操作" content-class="mobile-v1-menu"><template v-if="ownsSelectedTemplate"><label class="mobile-v1-row file-button"><RotateCcw :size="20" /><span><strong>上传并替换模板</strong><small>选择 ZIP 或 JSON，按角色名称匹配</small></span><input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="mobileTemplateMenu = false; replaceTemplateFromFile($event)" /></label><button class="mobile-v1-row danger-text" :disabled="!selectedTemplateUsage?.deletable || busy" @click="mobileTemplateMenu = false; openTemplateDeleteConfirmation()"><Trash2 :size="20" /><span><strong>删除模板</strong><small>{{ selectedTemplateUsage?.deletable ? '永久删除模板及其设定和角色' : `已有 ${selectedTemplateUsage?.associatedWorldCount || 0} 个世界使用，不能删除` }}</small></span></button></template><p v-else class="mobile-v1-notice">这是其他作者的模板。可以查看资料并使用它创建世界。</p></BaseDialog>
   <BaseDialog v-if="isMobile" v-model="mobileTemplateCharacterOpen" title="角色资料" mobile-presentation="page"><div v-if="mobileTemplateCharacter"><div class="mobile-v1-profile"><span class="mobile-v1-avatar" :style="mobileTemplateCharacter.image ? { backgroundImage: `url(${mobileTemplateCharacter.image})` } : {}">{{ mobileTemplateCharacter.image ? '' : mobileTemplateCharacter.name.slice(0, 1) }}</span><h1>{{ mobileTemplateCharacter.name }}</h1><p>{{ selectedTemplatePreview?.name }}</p></div><p class="mobile-v1-prose">{{ mobileTemplateCharacter.background || '模板预览提供角色名称与头像。使用模板创建世界后，即可与角色开始对话。' }}</p></div></BaseDialog>
   <BaseDialog v-if="isMobile" v-model="mobileModulePicker" title="选择模组" mobile-presentation="page"><button v-for="item in workspace.modules.value" :key="item.id" class="mobile-v1-row" @click="conversationForm.moduleId = String(item.id); mobileModulePicker = false"><span><strong>{{ item.name }}</strong><small>{{ [item.era, item.playerCount, item.estimatedDuration].filter(Boolean).join(' · ') }}</small></span><span class="mobile-v1-row-end">{{ conversationForm.moduleId === String(item.id) ? '✓' : '›' }}</span></button><p v-if="!workspace.modules.value.length" class="mobile-v1-notice">当前没有可用模组。</p></BaseDialog>
   <BaseDialog v-if="isMobile" :model-value="dialogs.character && characterPickerOpen" @update:model-value="!$event && collapseCharacterPicker()" title="添加角色" mobile-presentation="page"><template v-if="characterChoicePreview"><div class="mobile-v1-profile"><span class="mobile-v1-avatar" :style="characterChoicePreview.image ? { backgroundImage: `url(${characterChoicePreview.image})` } : {}">{{ characterChoicePreview.image ? '' : characterChoicePreview.name.slice(0,1) }}</span><h1>{{ characterChoicePreview.name }}</h1><p>即将加入 {{ workspace.selectedWorld.value?.name }}</p></div><section v-if="workspace.canEditSelectedWorld.value"><div class="mobile-v1-section"><h3>角色背景</h3></div><p class="mobile-v1-prose">{{ characterPreviewLoading ? '正在载入…' : characterChoicePreview.background || '尚未填写角色背景。' }}</p></section><label class="field"><span>希望角色记住的事</span><textarea v-model="characterPrompt" rows="5" placeholder="你的称呼、偏好或共同经历…" /></label></template><template #footer><button class="button primary" :disabled="!characterChoice || busy || characterPreviewLoading" @click="run(() => workspace.addCharacter(Number(characterChoice), characterPrompt), 'character')">添加到当前世界</button></template></BaseDialog>
@@ -1210,3 +1244,11 @@ async function changePassword() {
   <BaseDialog v-if="isMobile" v-model="mobileDeleteWorldOpen" title="删除当前世界" mobile-presentation="page"><div class="destructive-confirmation"><strong>删除「{{ workspace.selectedWorld.value?.name }}」？</strong><p>请先移出世界内的全部角色。删除后世界会从你的列表中移除。</p></div><template #footer><button class="button secondary" @click="mobileDeleteWorldOpen = false">保留世界</button><button class="button danger" :disabled="busy" @click="run(workspace.removeWorld, 'settings').then(success => { if (success) { mobileDeleteWorldOpen = false; view = 'library' } })">确认删除</button></template></BaseDialog>
   <NoticeToast />
 </template>
+
+<style scoped>
+.archive-operation-status { position: fixed; z-index: 1000; bottom: 28px; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 12px 18px; border-radius: 12px; background: #294f49; color: white; box-shadow: var(--shadow); font-size: 13px; overflow-wrap: anywhere; pointer-events: none; }
+.archive-file-name { overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .archive-operation-status { bottom: calc(84px + env(safe-area-inset-bottom)); width: max-content; }
+}
+</style>

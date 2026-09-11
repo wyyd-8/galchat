@@ -2,8 +2,9 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { AlertTriangle, ArrowLeft, ChevronRight, Ellipsis, BookCopy, Download, FileUp, ImageUp, LockKeyhole, Plus, Save, Search, Trash2, UnlockKeyhole } from '@lucide/vue'
 import { api, uploadImage } from '@/api/client'
+import { ARCHIVE_ACCEPT, downloadArchive } from '@/api/archiveFiles'
 import type {
-  CharacterCardCreationRules, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleMaterial,
+  CharacterCardCreationRules, CocModule, CocModuleClue, CocModuleDetail, CocModuleMaterial,
   CocModuleSavePayload, DraftCharacterCard,
 } from '@/api/types'
 import { parseModuleCharacterText, validateWeaponDamage } from './cocModuleCharacterImport'
@@ -103,6 +104,7 @@ const editing = ref<CocModuleSavePayload | null>(null)
 const activeTab = ref<Tab>('overview')
 const loading = ref(true)
 const busy = ref(false)
+const archiveOperation = ref('')
 const message = ref('')
 const creating = ref(false)
 const unlockConfirm = ref(false)
@@ -320,33 +322,34 @@ async function deleteModule() {
 }
 
 async function exportModule() {
-  if (!selectedId.value) return
+  if (!selectedId.value || busy.value || archiveOperation.value) return
+  const id = selectedId.value
   busy.value = true
+  archiveOperation.value = '正在保存并打包模组和图片…'
   try {
-    const blob = await api.exportCocModule(selectedId.value)
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `${selected.value?.module.name || 'galchat-coc-module'}.json`
-    link.click()
-    URL.revokeObjectURL(link.href)
+    if (canFullEdit.value && !await persistCurrentModule()) return
+    const name = selected.value?.module.name || 'galchat-coc-module'
+    downloadArchive(await api.exportCocModuleZip(id), name)
+    showMessage('ZIP 已生成并发起下载，包含模组内容和图片')
   } catch (error) { showError(error) }
-  finally { busy.value = false }
+  finally { busy.value = false; archiveOperation.value = '' }
 }
 
 async function importModule(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (!file) return
+  if (!file || busy.value || archiveOperation.value) return
   busy.value = true
+  archiveOperation.value = '正在导入模组和图片…'
   try {
-    const archive = JSON.parse(await file.text()) as CocModuleArchive
-    const imported = await api.importCocModule(archive)
+    if (hasUnsavedChanges.value && canFullEdit.value && !await persistCurrentModule()) return
+    const imported = await api.importCocModuleFile(file)
     showMessage(`已导入“${imported.name}”`)
     emit('changed')
     await loadModules(imported.id)
   } catch (error) { showError(error) }
-  finally { busy.value = false }
+  finally { busy.value = false; archiveOperation.value = '' }
 }
 
 async function unlockModule() {
@@ -630,14 +633,14 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
 
 <template>
   <main class="module-library-page" :class="`mobile-module-${mobileView}`">
-    <div v-if="message" class="module-toast" role="status">{{ message }}</div>
+    <div v-if="archiveOperation || message" class="module-toast" role="status" aria-live="polite">{{ archiveOperation || message }}</div>
     <div class="module-workspace">
       <section v-if="isMobile && mobileView === 'list'" class="v1-module-library">
         <header class="v1-module-library-header"><span class="v1-module-brand">✦</span><div><strong>模组库</strong><small>CoC 跑团内容</small></div><button class="icon-button" aria-label="创建模组" :disabled="busy" @click="newModule"><Plus :size="21" /></button></header>
         <div class="v1-module-library-content">
           <div class="v1-module-intro"><span class="eyebrow">SCENARIOS</span><h1>每一个谜团，<br />都有它的开端。</h1></div>
           <button class="button primary v1-module-wide" :disabled="busy" @click="newModule"><Plus :size="16" />创建模组</button>
-          <div class="v1-module-sectionline"><h3>模组列表</h3><label class="v1-module-import file-button">导入模组<input type="file" accept="application/json,.json" :disabled="busy" @change="importModule" /></label></div>
+          <div class="v1-module-sectionline"><h3>模组列表</h3><label class="v1-module-import file-button">导入 ZIP / JSON<input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="importModule" /></label></div>
           <p v-if="loading" role="status">正在载入模组…</p>
           <article v-if="featuredModule" class="v1-module-featured"><small>CoC · 我的模组{{ featuredModule.editLocked ? ' · 受限编辑' : '' }}</small><h2>{{ featuredModule.name }}</h2><p>{{ moduleSummary(featuredModule) }}</p><div class="v1-module-meta">{{ [featuredModule.era, featuredModule.playerCount, featuredModule.estimatedDuration].filter(Boolean).join(' · ') }}</div><button class="button secondary v1-module-wide" @click="openModule(featuredModule.id)">查看与编辑</button></article>
           <button v-for="item in mobileModuleRows" :key="item.id" class="v1-module-row" @click="openModule(item.id)"><span class="v1-module-avatar" :style="item.coverUrl ? { backgroundImage: `url(${item.coverUrl})` } : undefined"><BookCopy v-if="!item.coverUrl" :size="21" /></span><span><strong>{{ item.name }}</strong><small>{{ item.ownerUserId == null ? '系统提供 · 只读' : item.editLocked ? '我的模组 · 受限编辑' : '我的模组' }}</small></span><ChevronRight :size="16" /></button>
@@ -668,7 +671,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
           </button>
         </div>
         <div class="module-switcher-actions">
-          <label class="button secondary file-button"><FileUp :size="15" />导入模组<input type="file" accept="application/json,.json" :disabled="busy" @change="importModule" /></label>
+          <label class="button secondary file-button"><FileUp :size="15" />导入 ZIP / JSON<input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="importModule" /></label>
           <button class="button primary" :disabled="busy" @click="newModule"><Plus :size="15" />新建模组</button>
         </div>
       </nav>
@@ -681,7 +684,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
           <p v-if="!isLocked" class="v1-module-notice">{{ isDefault ? '这份模组由系统提供，内容只读。' : '这份模组由你创建，可维护全部内容。' }}</p>
         </nav>
         <div v-if="loading" class="module-empty">正在载入模组…</div>
-        <div v-else-if="!moduleForm" class="module-empty"><BookCopy :size="34" /><strong>还没有可管理的模组</strong><span>新建一个模组，或导入已有 JSON 文件。</span></div>
+        <div v-else-if="!moduleForm" class="module-empty"><BookCopy :size="34" /><strong>还没有可管理的模组</strong><span>新建模组，或导入 ZIP（含图片）及旧 JSON 文件。</span></div>
         <template v-else>
           <nav v-if="showModuleManagementActions || canFullEdit" class="module-tabs">
             <div class="module-tab-identity">
@@ -693,7 +696,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
             </div>
             <div class="module-editor-actions">
               <span v-if="canFullEdit && !creating" class="module-save-status" :class="saveStatus.kind" role="status">{{ saveStatus.text }}</span>
-              <button v-if="selectedId && showModuleManagementActions" class="button secondary" :disabled="busy" @click="exportModule"><Download :size="16" />导出</button>
+              <button v-if="selectedId && showModuleManagementActions" class="button secondary" :disabled="busy" @click="exportModule"><Download :size="16" />导出 ZIP</button>
               <button v-if="isLocked && showModuleManagementActions" class="button secondary" :disabled="busy" @click="unlockConfirm = true"><UnlockKeyhole :size="16" />解锁</button>
               <button v-if="canFullEdit" class="button primary" :disabled="busy || isSaving" @click="saveModule"><Save :size="16" />{{ creating ? '创建模组' : isSaving ? '保存中…' : '保存全部' }}</button>
             </div>
@@ -890,7 +893,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
     </div>
     <BaseDialog v-model="leaveOpen" title="仍有未保存的修改" description="修改仍保留在当前页面。可以返回继续编辑，或明确放弃这次修改。" layer="foreground"><template #footer><button class="button secondary" @click="leaveOpen = false">继续编辑</button><button class="button danger" @click="discardAndLeave">放弃修改并返回</button></template></BaseDialog>
     <BaseDialog v-model="moduleActionsOpen" title="模组选项" mobile-presentation="sheet">
-      <nav class="v1-module-action-list"><button v-if="selectedId" :disabled="busy" @click="exportModule(); moduleActionsOpen = false"><Download :size="18" />导出模组</button><button v-if="isLocked" :disabled="busy" @click="unlockConfirm = true; moduleActionsOpen = false"><UnlockKeyhole :size="18" />解锁模组</button><button v-if="canFullEdit && !creating" class="danger-text" :disabled="busy" @click="moduleActionsOpen = false; deleteModule()"><Trash2 :size="18" />删除模组</button></nav>
+      <nav class="v1-module-action-list"><button v-if="selectedId" :disabled="busy" @click="exportModule(); moduleActionsOpen = false"><Download :size="18" />导出 ZIP（含图片）</button><button v-if="isLocked" :disabled="busy" @click="unlockConfirm = true; moduleActionsOpen = false"><UnlockKeyhole :size="18" />解锁模组</button><button v-if="canFullEdit && !creating" class="danger-text" :disabled="busy" @click="moduleActionsOpen = false; deleteModule()"><Trash2 :size="18" />删除模组</button></nav>
       <template #footer><button class="button secondary" @click="moduleActionsOpen = false">取消</button></template>
     </BaseDialog>
   </main>

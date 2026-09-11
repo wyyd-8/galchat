@@ -1,6 +1,9 @@
 package com.me.galchat.controller;
 
 import com.me.galchat.domain.Result;
+import com.me.galchat.service.archive.ArchiveZipService;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.RequestPart;
 import com.me.galchat.domain.dto.CocModuleArchiveDTO;
 import com.me.galchat.domain.dto.CocModuleContentUpdateDTO;
 import com.me.galchat.domain.dto.CocModuleCreateDTO;
@@ -27,8 +30,22 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class CocModuleController {
 
+    private final ArchiveZipService zipService;
     private final CocModuleService moduleService;
     private final CocModuleRuntimeService runtimeService;
+
+    @GetMapping("/{id}/export-zip")
+    public ResponseEntity<byte[]> exportModuleZip(@PathVariable Long id) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"galchat-coc-module-" + id + ".zip\"")
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(zipService.exportModule(currentUserId(), id));
+    }
+
+    @PostMapping(value = "/import-zip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result importModuleZip(@RequestPart("file") MultipartFile file) {
+        return Result.success(zipService.importModule(currentUserId(), file));
+    }
 
     @GetMapping
     public Result list() {

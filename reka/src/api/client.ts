@@ -1,3 +1,4 @@
+import { archiveRequest } from './archiveFiles'
 import type {
   TrpgParticipantHistory, TrpgParticipantRunPage, TrpgCompletionReport, ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
@@ -49,6 +50,19 @@ async function request<T>(path: string, init: RequestInit = {}) {
   return result.data as T
 }
 
+async function requestArchive<T>(file: File, zipPath: string, jsonPath: string, method = 'POST'): Promise<T> {
+  const archive = await archiveRequest(file)
+  return request<T>(archive.zip ? zipPath : jsonPath, { method, body: archive.body })
+}
+
+async function exportZip(path: string): Promise<Blob> {
+  const response = await raw(path)
+  if (!response.headers.get('Content-Type')?.includes('application/zip')) {
+    throw new Error(await readError(response) || '导出失败，服务器未返回 ZIP 文件')
+  }
+  return response.blob()
+}
+
 const body = (value: unknown) => JSON.stringify(value)
 
 export function saveSession(value: UserToken) {
@@ -92,6 +106,12 @@ export const api = {
   worldDetails: (worldId: number) => request<WorldDetail[]>(`/world/templates/${worldId}/details`),
   addWorldDetail: (worldId: number, payload: WorldDetail) => request<void>(`/world/templates/${worldId}/details`, { method: 'POST', body: body(payload) }),
   deleteWorldDetail: (worldId: number, detailId: number) => request<void>(`/world/templates/${worldId}/${detailId}`, { method: 'DELETE' }),
+  exportWorldZip: (id: number) => exportZip(`/world/templates/my/${id}/export-zip`),
+  importWorldFile: (file: File) => requestArchive<WorldArchiveResult>(file, '/world/import-zip', '/world/import'),
+  replaceWorldTemplateFile: (id: number, file: File, confirmLowMatch = false) =>
+    requestArchive<WorldArchiveReplaceResult>(file,
+      `/world/templates/${id}/replace-zip?confirmLowMatch=${confirmLowMatch}`,
+      `/world/templates/${id}/replace?confirmLowMatch=${confirmLowMatch}`, 'PUT'),
   exportWorld: async (id: number) => (await raw(`/world/templates/my/${id}/export`)).text(),
   importWorld: (payload: WorldArchive) => request<WorldArchiveResult>('/world/import', { method: 'POST', body: body(payload) }),
   worldTemplateUsage: (id: number) => request<WorldTemplateUsage>(`/world/templates/${id}/usage`),
@@ -122,6 +142,8 @@ export const api = {
   createCocModule: (payload: CocModuleSavePayload) => request<CocModule>('/coc-modules', { method: 'POST', body: body(payload) }),
   updateCocModule: (id: number, payload: CocModuleSavePayload) => request<CocModule>(`/coc-modules/${id}`, { method: 'PUT', body: body(payload) }),
   deleteCocModule: (id: number) => request<void>(`/coc-modules/${id}`, { method: 'DELETE' }),
+  exportCocModuleZip: (id: number) => exportZip(`/coc-modules/${id}/export-zip`),
+  importCocModuleFile: (file: File) => requestArchive<CocModule>(file, '/coc-modules/import-zip', '/coc-modules/import'),
   exportCocModule: (id: number) => raw(`/coc-modules/${id}/export`).then((response) => response.blob()),
   importCocModule: (archive: CocModuleArchive) => request<CocModule>('/coc-modules/import', { method: 'POST', body: body(archive) }),
   updateCocModuleLocationContent: (moduleId: number, locationId: number, content: string) =>

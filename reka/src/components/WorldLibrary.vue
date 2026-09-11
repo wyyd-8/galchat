@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { ARCHIVE_ACCEPT } from '@/api/archiveFiles'
 import { useMobileViewport } from '@/composables/useMobileViewport'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import { ArrowUpRight, ChevronRight, ArrowRight, BookOpen, Import, Plus, Sparkles } from '@lucide/vue'
 import type { UserWorld, WorldTemplate } from '@/api/types'
 
-defineProps<{ worlds: UserWorld[]; templates: WorldTemplate[]; loading: boolean }>()
+defineProps<{ worlds: UserWorld[]; templates: WorldTemplate[]; loading: boolean; archiveBusy?: boolean }>()
 const emit = defineEmits<{ select: [id: number]; previewTemplate: [id: number]; createWorld: []; createTemplate: []; importWorld: [file: File] }>()
 const { isMobile } = useMobileViewport()
 const menuOpen = ref(false)
@@ -28,7 +29,7 @@ function pick(event: Event) { const file = (event.target as HTMLInputElement).fi
       <div class="mobile-v1-section"><h2>世界模板</h2><button class="mobile-v1-link" @click="emit('createTemplate')">创建模板 ＋</button></div>
       <div class="mobile-template-grid"><button v-for="(template, index) in templates" :key="template.id" class="mobile-template-tile" :class="{ sand: index % 2 }" :style="template.image ? { backgroundImage: `linear-gradient(180deg, #142d2b22, #142d2bc0), url(${template.image})`, color: '#fffefa' } : {}" :disabled="!template.id" @click="template.id && emit('previewTemplate', template.id)"><small>{{ String(index + 1).padStart(2, '0') }} / WORLD</small><strong>{{ template.name }}</strong></button></div>
     </div>
-    <BaseDialog v-model="menuOpen" title="世界操作" content-class="mobile-v1-menu"><button class="mobile-v1-row" @click="menuAction('createWorld')"><Plus :size="20" /><span><strong>创建世界</strong><small>从模板开始新的故事</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" @click="menuAction('createTemplate')"><BookOpen :size="20" /><span><strong>创建世界模板</strong><small>维护背景、设定和角色</small></span><ChevronRight :size="16" /></button><label class="mobile-v1-row file-button"><Import :size="20" /><span><strong>导入世界模板</strong><small>选择已有的 JSON 文件</small></span><input type="file" accept="application/json,.json" @change="pick" /></label></BaseDialog>
+    <BaseDialog v-model="menuOpen" title="世界操作" content-class="mobile-v1-menu"><button class="mobile-v1-row" @click="menuAction('createWorld')"><Plus :size="20" /><span><strong>创建世界</strong><small>从模板开始新的故事</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" @click="menuAction('createTemplate')"><BookOpen :size="20" /><span><strong>创建世界模板</strong><small>维护背景、设定和角色</small></span><ChevronRight :size="16" /></button><label class="mobile-v1-row file-button" :class="{ disabled: archiveBusy }"><Import :size="20" /><span><strong>导入世界模板</strong><small>ZIP 含图片，也支持旧 JSON</small></span><input type="file" :accept="ARCHIVE_ACCEPT" :disabled="archiveBusy" @change="pick" /></label></BaseDialog>
   </main>
   <main v-else class="library-page">
     <header class="library-hero">
@@ -37,7 +38,7 @@ function pick(event: Event) { const file = (event.target as HTMLInputElement).fi
         <h1><span class="hero-title-line">让角色身处同一个世界，</span><span class="hero-title-line">让每次回应自然发生。</span></h1>
         <p>创建世界，连接角色，开始属于你的故事。</p>
       </div>
-      <div class="hero-actions"><button class="button primary" @click="emit('createWorld')"><Plus :size="17" />创建世界</button><label class="button secondary file-button"><Import :size="17" />导入世界模板<input type="file" accept="application/json" @change="pick" /></label></div>
+      <div class="hero-actions"><button class="button primary" @click="emit('createWorld')"><Plus :size="17" />创建世界</button><label class="button secondary file-button" :class="{ disabled: archiveBusy }"><Import :size="17" />导入 ZIP / JSON<input type="file" :accept="ARCHIVE_ACCEPT" :disabled="archiveBusy" @change="pick" /></label></div>
     </header>
     <section class="content-section">
       <div class="section-title"><div><h2>继续你的世界</h2></div><span class="count-label">{{ worlds.length }} 个世界</span></div>

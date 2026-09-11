@@ -32,6 +32,16 @@ public final class ImageSecurityUtils {
         }
     }
 
+    public static void validateImageBytes(String filename, byte[] bytes) {
+        String extension = getLowercaseExtension(filename);
+        if (bytes.length == 0 || bytes.length > ImageConstant.MAX_IMAGE_SIZE) {
+            throw new UserRequestException("图片为空或超过4MB");
+        }
+        if (!matchesImageSignature(extension, bytes)) {
+            throw new UserRequestException("文件内容不是有效图片: " + filename);
+        }
+    }
+
     public static String getLowercaseExtension(String filename) {
         if (filename == null) {
             throw new UserRequestException("文件名不能为空");

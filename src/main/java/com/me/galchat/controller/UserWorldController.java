@@ -2,6 +2,9 @@ package com.me.galchat.controller;
 
 
 import com.me.galchat.domain.Result;
+import com.me.galchat.service.archive.ArchiveZipService;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.RequestPart;
 import com.me.galchat.domain.dto.WorldArchiveDTO;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.po.WorldDetail;
@@ -41,11 +44,33 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class UserWorldController {
 
+    private final ArchiveZipService zipService;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final IWorldTemplateService worldTemplateService;
     private final IWorldDetailService worldDetailService;
     private final IWorldArchiveService worldArchiveService;
     private final ObjectMapper objectMapper;
+
+    @GetMapping("/templates/my/{userWorldId}/export-zip")
+    public ResponseEntity<byte[]> exportWorldZip(@PathVariable Long userWorldId) {
+        checkUserWorldId(userWorldId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"galchat-world-" + userWorldId + ".zip\"")
+                .contentType(MediaType.parseMediaType("application/zip"))
+                .body(zipService.exportWorld(currentUserId(), userWorldId));
+    }
+
+    @PostMapping(value = "/import-zip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result importWorldZip(@RequestPart("file") MultipartFile file) {
+        return Result.success(zipService.importWorld(currentUserId(), file));
+    }
+
+    @PutMapping(value = "/templates/{id}/replace-zip", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result replaceWorldZip(@PathVariable Long id, @RequestPart("file") MultipartFile file,
+                                   @RequestParam(defaultValue = "false") boolean confirmLowMatch) {
+        checkWorldTemplateId(id);
+        return Result.success(zipService.replaceWorld(currentUserId(), id, file, confirmLowMatch));
+    }
 
     @GetMapping("/templates")
     public Result listWorldTemplates() {

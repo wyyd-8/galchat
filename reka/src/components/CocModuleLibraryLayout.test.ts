@@ -216,7 +216,7 @@ test('keeps the title and creation actions inside the horizontal module switcher
     }))
 
     assert.match(html, /<nav[^>]*class="module-switcher"[^>]*aria-label="选择模组"/)
-    assert.match(html, /<nav[^>]*class="module-switcher"[\s\S]*<h1[^>]*>模组库<\/h1>[\s\S]*导入模组[\s\S]*新建模组[\s\S]*<\/nav>/)
+    assert.match(html, /<nav[^>]*class="module-switcher"[\s\S]*<h1[^>]*>模组库<\/h1>[\s\S]*导入 ZIP \/ JSON[\s\S]*新建模组[\s\S]*<\/nav>/)
     assert.doesNotMatch(html, /class="module-page-header"/)
     assert.doesNotMatch(html, /<aside[^>]*class="module-list-pane"/)
   } finally {

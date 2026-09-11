@@ -65,8 +65,7 @@ public class UserInfoController {
 
     @PostMapping("/password/email-code")
     public Result sendPasswordEmailVerificationCode(@RequestBody UserPasswordDTO userPasswordDTO) {
-        userInfoService.sendPasswordEmailVerificationCode(CurrentHolder.getCurrentId(),
-                userPasswordDTO == null ? null : userPasswordDTO.getEmail());
-        return Result.success();
+        return Result.success(userInfoService.sendPasswordEmailVerificationCode(CurrentHolder.getCurrentId(),
+                userPasswordDTO == null ? null : userPasswordDTO.getEmail()));
     }
 }

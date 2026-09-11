@@ -133,7 +133,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
     }
 
     @Override
-    public void sendPasswordEmailVerificationCode(Integer userId, String email) {
+    public String sendPasswordEmailVerificationCode(Integer userId, String email) {
         String normalizedEmail = normalizeEmail(email);
         if (!StringUtils.hasText(normalizedEmail)) {
             throw new UserRequestException("邮箱不能为空");
@@ -165,6 +165,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
             redisTemplate.delete(cooldownKey);
             throw new UserRequestException("验证码邮件发送失败，请稍后重试");
         }
+        return verificationCode;
     }
 
     @Override

@@ -70,7 +70,7 @@ export const api = {
   sendRegisterCode: (email: string) => request<string>('/user/register/email-code', { method: 'POST', body: body({ email }) }),
   userInfo: () => request<UserInfo>('/user/info'),
   updateUserInfo: (payload: Partial<UserInfo>) => request<void>('/user/info', { method: 'PUT', body: body(payload) }),
-  sendPasswordCode: (email: string) => request<void>('/user/password/email-code', { method: 'POST', body: body({ email }) }),
+  sendPasswordCode: (email: string) => request<string>('/user/password/email-code', { method: 'POST', body: body({ email }) }),
   updatePassword: (payload: { email: string; newPassword: string; verificationCode: string }) => request<void>('/user/password', { method: 'PUT', body: body(payload) }),
 
   modelApis: () => request<ModelApi[]>('/model-apis'),

@@ -24,7 +24,7 @@ public interface IUserInfoService extends IService<UserInfo> {
 
     String sendRegisterEmailVerificationCode(String email);
 
-    void sendPasswordEmailVerificationCode(Integer userId, String email);
+    String sendPasswordEmailVerificationCode(Integer userId, String email);
 
     void updateUserInfo(Integer userId, UserProfileDTO userProfileDTO);
 

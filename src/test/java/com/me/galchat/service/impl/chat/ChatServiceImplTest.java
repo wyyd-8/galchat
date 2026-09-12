@@ -5,6 +5,7 @@ import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.ChatFluxVO;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.service.impl.trpg.TrpgRunMemoryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -21,8 +22,21 @@ class ChatServiceImplTest {
 
     private final IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
     private final IUserCharacterInfoService userCharacterInfoService = mock(IUserCharacterInfoService.class);
+    private final TrpgRunMemoryService runMemoryService = mock(TrpgRunMemoryService.class);
     private final ChatServiceImpl chatService = new ChatServiceImpl(null, null, null, null, null, userWorldPrefixService,
-            userCharacterInfoService, null, null, null);
+            userCharacterInfoService, null, null, null, runMemoryService);
+
+    @Test
+    void ordinaryChatGetsFreshRunIndexWithoutAddingItToBaseRolePrompt() {
+        when(userCharacterInfoService.buildCharacterPrompt(1L, 2L)).thenReturn("角色信息");
+        when(runMemoryService.formatRecentContext(1L, 2L)).thenReturn("最近跑团：雾中车站");
+
+        assertThat(chatService.buildChatSystemPrompt(10L, 1L, 2L))
+                .contains("角色信息", "最近跑团：雾中车站");
+        assertThat(chatService.buildSystemPrompt(10L, 1L, 2L)).doesNotContain("雾中车站");
+        when(runMemoryService.formatRecentContext(1L, 2L)).thenReturn("");
+        assertThat(chatService.buildChatSystemPrompt(10L, 1L, 2L)).doesNotContain("雾中车站");
+    }
 
     @Test
     void buildSystemPromptUsesDailyCompanionRequirementsByDefault() {

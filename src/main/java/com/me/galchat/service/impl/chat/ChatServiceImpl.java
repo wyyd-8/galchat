@@ -22,6 +22,7 @@ import com.me.galchat.service.ChatUserMessageListener;
 import com.me.galchat.service.IChatService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.service.impl.trpg.TrpgRunMemoryService;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,6 +62,7 @@ public class ChatServiceImpl implements IChatService {
     private final StringRedisTemplate redisTemplate;
     private final UserEventLogDetector userEventLogDetector;
     private final SingleChatLockService singleChatLockService;
+    private final TrpgRunMemoryService runMemoryService;
 
     @Resource(name = "userEventLogTaskExecutor")
     private TaskExecutor userEventLogTaskExecutor;
@@ -92,7 +94,7 @@ public class ChatServiceImpl implements IChatService {
                         chatMessageDTO.getUserWorldId(), chatMessageDTO.getCharacterId(),
                         singleChatThinkingClient);
                 Flux<ChatFluxVO> responseFlux = chatClient.prompt()
-                        .system(buildSystemPrompt(chatMessageDTO.getWorldId(), chatMessageDTO.getUserWorldId(),
+                        .system(buildChatSystemPrompt(chatMessageDTO.getWorldId(), chatMessageDTO.getUserWorldId(),
                                 chatMessageDTO.getCharacterId()))
                         .user(chatMessageDTO.getMessage())
                         .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
@@ -138,7 +140,7 @@ public class ChatServiceImpl implements IChatService {
             ChatClient chatClient = singleChatRuntimeService.chatClient(
                     task.getUserWorldId(), task.getCharacterId(), singleChatNonThinkingClient);
             String content = chatClient.prompt()
-                    .system(buildSystemPrompt(task.getWorldId(), task.getUserWorldId(), task.getCharacterId()))
+                    .system(buildChatSystemPrompt(task.getWorldId(), task.getUserWorldId(), task.getCharacterId()))
                     .user(task.getMessage())
                     .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
                     .toolContext(toolContext)
@@ -211,6 +213,13 @@ public class ChatServiceImpl implements IChatService {
     public String buildSystemPrompt(Long worldId, Long userWorldId, Long characterId) {
         StringBuilder prompt = new StringBuilder(buildWorldSystemPrompt(worldId, userWorldId));
         appendPrompt(prompt, userCharacterInfoService.buildCharacterPrompt(userWorldId, characterId));
+        return prompt.toString();
+    }
+
+    /** 普通聊天额外读取当前跑团索引；局内角色仍使用基础提示词。 */
+    public String buildChatSystemPrompt(Long worldId, Long userWorldId, Long characterId) {
+        StringBuilder prompt = new StringBuilder(buildSystemPrompt(worldId, userWorldId, characterId));
+        appendPrompt(prompt, runMemoryService.formatRecentContext(userWorldId, characterId));
         return prompt.toString();
     }
 

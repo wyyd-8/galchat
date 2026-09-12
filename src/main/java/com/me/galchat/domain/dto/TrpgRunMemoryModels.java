@@ -30,6 +30,14 @@ public final class TrpgRunMemoryModels {
             LocalDateTime updatedAt) {
     }
 
+    public record RecentRunBrief(
+            Long runId,
+            String moduleName,
+            String status,
+            Map<String, String> names,
+            LocalDateTime updatedAt) {
+    }
+
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record RunDetails(
             Long runId,

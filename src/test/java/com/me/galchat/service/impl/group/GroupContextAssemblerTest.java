@@ -30,6 +30,24 @@ import static org.mockito.Mockito.when;
 class GroupContextAssemblerTest {
 
     @Test
+    void onlyOrdinaryGroupChatUsesPromptWithRecentRunIndex() {
+        ChatServiceImpl chatService = mock(ChatServiceImpl.class);
+        GroupContextAssembler assembler = new GroupContextAssembler(
+                mock(GroupChatMessageMapper.class), mock(GroupConversationService.class),
+                chatService, mock(UserCharacterInfoMapper.class), mock(GroupToolHistoryAssembler.class),
+                mock(GroupDiceMessageFormatter.class), materialMessageCodec());
+        when(chatService.buildSystemPrompt(2L, 1L, 11L)).thenReturn("角色基础");
+        when(chatService.buildChatSystemPrompt(2L, 1L, 11L)).thenReturn("角色基础\n最近跑团：雾中车站");
+        var conversation = new GroupConversation().setId(8L).setWorldId(2L).setUserWorldId(1L)
+                .setMode(GroupChatConstant.MODE_CHAT);
+        var actor = new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 11L);
+
+        assertThat(assembler.baseSystemPrompt(conversation, actor)).contains("最近跑团：雾中车站");
+        conversation.setMode(GroupChatConstant.MODE_TRPG);
+        assertThat(assembler.baseSystemPrompt(conversation, actor)).contains("角色基础").doesNotContain("雾中车站");
+    }
+
+    @Test
     void mapsOnlyCurrentCharactersHistoryToAssistantAndKeepsOtherSpeakerIdentity() {
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupConversationService conversationService = mock(GroupConversationService.class);

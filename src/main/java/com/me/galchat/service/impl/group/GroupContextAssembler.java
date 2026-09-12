@@ -127,6 +127,9 @@ public class GroupContextAssembler {
         String actorPrompt = GroupChatConstant.ACTOR_KP.equals(currentActor.type())
                 ? chatService.buildWorldSystemPrompt(
                         conversation.getWorldId(), conversation.getUserWorldId())
+                : GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
+                ? chatService.buildChatSystemPrompt(
+                        conversation.getWorldId(), conversation.getUserWorldId(), currentActor.id())
                 : chatService.buildSystemPrompt(
                         conversation.getWorldId(), conversation.getUserWorldId(), currentActor.id());
         StringBuilder builder = new StringBuilder(actorPrompt);

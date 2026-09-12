@@ -41,6 +41,30 @@ import static org.mockito.Mockito.when;
 @SuppressWarnings("unchecked")
 class TrpgRunMemoryServiceTest {
 
+    @Test
+    void recentContextContainsOnlyBriefCurrentSnapshotAndRefreshesAfterRestore() {
+        when(conversationMapper.selectRecentTrpgByCharacter(5L, 9L)).thenReturn(List.of(
+                new GroupConversation()
+                        .setId(71L).setModuleId(4L)
+                        .setStatus("closed").setTitle("不应进入上下文的标题")
+                        .setUpdatedAt(LocalDateTime.of(2026, 9, 12, 10, 0))));
+        when(characterMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                new CocCharacter().setRunId(71L).setActorType("PLAYER").setName("林恩"),
+                new CocCharacter().setRunId(71L).setActorType("BOT")
+                        .setPlayerName("艾琳").setName("威尔").setQuickNotes("KP秘密")));
+
+        when(moduleMapper.selectBatchIds(List.of(4L))).thenReturn(List.of(
+                new CocModule().setId(4L).setName("雾中车站")));
+        String prompt = service.formatRecentContext(5L, 9L);
+
+        assertThat(prompt).contains("71", "雾中车站", "closed", "2026-09-12T10:00",
+                "用户", "林恩", "艾琳", "威尔", "\"updatedAt\"");
+        assertThat(prompt).doesNotContain("不应进入上下文的标题", "KP秘密");
+        when(conversationMapper.selectRecentTrpgByCharacter(5L, 9L)).thenReturn(List.of());
+        assertThat(service.formatRecentContext(5L, 9L)).isEmpty();
+        assertThat(service.formatRecentContext(6L, 9L)).isEmpty();
+    }
+
     private GroupConversationMapper conversationMapper;
     private GroupChatMemberMapper memberMapper;
     private CocModuleMapper moduleMapper;

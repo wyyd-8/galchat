@@ -138,7 +138,8 @@ public class CharacterTemplateServiceImpl extends ServiceImpl<CharacterTemplateM
                 .set(CharacterTemplate::getCocPlayStyle,
                         characterTemplate.getCocPlayStyle())
                 .set(CharacterTemplate::getFavorability,
-                        characterTemplate.getFavorability())
+                        characterTemplate.getFavorability(),
+                        "typeHandler=com.me.galchat.typehandler.JsonbTypeHandler")
                 .set(CharacterTemplate::getInitFavor,
                         characterTemplate.getInitFavor()));
     }

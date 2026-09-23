@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { ArrowDown, ArrowLeft, BrainCircuit, History, LoaderCircle, MoreHorizontal, Plus, RotateCcw, Send, Settings2 } from '@lucide/vue'
+import { ArrowDown, ArrowLeft, BookOpen, BrainCircuit, ChevronRight, History, LoaderCircle, MoreHorizontal, Pencil, Plus, RotateCcw, Send, Settings2, Trash2 } from '@lucide/vue'
 import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger } from 'reka-ui'
 import BaseDialog from './ui/BaseDialog.vue'
 import { useMobileViewport } from '@/composables/useMobileViewport'
@@ -13,10 +13,13 @@ import { resetConversationScrollFollowing, scrollConversationToLatest, updateCon
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
-const props = defineProps<{ world: UserWorld; character: Character; messages: DirectMessage[]; modelApis: ModelApi[]; loading: { history: boolean; sending: boolean; withdrawing: boolean; model: boolean }; canWithdraw: boolean; hasOlderMessages: boolean; settingsSaving?: boolean; settingsError?: string; canEditTemplate?: boolean }>()
-const emit = defineEmits<{ saveSettings: [settings: { userInfoPrompt: string; modelApiId?: number }]; editTemplate: []; back: []; send: []; withdraw: []; loadEarlier: []; edit: []; selectModel: [modelApiId?: number]; focus: []; composition: [value: boolean, input: string] }>()
+const props = defineProps<{ world: UserWorld; character: Character; messages: DirectMessage[]; modelApis: ModelApi[]; loading: { history: boolean; sending: boolean; withdrawing: boolean; model: boolean }; canWithdraw: boolean; hasOlderMessages: boolean; settingsSaving?: boolean; settingsError?: string; canEditTemplate?: boolean; removing?: boolean }>()
+const emit = defineEmits<{ saveSettings: [settings: { userInfoPrompt: string; modelApiId?: number }]; editTemplate: []; remove: []; back: []; send: []; withdraw: []; loadEarlier: []; edit: []; selectModel: [modelApiId?: number]; focus: []; composition: [value: boolean, input: string] }>()
 const { isMobile } = useMobileViewport()
 const profileOpen = ref(false)
+const noteOpen = ref(false)
+const noteInput = ref<HTMLTextAreaElement | null>(null)
+const settingsLocked = computed(() => props.settingsSaving || props.removing || props.loading.history || props.loading.model || props.loading.sending)
 const menuOpen = ref(false)
 const settingsDraft = reactive({ userInfoPrompt: '', modelApiId: '' })
 let profileScope = ''
@@ -31,13 +34,29 @@ watch(() => [props.world.id, props.character.characterId, props.character.userIn
   savedProfile = next
   profileScope = scope
 }, { immediate: true, flush: 'sync' })
-defineExpose({ closeProfile: () => {
+function closeProfile() {
   Object.assign(settingsDraft, characterProfile())
   savedProfile = characterProfile()
   profileOpen.value = false
-} })
+  noteOpen.value = false
+}
+defineExpose({ closeProfile })
+async function editNote() {
+  settingsDraft.userInfoPrompt = props.character.userInfoPrompt || ''
+  noteOpen.value = true
+  await nextTick()
+  noteInput.value?.focus()
+}
+function cancelNote() {
+  settingsDraft.userInfoPrompt = props.character.userInfoPrompt || ''
+  noteOpen.value = false
+}
+function saveNote() {
+  if (settingsLocked.value) return
+  emit('saveSettings', { userInfoPrompt: settingsDraft.userInfoPrompt, modelApiId: props.character.modelApiId })
+}
 function saveSettings() {
-  if (props.settingsSaving || props.loading.history || props.loading.model || props.loading.sending) return
+  if (props.settingsSaving || props.removing || props.loading.history || props.loading.model || props.loading.sending) return
   emit('saveSettings', { userInfoPrompt: settingsDraft.userInfoPrompt, modelApiId: settingsDraft.modelApiId ? Number(settingsDraft.modelApiId) : undefined })
 }
 const withdrawOpen = ref(false)
@@ -56,6 +75,7 @@ let latestScrollFrame = 0
 watch(() => `${props.loading.sending}:${props.messages.map((message) => `${message.id}:${message.role}:${Boolean(message.content.trim())}`).join('|')}`, syncThinkingState, { immediate: true, flush: 'sync' })
 watch(() => `${props.world.id}:${props.character.characterId}`, () => {
   profileOpen.value = false
+  noteOpen.value = false
   menuOpen.value = false
   withdrawOpen.value = false
   awayFromLatest.value = false
@@ -155,6 +175,7 @@ function resizeInput() {
   target.style.height = `${Math.min(target.scrollHeight, 130)}px`
 }
 function selectModel(event: Event) {
+  if (settingsLocked.value) return
   const value = (event.target as HTMLSelectElement).value
   emit('selectModel', value ? Number(value) : undefined)
 }
@@ -164,7 +185,7 @@ function selectModel(event: Event) {
   <main class="chat-page direct-chat-page">
     <header class="chat-header">
       <div v-if="!isMobile" class="direct-chat-heading"><button class="icon-button bordered" aria-label="返回世界" @click="emit('back')"><ArrowLeft :size="17" /></button><span class="message-avatar large" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</span><span><small>与角色单独对话</small><h1>{{ character.characterName }}</h1></span></div>
-      <div v-if="!isMobile" class="chat-header-actions"><span class="live-status active"><i />{{ world.thinkStatus === false ? (world.eotDetectionStatus ? '自动识别输入结束' : '连续消息模式') : '逐步显示思考与回复' }}</span><button class="button ghost" @click="emit('edit')"><Settings2 :size="16" />角色设置</button></div>
+      <div v-if="!isMobile" class="chat-header-actions"><span class="live-status active"><i />{{ world.thinkStatus === false ? (world.eotDetectionStatus ? '自动识别输入结束' : '连续消息模式') : '逐步显示思考与回复' }}</span></div>
       <template v-if="isMobile"><button class="icon-button" aria-label="返回世界" @click="emit('back')"><ArrowLeft :size="23" /></button><button class="mobile-chat-title" @click="profileOpen = true"><strong>{{ character.characterName }}</strong><small>{{ world.name }} · 单聊</small></button><button class="icon-button" aria-label="角色详情" @click="profileOpen = true"><MoreHorizontal :size="22" /></button></template>
     </header>
     <div class="direct-chat-layout">
@@ -185,7 +206,49 @@ function selectModel(event: Event) {
         <button v-if="awayFromLatest" class="chat-jump-latest" aria-label="回到最新" title="回到最新" @click="returnToLatest"><ArrowDown :size="16" /><span class="chat-jump-latest-label">回到最新</span></button>
         <div class="composer direct-composer"><button v-if="isMobile" class="icon-button" aria-label="聊天操作" @click="menuOpen = true"><Plus :size="23" /></button><button v-if="!isMobile" class="icon-button withdraw-button" :disabled="!canWithdraw" :title="canWithdraw ? '撤回上一轮' : '暂无可撤回的用户消息，或当前仍在处理消息'" aria-label="撤回上一轮" @click="emit('withdraw')"><LoaderCircle v-if="loading.withdrawing" class="spin" :size="17" /><RotateCcw v-else :size="17" /></button><textarea ref="inputElement" v-model="input" rows="1" placeholder="输入给角色的消息…" :disabled="loading.sending" @input="resizeInput" aria-label="给角色的消息" @focus="emit('focus')" @compositionstart="composition(true, $event)" @compositionend="composition(false, $event)" @keydown="keydown" /><button class="send-button" aria-label="发送消息" :disabled="!input.trim() || loading.sending" @click="emit('send')"><LoaderCircle v-if="loading.sending" class="spin" :size="19" /><Send v-else :size="19" /></button></div>
       </section>
-      <component v-if="!isMobile" :is="'div'" v-model="profileOpen" title="角色信息" mobile-presentation="page" content-class="mobile-chat-panel" :class="{ 'chat-side-host': !isMobile }"><aside class="direct-character-panel"><p v-if="isMobile" class="mobile-chat-status">{{ world.thinkStatus === false ? (world.eotDetectionStatus ? '自动识别输入结束' : '连续消息模式') : '逐步显示思考与回复' }}</p><span class="character-avatar portrait" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</span><h2>{{ character.characterName }}</h2><small>{{ world.name }}</small><div class="favor-card"><span>好感度</span><strong>{{ character.favorValue ?? 0 }}</strong><progress :value="character.favorValue ?? 0" max="100" /></div><label class="profile-note direct-model-picker"><strong>回复模型</strong><select :value="character.modelApiId ? String(character.modelApiId) : ''" :disabled="loading.sending || loading.model" aria-label="选择单聊回复模型" @change="selectModel"><option value="">默认模型</option><option v-if="character.modelApiId && !modelApis.some((model) => model.id === character.modelApiId)" :value="String(character.modelApiId)">原配置不可用（使用默认）</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select><small>切换后，角色的新回复将使用所选模型。</small></label><div class="profile-note"><strong>希望角色记住的事</strong><p>{{ character.userInfoPrompt || '暂未记录' }}</p></div><div class="profile-note"><strong>最近对话</strong><p>{{ character.lastChatContent || `${conversationalMessages} 条对话消息` }}</p><small>{{ character.lastChatTime || '' }}</small></div><button class="button secondary" @click="editCharacter"><Settings2 :size="16" />编辑角色设置</button></aside></component>
+      <div v-if="!isMobile" class="chat-side-host">
+        <aside class="direct-character-panel" aria-label="角色面板">
+          <div class="direct-panel-heading">
+            <span>{{ profileOpen ? '角色设置' : '角色信息' }}</span>
+            <button v-if="profileOpen" class="direct-panel-link" :disabled="settingsSaving" @click="closeProfile">返回概览</button>
+            <button v-else class="icon-button" aria-label="打开角色设置" :disabled="settingsSaving" @click="profileOpen = true"><Settings2 :size="16" /></button>
+          </div>
+          <div class="direct-panel-identity">
+            <span class="character-avatar direct-panel-portrait" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</span>
+            <div><h2>{{ character.characterName }}</h2><p><BookOpen :size="13" /><span>{{ world.name }}</span></p></div>
+          </div>
+          <template v-if="!profileOpen">
+            <section class="direct-panel-favor" aria-labelledby="direct-favor-title">
+              <div class="direct-panel-row"><h3 id="direct-favor-title">好感度</h3><strong>{{ character.favorValue ?? 0 }} <small>/ 100</small></strong></div>
+              <progress :value="character.favorValue ?? 0" max="100" aria-label="好感度" />
+              <p class="direct-panel-hint">随你们的对话而变化</p>
+            </section>
+            <section class="direct-panel-section" aria-labelledby="direct-note-title">
+              <div class="direct-panel-row"><h3 id="direct-note-title">希望角色记住的事</h3><button v-if="!noteOpen" class="direct-panel-link" :disabled="settingsLocked" @click="editNote"><Pencil :size="14" />编辑</button></div>
+              <form v-if="noteOpen" class="direct-note-editor" @submit.prevent="saveNote">
+                <label for="direct-note-input" class="direct-panel-hint">称呼、经历，或你们之间的约定</label>
+                <textarea id="direct-note-input" ref="noteInput" v-model="settingsDraft.userInfoPrompt" rows="5" :disabled="settingsSaving" placeholder="写下希望角色记住的事…" />
+                <div class="direct-panel-actions"><button type="button" class="button secondary" :disabled="settingsSaving" @click="cancelNote">取消</button><button type="submit" class="button primary" :disabled="settingsLocked"><LoaderCircle v-if="settingsSaving" class="spin" :size="14" />{{ settingsSaving ? '保存中…' : '保存' }}</button></div>
+              </form>
+              <p v-else class="direct-panel-note" :class="{ empty: !character.userInfoPrompt }">{{ character.userInfoPrompt || '写下希望角色记住的称呼、经历或约定。' }}</p>
+            </section>
+            <section class="direct-panel-section direct-model-picker">
+              <label for="direct-panel-model">回复模型</label>
+              <select id="direct-panel-model" :value="character.modelApiId ? String(character.modelApiId) : ''" :disabled="settingsLocked" aria-label="选择单聊回复模型" @change="selectModel"><option value="">默认模型</option><option v-if="character.modelApiId && !modelApis.some(model => model.id === character.modelApiId)" :value="String(character.modelApiId)">原配置不可用（使用默认）</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select>
+              <p class="direct-panel-hint" role="status">{{ loading.model ? '正在切换模型…' : '新回复将使用所选模型' }}</p>
+            </section>
+          </template>
+          <form v-else class="direct-panel-settings" @submit.prevent="saveSettings">
+            <label class="field"><span>回复模型</span><select v-model="settingsDraft.modelApiId" :disabled="settingsLocked" aria-label="选择单聊回复模型"><option value="">默认模型</option><option v-if="character.modelApiId && !modelApis.some(model => model.id === character.modelApiId)" :value="String(character.modelApiId)">原配置不可用（使用默认）</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select></label>
+            <label class="field"><span>希望角色记住的事</span><textarea v-model="settingsDraft.userInfoPrompt" rows="5" :disabled="settingsSaving" placeholder="写下希望角色记住的称呼、经历或约定…" /></label>
+            <section v-if="canEditTemplate" class="direct-panel-section direct-panel-author"><h3>作者设置</h3><button type="button" class="direct-panel-setting-row" :disabled="settingsSaving" @click="emit('editTemplate')"><span>编辑角色模板</span><ChevronRight :size="16" /></button><button type="button" class="direct-panel-setting-row" :disabled="settingsSaving" @click="editCharacter"><span>调整好感度</span><ChevronRight :size="16" /></button></section>
+            <div class="direct-panel-actions"><button type="button" class="button secondary" :disabled="settingsSaving" @click="closeProfile">取消</button><button type="submit" class="button primary" :disabled="settingsLocked"><LoaderCircle v-if="settingsSaving" class="spin" :size="14" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button></div>
+          </form>
+          <button v-if="profileOpen" type="button" class="direct-panel-setting-row direct-panel-remove danger-text" :disabled="settingsLocked" @click="emit('remove')"><span>{{ removing ? '正在移出…' : '移出当前世界' }}</span><LoaderCircle v-if="removing" class="spin" :size="16" /><Trash2 v-else :size="16" /></button>
+          <p v-if="settingsError" class="direct-panel-error" role="alert">{{ settingsError }}</p>
+          <footer class="direct-panel-footer"><span>{{ hasOlderMessages ? '已加载 ' : '' }}{{ conversationalMessages }} 条对话消息</span><span>与{{ character.characterName }}的对话</span></footer>
+        </aside>
+      </div>
     </div>
 
     <BaseDialog v-if="isMobile" v-model="profileOpen" title="角色详情" mobile-presentation="page" content-class="mobile-chat-profile mobile-chat-panel">
@@ -195,6 +258,7 @@ function selectModel(event: Event) {
       <label class="field"><span>希望角色记住的事</span><textarea v-model="settingsDraft.userInfoPrompt" rows="4" :disabled="settingsSaving" placeholder="写下希望角色记住的称呼、经历或约定…" /></label>
       <button v-if="canEditTemplate" class="mobile-chat-row" @click="profileOpen = false; emit('editTemplate')"><span><strong>编辑角色模板</strong><small>仅模板作者可用</small></span><span>›</span></button>
       <button v-if="canEditTemplate" class="mobile-chat-row" @click="editCharacter"><span><strong>调整好感度</strong><small>角色作者可修改好感设置</small></span><span>›</span></button>
+      <button class="mobile-chat-row danger-text" :disabled="settingsLocked" @click="emit('remove')"><span><strong>{{ removing ? '正在移出…' : '移出当前世界' }}</strong></span><LoaderCircle v-if="removing" class="spin" :size="18" /><Trash2 v-else :size="18" /></button>
       <p v-if="settingsError" class="mobile-chat-error" role="alert">{{ settingsError }}</p>
       <template #footer><button class="button primary" :disabled="settingsSaving || loading.history || loading.model || loading.sending" @click="saveSettings"><LoaderCircle v-if="settingsSaving" class="spin" :size="17" />{{ settingsSaving ? '保存中…' : '保存设置' }}</button></template>
     </BaseDialog>

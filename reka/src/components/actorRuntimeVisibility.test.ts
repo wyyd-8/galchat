@@ -103,9 +103,16 @@ test('normal group chat exposes each reply actor model inside the reply order', 
   // Vue serializes an empty value as either value="" or a bare value attribute.
   const modelSelect = html.match(/<select\b[^>]*aria-label="选择艾琳的回复模型"[^>]*>[\s\S]*?<\/select>/)?.[0]
   assert.ok(modelSelect, 'the actor must have its own model selector')
-  assert.match(modelSelect, /<option value(?:="")?>默认模型<\/option>/)
-  assert.match(html, /<select value="7" aria-label="选择艾琳的回复模型">/)
-  assert.match(html, /<option value="7">月影<\/option>/)
+  assert.match(modelSelect, /<option value(?:="")?[^>]*>默认模型<\/option>/)
+  assert.match(modelSelect, /value="7"/)
+  assert.match(html, /<option value="7"[^>]*>月影<\/option>/)
+  const modelDetails = html.match(/<details\b[^>]*>[\s\S]*?aria-label="选择艾琳的回复模型"[\s\S]*?<\/details>/)?.[0]
+  assert.ok(modelDetails, 'model settings should expand from the actor row')
+  assert.doesNotMatch(modelDetails.split('>')[0], /\bopen\b/)
+  assert.match(html, /调整顺序/)
+  assert.doesNotMatch(html, /aria-label="添加回复角色"/)
+  assert.doesNotMatch(html, /所有可用角色均已加入/)
+  assert.doesNotMatch(html, /后续聊天沿用此顺序|正在加载回复顺序/)
 })
 
 test('trpg roster does not expose actor runtime configuration', async (context) => {

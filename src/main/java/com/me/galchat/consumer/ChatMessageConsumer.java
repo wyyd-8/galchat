@@ -39,7 +39,7 @@ public class ChatMessageConsumer {
     public void init() {
         running = true;
         replyQueue = redissonClient.getBlockingQueue(RedisConstant.REPLY_QUEUE_NAME, new JsonJacksonCodec());
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 8; i++) {
             chatTaskExecutor.execute(this::consumeReplyTasks);
         }
     }

@@ -10,6 +10,7 @@ import { useMobileViewport, useVisualViewport } from '@/composables/useMobileVie
 import CocModuleLibrary from '@/components/CocModuleLibrary.vue'
 import AuthDialog from '@/components/AuthDialog.vue'
 import DirectChatStage from '@/components/DirectChatStage.vue'
+import CharacterFavorDialog from '@/components/CharacterFavorDialog.vue'
 import GroupChatStage from '@/components/GroupChatStage.vue'
 import TrpgCompletionStage from '@/components/TrpgCompletionStage.vue'
 import ModelApiManagerDialog from '@/components/ModelApiManagerDialog.vue'
@@ -63,6 +64,7 @@ const moduleDetailOpen = ref(false)
 const groupStage = ref<{ openTurnSettings: () => void; openScene: () => void } | null>(null)
 const directStage = ref<{ closeProfile: () => void } | null>(null)
 const directSettingsSaving = ref(false)
+const directCharacterRemoving = ref(false)
 const directSettingsError = ref('')
 const mobileTemplateMenu = ref(false)
 const mobileTemplateCharacters = ref<CharacterTemplate[]>([])
@@ -438,7 +440,6 @@ const characterPickerPhase = ref<'closed' | 'moving' | 'expanded'>('closed')
 const characterTemplateForm = reactive<CharacterTemplate>({ name: '', image: '', background: '', personality: '', cocPlayStyle: '', initFavor: 0, favorability: {} })
 const favorabilityRows = ref<FavorabilityRow[]>([])
 const selectedCharacterId = ref<number | null>(null)
-const characterEditForm = reactive({ prompt: '', favor: 0 })
 const settingsForm = reactive({ name: '', acitvePushStatus: false, favorSystemStatus: 'NORMAL', eotDetectionStatus: true })
 const detailForm = reactive<WorldDetail>({ about: '', details: '' })
 const settingsTab = ref<'general' | 'lore' | 'data'>('general')
@@ -657,7 +658,7 @@ async function toggleCharacterChoice(template: CharacterTemplate) {
 }
 function openCharacter(id: number) {
   const item = workspace.characters.value.find((character) => character.characterId === id); if (!item) return
-  selectedCharacterId.value = id; characterEditForm.prompt = item.userInfoPrompt || ''; characterEditForm.favor = item.favorValue || 0; dialogs.characterEdit = true
+  selectedCharacterId.value = id; dialogs.characterEdit = true
 }
 function openSettings() {
   const world = workspace.selectedWorld.value; if (!world) return
@@ -695,11 +696,21 @@ async function saveCharacterTemplate() {
   if (characterTemplateMode.value === 'edit' && editingCharacterTemplateId.value) await workspace.updateCharacterTemplate(editingCharacterTemplateId.value, payload)
   else await workspace.createCharacterTemplate(payload)
 }
-async function saveSelectedCharacter() {
-  const id = selectedCharacterId.value; if (!id) return
-  await workspace.updateCharacter(id, characterEditForm.prompt, workspace.canEditSelectedWorld.value ? characterEditForm.favor : undefined)
+async function saveSelectedCharacterFavor(value: number) {
+  const id = selectedCharacterId.value; if (!id || busy.value) return
+  await run(() => workspace.updateCharacterFavor(id, value), 'characterEdit')
 }
-async function removeSelectedCharacter() { const id = selectedCharacterId.value; if (id) await workspace.removeCharacter(id) }
+async function removeDirectCharacter() {
+  const character = direct.selectedCharacter.value
+  const worldId = workspace.selectedWorldId.value
+  if (!character || directCharacterRemoving.value || directSettingsSaving.value || direct.loading.sending) return
+  directCharacterRemoving.value = true
+  try {
+    await workspace.removeCharacter(character.characterId)
+    if (workspace.selectedWorldId.value === worldId && direct.selectedCharacterId.value === character.characterId) closeDirectChat()
+  } catch (error) { notify('移出角色失败', errorMessage(error), 'danger') }
+  finally { directCharacterRemoving.value = false }
+}
 async function removeDetail(id?: number) { if (id) await workspace.removeDetail(id) }
 function clearDetailForm() {
   detailForm.about = ''
@@ -862,7 +873,7 @@ async function changePassword() {
       <WorldLibrary v-else-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" :archive-busy="Boolean(archiveOperation)" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
       <CocModuleLibrary v-else-if="view === 'modules'" @changed="workspace.loadModules" @detail-open-change="moduleDetailOpen = $event" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @back="home" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
-      <DirectChatStage ref="directStage" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
+      <DirectChatStage ref="directStage" :removing="directCharacterRemoving" @remove="removeDirectCharacter" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
       <TrpgCompletionStage v-else-if="view === 'group' && completionAvailable && !completionTranscript" :key="workspace.selectedConversationId.value || 0" :report="completionReport" :loading="completionLoading" :busy="completionBusy || workspace.loading.sending" :error="completionError" @reload="loadCompletion" @archive="archiveCompletion" @back="completionTranscript = true" />
       <GroupChatStage ref="groupStage" v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" :persist-actor-runtime="workspace.saveActorRuntime" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
@@ -1068,10 +1079,7 @@ async function changePassword() {
     <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.characterTemplate = false">取消</button><button class="button primary" :disabled="!characterTemplateForm.name || busy" @click="run(saveCharacterTemplate, 'characterTemplate')">{{ characterTemplateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.characterEdit" mobile-presentation="page" :title="selectedCharacter?.characterName ? `${selectedCharacter.characterName} · 角色设置` : '角色设置'" description="这些设置会影响角色在当前世界中的表现。">
-    <div class="form-stack"><label class="field"><span>好感度</span><input v-model.number="characterEditForm.favor" type="range" min="0" max="100" :disabled="!workspace.canEditSelectedWorld.value" /><output>{{ characterEditForm.favor }}</output><small v-if="!workspace.canEditSelectedWorld.value">只有世界模板的作者可以手动设置好感度。</small></label><label class="field"><span>希望角色记住的事</span><textarea v-model="characterEditForm.prompt" rows="6" placeholder="可以填写你的称呼、偏好或共同经历…" /></label><button v-if="workspace.canEditSelectedWorld.value && selectedCharacterId" class="button secondary" @click="openEditCharacterTemplate(selectedCharacterId)"><Pencil :size="16" />编辑角色模板</button></div>
-    <template #footer><button class="button ghost danger-text" @click="run(removeSelectedCharacter, 'characterEdit')"><Trash2 :size="16" />移出当前世界</button><button class="button primary" :disabled="!selectedCharacterId || busy" @click="run(saveSelectedCharacter, 'characterEdit')">保存</button></template>
-  </BaseDialog>
+  <CharacterFavorDialog v-model="dialogs.characterEdit" :character="selectedCharacter" :world-name="workspace.selectedWorld.value?.name" :can-edit="workspace.canEditSelectedWorld.value" :saving="busy" @save="saveSelectedCharacterFavor" />
 
   <BaseDialog
     v-model="dialogs.settings" mobile-presentation="page"

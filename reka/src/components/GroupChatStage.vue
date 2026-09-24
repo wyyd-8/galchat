@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Component } from 'vue'
-import { Archive, ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, GripVertical, History, LoaderCircle, MessageCircleQuestion, MessageSquareText, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Save, Send, Settings2, Swords, Trash2, UsersRound, X } from '@lucide/vue'
+import { Archive, ArrowLeft, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, History, LoaderCircle, MessageCircleQuestion, MessageSquareText, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Send, Settings2, Swords, Trash2, UsersRound, X } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger,
@@ -17,6 +17,7 @@ import CombatResultMessage from './CombatResultMessage.vue'
 import EpilogueMessage from './EpilogueMessage.vue'
 import MaterialMessage from './MaterialMessage.vue'
 import TrpgActorRoster from './TrpgActorRoster.vue'
+import ChatReplyPanel from './ChatReplyPanel.vue'
 import MobileActorModelDialog from './MobileActorModelDialog.vue'
 import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
 import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
@@ -77,7 +78,6 @@ const awayFromLatest = ref(false)
 const readingKey = computed(() => `world:${props.conversation.userWorldId}:group:${props.conversation.id}`)
 const inputElement = ref<HTMLTextAreaElement | null>(null)
 const composing = ref(false)
-const draggedIndex = ref<number | null>(null)
 const addActorId = ref('')
 const planOpen = ref(true)
 const reasoningOpen = reactive<Record<number, boolean>>({})
@@ -237,7 +237,6 @@ function selectActorModel(item: ReplyPlanItem, event: Event) {
     modelApiId: value ? Number(value) : undefined,
   })
 }
-function drop(index: number) { if (!planLocked.value && draggedIndex.value !== null) emit('movePlanItem', draggedIndex.value, index); draggedIndex.value = null }
 async function openToolsFromScene() {
   panelOpen.value = false
   await nextTick()
@@ -486,7 +485,15 @@ function handleReasoningScroll(event: Event) {
         <div v-if="isMobile && conversation.status !== 'active' && !completionPending" class="mobile-closed-chat-footer"><button v-if="completionAvailable" class="button secondary" @click="emit('openCompletion')">翻阅完成记录</button><button class="button primary" @click="emit('back')">返回当前世界</button></div>
         <p v-if="completionPending && completionError" class="turn-completion-error" role="alert">{{ completionError }}</p>
       </section>
-      <component v-if="!isMobile" :is="'div'" v-model="panelOpen" :title="conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序'" mobile-presentation="page" content-class="mobile-chat-panel" :class="{ 'chat-side-host': !isMobile }"><aside class="reply-panel">
+      <component v-if="!isMobile" :is="'div'" v-model="panelOpen" :title="conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序'" mobile-presentation="page" content-class="mobile-chat-panel" :class="{ 'chat-side-host': !isMobile }"><ChatReplyPanel v-if="conversation.mode === 'chat'" :key="conversation.id"
+        :items="items" :characters="characters" :username="username" :available-characters="availableCharacters"
+        :actor-runtimes="actorRuntimes" :model-apis="modelApis" :messages="messages" :turn-state="replyTurnState"
+        :can-edit="canEditPlan" :locked="planLocked || loading" :sending="sending" :loading="loading"
+        :closed="conversation.status !== 'active'" :dirty="showSavePlan"
+        @save="emit('savePlan')" @move="(from, to) => emit('movePlanItem', from, to)"
+        @remove="emit('deletePlanItem', $event)" @add="emit('addPlanItem', $event)"
+        @save-model="emit('saveActorRuntime', $event)" />
+      <aside v-else class="reply-panel">
         <section v-if="conversation.mode === 'trpg'" class="trpg-time-panel">
           <header><span><Clock3 :size="17" /><small>当前时间</small><strong>{{ conversation.gameTime?.displayText || '尚未设定' }}</strong></span><button v-if="conversation.gameTime && conversation.status === 'active' && !timeEditing" class="icon-button subtle" :disabled="sending || Boolean(currentTurn)" :title="currentTurn ? '行动轮进行中，暂不能校时' : '校正游戏时间'" @click="beginTimeEdit"><Pencil :size="14" /></button></header>
           <div v-if="timeEditing" class="trpg-time-editor">
@@ -519,30 +526,7 @@ function handleReasoningScroll(event: Event) {
             </section>
             <div v-if="!trpgExecution.scenes.length" class="plan-empty">暂无场景计划</div>
           </template>
-          <template v-else>
-            <div v-for="(item, index) in items" :key="`${item.actorType}-${item.actorId}-${item.subjectCharacterId}`" class="reply-plan-item" :draggable="canEditPlan && !planLocked && !isMobile" @dragstart="draggedIndex = index" @dragover.prevent @drop="drop(index)">
-              <GripVertical v-if="canEditPlan && !isMobile" class="drag-handle" :size="16" /><span class="reply-order">{{ index + 1 }}</span><span class="reply-avatar" :style="planCharacter(item)?.characterImage ? { backgroundImage: `url(${planCharacter(item)?.characterImage})` } : {}">{{ planCharacter(item)?.characterImage ? '' : planActorName(item).slice(0, 1) }}</span><span class="reply-name">{{ planActorName(item) }}<small>第 {{ index + 1 }} 位回复</small></span><button v-if="canEditPlan" class="icon-button remove-plan" :disabled="planLocked" :aria-label="`移除${planActorName(item)}`" title="移除" @click="emit('deletePlanItem', index)"><Trash2 :size="15" /></button>
-              <div v-if="isMobile && canEditPlan" class="mobile-reply-order-actions"><button class="button ghost" :disabled="planLocked || index === 0" :aria-label="`上移${planActorName(item)}`" @click="emit('movePlanItem', index, index - 1)"><ArrowUp :size="16" />上移</button><button class="button ghost" :disabled="planLocked || index === items.length - 1" :aria-label="`下移${planActorName(item)}`" @click="emit('movePlanItem', index, index + 1)"><ArrowDown :size="16" />下移</button></div>
-              <label class="reply-model-picker" @mousedown.stop @click.stop>
-                <span>回复模型</span>
-                <select :value="actorModelValue(item)" :aria-label="`选择${planActorName(item)}的回复模型`" :disabled="sending || conversation.status !== 'active'" @change="selectActorModel(item, $event)">
-                  <option value="">默认模型</option>
-                  <option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option>
-                </select>
-              </label>
-            </div>
-            <div v-if="!items.length" class="plan-empty">暂无回复角色</div>
-          </template>
         </div>
-        <div v-if="canEditPlan" class="add-plan-row"><select v-model="addActorId" :disabled="planLocked || !availableCharacters.length"><option value="">{{ availableCharacters.length ? '添加参与角色' : '没有可添加角色' }}</option><option v-for="item in availableCharacters" :key="item.characterId" :value="String(item.characterId)">{{ item.characterName }}</option></select><button class="icon-button bordered" :disabled="planLocked || !addActorId" @click="addActor"><Plus :size="17" /></button></div>
-        <div v-if="showSavePlan" class="plan-actions"><button class="button secondary save-plan" :disabled="!items.length || planLocked" @click="emit('savePlan')"><Save :size="16" />保存顺序</button></div>
-        <section v-if="conversation.mode === 'chat' && replyTurnState" class="reply-turn-status" :class="replyTurnState.phase">
-          <header><span><strong>当前回复状态</strong><small>{{ replyTurnState.turnId ? `Turn #${replyTurnState.turnId}` : '正在创建 Turn' }}</small></span><em>{{ replyTurnPhaseLabels[replyTurnState.phase] }}</em></header>
-          <div class="reply-turn-actors">
-            <div v-for="actor in replyTurnActors" :key="`${actor.item.actorType}-${actor.item.actorId}`" class="reply-turn-actor" :class="actor.phase"><i /><span>{{ character(actor.item.actorId)?.characterName || `角色 #${actor.item.actorId}` }}</span><small>{{ replyActorPhaseLabels[actor.phase] }}</small></div>
-          </div>
-          <p v-if="replyTurnState.error">{{ replyTurnState.error }}</p>
-        </section>
         <div class="panel-note"><strong>执行规则</strong><span>{{ conversation.mode === 'trpg' ? '行动顺序由系统根据当前场景或战斗自动安排。' : '角色依次生成回复，后一位可以看到本轮前面角色刚完成的内容。' }}</span></div>
       </aside></component>
     </div>

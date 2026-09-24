@@ -119,9 +119,10 @@ class TrpgGroupAgentPolicyTest {
                 .contains("存在多个并行地点时，直接用空行分段，不添加镜头标记")
                 .contains("不得附加括号式或其他场外行动提示")
                 .contains("不要建议调查员换一种查法")
-                .contains("每次回复都尽量让当前场景发生有意义的变化")
+                .contains("在调查员视角与检定结果允许的范围内")
                 .contains("推进调查、揭示信息、产生后果、提供选择，或回应调查员的行动")
                 .contains("避免没有新信息、新选择或新变化的空转")
+                .contains("不必每次回复都揭示信息或制造变化")
                 .contains("完成当前叙述后立即结束回复");
         assertThat(invocation.prompt().getInstructions())
                 .noneMatch(message -> message.getText()

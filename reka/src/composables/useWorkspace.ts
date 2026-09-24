@@ -256,12 +256,14 @@ export function useWorkspace() {
     await reloadCharacters()
   }
   async function removeCharacter(id: number) { if (!selectedWorldId.value) return; await api.deleteCharacter(selectedWorldId.value, id); characters.value = await api.characters(selectedWorldId.value) }
-  async function updateCharacter(id: number, prompt: string, favor?: number) {
-    if (!selectedWorldId.value) return
-    const requests: Promise<void>[] = [api.updatePrompt(selectedWorldId.value, id, prompt)]
-    if (typeof favor === 'number') requests.push(api.updateFavor(selectedWorldId.value, id, favor))
-    await Promise.all(requests)
-    characters.value = await api.characters(selectedWorldId.value); notify('角色资料已保存', '', 'success')
+  async function updateCharacterFavor(id: number, favor: number) {
+    const worldId = selectedWorldId.value
+    if (!worldId || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以手动调整好感度')
+    if (!Number.isInteger(favor) || favor < 0 || favor > 100) throw new Error('好感度必须是 0–100 之间的整数')
+    await api.updateFavor(worldId, id, favor)
+    const updated = await api.characters(worldId)
+    if (selectedWorldId.value === worldId) characters.value = updated
+    notify('好感度已保存', '', 'success')
   }
   async function createCharacterTemplate(payload: CharacterTemplate) {
     if (!selectedWorld.value?.worldId) return
@@ -873,7 +875,7 @@ export function useWorkspace() {
     latestDiceRoll, incomingDiceRolls, hasOlderGroupMessages, generationFailure, generationFailureOpen,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
-    reloadCharacters, addCharacter, removeCharacter, updateCharacter, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation, deleteConversation,
+    reloadCharacters, addCharacter, removeCharacter, updateCharacterFavor, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation, deleteConversation,
     loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, saveActorRuntime, askKp, startTrpgTurn, retryGenerationFailure, selectSceneOption, endExploration, retryStep, correctGameTime, refreshDiceRoll,
   }
 }

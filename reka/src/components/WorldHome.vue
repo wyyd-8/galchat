@@ -138,7 +138,7 @@ function openDialogue(entry: DialogueEntry) {
               </span>
               <ChevronRight :size="17" />
             </button>
-            <button v-if="entry.kind === 'direct'" class="icon-button dialogue-entry-edit" title="编辑角色设置" aria-label="编辑角色设置" @click="emit('editCharacter', entry.id)"><Pencil :size="14" /></button>
+            <button v-if="entry.kind === 'direct'" class="icon-button dialogue-entry-edit" title="调整好感度" aria-label="调整好感度" @click="emit('editCharacter', entry.id)"><Pencil :size="14" /></button>
           </article>
         </div>
         <div v-else class="dialogue-hub-empty">

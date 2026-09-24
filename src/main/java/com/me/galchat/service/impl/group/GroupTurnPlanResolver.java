@@ -88,7 +88,7 @@ public class GroupTurnPlanResolver {
     public void onTurnCompleted(
             GroupConversation conversation, String turnSource) {
         if (GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
-            replyPlanService.finishActiveUnderLock(conversation);
+            // Keep the saved reply order for subsequent chat turns.
             return;
         }
         if (GroupChatConstant.PLAN_SOURCE_POST_COMBAT.equals(turnSource)) {

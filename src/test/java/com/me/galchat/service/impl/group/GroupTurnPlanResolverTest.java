@@ -233,13 +233,15 @@ class GroupTurnPlanResolverTest {
     }
 
     @Test
-    void completedChatTurnFinishesTheActivePlanWhileTheCallerHoldsTheLock() {
+    void completedChatTurnsKeepTheActiveReplyPlan() {
         GroupReplyPlanService replyPlanService =
                 mock(GroupReplyPlanService.class);
+        TrpgSceneLifecycleService lifecycleService =
+                mock(TrpgSceneLifecycleService.class);
         GroupTurnPlanResolver resolver = new GroupTurnPlanResolver(
                 replyPlanService,
                 mock(TrpgSceneSelectionService.class),
-                mock(TrpgSceneLifecycleService.class),
+                lifecycleService,
                 mock(TrpgRunLifecycleService.class),
                 mock(TrpgCombatLifecycleService.class),
                 mock(TrpgChildSceneCommandService.class),
@@ -247,10 +249,14 @@ class GroupTurnPlanResolverTest {
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setMode(GroupChatConstant.MODE_CHAT);
 
-        resolver.onTurnCompleted(
-                conversation, GroupChatConstant.PLAN_SOURCE_USER);
+        for (long turnId : List.of(61L, 62L)) {
+            resolver.onTurnCompleted(conversation, new GroupChatTurn()
+                    .setId(turnId).setConversationId(7L)
+                    .setPlanSource(GroupChatConstant.PLAN_SOURCE_USER));
+        }
 
-        verify(replyPlanService).finishActiveUnderLock(conversation);
+        verify(replyPlanService, never()).finishActiveUnderLock(conversation);
+        verify(lifecycleService, never()).finalizeAfterTurn(any(), any());
     }
 
     @Test

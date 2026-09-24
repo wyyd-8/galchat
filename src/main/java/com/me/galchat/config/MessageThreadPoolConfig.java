@@ -20,7 +20,7 @@ public class MessageThreadPoolConfig {
         // 最大线程数
         executor.setMaxPoolSize(8);
         // 队列大小
-        executor.setQueueCapacity(10);
+        executor.setQueueCapacity(8);
         // 线程名前缀
         executor.setThreadNamePrefix("delay-task-handler-");
         executor.setWaitForTasksToCompleteOnShutdown(false);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Component } from 'vue'
-import { Archive, ArrowLeft, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, History, LoaderCircle, MessageCircleQuestion, MessageSquareText, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Send, Settings2, Swords, Trash2, UsersRound, X } from '@lucide/vue'
+import { Archive, ArrowDown, ArrowLeft, Check, ChevronDown, Circle, CircleDot, CircleStop, Clock3, Footprints, History, LoaderCircle, MessageCircleQuestion, MessageSquareText, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Send, Settings2, Swords, Trash2, UsersRound, X } from '@lucide/vue'
 import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger,
   PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger,

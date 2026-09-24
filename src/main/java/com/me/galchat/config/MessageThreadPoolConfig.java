@@ -20,7 +20,7 @@ public class MessageThreadPoolConfig {
         // 最大线程数
         executor.setMaxPoolSize(8);
         // 队列大小
-        executor.setQueueCapacity(10);
+        executor.setQueueCapacity(8);
         // 线程名前缀
         executor.setThreadNamePrefix("delay-task-handler-");
         executor.setWaitForTasksToCompleteOnShutdown(false);
@@ -50,8 +50,8 @@ public class MessageThreadPoolConfig {
     public ThreadPoolTaskExecutor chatTaskExecutor() {
         log.info("初始化聊天消息消费线程池...");
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(4);
-        executor.setMaxPoolSize(8);
+        executor.setCorePoolSize(8);
+        executor.setMaxPoolSize(10);
         executor.setQueueCapacity(20);
         executor.setThreadNamePrefix("chat-message-consumer-");
         executor.setWaitForTasksToCompleteOnShutdown(false);

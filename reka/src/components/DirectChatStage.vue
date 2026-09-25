@@ -9,7 +9,7 @@ import { shouldSubmitChatKey } from './chatInputState'
 import { mergeDirectProfileDraft } from './directProfileDraft'
 import '@/styles/mobile-chat.css'
 import type { Character, DirectMessage, ModelApi, UserWorld } from '@/api/types'
-import { resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
+import { observeConversationResize, resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
 
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
@@ -71,6 +71,7 @@ const initialScrollPending = ref(true)
 let restorationBoundary: string | null = null
 const conversationalMessages = computed(() => props.messages.filter((item) => item.role === 'user' || item.role === 'assistant').length)
 let latestScrollFrame = 0
+let stopObservingResize: (() => void) | undefined
 
 watch(() => `${props.loading.sending}:${props.messages.map((message) => `${message.id}:${message.role}:${Boolean(message.content.trim())}`).join('|')}`, syncThinkingState, { immediate: true, flush: 'sync' })
 watch(() => `${props.world.id}:${props.character.characterId}`, () => {
@@ -92,6 +93,7 @@ watch(() => `${props.loading.sending}:${props.messages.map((message) => `${messa
 }, { flush: 'post' })
 watch(() => props.loading.sending, (sending, wasSending) => { if (!sending && wasSending) scrollToLatest() }, { flush: 'post' })
 onBeforeUnmount(() => {
+  stopObservingResize?.()
   if (scroller.value && !props.loading.history && !initialScrollPending.value) rememberChatReadingPosition(readingKey.value, scroller.value)
   cancelAnimationFrame(latestScrollFrame)
 })
@@ -104,7 +106,7 @@ function syncThinkingState() {
     const laterTurnStarted = following.some((item) => item.role === 'user')
     const phase = props.loading.sending && !mainStarted && !laterTurnStarted ? 'thinking' : mainStarted ? 'main' : 'idle'
     const previous = thinkingPhase.get(message.id)
-    if (!previous) thinkingOpen[message.id] = !isMobile.value && phase === 'thinking'
+    if (phase === 'thinking' && previous !== 'thinking') thinkingOpen[message.id] = true
     else if (previous === 'thinking' && phase !== 'thinking') thinkingOpen[message.id] = false
     thinkingPhase.set(message.id, phase)
   })
@@ -121,7 +123,11 @@ function scrollToLatest() {
   })
 }
 function bindScroller(element: unknown) {
-  scroller.value = element instanceof HTMLElement ? element : null
+  const viewport = element instanceof HTMLElement ? element : null
+  if (viewport === scroller.value) return
+  stopObservingResize?.()
+  scroller.value = viewport
+  stopObservingResize = viewport ? observeConversationResize(viewport, scrollToLatest) : undefined
   lastScrollTop.value = scroller.value?.scrollTop ?? 0
 }
 function handleScroll(event: Event) {

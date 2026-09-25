@@ -4,6 +4,14 @@ interface ScrollFollowingState { following: boolean; lastScrollTop: number }
 const conversationFollowing = new WeakMap<HTMLElement, ScrollFollowingState>()
 const reasoningFollowing = new WeakMap<HTMLElement, ScrollFollowingState>()
 
+/** Keyboard and composer resizing can hide the latest message without adding content. */
+export function observeConversationResize(viewport: HTMLElement, onResize: () => void): () => void {
+  if (typeof ResizeObserver === 'undefined') return () => {}
+  const observer = new ResizeObserver(onResize)
+  observer.observe(viewport)
+  return () => observer.disconnect()
+}
+
 function isNearLatest(element: HTMLElement) {
   return element.scrollHeight - element.clientHeight - element.scrollTop <= LATEST_THRESHOLD
 }
@@ -33,7 +41,9 @@ export function scrollConversationToLatest(viewport: HTMLElement) {
 
 function updateScrollFollowing(states: WeakMap<HTMLElement, ScrollFollowingState>, element: HTMLElement) {
   const previous = states.get(element)
-  const movingUp = previous !== undefined && element.scrollTop < previous.lastScrollTop
+  // A taller viewport clamps scrollTop downward; that is not a request to read history.
+  const maxTop = Math.max(0, element.scrollHeight - element.clientHeight)
+  const movingUp = previous !== undefined && element.scrollTop < Math.min(previous.lastScrollTop, maxTop)
   let following = previous?.following ?? isNearLatest(element)
   if (movingUp) following = false
   else if (!following && isNearLatest(element)) following = true

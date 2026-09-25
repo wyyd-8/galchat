@@ -22,7 +22,7 @@ import MobileActorModelDialog from './MobileActorModelDialog.vue'
 import { replyPlanActorName, replyPlanSignature, shouldShowSavePlan, visibleReplyPlanItems } from './replyPlanState'
 import { replyActorPhase, type ReplyActorPhase, type ReplyTurnState } from './replyTurnStatus'
 import { syncReasoningDisclosure, type ReasoningPhase } from './reasoningDisclosure'
-import { resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
+import { observeConversationResize, resetConversationScrollFollowing, scrollConversationToLatest, updateConversationScrollFollowing, updateReasoningScrollFollowing } from './reasoningScroll'
 import { buildTrpgExecutionState, trpgTurnActionLabel, type TrpgExecutionScene, type TrpgExecutionActor } from './trpgExecutionState'
 import { createCountdownController, isBetweenTrpgTurns } from './trpgTurnExperiments'
 
@@ -161,6 +161,7 @@ const composerPlaceholder = computed(() => {
   return '等待当前行动轮推进'
 })
 let latestScrollFrame = 0
+let stopObservingResize: (() => void) | undefined
 
 watch(() => props.messages.map((message) => `${message.id}:${message.replyStepId || 0}:${message.status}:${Boolean(message.content.trim())}:${Boolean(props.reasoning[message.id])}`).join('|'), syncReasoningState, { immediate: true, flush: 'sync' })
 watch(autoExpandKpReasoning, (enabled) => {
@@ -200,6 +201,7 @@ watch(
   { immediate: true },
 )
 onBeforeUnmount(() => {
+  stopObservingResize?.()
   if (scroller.value && !props.loading && !initialScrollPending.value) rememberChatReadingPosition(readingKey.value, scroller.value)
   cancelAnimationFrame(latestScrollFrame)
   turnCountdown.cancel()
@@ -210,10 +212,8 @@ function syncReasoningState() {
     const messageId = message.id
     if (!props.reasoning[messageId]) return
     const phase = message.status === 'streaming' && !message.content.trim() ? 'thinking' : message.content.trim() ? 'main' : 'idle'
-    const firstSeenOnMobile = isMobile.value && !reasoningPhase.has(messageId)
     const autoExpand = props.conversation.mode !== 'trpg' || message.speakerType !== 'kp' || autoExpandKpReasoning.value
     syncReasoningDisclosure(reasoningOpen, reasoningPhase, messageId, phase, autoExpand)
-    if (firstSeenOnMobile && !(props.conversation.mode === 'trpg' && message.speakerType === 'kp' && autoExpandKpReasoning.value)) reasoningOpen[messageId] = false
   })
 }
 
@@ -334,7 +334,11 @@ function scrollToLatest() {
   })
 }
 function bindScroller(element: unknown) {
-  scroller.value = element instanceof HTMLElement ? element : null
+  const viewport = element instanceof HTMLElement ? element : null
+  if (viewport === scroller.value) return
+  stopObservingResize?.()
+  scroller.value = viewport
+  stopObservingResize = viewport ? observeConversationResize(viewport, scrollToLatest) : undefined
   lastScrollTop.value = scroller.value?.scrollTop ?? 0
 }
 function sceneIcon(scene: TrpgExecutionScene): Component {

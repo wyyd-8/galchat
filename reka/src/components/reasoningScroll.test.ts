@@ -1,6 +1,60 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+test('keeps following after keyboard dismissal clamps the scroll position', async () => {
+  const module = await import('./reasoningScroll.ts')
+  let top = 700
+  const viewport = {
+    clientHeight: 300, scrollHeight: 1000,
+    get scrollTop() { return top },
+    set scrollTop(value: number) { top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)) },
+    querySelectorAll() { return [] },
+  }
+  module.resetConversationScrollFollowing(viewport as unknown as HTMLElement)
+  viewport.clientHeight = 600
+  viewport.scrollTop = 700 // Browser clamps the position when the keyboard closes.
+  module.updateConversationScrollFollowing(viewport as unknown as HTMLElement)
+  viewport.clientHeight = 300
+  module.scrollConversationToLatest(viewport as unknown as HTMLElement)
+  assert.equal(viewport.scrollTop, 700)
+})
+
+test('viewport resize follows latest content but preserves a reader browsing history', async context => {
+  const module = await import('./reasoningScroll.ts')
+  let resize: (() => void) | undefined
+  const original = globalThis.ResizeObserver
+  globalThis.ResizeObserver = class {
+    constructor(callback: () => void) { resize = callback }
+    observe() {}
+    disconnect() { resize = undefined }
+  } as unknown as typeof ResizeObserver
+  context.after(() => { globalThis.ResizeObserver = original })
+  let top = 400
+  const viewport = {
+    clientHeight: 600, scrollHeight: 1000,
+    get scrollTop() { return top },
+    set scrollTop(value: number) { top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)) },
+    querySelectorAll() { return [] },
+  }
+  const element = viewport as unknown as HTMLElement
+  module.resetConversationScrollFollowing(element)
+  assert.equal(typeof module.observeConversationResize, 'function', 'chat viewports must react to keyboard and composer resizing')
+  const stop = module.observeConversationResize(element, () => module.scrollConversationToLatest(element))
+  viewport.clientHeight = 300
+  resize?.()
+  assert.equal(viewport.scrollTop, 700)
+  viewport.scrollTop = 200
+  module.updateConversationScrollFollowing(element)
+  viewport.clientHeight = 250
+  resize?.()
+  assert.equal(viewport.scrollTop, 200)
+  stop()
+  module.resetConversationScrollFollowing(element)
+  viewport.clientHeight = 200
+  resize?.()
+  assert.equal(viewport.scrollTop, 200, 'unmounted conversations stop responding to resizing')
+})
+
 test('keeps streaming reasoning and the message viewport at their latest content', async () => {
   const module = await import('./reasoningScroll.ts').catch(() => null)
   assert.ok(module, 'the conversation scrolling behavior should be available')

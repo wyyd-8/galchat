@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ARCHIVE_ACCEPT, downloadArchive } from '@/api/archiveFiles'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { ArrowLeft, BookOpen, ChevronRight, Ellipsis, Database, Download, ImageUp, Pencil, Plus, RotateCcw, Trash2, X } from '@lucide/vue'
+import { ArrowLeft, BookOpen, ChevronRight, Ellipsis, Database, Download, Pencil, Plus, RotateCcw, Trash2, X } from '@lucide/vue'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import AppSidebar from '@/components/AppSidebar.vue'
 import MobileNavigation from '@/components/MobileNavigation.vue'
@@ -22,7 +22,9 @@ import WorldHome from '@/components/WorldHome.vue'
 import WorldLibrary from '@/components/WorldLibrary.vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import NoticeToast from '@/components/ui/NoticeToast.vue'
-import { api, uploadImage } from '@/api/client'
+import DesktopTemplateImageUpload from '@/components/DesktopTemplateImageUpload.vue'
+import MobileTemplateImageUpload from '@/components/MobileTemplateImageUpload.vue'
+import { api } from '@/api/client'
 import type {
   TrpgCompletionReport, CharacterTemplate, DiceRollAggregate, TrpgGameTimePeriod, UserInfo, UserWorld, WorldArchiveReplaceResult, WorldDetail,
   WorldTemplate, WorldTemplateUsage,
@@ -172,7 +174,7 @@ function formatDebugValue(value: unknown) {
   if (typeof value === 'string') return value
   try { return JSON.stringify(value, null, 2) } catch { return String(value) }
 }
-const uploading = ref<'world' | 'character' | null>(null)
+const uploading = reactive({ world: false, character: false })
 const templateMode = ref<'create' | 'edit'>('create')
 const characterTemplateMode = ref<'create' | 'edit'>('create')
 const editingCharacterTemplateId = ref<number | null>(null)
@@ -692,6 +694,7 @@ function characterTemplatePayload(): CharacterTemplate {
   return { ...characterTemplateForm, name: characterTemplateForm.name.trim(), image: characterTemplateForm.image?.trim(), background: characterTemplateForm.background?.trim(), personality: characterTemplateForm.personality?.trim(), cocPlayStyle: characterTemplateForm.cocPlayStyle?.trim() || undefined, favorability: Object.keys(favorability).length ? favorability : undefined }
 }
 async function saveCharacterTemplate() {
+  if (uploading.character) return
   const payload = characterTemplatePayload()
   if (characterTemplateMode.value === 'edit' && editingCharacterTemplateId.value) await workspace.updateCharacterTemplate(editingCharacterTemplateId.value, payload)
   else await workspace.createCharacterTemplate(payload)
@@ -743,15 +746,9 @@ async function addWorldDetail() {
   if (success) { mobileLoreOpen.value = false; await cancelDetailComposer() }
 }
 async function saveTemplate() {
+  if (uploading.world) return
   const payload = { ...templateForm, name: templateForm.name.trim(), background: templateForm.background?.trim() }
   if (templateMode.value === 'edit') await workspace.updateTemplate(payload); else await workspace.createTemplate(payload)
-}
-async function handleImage(event: Event, target: 'world' | 'character') {
-  const input = event.target as HTMLInputElement; const file = input.files?.[0]; input.value = ''; if (!file) return
-  uploading.value = target
-  try { const url = await uploadImage(file); if (target === 'world') templateForm.image = url; else characterTemplateForm.image = url; notify('图片已上传', file.name, 'success') }
-  catch (error) { notify('图片上传失败', errorMessage(error), 'danger') }
-  finally { uploading.value = null }
 }
 async function runArchive(label: string, action: () => Promise<unknown>) {
   if (archiveOperation.value || busy.value) return false
@@ -891,8 +888,8 @@ async function changePassword() {
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.template" mobile-presentation="page" :title="templateDialogTitle" :description="isMobile ? '' : templateDialogDescription" size="lg">
-    <div class="form-grid"><label class="field"><span>模板名称</span><input v-model.trim="templateForm.name" /></label><label class="field"><span>作者</span><input v-model.trim="templateForm.author" /></label><label class="field full"><span>封面</span><div class="upload-row"><small>{{ templateForm.image ? '已上传封面' : '尚未上传封面' }}</small><button v-if="templateForm.image" type="button" class="button ghost" :disabled="uploading !== null" @click="templateForm.image = ''">移除封面</button><label class="button secondary file-button"><ImageUp :size="16" />{{ uploading === 'world' ? '上传中' : '上传封面' }}<input type="file" accept="image/*" :disabled="uploading !== null" @change="handleImage($event, 'world')" /></label></div></label><label class="field full"><span>世界背景</span><textarea v-model.trim="templateForm.background" rows="7" /></label><label class="switch-row full"><span><strong>公开模板</strong><small>其他用户可以发现并使用</small></span><input v-model="templateForm.visible" type="checkbox" /></label></div>
-    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.template = false">取消</button><button class="button primary" :disabled="!templateForm.name || !templateForm.background || busy" @click="run(saveTemplate, 'template')">{{ templateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
+    <div class="form-grid"><label class="field"><span>模板名称</span><input v-model.trim="templateForm.name" /></label><label class="field"><span>作者</span><input v-model.trim="templateForm.author" /></label><MobileTemplateImageUpload v-if="isMobile" v-model="templateForm.image" kind="world" :name="templateForm.name" :disabled="busy" @busy-change="uploading.world = $event" /><DesktopTemplateImageUpload v-else v-model="templateForm.image" class="full" kind="world" :name="templateForm.name" :disabled="busy" @busy-change="uploading.world = $event" /><label class="field full"><span>世界背景</span><textarea v-model.trim="templateForm.background" rows="7" /></label><label class="switch-row full"><span><strong>公开模板</strong><small>其他用户可以发现并使用</small></span><input v-model="templateForm.visible" type="checkbox" /></label></div>
+    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.template = false">取消</button><button class="button primary" :disabled="!templateForm.name || !templateForm.background || busy || uploading.world" @click="run(saveTemplate, 'template')">{{ templateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.templatePreview" mobile-presentation="page" :title="isMobile ? '世界模板' : selectedTemplatePreview?.name || '世界模板'" :description="isMobile ? '' : selectedTemplatePreview?.author ? `作者：${selectedTemplatePreview.author}` : '匿名创作者'" size="lg">
@@ -1069,14 +1066,14 @@ async function changePassword() {
   <BaseDialog v-model="dialogs.characterTemplate" mobile-presentation="page" :title="characterTemplateDialogTitle" size="lg">
     <div v-if="isMobile" class="form-stack">
       <label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label>
-      <div class="mobile-character-upload"><img v-if="characterTemplateForm.image" :src="characterTemplateForm.image" alt="角色头像" /><label class="button secondary file-button"><ImageUp :size="16" />{{ uploading === 'character' ? '上传中…' : '上传 / 更换头像' }}<input type="file" accept="image/*" :disabled="uploading !== null" @change="handleImage($event, 'character')" /></label><button v-if="characterTemplateForm.image" class="mobile-v1-link" @click="characterTemplateForm.image = ''">移除头像</button></div>
+      <MobileTemplateImageUpload v-model="characterTemplateForm.image" kind="character" :name="characterTemplateForm.name" :disabled="busy" @busy-change="uploading.character = $event" />
       <label class="field"><span>初始好感</span><input v-model.number="characterTemplateForm.initFavor" type="number" min="0" max="100" /></label>
       <label class="field"><span>角色设定</span><textarea v-model.trim="characterTemplateForm.background" rows="5" /></label>
       <details class="mobile-character-extra"><summary>性格与跑团偏好</summary><label class="field"><span>性格</span><textarea v-model.trim="characterTemplateForm.personality" rows="4" /></label><label class="field"><span>CoC 跑团偏好</span><textarea v-model.trim="characterTemplateForm.cocPlayStyle" rows="4" placeholder="描述角色面对调查、危险与同伴时的偏好…" /></label></details>
       <button class="mobile-v1-row" @click="mobileFavorListOpen = true"><span><strong>好感阶段提示词</strong><small>{{ favorabilityRows.length }} 个阶段 · 按阈值逐条编辑</small></span><ChevronRight :size="16" /></button>
     </div>
-    <div v-else class="form-grid"><label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label><label class="field"><span>初始好感</span><input v-model.number="characterTemplateForm.initFavor" type="number" min="0" max="100" /></label><label class="field full"><span>角色头像</span><div class="upload-row"><small>{{ characterTemplateForm.image ? '已上传角色头像' : '尚未上传角色头像' }}</small><button v-if="characterTemplateForm.image" type="button" class="button ghost" :disabled="uploading !== null" @click="characterTemplateForm.image = ''">移除头像</button><label class="button secondary file-button"><ImageUp :size="16" />{{ uploading === 'character' ? '上传中' : '上传角色头像' }}<input type="file" accept="image/*" :disabled="uploading !== null" @change="handleImage($event, 'character')" /></label></div></label><label class="field full"><span>背景</span><textarea v-model.trim="characterTemplateForm.background" rows="4" /></label><label class="field full"><span>性格</span><textarea v-model.trim="characterTemplateForm.personality" rows="4" /></label><label class="field full"><span>CoC 跑团偏好</span><textarea v-model.trim="characterTemplateForm.cocPlayStyle" rows="4" placeholder="例如：倾向优先调查无人探索的地点；遇到明显危险时更愿意与同伴结伴。" /></label><div class="field full"><span>好感阶段的角色表现</span><div class="favorability-list"><div v-for="row in favorabilityRows" :key="row.id" class="favorability-row"><input v-model.number="row.threshold" type="number" min="0" max="100" placeholder="好感度" /><input v-model.trim="row.prompt" placeholder="达到该好感度时的角色表现" /><button class="icon-button" title="删除阶段" @click="removeFavorabilityRow(row.id)"><Trash2 :size="15" /></button></div></div><button class="button ghost add-row-button" @click="addFavorabilityRow"><Plus :size="15" />添加阶段</button></div></div>
-    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.characterTemplate = false">取消</button><button class="button primary" :disabled="!characterTemplateForm.name || busy" @click="run(saveCharacterTemplate, 'characterTemplate')">{{ characterTemplateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
+    <div v-else class="form-grid"><label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label><label class="field"><span>初始好感</span><input v-model.number="characterTemplateForm.initFavor" type="number" min="0" max="100" /></label><DesktopTemplateImageUpload v-model="characterTemplateForm.image" class="full" kind="character" :name="characterTemplateForm.name" :disabled="busy" @busy-change="uploading.character = $event" /><label class="field full"><span>背景</span><textarea v-model.trim="characterTemplateForm.background" rows="4" /></label><label class="field full"><span>性格</span><textarea v-model.trim="characterTemplateForm.personality" rows="4" /></label><label class="field full"><span>CoC 跑团偏好</span><textarea v-model.trim="characterTemplateForm.cocPlayStyle" rows="4" placeholder="例如：倾向优先调查无人探索的地点；遇到明显危险时更愿意与同伴结伴。" /></label><div class="field full"><span>好感阶段的角色表现</span><div class="favorability-list"><div v-for="row in favorabilityRows" :key="row.id" class="favorability-row"><input v-model.number="row.threshold" type="number" min="0" max="100" placeholder="好感度" /><input v-model.trim="row.prompt" placeholder="达到该好感度时的角色表现" /><button class="icon-button" title="删除阶段" @click="removeFavorabilityRow(row.id)"><Trash2 :size="15" /></button></div></div><button class="button ghost add-row-button" @click="addFavorabilityRow"><Plus :size="15" />添加阶段</button></div></div>
+    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.characterTemplate = false">取消</button><button class="button primary" :disabled="!characterTemplateForm.name || busy || uploading.character" @click="run(saveCharacterTemplate, 'characterTemplate')">{{ characterTemplateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
   <CharacterFavorDialog v-model="dialogs.characterEdit" :character="selectedCharacter" :world-name="workspace.selectedWorld.value?.name" :can-edit="workspace.canEditSelectedWorld.value" :saving="busy" @save="saveSelectedCharacterFavor" />

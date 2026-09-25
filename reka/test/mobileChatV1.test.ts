@@ -57,6 +57,41 @@ async function mobileRenderer(context: { after: (fn: () => Promise<void>) => voi
   }
 }
 
+test('mobile direct chat opens live thinking and keeps completed thinking collapsed', async context => {
+  const render = await mobileRenderer(context)
+  const props = {
+    input: '', scroller: null,
+    world: { id: 3, worldId: 2, name: '雾港' },
+    character: { characterId: 7, userWorldId: 3, characterName: '林间' },
+    messages: [{ id: 'thinking-1', role: 'thinking', content: '正在梳理线索' }], modelApis: [],
+    loading: { history: true, sending: true, withdrawing: false, model: false },
+    canWithdraw: false, hasOlderMessages: false,
+  }
+  const live = await render('DirectChatStage', props)
+  assert.match(live, /data-state="open"[^>]*class="direct-thinking"/)
+  const completed = await render('DirectChatStage', { ...props, loading: { ...props.loading, sending: false } })
+  assert.match(completed, /data-state="closed"[^>]*class="direct-thinking"/)
+})
+
+test('mobile group chat opens live character thinking while KP thinking remains opt-in', async context => {
+  const render = await mobileRenderer(context)
+  const props = {
+    input: '', scroller: null,
+    conversation: { id: 1, userWorldId: 3, title: '调查', mode: 'chat', status: 'active' },
+    username: '你', messages: [{ id: 9, speakerType: 'character', speakerId: 7, content: '', status: 'streaming' }],
+    reasoning: { 9: '正在梳理线索' }, characters: [{ characterId: 7, characterName: '林间' }],
+    replyPlan: { source: 'USER', items: [] }, replyPlans: [], availableCharacters: [], currentTurn: null,
+    replyTurnState: null, sending: true, loading: true, hasOlderMessages: false,
+  }
+  const live = await render('GroupChatStage', props)
+  assert.match(live, /data-state="open"[^>]*class="reasoning-block"/)
+  const kp = await render('GroupChatStage', {
+    ...props, conversation: { ...props.conversation, mode: 'trpg' },
+    messages: [{ ...props.messages[0], speakerType: 'kp' }],
+  })
+  assert.match(kp, /data-state="closed"[^>]*class="reasoning-block"/)
+})
+
 test('mobile direct profile has a saveable personal note without exposing author controls', async context => {
   const render = await mobileRenderer(context)
   const html = await render('DirectChatStage', {

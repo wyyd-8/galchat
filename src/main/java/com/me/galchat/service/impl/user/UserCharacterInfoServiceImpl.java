@@ -37,6 +37,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * <p>
@@ -206,9 +208,26 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     @Override
     public List<UserCharacterInfo> listByUserWorldId(Long userWorldId) {
         userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
-        return lambdaQuery()
+        List<UserCharacterInfo> characters = lambdaQuery()
                 .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                 .list();
+        List<Long> templateIds = characters.stream().map(UserCharacterInfo::getCharacterId)
+                .filter(Objects::nonNull).distinct().toList();
+        if (templateIds.isEmpty()) {
+            return characters;
+        }
+        Map<Long, CharacterTemplate> templates = characterTemplateService.list(new LambdaQueryWrapper<CharacterTemplate>()
+                        .select(CharacterTemplate::getId, CharacterTemplate::getImage)
+                        .in(CharacterTemplate::getId, templateIds)).stream()
+                .collect(Collectors.toMap(CharacterTemplate::getId, Function.identity()));
+        // Keep conversation state, but display the current template image.
+        characters.forEach(character -> {
+            CharacterTemplate template = templates.get(character.getCharacterId());
+            if (template != null) {
+                character.setCharacterImage(template.getImage());
+            }
+        });
+        return characters;
     }
 
     @Override

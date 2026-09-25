@@ -1,5 +1,6 @@
 package com.me.galchat.service.impl.world;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.UserWorldPrefix;
@@ -23,6 +24,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * <p>
@@ -42,10 +46,13 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
 
     @Override
     public List<UserWorldPrefix> listBaseInfoByUserId(Long userId) {
-        return lambdaQuery()
-                .select(UserWorldPrefix::getId, UserWorldPrefix::getName, UserWorldPrefix::getImage)
+        List<UserWorldPrefix> worlds = lambdaQuery()
+                .select(UserWorldPrefix::getId, UserWorldPrefix::getWorldId,
+                        UserWorldPrefix::getName, UserWorldPrefix::getImage)
                 .eq(UserWorldPrefix::getUserId, userId)
                 .list();
+        fillCurrentTemplateImages(worlds);
+        return worlds;
     }
 
     @Override
@@ -72,7 +79,28 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
 
     @Override
     public UserWorldPrefix getUserWorld(Long userId, Long id) {
-        return getExistingUserWorld(userId, id);
+        UserWorldPrefix world = getExistingUserWorld(userId, id);
+        fillCurrentTemplateImages(List.of(world));
+        return world;
+    }
+
+    private void fillCurrentTemplateImages(List<UserWorldPrefix> worlds) {
+        List<Long> templateIds = worlds.stream().map(UserWorldPrefix::getWorldId)
+                .filter(Objects::nonNull).distinct().toList();
+        if (templateIds.isEmpty()) {
+            return;
+        }
+        Map<Long, WorldTemplate> templates = worldTemplateService.list(new LambdaQueryWrapper<WorldTemplate>()
+                        .select(WorldTemplate::getId, WorldTemplate::getImage)
+                        .in(WorldTemplate::getId, templateIds)).stream()
+                .collect(Collectors.toMap(WorldTemplate::getId, Function.identity()));
+        // Images follow the live template, including an explicitly cleared image.
+        worlds.forEach(world -> {
+            WorldTemplate template = templates.get(world.getWorldId());
+            if (template != null) {
+                world.setImage(template.getImage());
+            }
+        });
     }
 
     @Override

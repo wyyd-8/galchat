@@ -99,6 +99,55 @@ class ModelApiServiceTest {
     }
 
     @Test
+    void updateReplacesKeyEncryptedWithPreviousMasterKey() {
+        ModelApiKeyCipher previousCipher = new ModelApiKeyCipher(
+                Base64.getEncoder().encodeToString(
+                        "abcdef0123456789abcdef0123456789".getBytes()));
+        UserModelApi existing = testedRecord()
+                .setApiKeyEncrypted(previousCipher.encrypt("sk-existing"));
+        mapperState.existing = existing;
+        assertThatThrownBy(() -> cipher.decrypt(existing.getApiKeyEncrypted()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("API Key 密文校验失败");
+        ModelApiSaveDTO dto = new ModelApiSaveDTO()
+                .setName(existing.getName())
+                .setBaseUrl(existing.getBaseUrl())
+                .setModelName(existing.getModelName())
+                .setApiKey("sk-replacement");
+
+        var result = service.update(7L, 41L, dto);
+
+        assertThat(cipher.decrypt(mapperState.updated.getApiKeyEncrypted()))
+                .isEqualTo("sk-replacement");
+        assertThat(result.getApiKeyHint()).isEqualTo("…ment");
+        assertThat(result.getStatus()).isEqualTo(ModelApiTestStatus.UNTESTED);
+        assertThat(result.getChatCapability()).isEqualTo(ModelApiCapability.UNKNOWN);
+        assertThat(result.getStreamingCapability()).isEqualTo(ModelApiCapability.UNKNOWN);
+        assertThat(result.getToolCallingCapability()).isEqualTo(ModelApiCapability.UNKNOWN);
+        assertThat(result.getReasoningOutputStatus()).isEqualTo(ReasoningOutputStatus.UNKNOWN);
+        assertThat(result.getLastTestCode()).isNull();
+        assertThat(result.getLastTestAt()).isNull();
+    }
+
+    @Test
+    void updateResetsTestResultWhenSameKeyIsSubmittedAgain() {
+        UserModelApi existing = testedRecord();
+        mapperState.existing = existing;
+        ModelApiSaveDTO dto = new ModelApiSaveDTO()
+                .setName(existing.getName())
+                .setBaseUrl(existing.getBaseUrl())
+                .setModelName(existing.getModelName())
+                .setApiKey("sk-existing");
+
+        var result = service.update(7L, 41L, dto);
+
+        assertThat(cipher.decrypt(mapperState.updated.getApiKeyEncrypted()))
+                .isEqualTo("sk-existing");
+        assertThat(result.getStatus()).isEqualTo(ModelApiTestStatus.UNTESTED);
+        assertThat(result.getLastTestCode()).isNull();
+    }
+
+    @Test
     void updateResetsOldCapabilitiesWhenModelChanges() {
         UserModelApi existing = testedRecord();
         mapperState.existing = existing;

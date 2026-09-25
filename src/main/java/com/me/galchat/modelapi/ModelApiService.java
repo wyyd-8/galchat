@@ -60,14 +60,13 @@ public class ModelApiService {
         UserModelApi existing = requireOwned(userId, id);
         ValidatedInput input = validate(dto, false);
         boolean hasNewKey = StringUtils.hasText(input.apiKey());
-        boolean keyChanged = hasNewKey && !Objects.equals(
-                cipher.decrypt(existing.getApiKeyEncrypted()), input.apiKey());
+        // Allow key replacement even when the previous master key is unavailable.
         boolean connectionChanged = !Objects.equals(existing.getBaseUrl(),
                 input.baseUrl().toString())
                 || !Objects.equals(existing.getModelName(), input.modelName())
                 || !Objects.equals(existing.getRequestOverrides(),
                         input.requestOverrides())
-                || keyChanged;
+                || hasNewKey;
         existing.setName(input.name())
                 .setBaseUrl(input.baseUrl().toString())
                 .setModelName(input.modelName())

@@ -110,7 +110,7 @@ public final class GroupChatConstant {
 
     public static final int DEFAULT_HISTORY_PAGE_SIZE = 50;
     public static final int MAX_REPLY_STEPS = 12;
-    public static final int MAX_GROUP_TOPIC_CHARS = 12000;
+    public static final int MAX_GROUP_TOPIC_CHARS = 8000;
     public static final int MAX_CONSECUTIVE_WITHDRAW_COUNT = 3;
     public static final int CONTEXT_TOPIC_COUNT = 2;
 }

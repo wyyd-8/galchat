@@ -36,16 +36,24 @@ class CommonConfigurationTest {
                         groupChatClientFactory()),
                 DeepSeekApi.ChatCompletionRequest.Thinking.ENABLED);
 
-        assertThinking(
-                configuration::topicClient,
-                DeepSeekApi.ChatCompletionRequest.Thinking.DISABLED);
+        DeepSeekChatOptions scoring = capturedOptions(configuration::topicClient);
+        assertThat(scoring.getModel()).isEqualTo("deepseek-flash");
+        assertThat(scoring.getThinking()).isEqualTo(DeepSeekApi.ChatCompletionRequest.Thinking.ENABLED);
+
+        DeepSeekChatOptions summary = capturedOptions(configuration::rewriteClient);
+        assertThat(summary.getModel()).isEqualTo("default-model");
+        assertThat(summary.getThinking()).isEqualTo(DeepSeekApi.ChatCompletionRequest.Thinking.DISABLED);
     }
 
     private void assertThinking(
             Function<DeepSeekChatModel, ChatClient> clientFactory,
             DeepSeekApi.ChatCompletionRequest.Thinking expected) {
+        assertThat(capturedOptions(clientFactory).getThinking()).isEqualTo(expected);
+    }
+
+    private DeepSeekChatOptions capturedOptions(Function<DeepSeekChatModel, ChatClient> clientFactory) {
         DeepSeekChatModel model = mock(DeepSeekChatModel.class);
-        when(model.getOptions()).thenReturn(DeepSeekChatOptions.builder().build());
+        when(model.getOptions()).thenReturn(DeepSeekChatOptions.builder().model("default-model").enableThinking().build());
         when(model.call(any(Prompt.class))).thenReturn(new ChatResponse(
                 List.of(new Generation(new AssistantMessage("OK")))));
 
@@ -53,9 +61,8 @@ class CommonConfigurationTest {
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
         verify(model).call(prompt.capture());
-        assertThat(prompt.getValue().getOptions()).isInstanceOfSatisfying(
-                DeepSeekChatOptions.class,
-                options -> assertThat(options.getThinking()).isEqualTo(expected));
+        assertThat(prompt.getValue().getOptions()).isInstanceOf(DeepSeekChatOptions.class);
+        return (DeepSeekChatOptions) prompt.getValue().getOptions();
     }
 
     private GroupChatClientFactory groupChatClientFactory() {

@@ -1,5 +1,9 @@
 package com.me.galchat.service.impl.group;
 
+import com.me.galchat.memory.TopicCompressionTask;
+import jakarta.annotation.Resource;
+import org.springframework.core.task.TaskExecutor;
+
 import com.me.galchat.service.impl.trpg.TrpgCombatLifecycleService;
 import com.me.galchat.service.impl.trpg.TrpgSceneSelectionService;
 import com.me.galchat.service.impl.trpg.TrpgStepInteractionService;
@@ -57,6 +61,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class GroupChatService {
+
+    @Resource(name = "topicCompressionTaskExecutor")
+    private TaskExecutor topicCompressionTaskExecutor;
+
 
     private final GroupConversationService conversationService;
     private final GroupConversationLockService lockService;
@@ -131,6 +139,8 @@ public class GroupChatService {
                 return Flux.error(new UserRequestException("当前群聊正在生成回复，请稍后再试"));
             }
 
+            TopicCompressionTask compression = new TopicCompressionTask(topicCompressionTaskExecutor,
+                    () -> lockService.unlock(lock));
             try {
                 GroupConversation conversation = conversationService.requireActive(conversationId);
                 if (GroupChatConstant.MODE_TRPG.equals(
@@ -151,13 +161,8 @@ public class GroupChatService {
                 if (prepared == null) {
                     throw new UserRequestException("创建群聊轮次失败");
                 }
-                try {
-                    runtime.contextPolicy().onTurnStarted(conversation, prepared.userMessage());
-                } catch (RuntimeException e) {
-                    recoveryService.recoverInterrupted(conversationId);
-                    return Flux.just(failureEvent(conversationId, prepared.turn().getId(), e))
-                            .doFinally(signal -> lockService.unlock(lock));
-                }
+                compression.submit(() -> runtime.contextPolicy()
+                        .prepareTurnStarted(conversation, prepared.userMessage()));
                 Flux<GroupChatEvent> accepted = Flux.just(GroupChatEvent.builder()
                         .eventType(GroupChatConstant.EVENT_TURN_ACCEPTED)
                         .conversationId(conversationId)
@@ -168,22 +173,16 @@ public class GroupChatService {
                 Flux<GroupChatEvent> replies = executeChatActions(
                         runtime, conversation, prepared.turn(),
                         prepared.actions(), 0);
-                return Flux.concat(accepted, replies)
+                return compression.attach(Flux.concat(accepted, replies)
                         .doOnError(error -> recoveryService.recoverInterrupted(conversationId))
                         .onErrorResume(error -> Flux.just(
                                 failureEvent(conversationId, prepared.turn().getId(), error)))
-                        .doFinally(signal -> {
-                            if (signal == SignalType.CANCEL) {
-                                transactionTemplate.executeWithoutResult(status -> {
-                                    recoveryService.cancelPendingSteps(
-                                            prepared.turn().getId(), "客户端取消生成");
-                                    cancelTurn(prepared.turn());
-                                });
-                            }
-                            lockService.unlock(lock);
-                        });
+                        .doOnCancel(() -> transactionTemplate.executeWithoutResult(status -> {
+                            recoveryService.cancelPendingSteps(prepared.turn().getId(), "客户端取消生成");
+                            cancelTurn(prepared.turn());
+                        })));
             } catch (RuntimeException e) {
-                lockService.unlock(lock);
+                compression.finish();
                 return Flux.error(e);
             }
         });

@@ -55,6 +55,7 @@ class GroupTopicVectorServiceTest {
                 .setStartSequence(1L);
         when(messageMapper.selectList(any())).thenReturn(List.of(
                 new GroupChatMessage()
+                        .setId(100L)
                         .setConversationId(7L)
                         .setSequenceNo(1L)
                         .setSpeakerType(GroupChatConstant.ACTOR_USER)
@@ -65,7 +66,7 @@ class GroupTopicVectorServiceTest {
                 member(11L, 1),
                 member(12L, 2)));
         when(rewriteClient.prompt().system(any(String.class)).user(any(String.class))
-                .call().content()).thenReturn("Alice 和 Bob 在仓库发现了一把钥匙。");
+                .call().content()).thenReturn("{\"messages\":[{\"messageId\":\"100\",\"compressedContent\":\"仓库里发现了一把钥匙\"}]}");
 
         service.addTopic(conversation, topic, 10L);
 
@@ -73,6 +74,7 @@ class GroupTopicVectorServiceTest {
         ArgumentCaptor<List<Document>> documents = ArgumentCaptor.forClass(List.class);
         verify(vectorStore).add(documents.capture());
         assertThat(documents.getValue()).hasSize(1);
+        assertThat(documents.getValue().getFirst().getText()).isEqualTo("user: 仓库里发现了一把钥匙");
         assertThat(documents.getValue().getFirst().getMetadata())
                 .containsEntry(VectorConstant.USER_WORLD_ID_METADATA_KEY, 3L)
                 .containsEntry(VectorConstant.VISIBLE_CHARACTERS_METADATA_KEY, List.of(11L, 12L));

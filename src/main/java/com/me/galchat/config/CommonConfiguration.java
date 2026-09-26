@@ -7,6 +7,7 @@ import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.mapper.UserChatThinkingHistoryMapper;
 import com.me.galchat.mapper.UserChatToolCallMapper;
 import com.me.galchat.memory.UserChatMemory;
+import com.me.galchat.memory.TopicCompressionPrompts;
 import com.me.galchat.singlechat.SingleChatClientFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -73,14 +74,8 @@ public class CommonConfiguration {
     public ChatClient topicClient(DeepSeekChatModel model) {
         return ChatClient
                 .builder(model)
-                .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
-                .defaultSystem("""
-                        你是一个专业的对话概要机器人，能够判断当前对话与上一段对话是否连续且为同一话题
-                        每个对话均包含对话人，时间戳与对话内容
-                        以下是上一段对话与当前对话，最后一个对话为当前对话，其余对话为上一段对话
-                        现在，你需要判断两段对话是否为连续且为同一话题，是输出"true"，不是或无法判断输出"false"
-                        不要输出其他内容
-                        """)
+                .defaultOptions(DeepSeekChatOptions.builder().model("deepseek-flash").enableThinking())
+                .defaultSystem(TopicCompressionPrompts.SCORE)
                 .build();
     }
 
@@ -89,15 +84,7 @@ public class CommonConfiguration {
         return ChatClient
                 .builder(model)
                 .defaultOptions(DeepSeekChatOptions.builder().disableThinking())
-                .defaultSystem("""
-                        你是一个专业的对话重写机器人，能够重写提供的一段对话
-                        你的目标为去除对话中无意义的部分与语气词，尽可能替换 对话中的代词 、 指代不明确的部分 与 时间指代（例如“昨天”，“上周”等） 为 具体人名 与 具体时间（例如2026年3月1日23:30，没有的部分可以省略），保留有实际意义的内容
-                        不需要保留括号中的内容
-                        每个对话均包含对话人，时间戳与对话内容
-                        现在，你需要重写这段对话，使其更简洁且保留有意义的内容，重写后的对话需要保持原有的意思不变，不同部分之间以换行符分隔，格式为 "assistant":内容 或 "user":内容
-                        时间戳仅用于重写时参考，输出时不需要保留；不明确的简写不要替换
-                        以下是对话内容
-                        """)
+                .defaultSystem(TopicCompressionPrompts.SUMMARIZE)
                 .build();
     }
 

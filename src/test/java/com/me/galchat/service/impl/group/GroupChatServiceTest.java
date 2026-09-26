@@ -589,6 +589,8 @@ class GroupChatServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(GroupTurnCheckpointService.class),
                 defaultActorRuntime());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor",
+                (org.springframework.core.task.TaskExecutor) Runnable::run);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -635,6 +637,8 @@ class GroupChatServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(GroupTurnCheckpointService.class),
                 defaultActorRuntime());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor",
+                (org.springframework.core.task.TaskExecutor) Runnable::run);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_CHAT)
@@ -658,7 +662,7 @@ class GroupChatServiceTest {
     }
 
     @Test
-    void streamsOpenAiReasoningMetadataWithoutPersistingIt() {
+    void streamsOpenAiReasoningMetadataWithoutPersistingIt() throws Exception {
         DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupConversationService conversationService = mock(GroupConversationService.class);
@@ -684,6 +688,9 @@ class GroupChatServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(GroupTurnCheckpointService.class),
                 defaultActorRuntime());
+        var compressionQueue = new java.util.ArrayList<Runnable>();
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor",
+                (org.springframework.core.task.TaskExecutor) compressionQueue::add);
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -778,7 +785,27 @@ class GroupChatServiceTest {
         GroupChatRequestDTO request = new GroupChatRequestDTO();
         request.setContent("你好");
 
-        List<GroupChatEvent> events = service.chat(7L, request).collectList().block();
+        var published = new AtomicInteger();
+        when(contextPolicy.prepareTurnStarted(eq(conversation), any()))
+                .thenReturn(published::incrementAndGet);
+        List<GroupChatEvent> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+        var completed = new java.util.concurrent.CompletableFuture<Void>();
+        var replyFinished = new java.util.concurrent.CountDownLatch(1);
+        service.chat(7L, request).subscribe(event -> {
+            events.add(event);
+            if (GroupChatConstant.EVENT_TURN_COMPLETED.equals(event.getEventType())) replyFinished.countDown();
+        }, completed::completeExceptionally, () -> completed.complete(null));
+        assertThat(replyFinished.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(events).anyMatch(event -> GroupChatConstant.EVENT_MESSAGE_DELTA.equals(event.getEventType()));
+        assertThat(completed).isNotDone();
+        assertThat(published).hasValue(0);
+        verify(lockService, never()).unlock(any());
+        compressionQueue.removeFirst().run();
+        completed.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(published).hasValue(1);
+        verify(lockService).unlock(any());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor",
+                (org.springframework.core.task.TaskExecutor) Runnable::run);
         List<GroupChatEvent> secondEvents = service.chat(7L, request).collectList().block();
 
         assertThat(events).extracting(GroupChatEvent::getEventType).containsExactly(
@@ -801,7 +828,7 @@ class GroupChatServiceTest {
                 });
         assertThat(secondEvents).extracting(GroupChatEvent::getEventType)
                 .containsExactlyElementsOf(events.stream().map(GroupChatEvent::getEventType).toList());
-        verify(contextPolicy, times(2)).onTurnStarted(eq(conversation),
+        verify(contextPolicy, times(2)).prepareTurnStarted(eq(conversation),
                 org.mockito.ArgumentMatchers.argThat(message -> "你好".equals(message.getContent())));
         verify(contextPolicy, times(2)).load(conversation, action);
         verify(agentPolicy, times(2)).prepare(conversation, action, context);
@@ -866,6 +893,8 @@ class GroupChatServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(GroupTurnCheckpointService.class),
                 defaultActorRuntime());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor",
+                (org.springframework.core.task.TaskExecutor) Runnable::run);
 
         when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
             TransactionCallback<?> callback = invocation.getArgument(0);
@@ -1328,6 +1357,8 @@ class GroupChatServiceTest {
                 mock(TrpgCombatLifecycleService.class),
                 mock(GroupTurnCheckpointService.class),
                 defaultActorRuntime());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor",
+                (org.springframework.core.task.TaskExecutor) Runnable::run);
 
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(1L).setWorldId(2L)

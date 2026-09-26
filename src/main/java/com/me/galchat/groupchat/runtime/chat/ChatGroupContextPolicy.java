@@ -38,6 +38,11 @@ public class ChatGroupContextPolicy implements GroupContextPolicy {
     }
 
     @Override
+    public Runnable prepareTurnStarted(GroupConversation conversation, GroupChatMessage userMessage) {
+        return topicService.prepareTurnStarted(conversation, userMessage);
+    }
+
+    @Override
     public GroupContextMaterial load(GroupConversation conversation, GroupActionSpec action) {
         long windowStart = topicService.windowStartSequence(conversation);
         List<Message> context = contextAssembler.assembleContextFrom(

@@ -70,9 +70,15 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         Message userMessage = chatClientRequest.prompt().getLastUserOrToolResponseMessage();
         UserChatHistory savedUserMessage = chatMemory.save(baseConversation, userMessage);
 
-        TopicBoundary boundary = MessageType.USER.equals(userMessage.getMessageType())
-                ? topicBoundaryService.updateAfterUserMessage(baseConversation, savedUserMessage)
-                : topicBoundaryService.getBoundary(baseConversation);
+        Object taskContext = chatClientRequest.context().get(TopicCompressionTask.CONTEXT_KEY);
+        TopicBoundary boundary = topicBoundaryService.getBoundary(baseConversation);
+        if (MessageType.USER.equals(userMessage.getMessageType())) {
+            if (taskContext instanceof TopicCompressionTask task) {
+                task.submit(() -> topicBoundaryService.prepareUpdate(baseConversation, savedUserMessage));
+            } else {
+                boundary = topicBoundaryService.updateAfterUserMessage(baseConversation, savedUserMessage);
+            }
+        }
         ConversationInfo windowConversation = new ConversationInfo(baseConversation.getUserWorldId(),
                 baseConversation.getCharacterId(), WINDOW_POLICY.contextStart(boundary.startIds()));
 

@@ -16,6 +16,44 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TopicAwareMessageChatMemoryAdvisorTest {
 
     @Test
+    void startsCompressionWithoutWaitingAndUsesOriginalWindow() {
+        var memory = org.mockito.Mockito.mock(UserChatMemory.class);
+        var boundaries = org.mockito.Mockito.mock(TopicBoundaryService.class);
+        var search = org.mockito.Mockito.mock(com.me.galchat.vector.MutiSearchService.class);
+        var queued = new java.util.ArrayList<Runnable>();
+        var effects = new java.util.ArrayList<String>();
+        var task = new TopicCompressionTask(queued::add, () -> effects.add("unlock"));
+        var user = new UserChatHistory().setId(40L).setType("user").setContent("换话题");
+        var old = new UserChatHistory().setId(10L).setType("assistant").setContent("仍需保留的旧话题");
+        org.mockito.Mockito.when(memory.save(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(user);
+        org.mockito.Mockito.when(boundaries.getBoundary(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new TopicBoundary(List.of(10L, 20L, 30L), 32L));
+        org.mockito.Mockito.when(boundaries.prepareUpdate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(user)))
+                .thenReturn(() -> effects.add("publish"));
+        org.mockito.Mockito.when(memory.listHistories(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            com.me.galchat.domain.po.ConversationInfo window = invocation.getArgument(0);
+            assertThat(window.getStart()).isEqualTo(10L);
+            return List.of(old, user);
+        });
+        org.mockito.Mockito.when(memory.toPromptMessages(List.of(old, user)))
+                .thenReturn(List.of(new AssistantMessage(old.getContent()), new UserMessage(user.getContent())));
+        var request = org.springframework.ai.chat.client.ChatClientRequest.builder()
+                .prompt(new org.springframework.ai.chat.prompt.Prompt(new UserMessage("换话题"),
+                        org.springframework.ai.model.tool.ToolCallingChatOptions.builder().build()))
+                .context(java.util.Map.of(org.springframework.ai.chat.memory.ChatMemory.CONVERSATION_ID, "1:2:10",
+                        TopicCompressionTask.CONTEXT_KEY, task)).build();
+        var result = TopicAwareMessageChatMemoryAdvisor.builder(memory, boundaries, search).build().before(request, null);
+        assertThat(result.prompt().getContents()).contains("仍需保留的旧话题", "换话题");
+        assertThat(queued).hasSize(1);
+        org.mockito.Mockito.verify(boundaries, org.mockito.Mockito.never())
+                .updateAfterUserMessage(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        queued.getFirst().run();
+        assertThat(effects).isEmpty();
+        task.finish();
+        assertThat(effects).containsExactly("publish", "unlock");
+    }
+
+    @Test
     void appendSuffixToFirstNonSystemMessageKeepsSystemMessageUntouched() {
         List<Message> messages = new ArrayList<>(List.of(
                 new SystemMessage("system"),

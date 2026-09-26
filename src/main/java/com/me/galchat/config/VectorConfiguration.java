@@ -1,6 +1,7 @@
 package com.me.galchat.config;
 
 import org.springframework.ai.embedding.EmbeddingModel;
+import com.me.galchat.memory.TopicModelCall;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
 import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -39,7 +40,7 @@ public class VectorConfiguration {
 
     @Bean(name = "chatHistoryVectorStore")
     public VectorStore chatHistoryVectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel embeddingModel) {
-        return PgVectorStore.builder(jdbcTemplate, embeddingModel)
+        return PgVectorStore.builder(jdbcTemplate, TopicModelCall.boundedEmbedding(embeddingModel))
                 .dimensions(1024) // 可选：默认为模型维度或 1536
                 .distanceType(COSINE_DISTANCE) // 可选：默认为 COSINE_DISTANCE
                 .indexType(HNSW) // 可选：默认为 HNSW
@@ -61,7 +62,7 @@ public class VectorConfiguration {
 
     @Bean(name = "groupTopicVectorStore")
     public VectorStore groupTopicVectorStore(JdbcTemplate jdbcTemplate, EmbeddingModel embeddingModel) {
-        return PgVectorStore.builder(jdbcTemplate, embeddingModel)
+        return PgVectorStore.builder(jdbcTemplate, TopicModelCall.boundedEmbedding(embeddingModel))
                 .dimensions(1024)
                 .distanceType(COSINE_DISTANCE)
                 .indexType(HNSW)

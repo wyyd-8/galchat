@@ -8,6 +8,7 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatTopicMapper;
 import com.me.galchat.memory.TopicWindowPolicy;
+import com.me.galchat.memory.TopicSplitDecision;
 import com.me.galchat.vector.GroupTopicVectorService;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 
 @Service
+@lombok.extern.slf4j.Slf4j
 public class GroupTopicService {
 
     private static final TopicWindowPolicy WINDOW_POLICY =
@@ -39,29 +41,41 @@ public class GroupTopicService {
     }
 
     public void onTurnStarted(GroupConversation conversation, GroupChatMessage userMessage) {
+        prepareTurnStarted(conversation, userMessage).run();
+    }
+
+    public Runnable prepareTurnStarted(GroupConversation conversation, GroupChatMessage userMessage) {
         List<GroupChatTopic> topics = recentTopics(conversation.getId());
         if (topics.isEmpty()) {
-            insertTopic(conversation.getId(), userMessage.getSequenceNo(), GroupChatConstant.TOPIC_BOUNDARY_SEMANTIC);
-            return;
+            return () -> insertTopic(conversation.getId(), userMessage.getSequenceNo(), GroupChatConstant.TOPIC_BOUNDARY_SEMANTIC);
         }
 
         GroupChatTopic current = topics.getFirst();
         List<GroupChatMessage> currentMessages = messages(
                 conversation.getId(), current.getStartSequence(), userMessage.getSequenceNo());
-        boolean capacityReached = contentLength(currentMessages) + contentLength(userMessage)
-                > GroupChatConstant.MAX_GROUP_TOPIC_CHARS;
-        boolean sameTopic = !capacityReached && isSameTopic(currentMessages, userMessage);
-        if (sameTopic) {
-            return;
+        int length = contentLength(currentMessages) + contentLength(userMessage);
+        Integer score = null;
+        if (!currentMessages.isEmpty() && length < GroupChatConstant.MAX_GROUP_TOPIC_CHARS) {
+            try {
+                score = classifier.boundaryScore(currentMessages, userMessage);
+            } catch (RuntimeException e) {
+                log.warn("群聊话题评分失败，保留当前话题 conversationId={} sequence={}",
+                        conversation.getId(), userMessage.getSequenceNo(), e);
+            }
+        }
+        TopicSplitDecision decision = TopicSplitDecision.evaluate(length, GroupChatConstant.MAX_GROUP_TOPIC_CHARS, score);
+        log.info("群聊话题判定 conversationId={} start={} trigger={} chars={} score={} pressure={} weighted={} reason={}",
+                conversation.getId(), current.getStartSequence(), userMessage.getSequenceNo(), length,
+                score, decision.pressure(), decision.weightedScore(), decision.reason());
+        if (currentMessages.isEmpty() || !decision.split()) {
+            return () -> { };
         }
 
         if (topics.size() > 1) {
             GroupChatTopic previous = topics.get(1);
             vectorService.addTopic(conversation, previous, current.getStartSequence());
         }
-        insertTopic(conversation.getId(), userMessage.getSequenceNo(), capacityReached
-                ? GroupChatConstant.TOPIC_BOUNDARY_CAPACITY
-                : GroupChatConstant.TOPIC_BOUNDARY_SEMANTIC);
+        return () -> insertTopic(conversation.getId(), userMessage.getSequenceNo(), decision.reason());
     }
 
     public long windowStartSequence(GroupConversation conversation) {
@@ -106,17 +120,6 @@ public class GroupTopicService {
             vectorService.addTopic(conversation, topics.get(1), current.getStartSequence());
         }
         vectorService.addTopic(conversation, current, lastMessage.getSequenceNo() + 1);
-    }
-
-    private boolean isSameTopic(List<GroupChatMessage> messages, GroupChatMessage userMessage) {
-        if (messages.isEmpty()) {
-            return true;
-        }
-        try {
-            return classifier.isSameTopic(messages, userMessage);
-        } catch (RuntimeException ignored) {
-            return true;
-        }
     }
 
     private List<GroupChatTopic> recentTopics(Long conversationId) {

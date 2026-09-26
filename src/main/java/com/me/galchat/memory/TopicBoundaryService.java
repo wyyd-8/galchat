@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Set;
 
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 @Service
 public class TopicBoundaryService {
 
@@ -33,9 +34,20 @@ public class TopicBoundaryService {
     private final ChatHistoryVectorService chatHistoryVectorService;
 
     public TopicBoundary updateAfterUserMessage(ConversationInfo baseConversation, UserChatHistory userMessage) {
+        TopicBoundary boundary = prepareBoundary(baseConversation, userMessage);
+        saveBoundary(baseConversation, boundary);
+        return boundary;
+    }
+
+    public Runnable prepareUpdate(ConversationInfo conversation, UserChatHistory userMessage) {
+        TopicBoundary boundary = prepareBoundary(conversation, userMessage);
+        return () -> saveBoundary(conversation, boundary);
+    }
+
+    private TopicBoundary prepareBoundary(ConversationInfo baseConversation, UserChatHistory userMessage) {
         TopicBoundary oldBoundary = getOrCreateBoundary(baseConversation, userMessage.getId());
         ConversationInfo topicConversation = new ConversationInfo(baseConversation.getUserWorldId(),
-                baseConversation.getCharacterId(), WINDOW_POLICY.contextStart(oldBoundary.startIds()));
+                baseConversation.getCharacterId(), oldBoundary.currentStartId());
 
         boolean sameTopic = isSameTopic(topicConversation, userMessage);
         List<Long> starts = new ArrayList<>(oldBoundary.startIds());
@@ -48,7 +60,6 @@ public class TopicBoundaryService {
         }
         TopicBoundary newBoundary = new TopicBoundary(starts, userMessage.getId());
 
-        saveBoundary(baseConversation, newBoundary);
         return newBoundary;
     }
 
@@ -131,34 +142,34 @@ public class TopicBoundaryService {
         Long startId = conversationInfo.getStart() != null ? conversationInfo.getStart() : fallbackStartId;
         TopicBoundary initialBoundary = new TopicBoundary(
                 startId == null ? List.of() : List.of(startId), boundary.lastCheckedMessageId());
-        saveBoundary(conversationInfo, initialBoundary);
         return initialBoundary;
     }
 
     private boolean isSameTopic(ConversationInfo topicConversation, UserChatHistory userMessage) {
-        List<UserChatHistory> history = new ArrayList<>(topicChatMemory.listHistories(topicConversation));
-        if (history.size() <= 1) {
+        // 回复分支可能已经落库；评分范围必须严格止于触发本任务的用户消息。
+        List<UserChatHistory> history = topicChatMemory.listHistories(topicConversation).stream()
+                .filter(message -> message.getId() < userMessage.getId()).toList();
+        if (history.isEmpty()) {
             return true;
         }
-        history.removeLast();
-        if (conversationContentLength(history, userMessage) > ChatConstant.MAX_TOPIC_CONVERSATION_LENGTH) {
-            return false;
+        int length = conversationContentLength(history, userMessage);
+        Integer score = null;
+        if (length < ChatConstant.MAX_TOPIC_CONVERSATION_LENGTH) {
+            try {
+                String content = TopicModelCall.read(() -> topicClient.prompt().user("当前话题历史：\n" + formatMessages(history)
+                        + "\n新用户消息：\n" + formatMessage(userMessage)).call().content(), TopicModelCall.SCORE_TIMEOUT);
+                score = TopicSplitDecision.parseScore(content);
+            } catch (RuntimeException e) {
+                log.warn("单聊话题评分失败，保留当前话题 userWorldId={} characterId={} messageId={}",
+                        userMessage.getUserWorldId(), userMessage.getCharacterId(), userMessage.getId(), e);
+            }
         }
-
-        String prompt = """
-                历史对话：
-                %s
-
-                当前用户消息：
-                %s
-                """.formatted(formatMessages(history), formatMessage(userMessage));
-
-        String content = topicClient.prompt()
-                .user(prompt)
-                .call()
-                .content();
-
-        return content != null && content.trim().equalsIgnoreCase("true");
+        TopicSplitDecision decision = TopicSplitDecision.evaluate(
+                length, ChatConstant.MAX_TOPIC_CONVERSATION_LENGTH, score);
+        log.info("单聊话题判定 userWorldId={} characterId={} start={} trigger={} chars={} score={} pressure={} weighted={} reason={}",
+                userMessage.getUserWorldId(), userMessage.getCharacterId(), topicConversation.getStart(),
+                userMessage.getId(), length, score, decision.pressure(), decision.weightedScore(), decision.reason());
+        return !decision.split();
     }
 
     private int conversationContentLength(List<UserChatHistory> history, UserChatHistory userMessage) {

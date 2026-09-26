@@ -11,6 +11,20 @@ import java.util.concurrent.ThreadPoolExecutor;
 @Slf4j
 public class MessageThreadPoolConfig {
 
+    @Bean("topicCompressionTaskExecutor")
+    public ThreadPoolTaskExecutor topicCompressionTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(0);
+        executor.setThreadNamePrefix("topic-compression-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        // 拒绝时保留原窗口，不能退回请求线程再次阻塞首字输出。
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        return executor;
+    }
+
     @Bean("delayTaskExecutor")
     public ThreadPoolTaskExecutor delayTaskExecutor() {
         log.info("初始化延时任务线程池...");

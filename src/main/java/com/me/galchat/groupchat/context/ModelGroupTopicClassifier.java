@@ -1,6 +1,9 @@
 package com.me.galchat.groupchat.context;
 
 import com.me.galchat.domain.po.GroupChatMessage;
+import com.me.galchat.memory.TopicCompressionPrompts;
+import com.me.galchat.memory.TopicSplitDecision;
+import com.me.galchat.memory.TopicModelCall;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -12,12 +15,12 @@ public class ModelGroupTopicClassifier implements GroupTopicClassifier {
 
     private final ChatClient classifierClient;
 
-    public ModelGroupTopicClassifier(@Qualifier("groupNonThinkingChatClient") ChatClient classifierClient) {
+    public ModelGroupTopicClassifier(@Qualifier("topicClient") ChatClient classifierClient) {
         this.classifierClient = classifierClient;
     }
 
     @Override
-    public boolean isSameTopic(List<GroupChatMessage> currentTopic, GroupChatMessage userMessage) {
+    public int boundaryScore(List<GroupChatMessage> currentTopic, GroupChatMessage userMessage) {
         String prompt = """
                 当前群聊话题：
                 %s
@@ -25,17 +28,12 @@ public class ModelGroupTopicClassifier implements GroupTopicClassifier {
                 新的用户消息：
                 %s
                 """.formatted(format(currentTopic), format(userMessage));
-        String result = classifierClient.prompt()
-                .system("""
-                        判断新的用户消息是否延续当前群聊话题。
-                        延续同一目标、问题或叙事焦点时只输出 true；
-                        明显转向新的独立话题时只输出 false。无法确定时输出 true。
-                        不要输出解释。
-                        """)
+        String result = TopicModelCall.read(() -> classifierClient.prompt()
+                .system(TopicCompressionPrompts.SCORE)
                 .user(prompt)
                 .call()
-                .content();
-        return result != null && result.trim().equalsIgnoreCase("true");
+                .content(), TopicModelCall.SCORE_TIMEOUT);
+        return TopicSplitDecision.parseScore(result);
     }
 
     private String format(List<GroupChatMessage> messages) {

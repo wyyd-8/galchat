@@ -17,6 +17,7 @@ import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.memory.AssistantReasoning;
+import com.me.galchat.memory.TopicCompressionTask;
 import com.me.galchat.service.ChatToolEventListener;
 import com.me.galchat.service.ChatUserMessageListener;
 import com.me.galchat.service.IChatService;
@@ -26,7 +27,6 @@ import com.me.galchat.service.impl.trpg.TrpgRunMemoryService;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -64,6 +64,9 @@ public class ChatServiceImpl implements IChatService {
     private final SingleChatLockService singleChatLockService;
     private final TrpgRunMemoryService runMemoryService;
 
+    @Resource(name = "topicCompressionTaskExecutor")
+    private TaskExecutor topicCompressionTaskExecutor;
+
     @Resource(name = "userEventLogTaskExecutor")
     private TaskExecutor userEventLogTaskExecutor;
 
@@ -77,6 +80,8 @@ public class ChatServiceImpl implements IChatService {
                 return Flux.error(new UserRequestException("当前单聊正在处理中，请稍后再对话"));
             }
 
+            TopicCompressionTask compression = new TopicCompressionTask(topicCompressionTaskExecutor,
+                    () -> singleChatLockService.unlock(conversationLock));
             try {
                 ConversationInfo conversationInfo = buildConversationInfo(chatMessageDTO.getUserWorldId(),
                         chatMessageDTO.getCharacterId());
@@ -97,7 +102,8 @@ public class ChatServiceImpl implements IChatService {
                         .system(buildChatSystemPrompt(chatMessageDTO.getWorldId(), chatMessageDTO.getUserWorldId(),
                                 chatMessageDTO.getCharacterId()))
                         .user(chatMessageDTO.getMessage())
-                        .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
+                        .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString())
+                                .param(TopicCompressionTask.CONTEXT_KEY, compression))
                         .toolContext(toolContext)
                         .stream()
                         .chatResponse()
@@ -107,10 +113,9 @@ public class ChatServiceImpl implements IChatService {
                         .doOnError(toolFlux::tryEmitError)
                         .doFinally(signalType -> toolFlux.tryEmitComplete());
 
-                return Flux.merge(toolFlux.asFlux(), responseFlux)
-                        .doFinally(signalType -> singleChatLockService.unlock(conversationLock));
+                return compression.attach(Flux.merge(toolFlux.asFlux(), responseFlux));
             } catch (RuntimeException e) {
-                singleChatLockService.unlock(conversationLock);
+                compression.finish();
                 return Flux.error(e);
             }
         });
@@ -123,7 +128,7 @@ public class ChatServiceImpl implements IChatService {
             log.warn("聊天回复任务缺少必要字段: {}", task);
             return null;
         }
-        RLock conversationLock = singleChatLockService.tryLock(task.getUserWorldId(),
+        SingleChatLockService.OwnedLock conversationLock = singleChatLockService.tryLockWithOwner(task.getUserWorldId(),
                 task.getCharacterId());
         if (conversationLock == null) {
             log.info("当前单聊正在处理中，跳过聊天回复任务, userWorldId:{}, characterId:{}",
@@ -131,6 +136,8 @@ public class ChatServiceImpl implements IChatService {
             return null;
         }
 
+        TopicCompressionTask compression = new TopicCompressionTask(topicCompressionTaskExecutor,
+                () -> singleChatLockService.unlock(conversationLock));
         try {
             ConversationInfo conversationInfo = buildConversationInfo(task.getUserWorldId(), task.getCharacterId());
             AtomicReference<Long> userMessageId = new AtomicReference<>();
@@ -142,7 +149,8 @@ public class ChatServiceImpl implements IChatService {
             String content = chatClient.prompt()
                     .system(buildChatSystemPrompt(task.getWorldId(), task.getUserWorldId(), task.getCharacterId()))
                     .user(task.getMessage())
-                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString()))
+                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationInfo.toString())
+                            .param(TopicCompressionTask.CONTEXT_KEY, compression))
                     .toolContext(toolContext)
                     .call()
                     .content();
@@ -167,7 +175,7 @@ public class ChatServiceImpl implements IChatService {
             cacheLastAssistant(task.getUserWorldId(), task.getCharacterId(), assistantMessage.getContent());
             return assistantMessage;
         } finally {
-            singleChatLockService.unlock(conversationLock);
+            compression.attach(Flux.empty()).blockLast();
         }
     }
 

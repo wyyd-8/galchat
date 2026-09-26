@@ -6,5 +6,5 @@ import java.util.List;
 
 public interface GroupTopicClassifier {
 
-    boolean isSameTopic(List<GroupChatMessage> currentTopic, GroupChatMessage userMessage);
+    int boundaryScore(List<GroupChatMessage> currentTopic, GroupChatMessage userMessage);
 }

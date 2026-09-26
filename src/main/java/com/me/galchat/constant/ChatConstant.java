@@ -16,7 +16,7 @@ public final class ChatConstant {
 
     public static final int DEFAULT_HISTORY_PAGE_SIZE = 20;
     public static final int MAX_CONTEXT_LENGTH = 430000;
-    public static final int MAX_TOPIC_CONVERSATION_LENGTH = 2000;
+    public static final int MAX_TOPIC_CONVERSATION_LENGTH = 4000;
     public static final int MAX_CONSECUTIVE_WITHDRAW_COUNT = 3;
     public static final int CONTEXT_TOPIC_COUNT = 3;
 

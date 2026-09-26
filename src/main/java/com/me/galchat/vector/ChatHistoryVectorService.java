@@ -6,6 +6,8 @@ import com.me.galchat.constant.DateTimeConstant;
 import com.me.galchat.constant.VectorConstant;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.mapper.UserChatHistoryMapper;
+import com.me.galchat.memory.TopicSummaryCodec;
+import com.me.galchat.memory.TopicModelCall;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
@@ -49,21 +51,28 @@ public class ChatHistoryVectorService {
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
                         .notIn(UserChatHistory::getType, List.of(ChatConstant.SYSTEM_TYPE, ChatConstant.TOOL_TYPE,
-                                ChatConstant.AUTO_SEARCH_INFO_TYPE)))
+                                ChatConstant.AUTO_SEARCH_INFO_TYPE, ChatConstant.WITHDRAWN_TYPE)))
                 .orderByAsc(UserChatHistory::getId));
 
         if (histories.isEmpty()) {
             return;
         }
 
-        String rewrittenContent = rewriteClient.prompt()
-                .user(formatHistories(histories))
-                .call()
-                .content();
-
-        if (!StringUtils.hasText(rewrittenContent)) {
+        List<TopicSummaryCodec.Item> source = histories.stream()
+                .filter(history -> StringUtils.hasText(history.getContent()))
+                .map(history -> new TopicSummaryCodec.Item(history.getId().toString(),
+                        StringUtils.hasText(history.getType()) ? history.getType() : "user",
+                        history.getTimestamp() == null ? "" : history.getTimestamp().toString(), history.getContent()))
+                .toList();
+        if (source.isEmpty()) {
             return;
         }
+        String rewrittenContent = TopicModelCall.read(() -> rewriteClient.prompt()
+                .user(TopicSummaryCodec.input(source))
+                .call()
+                .content(), TopicModelCall.SUMMARY_TIMEOUT);
+
+        rewrittenContent = TopicSummaryCodec.render(source, rewrittenContent);
 
         Map<String, Object> metadata = new HashMap<>();
         metadata.put(VectorConstant.USER_WORLD_ID_METADATA_KEY, userWorldId);
@@ -108,22 +117,6 @@ public class ChatHistoryVectorService {
                 builder.eq(VectorConstant.USER_WORLD_ID_METADATA_KEY, userWorldId),
                 builder.eq(VectorConstant.CHARACTER_ID_METADATA_KEY, characterId)
         ).build();
-    }
-
-    private String formatHistories(List<UserChatHistory> histories) {
-        StringBuilder builder = new StringBuilder();
-        for (UserChatHistory history : histories) {
-            builder.append(formatHistory(history)).append('\n');
-        }
-        return builder.toString();
-    }
-
-    private String formatHistory(UserChatHistory history) {
-        String type = StringUtils.hasText(history.getType()) ? history.getType() : "user";
-        String timestamp = history.getTimestamp() == null
-                ? ""
-                : history.getTimestamp().format(DateTimeConstant.DATE_TIME_FORMATTER);
-        return type + " " + timestamp + ": \n" + history.getContent();
     }
 
     private String vectorDocumentId(Long userWorldId, Long characterId, Long start, Long end) {

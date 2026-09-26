@@ -46,7 +46,7 @@ class GroupTopicServiceTest {
         GroupChatMessage userMessage = userMessage(100L, 20L, "换个话题，聊旅行");
         when(fixture.topicMapper.selectList(any())).thenReturn(List.of(current, previous));
         when(fixture.messageMapper.selectList(any())).thenReturn(List.of(existing));
-        when(fixture.classifier.isSameTopic(List.of(existing), userMessage)).thenReturn(false);
+        when(fixture.classifier.boundaryScore(List.of(existing), userMessage)).thenReturn(100);
 
         fixture.service.onTurnStarted(conversation, userMessage);
 
@@ -65,7 +65,7 @@ class GroupTopicServiceTest {
         GroupChatMessage userMessage = userMessage(100L, 20L, "那就吃面吧");
         when(fixture.topicMapper.selectList(any())).thenReturn(List.of(current, previous));
         when(fixture.messageMapper.selectList(any())).thenReturn(List.of(existing));
-        when(fixture.classifier.isSameTopic(List.of(existing), userMessage)).thenReturn(true);
+        when(fixture.classifier.boundaryScore(List.of(existing), userMessage)).thenReturn(10);
 
         fixture.service.onTurnStarted(conversation, userMessage);
 
@@ -89,6 +89,33 @@ class GroupTopicServiceTest {
 
         verify(fixture.topicMapper).deleteById(6L);
         verify(fixture.vectorService).deleteTopic(7L, 40L, 50L);
+    }
+
+    @Test
+    void capacityAtEightThousandArchivesBeforePublishingAndSkipsModel() {
+        Fixture fixture = new Fixture();
+        var conversation = conversation();
+        when(fixture.topicMapper.selectList(any())).thenReturn(List.of(topic(2L, 10L), topic(1L, 1L)));
+        when(fixture.messageMapper.selectList(any())).thenReturn(List.of(userMessage(90L, 10L, "字".repeat(7999))));
+        Runnable publish = fixture.service.prepareTurnStarted(conversation, userMessage(100L, 20L, "续"));
+        verify(fixture.classifier, never()).boundaryScore(any(), any());
+        verify(fixture.vectorService).addTopic(conversation, topic(1L, 1L), 10L);
+        verify(fixture.topicMapper, never()).insert(any(GroupChatTopic.class));
+        publish.run();
+        verify(fixture.topicMapper).insert(org.mockito.ArgumentMatchers.argThat((GroupChatTopic item) ->
+                item.getStartSequence() == 20L && "capacity".equals(item.getBoundaryReason())));
+    }
+
+    @Test
+    void failedArchivalCannotPublishBoundary() {
+        Fixture fixture = new Fixture();
+        when(fixture.topicMapper.selectList(any())).thenReturn(List.of(topic(2L, 10L), topic(1L, 1L)));
+        when(fixture.messageMapper.selectList(any())).thenReturn(List.of(userMessage(90L, 10L, "字".repeat(8000))));
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("invalid summary"))
+                .when(fixture.vectorService).addTopic(any(), any(), any());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.service.prepareTurnStarted(
+                conversation(), userMessage(100L, 20L, "续"))).isInstanceOf(IllegalArgumentException.class);
+        verify(fixture.topicMapper, never()).insert(any(GroupChatTopic.class));
     }
 
     private GroupConversation conversation() {

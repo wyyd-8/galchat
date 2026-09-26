@@ -8,6 +8,9 @@ import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatTopic;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.mapper.GroupChatMemberMapper;
+import com.me.galchat.memory.TopicSummaryCodec;
+import com.me.galchat.memory.TopicModelCall;
+import com.me.galchat.memory.TopicCompressionPrompts;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.pgvector.PGvector;
 import org.springframework.ai.chat.client.ChatClient;
@@ -51,7 +54,7 @@ public class GroupTopicVectorService {
     public GroupTopicVectorService(
             GroupChatMessageMapper messageMapper,
             GroupChatMemberMapper memberMapper,
-            @Qualifier("groupNonThinkingChatClient") ChatClient rewriteClient,
+            @Qualifier("rewriteClient") ChatClient rewriteClient,
             @Qualifier("groupTopicVectorStore") VectorStore vectorStore,
             @Qualifier("groupTopicRetriever") DocumentRetriever retriever,
             EmbeddingModel embeddingModel,
@@ -78,18 +81,20 @@ public class GroupTopicVectorService {
         if (visibleCharacters.isEmpty()) {
             return;
         }
-        String rewritten = rewriteClient.prompt()
-                .system("""
-                        将这段多人群聊重写成适合长期检索的简洁记录。
-                        保留发言者身份、明确事实、约定、人物关系和未解决事项，不要添加新事实。
-                        只输出重写后的记录。
-                        """)
-                .user(format(messages))
-                .call()
-                .content();
-        if (!StringUtils.hasText(rewritten)) {
+        List<TopicSummaryCodec.Item> source = messages.stream()
+                .filter(message -> StringUtils.hasText(message.getContent()))
+                .map(message -> new TopicSummaryCodec.Item(message.getId().toString(),
+                        message.getSpeakerType() + (message.getSpeakerId() == null ? "" : ":" + message.getSpeakerId()),
+                        message.getCreatedAt() == null ? "" : message.getCreatedAt().toString(), message.getContent()))
+                .toList();
+        if (source.isEmpty()) {
             return;
         }
+        String rewritten = TopicModelCall.read(() -> rewriteClient.prompt()
+                .system(TopicCompressionPrompts.SUMMARIZE)
+                .user(TopicSummaryCodec.input(source))
+                .call().content(), TopicModelCall.SUMMARY_TIMEOUT);
+        rewritten = TopicSummaryCodec.render(source, rewritten);
 
         Map<String, Object> metadata = new HashMap<>();
         metadata.put(VectorConstant.USER_WORLD_ID_METADATA_KEY, conversation.getUserWorldId());
@@ -191,17 +196,6 @@ public class GroupTopicVectorService {
                 .toList();
     }
 
-    private String format(List<GroupChatMessage> messages) {
-        StringBuilder builder = new StringBuilder();
-        for (GroupChatMessage message : messages) {
-            builder.append('[').append(message.getSpeakerType());
-            if (message.getSpeakerId() != null) {
-                builder.append(':').append(message.getSpeakerId());
-            }
-            builder.append("] ").append(message.getContent()).append('\n');
-        }
-        return builder.toString();
-    }
 
     private String documentId(Long conversationId, Long startSequence, Long endSequence) {
         String source = "%s:%d:%d:%d".formatted(

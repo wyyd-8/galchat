@@ -116,11 +116,15 @@ class UserPasswordRecoveryTest {
     }
 
     @Test
-    void sendsExpiringCodeWithoutLoginAndEnforcesCooldown() throws Exception {
-        mvc.perform(post("/user/password/reset/email-code").contentType("application/json")
+    void returnsExpiringCodeForAutofillWithoutLoginAndEnforcesCooldown() throws Exception {
+        var response = mvc.perform(post("/user/password/reset/email-code").contentType("application/json")
                 .content("{\"email\":\" " + EMAIL + " \"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(1));
-        verify(values).set(matches("user:email:verify:code:" + EMAIL + ":[0-9]{6}"), eq(EMAIL), eq(RedisConstant.EMAIL_VERIFY_CODE_TTL));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(1))
+                .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.matchesPattern("\\d{6}")))
+                .andReturn();
+        String code = com.jayway.jsonpath.JsonPath.read(response.getResponse().getContentAsString(), "$.data");
+        verify(values).set(RedisConstant.EMAIL_VERIFY_CODE_KEY_PREFIX + EMAIL + ":" + code,
+                EMAIL, RedisConstant.EMAIL_VERIFY_CODE_TTL);
         when(values.setIfAbsent(anyString(), eq("1"), eq(RedisConstant.EMAIL_VERIFY_COOLDOWN_TTL))).thenReturn(false);
         mvc.perform(post("/user/password/reset/email-code").contentType("application/json")
                 .content("{\"email\":\"" + EMAIL + "\"}"))

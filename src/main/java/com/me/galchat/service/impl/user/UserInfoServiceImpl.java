@@ -218,9 +218,9 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
     }
 
     @Override
-    public void sendPasswordResetEmailVerificationCode(String email) {
+    public String sendPasswordResetEmailVerificationCode(String email) {
         UserInfo userInfo = getPasswordResetUser(email);
-        sendPasswordEmailVerificationCode(Math.toIntExact(userInfo.getId()), userInfo.getEmail());
+        return sendPasswordEmailVerificationCode(Math.toIntExact(userInfo.getId()), userInfo.getEmail());
     }
 
     @Override

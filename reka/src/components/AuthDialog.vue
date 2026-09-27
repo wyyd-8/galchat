@@ -13,7 +13,7 @@ const busy = ref(false)
 const codeBusy = ref(false)
 const form = reactive({ email: '', password: '', confirmPassword: '', code: '' })
 const title = computed(() => mode.value === 'reset' ? '找回密码' : isMobile.value ? (mode.value === 'login' ? 'GalChat' : '创建账号') : (mode.value === 'login' ? '回到你的世界' : '建立旅人档案'))
-const description = computed(() => mode.value === 'reset' ? '输入账户邮箱，通过邮箱验证码设置新密码。验证码 5 分钟内有效。' : isMobile.value ? undefined : '世界、角色、单聊与群聊记录会保存在当前账号下。')
+const description = computed(() => mode.value === 'reset' ? '输入账户邮箱，获取验证码后将自动填写，5 分钟内有效。' : isMobile.value ? undefined : '世界、角色、单聊与群聊记录会保存在当前账号下。')
 
 function switchMode(next: 'login' | 'register' | 'reset') {
   mode.value = next
@@ -43,9 +43,9 @@ async function sendCode() {
   if (!form.email) return notify('请先填写邮箱', '', 'danger')
   codeBusy.value = true
   try {
-    if (mode.value === 'reset') await api.sendPasswordResetCode(form.email)
+    if (mode.value === 'reset') form.code = await api.sendPasswordResetCode(form.email)
     else form.code = await api.sendRegisterCode(form.email)
-    notify(mode.value === 'reset' ? '验证码已发送' : '验证码已自动填写', '', 'success')
+    notify('验证码已自动填写', '', 'success')
   }
   catch (error) { notify('发送失败', errorMessage(error), 'danger') }
   finally { codeBusy.value = false }

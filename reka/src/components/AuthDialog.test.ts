@@ -17,7 +17,7 @@ for (const mobile of [false, true]) {
     let failReset = false
     globalThis.fetch = async (input, init = {}) => {
       requests.push({ url: String(input), method: init.method || 'GET', body: JSON.parse(String(init.body)) })
-      return new Response(JSON.stringify(failReset ? { code: 0, msg: '邮箱验证码错误或已过期' } : { code: 1 }))
+      return new Response(JSON.stringify(failReset ? { code: 0, msg: '邮箱验证码错误或已过期' } : { code: 1, data: String(input).endsWith('/email-code') ? '012345' : undefined }))
     }
     context.after(() => {
       globalThis.fetch = originalFetch
@@ -57,6 +57,8 @@ for (const mobile of [false, true]) {
     assert.equal(state.title, '找回密码')
     await state.sendCode()
     assert.deepEqual(requests[0], { url: '/api/user/password/reset/email-code', method: 'POST', body: { email: '12345678@bjtu.edu.cn' } })
+    assert.equal(state.form.code, '012345', 'recovery must fill the returned code including leading zeros')
+    assert.equal(notice.title, '验证码已自动填写')
     state.form.password = 'new-secret'
     state.form.confirmPassword = 'different'
     state.form.code = '123456'
@@ -80,5 +82,9 @@ for (const mobile of [false, true]) {
     assert.equal(state.form.password, '')
     assert.equal(state.form.code, '')
     assert.equal(state.busy, false)
+    state.switchMode('register')
+    await state.sendCode()
+    assert.equal(state.form.code, '012345', 'registration must keep its existing code autofill')
+    assert.equal(requests.at(-1)?.url, '/api/user/register/email-code')
   })
 }

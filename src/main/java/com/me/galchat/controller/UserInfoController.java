@@ -53,9 +53,8 @@ public class UserInfoController {
 
     @PostMapping("/password/reset/email-code")
     public Result sendPasswordResetEmailVerificationCode(@RequestBody UserPasswordDTO userPasswordDTO) {
-        userInfoService.sendPasswordResetEmailVerificationCode(
-                userPasswordDTO == null ? null : userPasswordDTO.getEmail());
-        return Result.success();
+        return Result.success(userInfoService.sendPasswordResetEmailVerificationCode(
+                userPasswordDTO == null ? null : userPasswordDTO.getEmail()));
     }
 
     @PutMapping("/password/reset")

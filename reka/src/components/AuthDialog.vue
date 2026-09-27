@@ -8,46 +8,75 @@ import { errorMessage, notify } from '@/composables/useNotice'
 const open = defineModel<boolean>({ required: true })
 const emit = defineEmits<{ submit: [payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }] }>()
 const { isMobile } = useMobileViewport()
-const mode = ref<'login' | 'register'>('login')
+const mode = ref<'login' | 'register' | 'reset'>('login')
 const busy = ref(false)
 const codeBusy = ref(false)
 const form = reactive({ email: '', password: '', confirmPassword: '', code: '' })
-const title = computed(() => isMobile.value ? (mode.value === 'login' ? 'GalChat' : '创建账号') : (mode.value === 'login' ? '回到你的世界' : '建立旅人档案'))
+const title = computed(() => mode.value === 'reset' ? '找回密码' : isMobile.value ? (mode.value === 'login' ? 'GalChat' : '创建账号') : (mode.value === 'login' ? '回到你的世界' : '建立旅人档案'))
+const description = computed(() => mode.value === 'reset' ? '输入账户邮箱，通过邮箱验证码设置新密码。验证码 5 分钟内有效。' : isMobile.value ? undefined : '世界、角色、单聊与群聊记录会保存在当前账号下。')
+
+function switchMode(next: 'login' | 'register' | 'reset') {
+  mode.value = next
+  Object.assign(form, { password: '', confirmPassword: '', code: '' })
+}
 
 async function submit() {
+  if (busy.value) return
   if (!form.email || !form.password) return notify('请填写邮箱和密码', '', 'danger')
-  if (mode.value === 'register' && form.password !== form.confirmPassword) return notify('两次密码不一致', '', 'danger')
+  if (mode.value !== 'login' && form.password !== form.confirmPassword) return notify('两次密码不一致', '', 'danger')
+  if (mode.value === 'reset' && !/^\d{6}$/.test(form.code)) return notify('请填写 6 位邮箱验证码', '', 'danger')
   busy.value = true
+  if (mode.value === 'reset') {
+    try {
+      await api.resetPassword({ email: form.email, newPassword: form.password, verificationCode: form.code })
+      switchMode('login')
+      notify('密码已重置', '请使用新密码登录', 'success')
+    } catch (error) { notify('重置失败', errorMessage(error), 'danger') }
+    finally { busy.value = false }
+    return
+  }
   try { emit('submit', { mode: mode.value, email: form.email, password: form.password, code: form.code }) }
   finally { window.setTimeout(() => { busy.value = false }, 500) }
 }
 async function sendCode() {
+  if (codeBusy.value || busy.value) return
   if (!form.email) return notify('请先填写邮箱', '', 'danger')
   codeBusy.value = true
-  try { form.code = await api.sendRegisterCode(form.email); notify('验证码已自动填写', '', 'success') }
+  try {
+    if (mode.value === 'reset') await api.sendPasswordResetCode(form.email)
+    else form.code = await api.sendRegisterCode(form.email)
+    notify(mode.value === 'reset' ? '验证码已发送' : '验证码已自动填写', '', 'success')
+  }
   catch (error) { notify('发送失败', errorMessage(error), 'danger') }
   finally { codeBusy.value = false }
 }
 </script>
 
 <template>
-  <BaseDialog v-model="open" :title="title" :description="isMobile ? undefined : '世界、角色、单聊与群聊记录会保存在当前账号下。'" mobile-presentation="page" :content-class="mode === 'login' ? 'auth-dialog auth-login-dialog' : 'auth-dialog'" :mobile-back="() => mode === 'register' ? mode = 'login' : open = false" size="sm">
+  <BaseDialog v-model="open" :title="title" :description="description" mobile-presentation="page" :content-class="mode === 'login' ? 'auth-dialog auth-login-dialog' : 'auth-dialog'" :mobile-back="() => { if (!busy && !codeBusy) { if (mode !== 'login') switchMode('login'); else open = false } }" size="sm">
     <div v-if="isMobile && mode === 'login'" class="auth-hero"><span class="auth-brand">✦</span><span class="eyebrow">GALCHAT</span><h1>回到你的世界。</h1><p>角色、故事和每一次相遇，<br />都保存在你的账号里。</p></div>
-    <form class="form-stack auth-form" @submit.prevent="submit">
+    <form id="auth-form" class="form-stack auth-form" @submit.prevent="submit">
       <label class="field"><span>邮箱</span><input v-model.trim="form.email" type="email" autocomplete="email" :placeholder="mode === 'register' ? '请输入邮箱' : '请输入账号邮箱'" /></label>
-      <label class="field"><span>密码</span><input v-model="form.password" type="password" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" placeholder="请输入密码" /></label>
-      <label v-if="mode === 'register'" class="field"><span>确认密码</span><input v-model="form.confirmPassword" type="password" autocomplete="new-password" /></label>
-      <label v-if="mode === 'register'" class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="form.code" inputmode="numeric" maxlength="6" placeholder="验证码 5 分钟内有效" /><button class="button secondary" type="button" :disabled="codeBusy" @click="sendCode">{{ codeBusy ? '发送中' : '获取验证码' }}</button></div></label>
-      <template v-if="isMobile && mode === 'login'"><button class="button primary auth-wide" type="submit" :disabled="busy">{{ busy ? '请稍候…' : '进入 GalChat' }}</button><button class="button secondary auth-wide" type="button" @click="mode = 'register'">创建账号</button></template>
+      <div class="field">
+        <label for="auth-password">{{ mode === 'reset' ? '新密码' : '密码' }}</label>
+        <div class="auth-password-row">
+          <input id="auth-password" v-model="form.password" type="password" :autocomplete="mode !== 'login' ? 'new-password' : 'current-password'" :placeholder="mode === 'reset' ? '请输入新密码' : '请输入密码'" />
+          <button v-if="mode === 'login'" class="button secondary" type="button" :disabled="busy" @click="switchMode('reset')">找回密码</button>
+        </div>
+      </div>
+      <label v-if="mode !== 'login'" class="field"><span>{{ mode === 'reset' ? '确认新密码' : '确认密码' }}</span><input v-model="form.confirmPassword" type="password" autocomplete="new-password" /></label>
+      <label v-if="mode !== 'login'" class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="form.code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="验证码 5 分钟内有效" /><button class="button secondary" type="button" :disabled="codeBusy || busy" @click="sendCode">{{ codeBusy ? '发送中' : '获取验证码' }}</button></div></label>
+      <template v-if="isMobile && mode === 'login'"><button class="button primary auth-wide" type="submit" :disabled="busy">{{ busy ? '请稍候…' : '进入 GalChat' }}</button><button class="button secondary auth-wide" type="button" :disabled="busy" @click="switchMode('register')">创建账号</button></template>
     </form>
-    <template v-if="!isMobile || mode === 'register'" #footer>
-      <button class="button ghost" @click="mode = mode === 'login' ? 'register' : 'login'">{{ mode === 'login' ? '创建账号' : '已有账号' }}</button>
-      <button class="button primary" :disabled="busy" @click="submit">{{ busy ? '请稍候…' : mode === 'login' ? '进入 GalChat' : '完成注册' }}</button>
+    <template v-if="!isMobile || mode !== 'login'" #footer>
+      <button class="button ghost" type="button" :disabled="busy || codeBusy" @click="switchMode(mode === 'login' ? 'register' : 'login')">{{ mode === 'login' ? '创建账号' : mode === 'reset' ? '返回登录' : '已有账号' }}</button>
+      <button class="button primary" type="submit" form="auth-form" :disabled="busy || codeBusy">{{ busy ? '请稍候…' : mode === 'login' ? '进入 GalChat' : mode === 'reset' ? '重置密码' : '完成注册' }}</button>
     </template>
   </BaseDialog>
 </template>
 
 <style scoped>
+.auth-password-row { display: grid; grid-auto-flow: column; grid-template-columns: minmax(0, 1fr); gap: 7px; }
 @media (max-width: 767px) {
   :global(.dialog-content.auth-login-dialog[data-mobile-presentation] > .dialog-header) { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   :global(.auth-login-dialog .mobile-dialog-back) { display: none; }

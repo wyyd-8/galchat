@@ -119,8 +119,8 @@ public class UserEventLogConsumer {
         if (userWorld == null) {
             return;
         }
-        if (!dailyDiscussionTask && !Boolean.TRUE.equals(userWorld.getAcitvePushStatus())) {
-            log.info("用户世界未开启主动推送，跳过用户事件关怀任务, userWorldId:{}, characterId:{}",
+        if (!Boolean.TRUE.equals(userWorld.getAcitvePushStatus())) {
+            log.info("用户世界未开启主动推送，跳过主动消息任务, userWorldId:{}, characterId:{}",
                     task.getUserWorldId(), task.getCharacterId());
             return;
         }

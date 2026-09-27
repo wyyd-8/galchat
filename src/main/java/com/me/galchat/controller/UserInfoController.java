@@ -51,6 +51,19 @@ public class UserInfoController {
         return Result.success(userInfoService.getInfoById(CurrentHolder.getCurrentId()));
     }
 
+    @PostMapping("/password/reset/email-code")
+    public Result sendPasswordResetEmailVerificationCode(@RequestBody UserPasswordDTO userPasswordDTO) {
+        userInfoService.sendPasswordResetEmailVerificationCode(
+                userPasswordDTO == null ? null : userPasswordDTO.getEmail());
+        return Result.success();
+    }
+
+    @PutMapping("/password/reset")
+    public Result resetPassword(@RequestBody UserPasswordDTO userPasswordDTO) {
+        userInfoService.resetPassword(userPasswordDTO);
+        return Result.success();
+    }
+
     @PutMapping("/info")
     public Result updateUserInfo(@RequestBody UserProfileDTO userProfileDTO) {
         userInfoService.updateUserInfo(CurrentHolder.getCurrentId(), userProfileDTO);

@@ -25,7 +25,7 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addInterceptor(tokenInterceptor)
                 .addPathPatterns("/**")//拦截所有请求
                 .excludePathPatterns("/user/login", "/user/register", "/user/register/email-code",
-                        LOCAL_UPLOAD_URL_PREFIX + "**");//不拦截/login的请求(excludePathPatterns优先级更高)
+                        "/user/password/reset", "/user/password/reset/email-code", LOCAL_UPLOAD_URL_PREFIX + "**");//不拦截/login的请求(excludePathPatterns优先级更高)
     }
 
     @Override

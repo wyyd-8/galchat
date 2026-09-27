@@ -137,6 +137,8 @@
   .dialog-content[data-mobile-presentation] .dialog-body > :first-child { margin-top: 0; }
   .dialog-content[data-mobile-presentation] .dialog-body > :last-child { margin-bottom: 0; }
   .dialog-body .form-stack, .dialog-body .form-grid { display: block; gap: 0; }
+  .dialog-body .world-option-group { margin-top: 20px; }
+  .dialog-body .world-option-group .switch-row:last-child { border-bottom: 0; }
   .dialog-body .form-stack > .field:first-child, .dialog-body .form-grid > .field:first-child { margin-top: 0; }
   .dialog-body .field { display: block; margin: 17px 0; }
   .dialog-body .field > span { display: block; font-size: 13px; font-weight: 550; margin-bottom: 8px; line-height: 1.5; }

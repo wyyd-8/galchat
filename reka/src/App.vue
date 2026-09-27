@@ -178,7 +178,7 @@ const uploading = reactive({ world: false, character: false })
 const templateMode = ref<'create' | 'edit'>('create')
 const characterTemplateMode = ref<'create' | 'edit'>('create')
 const editingCharacterTemplateId = ref<number | null>(null)
-const worldForm = reactive({ worldId: '', name: '', acitvePushStatus: true, dailyCompanionMode: true, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
+const worldForm = reactive({ worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
 const templateForm = reactive<WorldTemplate>({ name: '', author: '', image: '', background: '', visible: true })
 const conversationForm = reactive({ title: '', mode: 'chat' as 'chat' | 'trpg', moduleId: '', characterIds: [] as number[] })
 const conversationStep = ref<1 | 2>(1)
@@ -550,7 +550,7 @@ async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
 }
 
 function openNewWorld() {
-  Object.assign(worldForm, { worldId: '', name: '', acitvePushStatus: true, dailyCompanionMode: true, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
+  Object.assign(worldForm, { worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
   dialogs.world = true
 }
 async function openTemplatePreview(id: number) {
@@ -882,8 +882,22 @@ async function changePassword() {
 
   <AuthDialog v-model="authOpen" @submit="authenticate" />
 
-  <BaseDialog v-model="dialogs.world" mobile-presentation="page" title="创建世界" :description="isMobile ? '' : '从一个模板开始，并设定角色的陪伴方式。'" size="lg">
-    <div class="form-stack"><label class="field"><span>世界模板</span><select v-model="worldForm.worldId"><option value="">请选择</option><option v-for="item in workspace.templates.value" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label><label class="field"><span>世界名称</span><input v-model.trim="worldForm.name" placeholder="留空则使用模板名称" /></label><label v-if="isMobile" class="field"><span>好感变化幅度</span><select v-model="worldForm.favorSystemStatus"><option value="NORMAL">标准</option><option value="EASY">较易提升</option><option value="HARD">较难提升</option></select></label><div v-else class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: worldForm.favorSystemStatus === item }" @click="worldForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div><label class="switch-row"><span><strong>主动消息偏好</strong><small>允许角色围绕聊天中提到的事件发送提醒和当日关怀；晚间主动话题不受此开关影响</small></span><input v-model="worldForm.acitvePushStatus" type="checkbox" /></label><label class="switch-row"><span><strong>日常陪伴语气</strong><small>让单聊更侧重现实日常分享与陪伴</small></span><input v-model="worldForm.dailyCompanionMode" type="checkbox" /></label><label class="switch-row"><span><strong>逐步显示思考与回复</strong><small>发送后逐步展示角色思考和回复；关闭后可连续发送消息，等待角色回应</small></span><input v-model="worldForm.thinkStatus" type="checkbox" /></label><label v-if="worldForm.thinkStatus" class="switch-row"><span><strong>以第一人称展示角色思考</strong><small>例如：“我想先听听你的意见。”</small></span><input v-model="worldForm.addSpecialPrompt" type="checkbox" /></label><label v-else class="switch-row"><span><strong>输入结束识别</strong><small>停止输入后判断表达是否完整并自动回复</small></span><input v-model="worldForm.eotDetectionStatus" type="checkbox" /></label></div>
+  <BaseDialog v-model="dialogs.world" mobile-presentation="page" title="创建世界" :description="isMobile ? '' : '选择世界模板，设置聊天方式和角色表达。'" size="lg">
+    <div class="form-stack"><label class="field"><span>世界模板</span><select v-model="worldForm.worldId"><option value="">请选择</option><option v-for="item in workspace.templates.value" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label><label class="field"><span>世界名称</span><input v-model.trim="worldForm.name" placeholder="留空则使用模板名称" /></label><label v-if="isMobile" class="field"><span>好感变化幅度</span><select v-model="worldForm.favorSystemStatus"><option value="NORMAL">标准</option><option value="EASY">较易提升</option><option value="HARD">较难提升</option></select></label><div v-else class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: worldForm.favorSystemStatus === item }" @click="worldForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div>
+      <fieldset class="world-option-group">
+        <legend>系统</legend>
+        <p class="world-option-description">设置角色何时发消息，以及聊天时如何收发消息。</p>
+        <label class="switch-row"><span><strong>主动发消息</strong><small>开启后，角色可能主动发来事件提醒、关心问候或晚间话题；关闭后，不再发送这些主动消息。</small></span><input v-model="worldForm.acitvePushStatus" type="checkbox" /></label>
+        <label class="switch-row"><span><strong>逐字显示思考和回复</strong><small>开启后，每次发送都会开始一轮回复，逐步显示思考和回答，回复结束后才能继续发送；关闭后，你可以连续发送多条消息，角色会等你说完再一起回复。</small></span><input v-model="worldForm.thinkStatus" type="checkbox" /></label>
+        <label v-if="!worldForm.thinkStatus" class="switch-row"><span><strong>智能判断是否说完</strong><small>开启后，系统会判断你发送的话是否说完，完整时更快开始回复；关闭后，通常会等你停止输入约 3 秒再开始回复。</small></span><input v-model="worldForm.eotDetectionStatus" type="checkbox" /></label>
+      </fieldset>
+      <fieldset class="world-option-group">
+        <legend>提示词</legend>
+        <p class="world-option-description">引导角色如何与你相处、如何表达。</p>
+        <label class="switch-row"><span><strong>现实日常陪伴</strong><small>开启后，角色会把你当作来自现实世界的朋友，陪你聊生活、学习和心情；关闭后，更侧重故事中的互动，回应你的动作和当前场景。</small></span><input v-model="worldForm.dailyCompanionMode" type="checkbox" /></label>
+        <label v-if="worldForm.thinkStatus" class="switch-row"><span><strong>用角色口吻写内心独白</strong><small>开启后，会引导角色用“我……”写内心独白，例如“（心想：我想再听听你的看法。）”；关闭后，不额外要求思考的写法。实际效果取决于所用模型。</small></span><input v-model="worldForm.addSpecialPrompt" type="checkbox" /></label>
+      </fieldset>
+    </div>
     <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.world = false">取消</button><button class="button primary" :disabled="!worldForm.worldId || busy" @click="run(() => workspace.createWorld({ ...worldForm, worldId: Number(worldForm.worldId), eotDetectionStatus: worldForm.thinkStatus ? false : worldForm.eotDetectionStatus, addSpecialPrompt: worldForm.thinkStatus && worldForm.addSpecialPrompt }), 'world')">创建</button></template>
   </BaseDialog>
 
@@ -1096,8 +1110,8 @@ async function changePassword() {
         <div class="form-stack">
           <label class="field"><span>世界名称</span><input v-model.trim="settingsForm.name" /></label>
           <label v-if="isMobile" class="field"><span>好感变化幅度</span><select v-model="settingsForm.favorSystemStatus"><option value="NORMAL">标准</option><option value="EASY">较易提升</option><option value="HARD">较难提升</option></select></label><div v-else class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: settingsForm.favorSystemStatus === item }" @click="settingsForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div>
-          <label class="switch-row"><span><strong>主动消息偏好</strong><small>允许角色围绕聊天中提到的事件发送提醒和当日关怀；晚间主动话题不受此开关影响</small></span><input v-model="settingsForm.acitvePushStatus" type="checkbox" /></label>
-          <label v-if="workspace.selectedWorld.value?.thinkStatus === false" class="switch-row"><span><strong>输入结束识别</strong><small>停止输入后判断表达是否完整并自动回复</small></span><input v-model="settingsForm.eotDetectionStatus" type="checkbox" /></label>
+          <label class="switch-row"><span><strong>主动发消息</strong><small>开启后，角色可能主动发来事件提醒、关心问候或晚间话题；关闭后，不再发送这些主动消息。</small></span><input v-model="settingsForm.acitvePushStatus" type="checkbox" /></label>
+          <label v-if="workspace.selectedWorld.value?.thinkStatus === false" class="switch-row"><span><strong>智能判断是否说完</strong><small>开启后，系统会判断你发送的话是否说完，完整时更快开始回复；关闭后，通常会等你停止输入约 3 秒再开始回复。</small></span><input v-model="settingsForm.eotDetectionStatus" type="checkbox" /></label>
         </div>
         <template v-if="isMobile"><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="settingsTab = 'lore'"><span><strong>世界设定</strong><small>主题与内容 · 仅模板作者维护</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" @click="settingsTab = 'data'"><span><strong>数据管理</strong><small>导入、导出与清理</small></span><ChevronRight :size="16" /></button></template>
         <div v-if="!isMobile" class="dialog-inline-actions settings-general-actions"><button v-if="workspace.canEditSelectedWorld.value" class="button secondary" @click="openEditTemplate"><Pencil :size="16" />编辑世界模板</button><button class="button primary" @click="run(() => workspace.updateWorld({ ...settingsForm }))">保存设置</button></div>
@@ -1172,7 +1186,7 @@ async function changePassword() {
     <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.loadSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
   </BaseDialog>
   <BaseDialog v-model="dialogs.account" mobile-presentation="page" title="账号资料"><div class="form-stack"><label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label><label class="field"><span>邮箱（不可在此修改）</span><input v-model="accountForm.email" disabled /></label><label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label><label class="field"><span>骰子皮肤</span><select v-model="accountForm.diceSkin"><option v-for="option in DICE_SKIN_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><small>保存后，新打开的掷骰动画会使用这套皮肤。</small></label></div><template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template></BaseDialog>
-  <BaseDialog v-model="dialogs.password" mobile-presentation="page" title="修改密码" description="获取验证码后将自动填写，5 分钟内有效。"><div class="form-stack"><label class="field"><span>账户邮箱</span><input v-model="passwordForm.email" disabled /></label><label class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="passwordForm.code" inputmode="numeric" maxlength="6" /><button class="button secondary" @click="sendPasswordCode">获取验证码</button></div></label><label class="field"><span>新密码</span><input v-model="passwordForm.newPassword" type="password" placeholder="请输入非空新密码" /></label><label class="field"><span>确认新密码</span><input v-model="passwordForm.confirmPassword" type="password" /></label></div><template #footer><button class="button primary" :disabled="!passwordForm.code || !passwordForm.newPassword || !passwordForm.confirmPassword" @click="run(changePassword, 'password')">更新密码</button></template></BaseDialog>
+  <BaseDialog v-model="dialogs.password" mobile-presentation="page" title="修改密码" description="获取验证码后将自动填写，5 分钟内有效。"><form id="change-password-form" class="form-stack" @submit.prevent="run(changePassword, 'password')"><label class="field"><span>账户邮箱</span><input v-model="passwordForm.email" disabled /></label><label class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="passwordForm.code" inputmode="numeric" maxlength="6" /><button class="button secondary" type="button" @click="sendPasswordCode">获取验证码</button></div></label><label class="field"><span>新密码</span><input v-model="passwordForm.newPassword" type="password" placeholder="请输入非空新密码" /></label><label class="field"><span>确认新密码</span><input v-model="passwordForm.confirmPassword" type="password" /></label></form><template #footer><button class="button primary" type="submit" form="change-password-form" :disabled="busy || !passwordForm.code || !passwordForm.newPassword || !passwordForm.confirmPassword">更新密码</button></template></BaseDialog>
   <ModelApiManagerDialog v-model="dialogs.modelApis" />
   <BaseDialog
     v-model="dialogs.end" mobile-presentation="page"

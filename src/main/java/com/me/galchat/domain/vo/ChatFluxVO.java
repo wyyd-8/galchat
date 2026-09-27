@@ -10,4 +10,9 @@ import lombok.Data;
 public class ChatFluxVO {
     private String type;
     private String content;
+    private Long sequence;
+
+    public ChatFluxVO(String type, String content) {
+        this(type, content, null);
+    }
 }

@@ -25,6 +25,8 @@ public class GroupChatEvent {
     private Integer itemOrder;
     private Long messageId;
     private Long sequence;
+    /** Transport cursor within one generation, independent of persisted message ordering. */
+    private Long eventSequence;
     private String messageKind;
     private Speaker speaker;
     private String delta;

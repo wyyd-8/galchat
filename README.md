@@ -353,6 +353,7 @@ python python/character_card_pdf.py
 | 用户 | `/user/login`、`/user/register`、`/user/register/email-code`、`/user/info`、`/user/password`、`/user/password/email-code` |
 | 世界与角色 | `/world/**`、`/character/**` |
 | 单聊与历史 | `POST /ai/chat`、`GET /history`、`POST /history/withdraw` |
+| 单聊生成流恢复 | `GET /ai/chat/{userWorldId}/{characterId}/generations/{requestId}?after=…` |
 | 单聊模型绑定 | `PUT /character/{userWorldId}/{characterId}/model` |
 | 世界存档 | `GET/POST /world-saves/{userWorldId}`、`POST /world-saves/{userWorldId}/load` |
 | 模型 API | `GET/POST /model-apis`、`PUT/DELETE /model-apis/{id}`、`POST /model-apis/{id}/test` |
@@ -371,6 +372,14 @@ python python/character_card_pdf.py
 | 跑团存档 | `GET/POST /trpg-saves/{conversationId}`、`POST /trpg-saves/{conversationId}/load` |
 | 跑团回滚 | `GET /trpg-saves/{conversationId}/rollback-status`；`POST` 同前缀下的 `/rollback-turn`、`/rollback-scene`、`/rollback-initial` |
 | 图片与实时连接 | `POST /upload`、WebSocket `/ws/{sid}` |
+
+单聊思考模式的 `POST /ai/chat` 支持 `clientRequestId`。同一账号、世界、角色下重复提交相同标识时，尚在生成的请求续接原流；已经完成的请求只返回完成状态，不重复调用模型。SSE 事件带递增的 `sequence`，恢复接口的 `after` 只返回该序号之后的事件；`generation.user` 提供已保存的用户消息 ID，用于合并历史，`generation.completed` / `generation.failed` 表示终态。
+
+切换角色时，单聊消息及发送状态按会话隔离，原回复继续生成。断线后前端自动尝试续接，刷新页面后重新进入对应单聊也会恢复；恢复标识保存在当前浏览器标签页的 `sessionStorage`，退出账号时清除。仅生成中的请求保留回放缓存；生成、落库及归档全部结束后立即释放原流，前端重新读取数据库历史。后端仅短期保留不含消息内容的完成标识，用于防止重复提交，不保留原流。回放缓存位于后端实例内存，多实例部署需要将续接请求路由到原实例。服务重启或缓存过期后返回 `generation.expired`，前端重新加载持久化历史，不自动重发消息；未完成的回复可撤回后重发。撤回、移除角色及读取世界存档会清除对应的单聊回放缓存。非思考模式沿用 WebSocket 队列生成与历史加载机制。
+
+单聊、群聊与跑团通过公共 `GenerationStreams` 管理生成生命周期，各自保留业务事件适配。群聊恢复接口也支持 `after`；使用新增的 `eventSequence` 作为流事件游标，原有 `sequence` 仍表示消息排序。前端共用 SSE 解析及 `followGeneration` 连接逻辑，遇到断线或非正常 EOF 时最多续接两次（间隔 500ms、1s），只恢复原请求，不重新 POST。页面内续接按游标补发，刷新后从头回放当前生成并合并历史。群聊切换会话、退出账号和组件卸载会取消本地订阅，服务端生成继续执行。跨设备按会话发现当前流尚未接入，恢复入口仍依赖本地请求标识。
+
+各类生成仅保留尚未结束的流。生成及落库流程结束后立即移除原流与事件缓冲；短期完成标识仅包含结果状态。恢复已完成的请求返回 `generation.completed`，前端刷新数据库消息及行动轮状态，不重放旧回复；生成失败只保留失败状态，完整错误详情仅提供给当次连接。
 
 完整请求字段与响应结构以 `src/main/java/com/me/galchat/controller/`、`domain/dto/`、`domain/vo/` 和 `reka/src/api/` 为准。
 

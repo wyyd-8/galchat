@@ -542,6 +542,11 @@ async function openDirectChat(id: number) {
   await loadingConversation
 }
 function closeDirectChat() { direct.close(); view.value = 'world' }
+async function loadWorldSnapshot() {
+  const worldId = workspace.selectedWorldId.value
+  await workspace.loadSnapshot()
+  if (worldId != null) direct.invalidateWorld(worldId)
+}
 async function restoreTrpg() { const id = workspace.selectedConversationId.value; if (id) await workspace.selectConversation(id) }
 async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
   await run(() => workspace.correctGameTime(dayNo, period))
@@ -709,6 +714,7 @@ async function removeDirectCharacter() {
   try {
     await workspace.removeCharacter(character.characterId)
     if (workspace.selectedWorldId.value === worldId && direct.selectedCharacterId.value === character.characterId) closeDirectChat()
+    if (worldId != null) direct.invalidateWorld(worldId, character.characterId)
   } catch (error) { notify('移出角色失败', errorMessage(error), 'danger') }
   finally { directCharacterRemoving.value = false }
 }
@@ -1149,7 +1155,7 @@ async function changePassword() {
   <BaseDialog v-model="dialogs.save" mobile-presentation="page" :layer="isMobile ? 'foreground' : 'default'" :title="workspace.worldSave.value ? '覆盖世界存档' : '创建世界存档'" description="每个世界只保留一个存档；再次保存会覆盖现有存档。"><label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="4" maxlength="200" placeholder="记录此刻发生了什么（最多 200 字）" /></label><template #footer><button class="button ghost" @click="dialogs.save = false">取消</button><button class="button primary" @click="run(() => workspace.saveSnapshot(saveRemark), 'save')">{{ workspace.worldSave.value ? '确认覆盖' : '创建存档' }}</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.worldLoad" mobile-presentation="page" :layer="isMobile ? 'foreground' : 'default'" title="确认读取世界存档" description="读档会回滚角色、聊天、好感和世界事件，并删除存档点之后的进度。">
     <div class="restore-summary"><strong>{{ workspace.worldSave.value?.remark || '未填写存档备注' }}</strong><span>{{ workspace.worldSave.value?.savedAt || '未知存档时间' }}</span><p>这项操作不可撤销，请确认当前进度已不再需要。</p></div><section class="world-save-favors"><h3>存档中的角色好感</h3><dl v-if="workspace.worldSave.value?.characterFavors?.length"><div v-for="character in workspace.worldSave.value.characterFavors" :key="character.characterId"><dt>{{ character.characterName }}</dt><dd>{{ character.favorValue ?? '—' }}</dd></div></dl><p v-else>这份存档没有记录角色好感快照。</p></section>
-    <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.loadSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
+    <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(loadWorldSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
   </BaseDialog>
   <BaseDialog v-model="dialogs.account" mobile-presentation="page" title="账号资料"><div class="form-stack"><label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label><label class="field"><span>邮箱（不可在此修改）</span><input v-model="accountForm.email" disabled /></label><label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label><label class="field"><span>骰子皮肤</span><select v-model="accountForm.diceSkin"><option v-for="option in DICE_SKIN_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><small>保存后，新打开的掷骰动画会使用这套皮肤。</small></label></div><template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.password" mobile-presentation="page" title="修改密码" description="验证码发送到当前账户邮箱，5 分钟内有效。"><form id="change-password-form" class="form-stack" @submit.prevent="run(changePassword, 'password')"><label class="field"><span>账户邮箱</span><input v-model="passwordForm.email" disabled /></label><label class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="passwordForm.code" inputmode="numeric" maxlength="6" /><button class="button secondary" type="button" @click="sendPasswordCode">发送验证码</button></div></label><label class="field"><span>新密码</span><input v-model="passwordForm.newPassword" type="password" placeholder="请输入非空新密码" /></label><label class="field"><span>确认新密码</span><input v-model="passwordForm.confirmPassword" type="password" /></label></form><template #footer><button class="button primary" type="submit" form="change-password-form" :disabled="busy || !passwordForm.code || !passwordForm.newPassword || !passwordForm.confirmPassword">更新密码</button></template></BaseDialog>

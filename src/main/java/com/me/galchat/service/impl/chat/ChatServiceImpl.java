@@ -102,9 +102,16 @@ public class ChatServiceImpl implements IChatService {
                 Sinks.Many<ChatFluxVO> toolFlux = Sinks.many().unicast().onBackpressureBuffer();
                 Map<String, Object> toolContext = buildToolContext(chatMessageDTO.getUserWorldId(),
                         chatMessageDTO.getCharacterId(), true);
+                ChatUserMessageListener userMessageListener = buildUserMessageListener(userMessageId,
+                        chatMessageDTO.getUserWorldId(), chatMessageDTO.getCharacterId());
                 toolContext.put(ChatToolContextConstant.USER_MESSAGE_LISTENER_KEY,
-                        buildUserMessageListener(userMessageId, chatMessageDTO.getUserWorldId(),
-                                chatMessageDTO.getCharacterId()));
+                        (ChatUserMessageListener) (id, info, histories) -> {
+                            // The persistent anchor lets a reconnect replace this turn in loaded history.
+                            if (StringUtils.hasText(chatMessageDTO.getClientRequestId())) {
+                                toolFlux.tryEmitNext(new ChatFluxVO("generation.user", String.valueOf(id)));
+                            }
+                            userMessageListener.onUserMessageSaved(id, info, histories);
+                        });
                 toolContext.put(ChatToolContextConstant.TOOL_EVENT_LISTENER_KEY,
                         (ChatToolEventListener) () -> toolFlux.tryEmitNext(new ChatFluxVO(ChatConstant.TOOL_TYPE, null)));
 

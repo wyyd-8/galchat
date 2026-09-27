@@ -9,8 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
+import com.me.galchat.service.impl.generation.GenerationStreams;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -19,19 +18,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 
 @Service
 public class GroupGenerationStreamRegistry {
 
     private static final Duration DEFAULT_RETENTION = Duration.ofMinutes(5);
 
-    private final ConcurrentHashMap<GenerationKey, GenerationEntry> entries =
-            new ConcurrentHashMap<>();
-    private final Duration retention;
+    private final GenerationStreams<Long, GroupChatEvent> streams;
     private final GroupConversationLockService lockService;
     private final GroupTurnRecoveryService recoveryService;
 
@@ -54,7 +48,7 @@ public class GroupGenerationStreamRegistry {
             Duration retention,
             GroupConversationLockService lockService,
             GroupTurnRecoveryService recoveryService) {
-        this.retention = retention;
+        this.streams = new GenerationStreams<>(retention);
         this.lockService = lockService;
         this.recoveryService = recoveryService;
     }
@@ -77,158 +71,79 @@ public class GroupGenerationStreamRegistry {
         if (!StringUtils.hasText(clientRequestId)) {
             return source.contextCapture();
         }
-        GenerationKey key = new GenerationKey(
-                conversationId, clientRequestId.trim());
-        GenerationEntry entry = entries.computeIfAbsent(
-                key,
-                ignored -> new GenerationEntry(
-                        conversationId,
-                        requestContext,
-                        source,
-                        () -> recoverInterrupted(conversationId),
-                        completed -> scheduleRemoval(key, completed)));
-        return entry.events(true);
+        FailureTrace trace = new FailureTrace();
+        trace.requestContext = requestContext;
+        AtomicBoolean recovered = new AtomicBoolean();
+        Runnable recover = () -> {
+            if (recovered.compareAndSet(false, true)) recoverInterrupted(conversationId);
+        };
+        Flux<GroupChatEvent> traced = source.map(event -> {
+            trace.record(event);
+            if (GroupChatConstant.EVENT_REPLY_FAILED.equals(event.getEventType())) {
+                recover.run();
+                return trace.failureEvent(conversationId, event, new IllegalStateException(event.getError()));
+            }
+            return event;
+        }).onErrorResume(error -> {
+            recover.run();
+            return Flux.just(trace.failureEvent(conversationId, null, error));
+        });
+        return streams.start(conversationId, clientRequestId.trim(), traced, events(conversationId));
     }
 
-    public Flux<GroupChatEvent> resume(
-            Long conversationId, String clientRequestId) {
-        if (!StringUtils.hasText(clientRequestId)) {
-            return Flux.error(new UserRequestException("生成标识不能为空"));
-        }
-        GenerationEntry entry = entries.get(new GenerationKey(
-                conversationId, clientRequestId.trim()));
-        if (entry == null) {
-            if (lockService != null && recoveryService != null) {
-                GroupConversationLockService.OwnedLock lock =
-                        lockService.tryLock(conversationId);
-                if (lock == null) {
-                    return Flux.error(new UserRequestException(
-                            "生成仍在执行，请稍后重连"));
-                }
-                try {
-                    recoveryService.recoverInterrupted(conversationId);
-                    return Flux.just(GroupChatEvent.builder()
-                            .eventType(GroupChatConstant
-                                    .EVENT_GENERATION_FAILED)
-                            .conversationId(conversationId)
-                            .error("生成连接已失效，请重试此行动轮")
-                            .build());
-                } finally {
-                    lockService.unlock(lock);
-                }
+    public Flux<GroupChatEvent> resume(Long conversationId, String clientRequestId) {
+        return resume(conversationId, clientRequestId, 0);
+    }
+
+    public Flux<GroupChatEvent> resume(Long conversationId, String clientRequestId, long after) {
+        if (!StringUtils.hasText(clientRequestId)) return Flux.error(new UserRequestException("生成标识不能为空"));
+        Flux<GroupChatEvent> stream = streams.resume(conversationId, clientRequestId.trim(), after, events(conversationId));
+        if (stream != null) return stream.map(event -> event.getErrorDetail() == null
+                ? event : event.toBuilder().errorDetail(null).build());
+        if (lockService != null && recoveryService != null) {
+            GroupConversationLockService.OwnedLock lock = lockService.tryLock(conversationId);
+            if (lock == null) return Flux.error(new UserRequestException("生成仍在执行，请稍后重连"));
+            try {
+                recoveryService.recoverInterrupted(conversationId);
+                return Flux.just(GroupChatEvent.builder().eventType(GroupChatConstant.EVENT_GENERATION_FAILED)
+                        .conversationId(conversationId).error("生成连接已失效，请重试此行动轮").build());
+            } finally {
+                lockService.unlock(lock);
             }
-            return Flux.error(new UserRequestException(
-                    "生成流不存在或已过期"));
         }
-        return entry.events(false);
+        return Flux.error(new UserRequestException("生成流不存在或已过期"));
     }
 
     public void evict(Long conversationId) {
-        if (conversationId == null) {
-            return;
-        }
-        entries.keySet().removeIf(key ->
-                conversationId.equals(key.conversationId()));
-    }
-
-    private void scheduleRemoval(
-            GenerationKey key, GenerationEntry completed) {
-        Mono.delay(retention).subscribe(
-                ignored -> entries.remove(key, completed));
+        if (conversationId != null) streams.evict(conversationId::equals);
     }
 
     private void recoverInterrupted(Long conversationId) {
-        if (recoveryService != null) {
-            recoveryService.recoverInterrupted(conversationId);
-        }
+        if (recoveryService != null) recoveryService.recoverInterrupted(conversationId);
     }
 
-    private record GenerationKey(
-            Long conversationId, String clientRequestId) {
-    }
-
-    private static final class GenerationEntry {
-
-        private final Long conversationId;
-        private final Sinks.Many<GroupChatEvent> events =
-                Sinks.many().replay().all();
-        private final AtomicInteger eventCount = new AtomicInteger();
-        private final FailureTrace failureTrace = new FailureTrace();
-        private final AtomicBoolean failureRecovered =
-                new AtomicBoolean();
-
-        private GenerationEntry(
-                Long conversationId,
-                GenerationRequestContext requestContext,
-                Flux<GroupChatEvent> source,
-                Runnable beforeFailure,
-                Consumer<GenerationEntry> onTerminated) {
-            this.conversationId = conversationId;
-            failureTrace.requestContext = requestContext;
-            source.contextCapture().subscribe(
-                    event -> {
-                        failureTrace.record(event);
-                        if (GroupChatConstant.EVENT_REPLY_FAILED.equals(
-                                event.getEventType())) {
-                            recoverOnce(beforeFailure);
-                            emit(failureTrace.failureEvent(
-                                    conversationId, event,
-                                    new IllegalStateException(
-                                            event.getError())));
-                        } else {
-                            emit(event);
-                        }
-                    },
-                    error -> {
-                        recoverOnce(beforeFailure);
-                        GroupChatEvent failed = failureTrace.failureEvent(
-                                conversationId, null, error);
-                        emit(failed);
-                        events.tryEmitComplete();
-                        onTerminated.accept(this);
-                    },
-                    () -> {
-                        events.tryEmitComplete();
-                        onTerminated.accept(this);
-                    });
-        }
-
-        private void recoverOnce(Runnable beforeFailure) {
-            if (failureRecovered.compareAndSet(false, true)) {
-                beforeFailure.run();
+    private GenerationStreams.Events<GroupChatEvent> events(Long conversationId) {
+        return new GenerationStreams.Events<>() {
+            public GroupChatEvent sequence(GroupChatEvent event, long sequence) {
+                return event.toBuilder().eventSequence(sequence).build();
             }
-        }
-
-        private void emit(GroupChatEvent event) {
-            eventCount.incrementAndGet();
-            Sinks.EmitResult result = events.tryEmitNext(event);
-            if (result.isFailure()) {
-                eventCount.decrementAndGet();
+            public boolean failed(GroupChatEvent event) {
+                return GroupChatConstant.EVENT_GENERATION_FAILED.equals(event.getEventType());
             }
-        }
-
-        private Flux<GroupChatEvent> events(boolean includeDebugDetails) {
-            return Flux.defer(() -> {
-                int replayCount = eventCount.get();
-                Flux<GroupChatEvent> replayed = events.asFlux()
-                        .take(replayCount);
-                Flux<GroupChatEvent> live = events.asFlux()
-                        .skip(replayCount);
-                GroupChatEvent caughtUp = GroupChatEvent.builder()
-                        .eventType(GroupChatConstant.EVENT_STREAM_CAUGHT_UP)
-                        .conversationId(conversationId)
-                        .build();
-                Flux<GroupChatEvent> stream = Flux.concat(
-                        replayed, Flux.just(caughtUp), live);
-                return includeDebugDetails
-                        ? stream
-                        : stream.map(event -> event.getErrorDetail() == null
-                                ? event
-                                : event.toBuilder()
-                                        .errorDetail(null)
-                                        .build());
-            });
-        }
+            public GroupChatEvent failure(Throwable error) {
+                return completion(true);
+            }
+            public GroupChatEvent completion(boolean failed) {
+                return GroupChatEvent.builder().conversationId(conversationId)
+                        .eventType(failed ? GroupChatConstant.EVENT_GENERATION_FAILED : GroupChatConstant.EVENT_GENERATION_COMPLETED)
+                        .error(failed ? "生成已中断，请读取最新状态后重试" : null).build();
+            }
+            public GroupChatEvent terminal() { return null; } // Domain events close the current turn/step.
+            public GroupChatEvent caughtUp() {
+                return GroupChatEvent.builder().conversationId(conversationId)
+                        .eventType(GroupChatConstant.EVENT_STREAM_CAUGHT_UP).build();
+            }
+        };
     }
 
     private static final class FailureTrace {

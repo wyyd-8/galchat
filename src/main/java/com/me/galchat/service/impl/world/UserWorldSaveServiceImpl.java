@@ -4,6 +4,7 @@ import com.me.galchat.service.impl.group.GroupReplyPlanSnapshotService;
 import com.me.galchat.service.impl.group.GroupConversationLockService;
 import com.me.galchat.service.impl.group.GroupTurnRecoveryService;
 import com.me.galchat.service.impl.chat.SingleChatLockService;
+import com.me.galchat.service.impl.chat.SingleChatGenerationRegistry;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.ChatConstant;
@@ -99,6 +100,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private final GroupReplyPlanSnapshotService groupReplyPlanSnapshotService;
     private final GroupTurnRecoveryService groupTurnRecoveryService;
     private final SingleChatLockService singleChatLockService;
+    private final SingleChatGenerationRegistry singleChatGenerations;
     private final GroupConversationLockService groupConversationLockService;
     private final StringRedisTemplate redisTemplate;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
@@ -151,6 +153,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
             groupLocks = lockGroupConversations(userWorldId, snapshotConversationIds(snapshot));
             groupTurnRecoveryService.assertNoNonTerminalTurns(userWorldId);
             List<Long> deletedUserMessageIds = transactionTemplate.execute(status -> doLoadWorld(userWorldId, snapshot));
+            singleChatGenerations.evict(userWorldId, null);
             evictRedisData(userWorldId, emptyIfNull(deletedUserMessageIds), snapshot);
             restoreTopicBoundaries(userWorldId, snapshot.getTopicBoundaries());
             restoreDerivedData(userWorldId, snapshot);

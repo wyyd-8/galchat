@@ -70,6 +70,30 @@ function event(controller: ReadableStreamDefaultController, type: string, conten
 }
 async function settle() { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)) }
 
+test('a rejected send preserves the server error and draft without resuming a nonexistent generation', async () => {
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  const urls: string[] = []
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout }, fetch: async (url: string, init: RequestInit) => {
+    urls.push(String(url))
+    return init.method === 'POST'
+      ? Response.json({ code: 0, msg: '世界模板与用户世界不匹配' })
+      : new Response('data: {"type":"generation.expired"}\n\n')
+  } })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis }
+  api.history = async () => []; api.modelApis = async () => []
+  try {
+    await chat.selectCharacter(7); chat.input.value = '保留这段输入'; await chat.send()
+    assert.deepEqual(urls, ['/api/ai/chat'])
+    assert.equal(chat.input.value, '保留这段输入')
+    assert.match(notice.message, /世界模板与用户世界不匹配/)
+    assert.equal(sessionStorage.length, 0)
+    assert.equal(chat.loading.sending, false)
+    assert.deepEqual(chat.messages.value, [])
+  } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
 test('keeps concurrent character replies, errors and sending flags in their own conversations', async () => {
   const requests: Array<{ controller: ReadableStreamDefaultController; payload: any }> = []
   const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }

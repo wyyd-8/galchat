@@ -5,7 +5,7 @@ import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
 import { useScopedChatDraft } from '@/components/chatInputState'
 import { errorMessage, notify } from './useNotice'
-import { followGeneration } from '@/streaming/generationConnection'
+import { followGeneration, GenerationStartRejected } from '@/streaming/generationConnection'
 
 interface DirectChatContext {
   world: ComputedRef<UserWorld | null>
@@ -375,7 +375,14 @@ export function useDirectChat(context: DirectChatContext) {
         if (isActive(state)) await context.reloadCharacters()
       }
     } catch (error) {
-      if (valid()) notifyFor(state, '单聊连接中断', `${errorMessage(error)}。重新进入此单聊可继续恢复。`)
+      if (valid()) {
+        if (payload && error instanceof GenerationStartRejected) {
+          remember(state, null); state.generation = null
+          state.messages = generation.base
+          if (isActive(state) && !input.value) input.value = payload.message
+          notifyFor(state, '单聊消息发送失败', errorMessage(error))
+        } else notifyFor(state, '单聊连接中断', `${errorMessage(error)}。重新进入此单聊可继续恢复。`)
+      }
     } finally {
       if (ownEpoch === epoch && !disposed && state.controller === controller) {
         state.loading.sending = false; state.controller = null

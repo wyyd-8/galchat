@@ -1,5 +1,9 @@
 type Connect<E> = (receive: (event: E) => void, signal: AbortSignal) => Promise<void>
 
+/** The server rejected the request before opening an event stream. */
+export class GenerationRequestRejected extends Error {}
+export class GenerationStartRejected extends Error {}
+
 export function isGenerationAbort(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
 }
@@ -38,6 +42,9 @@ export async function followGeneration<E>(options: {
       return
     } catch (error) {
       options.signal.throwIfAborted()
+      if (attempt === 0 && options.initial && cursor === 0 && error instanceof GenerationRequestRejected) {
+        throw new GenerationStartRejected(error.message, { cause: error })
+      }
       if (attempt === 2) throw error
       await new Promise<void>((resolve) => {
         const finish = () => { clearTimeout(timer); options.signal.removeEventListener('abort', finish); resolve() }

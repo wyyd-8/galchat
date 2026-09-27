@@ -5,6 +5,8 @@ import type {
   WorldTemplate, WorldTemplateUsage,
 } from './types'
 
+import { GenerationRequestRejected } from '../streaming/generationConnection'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const TOKEN_KEY = 'galchat.token'
 export const UNAUTHORIZED_EVENT = 'galchat:unauthorized'
@@ -40,7 +42,11 @@ async function raw(path: string, init: RequestInit = {}) {
     if (requestHeaders.get('token') === token()) { clearSession(); window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)) }
     throw new Error('登录状态已失效')
   }
-  if (!response.ok) throw new Error(await readError(response))
+  if (!response.ok) {
+    const message = await readError(response)
+    if (response.status >= 400 && response.status < 500 && response.status !== 408) throw new GenerationRequestRejected(message)
+    throw new Error(message)
+  }
   return response
 }
 
@@ -232,7 +238,7 @@ export async function resumeChat(userWorldId: number, characterId: number, reque
 async function readEventStream<E>(response: Response, onMessage: (message: E) => void) {
   if (response.headers.get('content-type')?.includes('application/json')) {
     const result = await response.json() as ApiResult<unknown>
-    throw new Error(result.msg || '生成请求失败')
+    throw new GenerationRequestRejected(result.msg || '生成请求失败')
   }
   if (!response.body) throw new Error('回复连接为空')
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''

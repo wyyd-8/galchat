@@ -14,7 +14,7 @@ import { hydrateDiceMessage } from '@/dice/domain/dicePlayback'
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
 import { useScopedChatDraft } from '@/components/chatInputState'
 import { errorMessage, notify } from './useNotice'
-import { followGeneration, isGenerationAbort } from '@/streaming/generationConnection'
+import { followGeneration, isGenerationAbort, GenerationStartRejected } from '@/streaming/generationConnection'
 
 let tempMessageId = -1
 const freshPlan = (): ReplyPlan => ({ source: 'USER', displayName: '群聊', items: [] })
@@ -613,6 +613,9 @@ export function useWorkspace() {
       })
       if (terminal) forgetGeneration(conversationId, clientRequestId)
       return { failed, terminal, completed }
+    } catch (error) {
+      if (error instanceof GenerationStartRejected) forgetGeneration(conversationId, clientRequestId)
+      throw error
     } finally {
       if (generationConnection === connection) {
         generationConnection = null

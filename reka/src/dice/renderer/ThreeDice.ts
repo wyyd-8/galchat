@@ -90,21 +90,19 @@ interface SharedDiceRenderer {
 
 let sharedDiceRenderer: SharedDiceRenderer | undefined
 
+function createRenderer(): THREE.WebGLRenderer {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.setClearColor(0x000000, 0)
+  renderer.autoClear = false
+  renderer.domElement.className = 'dice-shared-canvas'
+  renderer.domElement.setAttribute('aria-hidden', 'true')
+  return renderer
+}
+
 function acquireSharedRenderer(host: HTMLElement, owner: object): THREE.WebGLRenderer {
-  if (!sharedDiceRenderer) {
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: true,
-      powerPreference: 'high-performance',
-    })
-    renderer.outputColorSpace = THREE.SRGBColorSpace
-    renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.setClearColor(0x000000, 0)
-    renderer.autoClear = false
-    renderer.domElement.className = 'dice-shared-canvas'
-    renderer.domElement.setAttribute('aria-hidden', 'true')
-    sharedDiceRenderer = { renderer }
-  }
+  sharedDiceRenderer ??= { renderer: createRenderer() }
   sharedDiceRenderer.owner = owner
   host.append(sharedDiceRenderer.renderer.domElement)
   sharedDiceRenderer.renderer.domElement.hidden = false
@@ -327,7 +325,10 @@ function loadTemplate(config: DiceModelConfig, skin: DiceSkin): Promise<THREE.Gr
   const cacheKey = `${skin}:${config.key}`
   const cached = templatePromises.get(cacheKey)
   if (cached) return cached
-  const promise = loader.loadAsync(modelUrl(config, skin)).then((gltf) => gltf.scene)
+  const promise = loader.loadAsync(modelUrl(config, skin)).then((gltf) => gltf.scene).catch((error) => {
+    templatePromises.delete(cacheKey)
+    throw error
+  })
   templatePromises.set(cacheKey, promise)
   return promise
 }
@@ -783,13 +784,14 @@ export class ThreeDiceBoard {
   private canvasPixelRatio = 0
   private disposed = false
 
-  constructor(private readonly diceTray: HTMLElement, renderLayer?: HTMLElement) {
+  constructor(private readonly diceTray: HTMLElement, renderLayer?: HTMLElement, private readonly isolated = false) {
     const surface = diceTray.closest<HTMLElement>('.dice-player-surface') || diceTray.parentElement
     if (!surface) throw new Error('骰子托盘缺少播放器表面')
     this.surface = surface
     this.renderLayer = renderLayer || surface
     this.scrollHost = findDiceStageScrollHost<HTMLElement>(diceTray)
-    this.renderer = acquireSharedRenderer(this.renderLayer, this.rendererOwner)
+    this.renderer = isolated ? createRenderer() : acquireSharedRenderer(this.renderLayer, this.rendererOwner)
+    if (isolated) this.renderLayer.append(this.renderer.domElement)
     const scheduler = {
       request: (callback: (now: number) => void) => window.requestAnimationFrame(callback),
       cancel: (handle: number) => window.cancelAnimationFrame(handle),
@@ -926,7 +928,11 @@ export class ThreeDiceBoard {
     this.activeModules = []
     this.preparedResult = undefined
     this.diceTray.replaceChildren()
-    releaseSharedRenderer(this.rendererOwner)
+    if (this.isolated) {
+      this.renderer.dispose()
+      this.renderer.forceContextLoss()
+      this.renderer.domElement.remove()
+    } else releaseSharedRenderer(this.rendererOwner)
   }
 
   refreshLayout(): void {
@@ -967,14 +973,15 @@ export class ThreeDiceBoard {
   }
 
   private renderAll(): void {
-    if (this.disposed || sharedDiceRenderer?.owner !== this.rendererOwner) return
+    if (this.disposed || (!this.isolated && sharedDiceRenderer?.owner !== this.rendererOwner)) return
     const surfaceRect = this.surface.getBoundingClientRect()
-    const clippingRects: DiceViewportRect[] = [surfaceRect, {
+    const clippingRects: DiceViewportRect[] = [surfaceRect]
+    if (!this.isolated) clippingRects.push({
       left: 0,
       top: 0,
       width: window.innerWidth,
       height: window.innerHeight,
-    }]
+    })
     if (this.scrollHost) clippingRects.push(this.scrollHost.getBoundingClientRect())
     const canvasRect = intersectDiceViewportRects(clippingRects)
     const canvas = this.renderer.domElement

@@ -7,17 +7,27 @@ import { createServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 for (const mobile of [false, true]) {
-  test(`password recovery works on ${mobile ? 'mobile' : 'desktop'} and returns to login`, async context => {
-    const requests: Array<{ url: string, method: string, body: unknown }> = []
+  test(`password recovery and registration automatically sign in the submitted account on ${mobile ? 'mobile' : 'desktop'}`, async context => {
+    const requests: Array<{ url: string, method: string, body: unknown, token: string | null }> = []
     const originalFetch = globalThis.fetch
     const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
     const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: { clearTimeout() {}, setTimeout() { return 1 } } })
-    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem() { return null } } })
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { clearTimeout() {}, setTimeout() { return 1 }, addEventListener() {} } })
+    const stored = new Map<string, string>()
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+      getItem(key: string) { return stored.get(key) ?? null },
+      setItem(key: string, value: string) { stored.set(key, value) },
+    } })
     let failReset = false
     globalThis.fetch = async (input, init = {}) => {
-      requests.push({ url: String(input), method: init.method || 'GET', body: JSON.parse(String(init.body)) })
-      return new Response(JSON.stringify(failReset ? { code: 0, msg: '邮箱验证码错误或已过期' } : { code: 1 }))
+      const url = String(input)
+      requests.push({ url, method: init.method || 'GET', body: init.body ? JSON.parse(String(init.body)) : undefined, token: new Headers(init.headers).get('token') })
+      if (url === '/api/user/password/reset') return new Response(JSON.stringify(failReset ? { code: 0, msg: '邮箱验证码错误或已过期' } : { code: 1 }))
+      const data = url === '/api/user/login' ? { id: 17, username: '找回的账号', token: 'recovered-token' }
+        : url === '/api/user/register' ? { id: 23, username: '新注册账号', token: 'registered-token' }
+        : url === '/api/user/info' ? { id: Number(stored.get('galchat.userId')), username: stored.get('galchat.username') }
+        : []
+      return new Response(JSON.stringify({ code: 1, data }))
     }
     context.after(() => {
       globalThis.fetch = originalFetch
@@ -43,9 +53,15 @@ for (const mobile of [false, true]) {
     context.after(() => vite.close())
     const { default: AuthDialog } = await vite.ssrLoadModule('/src/components/AuthDialog.vue')
     const { notice } = await vite.ssrLoadModule('/src/composables/useNotice.ts')
+    const { useWorkspace } = await vite.ssrLoadModule('/src/composables/useWorkspace.ts')
     // Capture the real component state while rendering, without exporting test-only APIs.
     let state: any
-    const app = createSSRApp({ render: () => h(AuthDialog, { modelValue: true }) })
+    let workspace: any
+    let authentication: Promise<void> | undefined
+    const app = createSSRApp({ setup() {
+      workspace = useWorkspace()
+      return () => h(AuthDialog, { modelValue: true, onSubmit(payload: unknown) { authentication = workspace.authenticate(payload) } })
+    } })
     app.mixin({ created() { if (this.$options.__name === 'AuthDialog') state = (this.$ as any).setupState } })
     const html = await renderToString(app)
     assert.match(html, /找回密码<\/button>/)
@@ -56,7 +72,7 @@ for (const mobile of [false, true]) {
     assert.equal(state.form.password, '')
     assert.equal(state.title, '找回密码')
     await state.sendCode()
-    assert.deepEqual(requests[0], { url: '/api/user/password/reset/email-code', method: 'POST', body: { email: '12345678@bjtu.edu.cn' } })
+    assert.deepEqual(requests[0], { url: '/api/user/password/reset/email-code', method: 'POST', body: { email: '12345678@bjtu.edu.cn' }, token: null })
     state.form.password = 'new-secret'
     state.form.confirmPassword = 'different'
     state.form.code = '123456'
@@ -72,13 +88,36 @@ for (const mobile of [false, true]) {
     assert.equal(state.mode, 'reset', 'failure keeps the form available for correction')
     assert.equal(state.busy, false)
     assert.equal(notice.message, '邮箱验证码错误或已过期')
+    assert.equal(authentication, undefined, 'failed reset must not sign in')
     failReset = false
-    await state.submit()
-    assert.deepEqual(requests.at(-1), { url: '/api/user/password/reset', method: 'PUT', body: { email: '12345678@bjtu.edu.cn', newPassword: 'new-secret', verificationCode: '123456' } })
+    const resetting = state.submit()
+    Object.assign(state.form, { email: '99999999@bjtu.edu.cn', password: 'edited-while-waiting' })
+    await resetting
+    await authentication
+    assert.deepEqual(requests.filter(request => request.url === '/api/user/password/reset').at(-1), { url: '/api/user/password/reset', method: 'PUT', body: { email: '12345678@bjtu.edu.cn', newPassword: 'new-secret', verificationCode: '123456' }, token: null })
+    assert.deepEqual(requests.find(request => request.url === '/api/user/login'), { url: '/api/user/login', method: 'POST', body: { email: '12345678@bjtu.edu.cn', password: 'new-secret' }, token: null })
+    assert.deepEqual(workspace.session, { id: 17, username: '找回的账号', token: 'recovered-token' })
+    assert.equal(workspace.isLoggedIn.value, true)
+    assert.equal(stored.get('galchat.token'), 'recovered-token')
+    assert.equal(workspace.userInfo.value.id, 17)
+    assert.ok(requests.some(request => request.url === '/api/world/user/17' && request.token === 'recovered-token'))
     assert.equal(state.mode, 'login')
     assert.equal(state.form.email, '12345678@bjtu.edu.cn')
     assert.equal(state.form.password, '')
     assert.equal(state.form.code, '')
     assert.equal(state.busy, false)
+
+    state.switchMode('register')
+    Object.assign(state.form, { email: '87654321@bjtu.edu.cn', password: 'registered-secret', confirmPassword: 'registered-secret', code: '654321' })
+    await state.submit()
+    await authentication
+    assert.deepEqual(requests.find(request => request.url === '/api/user/register'), { url: '/api/user/register', method: 'POST', body: { email: '87654321@bjtu.edu.cn', password: 'registered-secret', verificationCode: '654321' }, token: 'recovered-token' })
+    assert.deepEqual(workspace.session, { id: 23, username: '新注册账号', token: 'registered-token' })
+    assert.equal(workspace.isLoggedIn.value, true)
+    assert.equal(stored.get('galchat.userId'), '23')
+    assert.equal(stored.get('galchat.token'), 'registered-token')
+    assert.equal(workspace.userInfo.value.id, 23)
+    assert.ok(requests.some(request => request.url === '/api/world/user/23' && request.token === 'registered-token'))
+    assert.equal(requests.filter(request => request.url === '/api/user/login').length, 1, 'registration uses its returned token directly')
   })
 }

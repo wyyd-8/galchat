@@ -16,9 +16,10 @@ const props = withDefaults(defineProps<{
   contentStyle?: StyleValue
   mobilePresentation?: 'sheet' | 'page'
   mobileBack?: () => void
+  embedded?: boolean
 }>(), { description: '', size: 'md', layer: 'default', contentClass: '', contentStyle: undefined, mobilePresentation: 'sheet' })
 const { isMobile } = useMobileViewport()
-useMobileDialogHistory(open, isMobile, () => {
+useMobileDialogHistory(open, computed(() => isMobile.value && !props.embedded), () => {
   if (props.mobileBack) props.mobileBack()
   else open.value = false
 })
@@ -35,7 +36,11 @@ function restoreFocus(event: Event) {
 </script>
 
 <template>
-  <DialogRoot v-model:open="open">
+  <section v-if="embedded" class="dialog-content dialog-embedded" :class="contentClass" :aria-label="title" :data-mobile-presentation="mobilePresentation"
+    style="position: relative; inset: auto; transform: none; width: 100%; max-width: 100%; height: auto; max-height: none; margin: 0; border: 0; border-radius: 12px; box-shadow: none; animation: none; z-index: auto;">
+    <div class="dialog-body" style="padding: 0; display: block; overflow: visible;"><slot /></div>
+  </section>
+  <DialogRoot v-else v-model:open="open">
     <DialogPortal>
       <DialogOverlay class="dialog-overlay" :class="layerClass" />
       <DialogContent class="dialog-content" :class="[`dialog-${size}`, layerClass, contentClass]" :style="contentStyle" v-bind="description ? {} : { 'aria-describedby': undefined }" :data-mobile-presentation="mobilePresentation" @close-auto-focus="restoreFocus">
@@ -55,3 +60,7 @@ function restoreFocus(event: Event) {
     </DialogPortal>
   </DialogRoot>
 </template>
+
+<style scoped>
+.dialog-content.dialog-embedded[data-mobile-presentation]::before { display: none; }
+</style>

@@ -24,13 +24,14 @@ import superLoseUrl from '@/dice/assets/audio/dice_superlose.mp3'
 import type { DiceRollResult, ThreeDiceBoard } from '@/dice/renderer/ThreeDice'
 
 const open = defineModel<boolean>({ required: true })
-const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean }>()
-const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: [] }>()
+const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean; embedded?: boolean }>()
+const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: []; phaseChange: [phase: DicePlayerPhase] }>()
 const stageScroll = ref<HTMLElement | null>(null)
 const surface = ref<HTMLElement | null>(null)
 const tray = ref<HTMLElement | null>(null)
 const renderLayer = ref<HTMLElement | null>(null)
 const status = ref<DicePlayerPhase>('loading')
+watch(status, phase => emit('phaseChange', phase), { immediate: true })
 const flowPhase = ref<'rolling' | 'revealing'>('rolling')
 const error = ref('')
 const activeModule = ref(0)
@@ -173,6 +174,10 @@ function retire() {
 }
 async function prepare() {
   if (!open.value) return
+  // An embedded player lives in the account page's scroller. Reserve its space
+  // before retire() clears the tray, otherwise the browser clamps that scroller.
+  const embeddedStage = props.embedded ? stageScroll.value : null
+  if (embeddedStage) embeddedStage.style.minHeight = `${embeddedStage.getBoundingClientRect().height}px`
   retire()
   const token = generation
   const request = props.request
@@ -191,8 +196,8 @@ async function prepare() {
   try {
     const renderer = await import('@/dice/renderer/ThreeDice')
     if (token !== generation) return
-    disposeSharedRenderer = renderer.disposeSharedDiceRenderer
-    board = new renderer.ThreeDiceBoard(tray.value, renderLayer.value)
+    disposeSharedRenderer = props.embedded ? undefined : renderer.disposeSharedDiceRenderer
+    board = new renderer.ThreeDiceBoard(tray.value, renderLayer.value, props.embedded)
     board.setSkin(request.skin)
     const prepared = createDicePlayerPreparedResult(request) as DiceRollResult
     await board.prepareResult(prepared)
@@ -205,6 +210,8 @@ async function prepare() {
     }
     buildRows()
     await nextTick()
+    if (token !== generation) return
+    if (embeddedStage) embeddedStage.style.minHeight = ''
     board.refreshLayout()
     if (stageScroll.value) stageScroll.value.scrollTop = 0
     if (mode === 'settled') {
@@ -223,7 +230,11 @@ async function prepare() {
       await play()
     }
   } catch (cause) {
-    if (token === generation) { status.value = 'error'; error.value = cause instanceof Error ? cause.message : '骰子动画播放失败' }
+    if (token === generation) {
+      if (embeddedStage) embeddedStage.style.minHeight = ''
+      status.value = 'error'
+      error.value = cause instanceof Error ? cause.message : '骰子动画播放失败'
+    }
   }
 }
 async function play() {
@@ -324,8 +335,8 @@ watch(open, (visible, wasVisible) => {
 onBeforeUnmount(() => { retire(); disposeSharedRenderer?.() })
 </script>
 <template>
-<BaseDialog v-model="open" :title="request?.reason||'掷骰检定'" :description="`${originalSummary?.modifierLabel || '掷骰判定'} · ${modules.length} 组 · ${rowCount} 行`" size="lg" layer="foreground" content-class="dice-player-window mobile-v4-window">
- <div class="mobile-progress"><span aria-live="polite"><i/>{{stateLabel}}</span><button v-if="status==='playing'" @click="follow?pauseFollow():resumeFollow()">{{follow?'暂停跟随':'继续跟随'}}<ArrowDown :size="12"/></button><DiceModifierNotice v-else-if="modifierNotice" :notice="modifierNotice" /><span v-else>向下查看各组</span></div>
+<BaseDialog :embedded="embedded" v-model="open" :title="request?.reason||'掷骰检定'" :description="`${originalSummary?.modifierLabel || '掷骰判定'} · ${modules.length} 组 · ${rowCount} 行`" size="lg" layer="foreground" content-class="dice-player-window mobile-v4-window">
+ <div v-if="!embedded" class="mobile-progress"><span aria-live="polite"><i/>{{stateLabel}}</span><button v-if="status==='playing'" @click="follow?pauseFollow():resumeFollow()">{{follow?'暂停跟随':'继续跟随'}}<ArrowDown :size="12"/></button><DiceModifierNotice v-else-if="modifierNotice" :notice="modifierNotice" /><span v-else>向下查看各组</span></div>
  <div ref="stageScroll" class="dice-player-stage-scroll" @wheel.passive="pauseFollow" @touchmove.passive="pauseFollow" @keydown="pauseForKeyboard" tabindex="0" aria-label="骰子与分组结果">
   <section ref="surface" class="dice-player-surface" :class="[`is-${status}`, { 'show-die-values': status === 'complete' || flowPhase === 'revealing' }]" :data-skin="request?.skin||'classic'">
    <div v-if="outcomeEffects.length" class="dice-outcome-vfx-layer" aria-hidden="true"><div v-for="e in outcomeEffects" :key="e.id" class="dice-outcome-vfx-burst" :class="`is-${e.tone}`" :style="e.style"><i class="dice-outcome-vfx-core"/><i v-for="(particle,i) in e.particles" :key="i" class="dice-outcome-vfx-fog" :style="particle"/></div></div>
@@ -333,13 +344,13 @@ onBeforeUnmount(() => { retire(); disposeSharedRenderer?.() })
    <p v-if="error" class="mobile-error" role="alert">{{error}}</p>
   </section>
  </div>
- <div v-if="showRollAction || showContinueAction" class="mobile-v4-actions">
+ <div v-if="!embedded && (showRollAction || showContinueAction)" class="mobile-v4-actions">
   <button v-if="showRollAction" class="button" :class="status === 'complete' ? 'secondary' : 'primary'" :disabled="presentation.actionDisabled" @click="handleRollAction"><LoaderCircle v-if="presentation.actionDisabled" class="spin" :size="17"/><RotateCcw v-else-if="status === 'complete' || status === 'error'" :size="17"/><Dices v-else :size="17"/>{{status === 'playing' && flowPhase === 'revealing' ? '展示结果中' : presentation.actionLabel}}</button>
   <button v-if="showContinueAction" class="button primary" @click="handleContinueAction">{{continueActionLabel}}</button>
  </div>
  <template v-for="host in mounts" :key="host.module">
   <Teleport :to="host.header"><div class="mobile-group-title"><span>第 {{host.module+1}} 组 <small>/ {{modules.length}}</small></span><strong>{{[groupAt(host.module)?.label,groupAt(host.module)?.checkName].filter(Boolean).join(' · ')}}</strong></div><div class="mobile-group-sub"><span>{{modules[host.module]?.expression}} · {{Math.ceil((modules[host.module]?.dice.length || 0)/2)}} 行</span><span v-if="(groupAt(host.module)?.moduleCount || 0)>1">{{scopeLabel(groupAt(host.module)!)}} · 详情在第 {{groupAt(host.module)!.moduleStart+groupAt(host.module)!.moduleCount}} 组后</span><span v-else>{{skinLabel}}骰面</span></div></Teleport>
-  <Teleport :to="host.details">
+  <Teleport v-if="!embedded" :to="host.details">
    <template v-for="(g,gi) in endsAt(host.module)" :key="gi">
     <article class="mobile-inline-result" :class="[`tone-${isRevealed(g)?g.outcomeTone:'pending'}`,{'is-revealed':isRevealed(g)}]" :data-start="g.moduleStart" :data-end="g.moduleStart+g.moduleCount-1" aria-live="polite">
      <template v-if="request?.presentation">

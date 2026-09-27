@@ -191,6 +191,9 @@ public class UserWorldController {
         if (userId == null) {
             throw new UserRequestException("用户id不能为空");
         }
+        if (!currentUserId().equals(userId)) {
+            throw new UserAuthException("无权访问其他用户的世界列表");
+        }
         return Result.success(userWorldPrefixService.listBaseInfoByUserId(userId));
     }
 

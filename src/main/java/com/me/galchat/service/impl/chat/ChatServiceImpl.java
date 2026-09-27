@@ -14,6 +14,8 @@ import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserWorldPrefix;
 import com.me.galchat.domain.vo.ChatFluxVO;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.exception.UserAuthException;
+import com.me.galchat.utils.CurrentHolder;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.memory.AssistantReasoning;
@@ -45,6 +47,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
@@ -72,8 +75,18 @@ public class ChatServiceImpl implements IChatService {
 
     @Override
     public Flux<ChatFluxVO> chat(ChatMessageDTO chatMessageDTO) {
+        checkChatRequest(chatMessageDTO);
+        // Authorize on the request thread before deferred model and memory work begins.
+        Integer userId = CurrentHolder.getCurrentId();
+        if (userId == null) {
+            throw new UserAuthException("用户未登录");
+        }
+        UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(
+                userId.longValue(), chatMessageDTO.getUserWorldId(), true);
+        if (!Objects.equals(userWorld.getWorldId(), chatMessageDTO.getWorldId())) {
+            throw new UserRequestException("世界模板与用户世界不匹配");
+        }
         return Flux.defer(() -> {
-            checkChatRequest(chatMessageDTO);
             SingleChatLockService.OwnedLock conversationLock = singleChatLockService
                     .tryLockWithOwner(chatMessageDTO.getUserWorldId(), chatMessageDTO.getCharacterId());
             if (conversationLock == null) {

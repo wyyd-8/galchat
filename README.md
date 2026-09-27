@@ -221,12 +221,16 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 | `spring.datasource.url` / `username` / `password` | PostgreSQL 连接 |
 | `spring.data.redis.*` | Redis 连接 |
 | `spring.ai.deepseek.base-url` / `api-key` / `chat.model` | 内置模型服务与模型名 |
+| `DEEPSEEK_API_KEY` | 内置 DeepSeek API Key，通过环境变量注入 |
 | `spring.ai.ollama.base-url` / `embedding.model` | Ollama 地址与 embedding 模型 |
 | `galchat.model-api.master-key` | 加密用户自定义模型 API Key 的主密钥 |
+| `galchat.jwt.signing-key` / `GALCHAT_JWT_SIGNING_KEY` | JWT 签名密钥，32 字节随机数据的 Base64 编码 |
 | `galchat.model-api.request-timeout` | 自定义模型请求超时，当前为 `120s` |
 | `galchat.alioss.*` / `galchat.aliemail.*` | OSS 与邮件业务配置；OSS 使用环境变量凭据，邮件使用阿里云默认凭据链 |
 
 主密钥必须是 **32 字节随机数据的 Base64 编码**。首次部署时可用 `openssl rand -base64 32` 生成，并通过外部配置持久保存；配置读取也支持 `GALCHAT_MODEL_API_MASTER_KEY` 作为回退值。已有加密数据需要同一把密钥才能解密。数据库连接、API Key 等敏感值请使用环境变量或外部配置覆盖。
+
+启动后端前设置 `DEEPSEEK_API_KEY` 和 `GALCHAT_JWT_SIGNING_KEY`。JWT 密钥应单独用 `openssl rand -base64 32` 生成，与模型主密钥分开保存；缺失或格式不正确会阻止应用启动。所有后端实例须使用同一 JWT 密钥，轮换后已有登录令牌失效，需要重新登录。IDEA 启动时在运行配置的环境变量中设置，终端启动时在当前 shell 中导出；不要将密钥提交到 Git。
 
 ## 快速启动
 

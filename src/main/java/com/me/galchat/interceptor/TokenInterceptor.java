@@ -7,6 +7,7 @@ import io.jsonwebtoken.JwtException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -15,7 +16,10 @@ import org.springframework.web.servlet.HandlerInterceptor;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class TokenInterceptor implements HandlerInterceptor {
+    private final JwtUtils jwtUtils;
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         /*//1.获取请求路径
@@ -35,7 +39,7 @@ public class TokenInterceptor implements HandlerInterceptor {
         }
         //5.如果token存在则校验token，不通过返回错误信息401
         try {
-            Claims claims = JwtUtils.parseToken(token);
+            Claims claims = jwtUtils.parseToken(token);
             Integer id = (Integer) claims.get("id");
             log.info("登录id:{}", id);
             CurrentHolder.setCurrentId(id);

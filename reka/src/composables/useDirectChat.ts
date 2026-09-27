@@ -19,6 +19,12 @@ function splitContent(value: string) {
   return parts.length ? parts : [value]
 }
 
+// The server pages primary messages, then expands their replies, reasoning and tools.
+function hasOlderHistory(history: ChatHistory[]) {
+  return history.filter(item => item.type == null || item.type.toLowerCase() === 'user'
+    || (item.type.toLowerCase() === 'assistant' && item.userMessageId == null)).length === 30
+}
+
 export function useDirectChat(context: DirectChatContext) {
   interface Generation {
     requestId: string; sequence: number; base: DirectMessage[]; live: DirectMessage[]; following: DirectMessage[]
@@ -156,15 +162,23 @@ export function useDirectChat(context: DirectChatContext) {
     scrollConversationToLatest(viewport)
   }
 
-  async function loadHistory(state: State) {
+  async function loadHistory(state: State, preserveOlder = false) {
     const revision = ++state.historyRevision; const ownEpoch = epoch
     state.loading.history = true
     try {
       const [history, models] = await Promise.all([api.history(state.world!.id, state.characterId), api.modelApis()])
       if (disposed || ownEpoch !== epoch || revision !== state.historyRevision) return
       const errors = state.messages.filter(message => message.complete === false)
-      state.messages = [...historyMessages(history, state.world?.thinkStatus === false), ...errors]
-      state.modelApis = models; state.hasOlder = history.length === 30
+      const hasOlder = hasOlderHistory(history)
+      const boundary = Math.min(...history.flatMap(item => item.id == null ? [] : [item.id]))
+      const older = preserveOlder && hasOlder ? state.messages.filter(message => {
+        const id = message.userMessageId ?? message.historyId
+        return message.complete !== false && id != null && id < boundary
+      }) : []
+      state.messages = [...older, ...historyMessages(history, state.world?.thinkStatus === false), ...errors]
+      state.modelApis = models
+      // Retained pages own the oldest cursor, including an already exhausted one.
+      if (!older.length) state.hasOlder = hasOlder
     } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '单聊记录加载失败', errorMessage(error)) }
     finally { if (revision === state.historyRevision) state.loading.history = false }
   }
@@ -203,7 +217,7 @@ export function useDirectChat(context: DirectChatContext) {
       if (disposed || ownEpoch !== epoch || revision !== state.historyRevision) return
       const older = historyMessages(history, state.world.thinkStatus === false)
       if (state.generation) state.generation.base = [...older, ...state.generation.base]
-      state.messages = [...older, ...state.messages]; state.hasOlder = history.length === 30
+      state.messages = [...older, ...state.messages]; state.hasOlder = hasOlderHistory(history)
       const previousTop = viewport?.scrollTop ?? 0
       await nextTick()
       if (isActive(state) && viewport && scroller.value === viewport) viewport.scrollTop = previousTop + viewport.scrollHeight - previousHeight
@@ -368,7 +382,7 @@ export function useDirectChat(context: DirectChatContext) {
       if (!valid()) return
       if (terminal) {
         remember(state, null); state.generation = null
-        await loadHistory(state)
+        await loadHistory(state, true)
         if (expired) {
           if (ownEpoch === epoch && !disposed) notifyFor(state, '回复续接已失效', '已重新加载历史；若回复未完成，可撤回后重新发送。')
         }

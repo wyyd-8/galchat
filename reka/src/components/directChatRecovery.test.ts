@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import test from 'node:test'
-import type { Character, UserWorld } from '../api/types.ts'
+import type { Character, ChatHistory, UserWorld } from '../api/types.ts'
 
 const sourceRoot = new URL('../', import.meta.url)
 registerHooks({
@@ -299,4 +299,81 @@ test('completed generation releases live state and displays only authoritative p
     assert.deepEqual(chat.messages.value.map(m => m.content), ['问题', '数据库中的回复'])
     assert.equal(chat.loading.sending, false); assert.equal(sessionStorage.length, 0)
   } finally { app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
+function historyRounds(start: number, count: number): ChatHistory[] {
+  return Array.from({ length: count }, (_, i) => {
+    const id = start + i * 2
+    return [
+      { id, type: 'user', content: `问题${id}` },
+      { type: 'thinking', userMessageId: id, stepNo: 1, content: `思考${id}` },
+      { type: 'tool' },
+      { id: id + 1, type: 'assistant', userMessageId: id, stepNo: 1, content: `回答${id}` },
+    ]
+  }).flat()
+}
+
+test('direct history counts primary messages and uses their IDs to paginate expanded rounds', async (t) => {
+  const { api, chat, app } = await mountDirectChat()
+  t.after(() => app.unmount())
+  t.mock.method(api, 'modelApis', async () => [])
+  const cursors: Array<number | undefined> = []
+  t.mock.method(api, 'history', async (_world: number, _character: number, _size?: number, before?: number) => {
+    cursors.push(before)
+    if (before == null) return [...historyRounds(100, 29), { id: 158, type: 'assistant', content: '主动回复' }]
+    if (before === 100) return historyRounds(40, 30)
+    return historyRounds(20, 5)
+  })
+  await chat.selectCharacter(7)
+  assert.equal(chat.hasOlderMessages.value, true)
+  await chat.loadEarlier()
+  assert.equal(chat.hasOlderMessages.value, true)
+  await chat.loadEarlier()
+  assert.equal(chat.hasOlderMessages.value, false)
+  assert.deepEqual(cursors, [undefined, 100, 40])
+  assert.equal(chat.messages.value[0]?.historyId, 20)
+})
+
+test('30 expanded history entries from a short primary page do not advertise another page', async (t) => {
+  const { api, chat, app } = await mountDirectChat()
+  t.after(() => app.unmount())
+  t.mock.method(api, 'modelApis', async () => [])
+  t.mock.method(api, 'history', async () => historyRounds(10, 10).filter(item => item.type !== 'tool'))
+  await chat.selectCharacter(7)
+  assert.equal(chat.hasOlderMessages.value, false)
+})
+
+test('completed direct replies preserve older pages and their exhausted cursor while replacing the latest page', async (t) => {
+  const globals = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
+  let controller!: ReadableStreamDefaultController
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), fetch: async () => new Response(new ReadableStream({ start(c) { controller = c } })) })
+  t.after(() => Object.assign(globalThis, globals))
+  const { api, chat, app } = await mountDirectChat()
+  t.after(() => app.unmount())
+  t.mock.method(api, 'modelApis', async () => [])
+  let completed = false
+  t.mock.method(api, 'history', async (_world: number, _character: number, _size?: number, before?: number) => {
+    if (before != null) return historyRounds(80, 10)
+    return historyRounds(completed ? 102 : 100, 30)
+  })
+  await chat.selectCharacter(7)
+  await chat.loadEarlier()
+  assert.equal(chat.hasOlderMessages.value, false)
+  chat.input.value = '新问题'
+  const sending = chat.send()
+  await settle()
+  event(controller, 'response', '流中的临时回复', 1)
+  completed = true
+  event(controller, 'generation.completed', '', 2)
+  controller.close()
+  await sending
+  assert.equal(chat.messages.value[0]?.historyId, 80)
+  assert.equal(chat.messages.value.filter(item => item.role === 'user').length, 41)
+  assert.equal(chat.messages.value.filter(item => item.role === 'thinking').length, 41)
+  assert.equal(chat.hasOlderMessages.value, false)
+  assert.equal(chat.messages.value.at(-1)?.content, '回答160')
+  assert.ok(!chat.messages.value.some(item => item.content === '流中的临时回复'))
+  assert.equal(new Set(chat.messages.value.map(item => item.id)).size, chat.messages.value.length)
+  await chat.selectCharacter(7)
+  assert.equal(chat.messages.value[0]?.historyId, 102, 're-enter still reloads authoritative history')
 })

@@ -666,8 +666,12 @@ export function useWorkspace() {
     const hydrated = await hydrateGroupMessages(history)
     if (revision !== conversationRevision || selectedConversationId.value !== conversation.id || selectedWorldId.value !== worldId) return
     conversations.value = conversations.value.map((item) => item.id === conversation.id ? { ...item, ...detail } : item)
-    messages.value = hydrated.sort((a, b) => a.sequenceNo - b.sequenceNo)
-    hasOlderGroupMessages.value = history.length === 50
+    // Replace the authoritative latest page, retaining only persisted older pages.
+    // Read after hydration so concurrent pagination is preserved as well.
+    const boundary = Math.min(...history.map(item => item.id))
+    const older = history.length === 50 ? messages.value.filter(item => item.id > 0 && item.id < boundary) : []
+    messages.value = [...older, ...hydrated].sort((a, b) => a.sequenceNo - b.sequenceNo)
+    if (!older.length) hasOlderGroupMessages.value = history.length === 50
     setReplyPlans(plans)
     currentTurn.value = turn
     combatOverview.value = overview

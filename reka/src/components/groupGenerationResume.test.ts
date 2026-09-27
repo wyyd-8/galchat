@@ -798,3 +798,65 @@ test('re-entering a group cancels its old subscription and ignores that connecti
     assert.equal(session.getItem('galchat:generation:7'), null)
   } finally { app.unmount(); Object.assign(api, savedApi); streamGroupGeneration.resume = savedResume; Object.assign(globalThis, globals) }
 })
+
+for (const mode of ['chat', 'trpg'] as const) {
+  test(`${mode} sync retains loaded older pages and respects an empty server history`, async (t) => {
+    const { api, streamTrpgTurn } = await import('../api/client.ts')
+    const { useWorkspace } = await import('../composables/useWorkspace.ts')
+    const { createRenderer, defineComponent, h } = await import('vue')
+    const globals = { fetch: globalThis.fetch, window: globalThis.window, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
+    Object.assign(globalThis, {
+      window: { addEventListener() {}, clearTimeout, setTimeout }, localStorage: storage(), sessionStorage: storage(),
+      fetch: async () => new Response('data: {"eventType":"turn.completed","conversationId":7,"turnId":42}\n\n'),
+    })
+    t.after(() => Object.assign(globalThis, globals))
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {}, createElement: () => ({}), createText: text => ({ text }),
+      createComment: text => ({ text }), setText(node, text) { node.text = text }, setElementText(node, text) { node.text = text },
+      parentNode: node => node.parent as Record<string, unknown> | null, nextSibling: () => null,
+    })
+    const app = renderer.createApp(defineComponent({ setup() { workspace = useWorkspace(); return () => h('div') } }))
+    app.mount({})
+    t.after(() => app.unmount())
+    const conversation = { id: 7, userWorldId: 3, worldId: 2, mode, title: '群聊', status: 'active' as const }
+    workspace.conversations.value = [conversation]
+    const records = Array.from({ length: 112 }, (_, i) => ({ id: i + 1, conversationId: 7, speakerType: 'user' as const,
+      messageKind: 'dialogue' as const, content: `消息${i + 1}`, sequenceNo: i + 1, status: 'completed' }))
+    let completed = false
+    let empty = false
+    t.mock.method(api, 'conversation', async () => conversation)
+    t.mock.method(api, 'groupMessages', async (_id: number, before?: number) => {
+      if (empty) return []
+      if (before != null) return records.filter(item => item.id < before).slice(-50)
+      return completed ? records.slice(-50).map(item => ({ ...item, content: `已保存${item.id}` })) : records.slice(60, 110)
+    })
+    t.mock.method(api, 'replyPlan', async () => [{ source: 'USER', displayName: '群聊', items: [] }])
+    t.mock.method(api, 'currentTurn', async () => null)
+    t.mock.method(api, 'actorRuntimes', async () => [])
+    t.mock.method(api, 'modelApis', async () => [])
+    t.mock.method(api, 'combatOverview', async () => [])
+    t.mock.method(api, 'investigatorCards', async () => [])
+    t.mock.method(streamTrpgTurn, 'continue', async (_id: number, _request: string, receive: (event: { eventType: string; conversationId: number; turnId: number }) => void) => {
+      receive({ eventType: 'turn.paused', conversationId: 7, turnId: 42 })
+    })
+    await workspace.selectConversation(7)
+    await workspace.loadOlderGroupMessages()
+    await workspace.loadOlderGroupMessages()
+    assert.equal(workspace.messages.value.length, 110)
+    assert.equal(workspace.hasOlderGroupMessages.value, false)
+    const sync = async () => {
+      if (mode === 'trpg') assert.equal(await workspace.startTrpgTurn(), true)
+      else { workspace.messageInput.value = '新问题'; await workspace.sendMessage() }
+    }
+    completed = true
+    await sync()
+    assert.deepEqual(workspace.messages.value.map(item => item.id), Array.from({ length: 112 }, (_, i) => i + 1))
+    assert.equal(workspace.messages.value.find(item => item.id === 100)?.content, '已保存100')
+    assert.equal(workspace.hasOlderGroupMessages.value, false)
+    empty = true
+    await sync()
+    assert.deepEqual(workspace.messages.value, [])
+    assert.equal(workspace.hasOlderGroupMessages.value, false)
+  })
+}

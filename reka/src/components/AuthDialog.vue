@@ -27,10 +27,12 @@ async function submit() {
   if (mode.value === 'reset' && !/^\d{6}$/.test(form.code)) return notify('请填写 6 位邮箱验证码', '', 'danger')
   busy.value = true
   if (mode.value === 'reset') {
+    const { email, password, code } = form
     try {
-      await api.resetPassword({ email: form.email, newPassword: form.password, verificationCode: form.code })
+      await api.resetPassword({ email, newPassword: password, verificationCode: code })
       switchMode('login')
-      notify('密码已重置', '请使用新密码登录', 'success')
+      form.email = email
+      emit('submit', { mode: 'login', email, password })
     } catch (error) { notify('重置失败', errorMessage(error), 'danger') }
     finally { busy.value = false }
     return

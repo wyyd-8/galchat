@@ -9,6 +9,7 @@ import MobileProfile from '@/components/MobileProfile.vue'
 import { useMobileViewport, useVisualViewport } from '@/composables/useMobileViewport'
 import CocModuleLibrary from '@/components/CocModuleLibrary.vue'
 import AuthDialog from '@/components/AuthDialog.vue'
+import AccountDiceSettings from '@/components/AccountDiceSettings.vue'
 import DirectChatStage from '@/components/DirectChatStage.vue'
 import CharacterFavorDialog from '@/components/CharacterFavorDialog.vue'
 import GroupChatStage from '@/components/GroupChatStage.vue'
@@ -37,7 +38,6 @@ import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
 import { mergeAutoAdvanceDiceSummaryIds } from '@/components/trpgTurnExperiments'
 import { mergeGenerationResponseEvents } from '@/components/generationErrorFormatting'
 import {
-  DICE_SKIN_OPTIONS,
   createDicePostRollPlaybackPlan,
   createDiceInitialAnimationPlan,
   createIncomingDiceMessagePlaybackRequest,
@@ -512,7 +512,10 @@ async function permanentlyDeleteConversation() {
   const deleted = await run(workspace.deleteConversation, 'deleteConversation')
   if (deleted) view.value = 'world'
 }
-async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) { await run(async () => { await workspace.authenticate(payload); authOpen.value = false }) }
+async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) {
+  const authenticated = await run(async () => { await workspace.authenticate(payload); authOpen.value = false })
+  if (authenticated && payload.mode === 'register') await openAccount()
+}
 function logout() { direct.close(); direct.clearDrafts(); workspace.logout() }
 function home() { direct.close(); workspace.selectedWorldId.value = null; workspace.selectedConversationId.value = null; view.value = 'library' }
 function openModuleLibrary() { direct.close(); workspace.selectedConversationId.value = null; view.value = 'modules' }
@@ -544,6 +547,11 @@ async function openDirectChat(id: number) {
   await loadingConversation
 }
 function closeDirectChat() { direct.close(); view.value = 'world' }
+async function loadWorldSnapshot() {
+  const worldId = workspace.selectedWorldId.value
+  await workspace.loadSnapshot()
+  if (worldId != null) direct.invalidateWorld(worldId)
+}
 async function restoreTrpg() { const id = workspace.selectedConversationId.value; if (id) await workspace.selectConversation(id) }
 async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
   await run(() => workspace.correctGameTime(dayNo, period))
@@ -711,6 +719,7 @@ async function removeDirectCharacter() {
   try {
     await workspace.removeCharacter(character.characterId)
     if (workspace.selectedWorldId.value === worldId && direct.selectedCharacterId.value === character.characterId) closeDirectChat()
+    if (worldId != null) direct.invalidateWorld(worldId, character.characterId)
   } catch (error) { notify('移出角色失败', errorMessage(error), 'danger') }
   finally { directCharacterRemoving.value = false }
 }
@@ -867,7 +876,7 @@ async function changePassword() {
       <div v-if="!online" class="connection-banner" role="status">当前网络已断开，连接恢复后再继续操作。</div>
 
       <MobileProfile v-if="view === 'profile'" :username="workspace.session.username" @account="openAccount" @models="dialogs.modelApis = true" @password="openPassword" @logout="logout" />
-      <WorldLibrary v-else-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" :archive-busy="Boolean(archiveOperation)" @select="selectWorld" @preview-template="openTemplatePreview" @create-world="openNewWorld" @create-template="openCreateTemplate" @import-world="importWorld" />
+      <WorldLibrary v-else-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" :archive-busy="Boolean(archiveOperation)" @select="selectWorld" @preview-template="openTemplatePreview" @create-template="openCreateTemplate" @import-world="importWorld" />
       <CocModuleLibrary v-else-if="view === 'modules'" @changed="workspace.loadModules" @detail-open-change="moduleDetailOpen = $event" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @back="home" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage ref="directStage" :removing="directCharacterRemoving" @remove="removeDirectCharacter" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
@@ -1183,9 +1192,18 @@ async function changePassword() {
   <BaseDialog v-model="dialogs.save" mobile-presentation="page" :layer="isMobile ? 'foreground' : 'default'" :title="workspace.worldSave.value ? '覆盖世界存档' : '创建世界存档'" description="每个世界只保留一个存档；再次保存会覆盖现有存档。"><label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="4" maxlength="200" placeholder="记录此刻发生了什么（最多 200 字）" /></label><template #footer><button class="button ghost" @click="dialogs.save = false">取消</button><button class="button primary" @click="run(() => workspace.saveSnapshot(saveRemark), 'save')">{{ workspace.worldSave.value ? '确认覆盖' : '创建存档' }}</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.worldLoad" mobile-presentation="page" :layer="isMobile ? 'foreground' : 'default'" title="确认读取世界存档" description="读档会回滚角色、聊天、好感和世界事件，并删除存档点之后的进度。">
     <div class="restore-summary"><strong>{{ workspace.worldSave.value?.remark || '未填写存档备注' }}</strong><span>{{ workspace.worldSave.value?.savedAt || '未知存档时间' }}</span><p>这项操作不可撤销，请确认当前进度已不再需要。</p></div><section class="world-save-favors"><h3>存档中的角色好感</h3><dl v-if="workspace.worldSave.value?.characterFavors?.length"><div v-for="character in workspace.worldSave.value.characterFavors" :key="character.characterId"><dt>{{ character.characterName }}</dt><dd>{{ character.favorValue ?? '—' }}</dd></div></dl><p v-else>这份存档没有记录角色好感快照。</p></section>
-    <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(workspace.loadSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
+    <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(loadWorldSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
   </BaseDialog>
-  <BaseDialog v-model="dialogs.account" mobile-presentation="page" title="账号资料"><div class="form-stack"><label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label><label class="field"><span>邮箱（不可在此修改）</span><input v-model="accountForm.email" disabled /></label><label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label><label class="field"><span>骰子皮肤</span><select v-model="accountForm.diceSkin"><option v-for="option in DICE_SKIN_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><small>保存后，新打开的掷骰动画会使用这套皮肤。</small></label></div><template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template></BaseDialog>
+  <BaseDialog v-model="dialogs.account" mobile-presentation="page" size="lg" content-class="account-settings-dialog" title="账号资料" description="个人信息与掷骰偏好">
+    <AccountDiceSettings v-if="dialogs.account" v-model="accountForm.diceSkin">
+      <div class="form-stack">
+        <label class="field"><span>用户名</span><input v-model.trim="accountForm.username" /></label>
+        <label class="field"><span>邮箱（不可在此修改）</span><input v-model="accountForm.email" disabled /></label>
+        <label class="field"><span>生日</span><input v-model="accountForm.birthday" type="date" /></label>
+      </div>
+    </AccountDiceSettings>
+    <template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template>
+  </BaseDialog>
   <BaseDialog v-model="dialogs.password" mobile-presentation="page" title="修改密码" description="获取验证码后将自动填写，5 分钟内有效。"><form id="change-password-form" class="form-stack" @submit.prevent="run(changePassword, 'password')"><label class="field"><span>账户邮箱</span><input v-model="passwordForm.email" disabled /></label><label class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="passwordForm.code" inputmode="numeric" maxlength="6" /><button class="button secondary" type="button" @click="sendPasswordCode">获取验证码</button></div></label><label class="field"><span>新密码</span><input v-model="passwordForm.newPassword" type="password" placeholder="请输入非空新密码" /></label><label class="field"><span>确认新密码</span><input v-model="passwordForm.confirmPassword" type="password" /></label></form><template #footer><button class="button primary" type="submit" form="change-password-form" :disabled="busy || !passwordForm.code || !passwordForm.newPassword || !passwordForm.confirmPassword">更新密码</button></template></BaseDialog>
   <ModelApiManagerDialog v-model="dialogs.modelApis" />
   <BaseDialog

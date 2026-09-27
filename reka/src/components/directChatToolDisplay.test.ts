@@ -90,6 +90,7 @@ test('rebuilds every stored reasoning step in one process with the tool summary 
 })
 
 test('appends live tool calls inside the current reasoning process', async () => {
+  let controller!: ReadableStreamDefaultController
   const previousFetch = globalThis.fetch
   const previousLocalStorage = globalThis.localStorage
   const storage = new Map<string, string>()
@@ -101,13 +102,16 @@ test('appends live tool calls inside the current reasoning process', async () =>
       key: (index: number) => [...storage.keys()][index] ?? null,
       get length() { return storage.size },
     },
-    fetch: async () => new Response([
+    fetch: async () => new Response(new ReadableStream({ start(c) {
+      controller = c
+      c.enqueue(new TextEncoder().encode([
       'data: {"type":"thinking","content":"先判断"}',
       'data: {"type":"tool","content":"调用了工具"}',
       'data: {"type":"thinking","content":"继续判断"}',
       'data: {"type":"response","content":"结果"}',
       '',
-    ].join('\n')),
+    ].join('\n\n')))
+    } })),
   })
   const { api, chat, app } = await mountDirectChat()
   const originalHistory = api.history
@@ -118,13 +122,25 @@ test('appends live tool calls inside the current reasoning process', async () =>
     await chat.selectCharacter(7)
     chat.input.value = '查看现场'
 
-    await chat.send()
+    const sending = chat.send()
+    for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve))
 
     assert.deepEqual(chat.messages.value.map(({ role, content }) => ({ role, content })), [
       { role: 'user', content: '查看现场' },
       { role: 'thinking', content: '先判断\n\n调用了工具\n\n继续判断' },
       { role: 'assistant', content: '结果' },
     ])
+    api.history = async () => [
+      { id: 10, type: 'USER', content: '查看现场' },
+      { type: 'thinking', content: '先判断', userMessageId: 10 },
+      { type: 'tool', content: '' },
+      { type: 'thinking', content: '继续判断', userMessageId: 10 },
+      { id: 11, type: 'ASSISTANT', content: '结果', userMessageId: 10 },
+    ]
+    controller.enqueue(new TextEncoder().encode('data: {"type":"generation.completed"}\n\n'))
+    controller.close()
+    await sending
+    assert.deepEqual(chat.messages.value.map(m => m.content), ['查看现场', '调用了1次工具\n\n先判断继续判断', '结果'])
   } finally {
     api.history = originalHistory
     api.modelApis = originalModelApis

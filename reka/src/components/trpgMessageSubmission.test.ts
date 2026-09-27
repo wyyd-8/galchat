@@ -49,6 +49,7 @@ test('submits a clarification through the waiting user step', async () => {
     streamTrpgTurn.message = async (conversationId, turnId, stepId, payload, onEvent) => {
       submitted = { conversationId, turnId, stepId, content: payload.content }
       onEvent({ eventType: 'stream.caught_up', conversationId })
+      onEvent({ eventType: 'turn.waiting_input', conversationId, turnId: 42 })
     }
     api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: 'active' })
     api.groupMessages = async () => []
@@ -135,6 +136,7 @@ test('submits a KP inquiry and returns the composer to action mode', async () =>
     streamTrpgTurn.inquiry = async (conversationId, turnId, stepId, payload, onEvent) => {
       submitted = { conversationId, turnId, stepId, question: payload.question }
       onEvent({ eventType: 'stream.caught_up', conversationId })
+      onEvent({ eventType: 'turn.waiting_input', conversationId, turnId: 42 })
     }
     api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: 'active' })
     api.groupMessages = async () => []
@@ -224,6 +226,7 @@ test('starts a new TRPG turn with the temporary investigator direction', async (
     streamTrpgTurn.continue = async (...args: any[]) => {
       submittedDirection = args[3]
       args[2]({ eventType: 'stream.caught_up', conversationId: args[0] })
+      args[2]({ eventType: 'turn.waiting_input', conversationId: args[0], turnId: 42 })
     }
     api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'trpg', title: '调查', status: 'active' })
     api.groupMessages = async () => []

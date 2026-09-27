@@ -7,7 +7,7 @@ import { ArrowUpRight, ChevronRight, BookOpen, Import, Plus } from '@lucide/vue'
 import type { UserWorld, WorldTemplate } from '@/api/types'
 
 defineProps<{ worlds: UserWorld[]; templates: WorldTemplate[]; loading: boolean; archiveBusy?: boolean }>()
-const emit = defineEmits<{ select: [id: number]; previewTemplate: [id: number]; createWorld: []; createTemplate: []; importWorld: [file: File] }>()
+const emit = defineEmits<{ select: [id: number]; previewTemplate: [id: number]; createTemplate: []; importWorld: [file: File] }>()
 const { isMobile } = useMobileViewport()
 const selectedTab = ref('worlds')
 const templatesTab = ref<InstanceType<typeof TabsTrigger>>()
@@ -51,7 +51,6 @@ function pick(event: Event) {
           <div class="library-panel-heading"><p>继续你的世界</p></div>
           <p v-if="loading" class="library-notice" role="status">正在载入你的世界…</p>
           <template v-else>
-            <div v-if="!worlds.length" class="library-empty"><BookOpen :size="28" /><h2>还没有自己的世界</h2><p>从一个世界模板开始新的故事。</p></div>
             <div class="library-world-grid">
               <button v-for="world in worlds" :key="world.id" class="library-world-card" @click="emit('select', world.id)">
                 <span class="library-world-cover" :style="world.image ? { backgroundImage: `url(${world.image})` } : {}"><BookOpen v-if="!world.image" :size="26" /></span>
@@ -66,8 +65,8 @@ function pick(event: Event) {
           <div class="library-panel-heading">
             <p>{{ isMobile ? '挑选新的故事' : '从一个模板，开始新的故事' }}</p>
             <div class="library-template-actions">
-              <button aria-label="创建世界模板" @click="emit('createTemplate')"><Plus :size="16" />{{ isMobile ? '创建' : '创建模板' }}</button>
-              <button aria-label="导入世界模板" :disabled="archiveBusy" @click="importInput?.click()"><Import :size="16" />{{ isMobile ? '导入' : '导入模板' }}</button>
+              <button class="button primary" aria-label="创建世界模板" @click="emit('createTemplate')"><Plus :size="18" />{{ isMobile ? '创建' : '创建模板' }}</button>
+              <button class="button secondary" aria-label="导入世界模板" :disabled="archiveBusy" @click="importInput?.click()"><Import :size="18" />{{ isMobile ? '导入' : '导入模板' }}</button>
             </div>
           </div>
           <p v-if="loading" class="library-notice" role="status">正在载入世界模板…</p>
@@ -77,7 +76,7 @@ function pick(event: Event) {
               <span class="library-template-copy"><strong>{{ template.name }}</strong><span>查看背景与角色 <ArrowUpRight :size="16" /></span></span>
             </button>
           </div>
-          <div v-else class="library-empty"><BookOpen :size="28" /><h2>暂无世界模板</h2><p>创建一套新设定，或导入已有的模板文件。</p><button class="button secondary" @click="emit('createWorld')">创建世界</button></div>
+          <div v-else class="library-empty"><BookOpen :size="28" /><h2>暂无世界模板</h2><p>创建一套新设定，或导入已有的模板文件。</p><button class="button secondary" @click="emit('createTemplate')">创建模板</button></div>
         </TabsContent>
       </TabsRoot>
     </div>
@@ -97,8 +96,9 @@ function pick(event: Event) {
 .library-tab[data-state="active"] > span { background: var(--pine-soft); }
 .library-panel-heading { min-height: 44px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
 .library-panel-heading p { margin: 0; color: var(--muted); font-size: 12px; }
-.library-template-actions { display: flex; align-items: center; gap: 18px; }
-.library-template-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--pine); font-size: 12px; cursor: pointer; }
+.library-template-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.library-template-actions .button { min-height: 44px; padding: 0 16px; font-size: 14px; white-space: nowrap; }
+.library-template-actions .button.secondary { color: var(--pine); }
 .library-file-input { display: none; }
 .library-world-grid, .library-template-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .library-world-card, .library-template-card { min-width: 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); text-align: left; cursor: pointer; transition: border-color 150ms ease, box-shadow 150ms ease; }
@@ -151,7 +151,8 @@ function pick(event: Event) {
   .library-tab[data-state="active"] { background: var(--surface-strong); box-shadow: 0 2px 6px rgba(40,61,41,.06); }
   .library-tab > span, .library-tab[data-state="active"] > span { min-width: 0; padding: 0; background: transparent; }
   .library-panel-heading { margin-bottom: 8px; }
-  .library-template-actions { gap: 14px; }
+  .library-template-actions { gap: 8px; }
+  .library-template-actions .button { padding-inline: 12px; }
   .library-world-grid { display: flex; flex-direction: column; gap: 0; }
   .library-world-card { display: flex; align-items: center; gap: 13px; padding: 12px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
   .library-world-card:first-child { padding-top: 0; }
@@ -170,7 +171,6 @@ function pick(event: Event) {
 }
 @media (max-width: 360px) {
   .library-body { padding-inline: 14px; }
-  .library-template-actions { gap: 10px; }
   .library-template-cover { padding: 12px; min-height: 120px; }
   .library-template-cover > span { font-size: 19px; }
   .library-template-copy { padding: 10px; }

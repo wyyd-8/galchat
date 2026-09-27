@@ -605,3 +605,196 @@ async function waitFor(predicate: () => boolean) {
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
 }
+
+for (const scenario of ['replay', 'reenter'] as const) {
+  test(`history pagination stays consistent when ${scenario} happens during dice hydration`, async () => {
+    const { api, streamGroupGeneration } = await import('../api/client.ts')
+    const { useWorkspace } = await import('../composables/useWorkspace.ts')
+    const { createRenderer, defineComponent, h } = await import('vue')
+    const globals = { window: globalThis.window, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
+    Object.assign(globalThis, { window: { addEventListener() {}, clearTimeout, setTimeout }, localStorage: storage(), sessionStorage: storage([['galchat:generation:7', 'active']]) })
+    const savedApi = { conversation: api.conversation, groupMessages: api.groupMessages, replyPlan: api.replyPlan, currentTurn: api.currentTurn,
+      actorRuntimes: api.actorRuntimes, modelApis: api.modelApis, combatOverview: api.combatOverview, investigatorCards: api.investigatorCards,
+      diceSummary: api.diceSummary, diceResults: api.diceResults }
+    const savedResume = streamGroupGeneration.resume
+    let releaseDice!: (value: Awaited<ReturnType<typeof api.diceSummary>>) => void
+    let hydrating = false
+    let receive!: Parameters<typeof streamGroupGeneration.resume>[2]
+    let finishConnection!: () => void
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {}, createElement: () => ({}), createText: text => ({ text }),
+      createComment: text => ({ text }), setText(node, text) { node.text = text }, setElementText(node, text) { node.text = text },
+      parentNode: node => node.parent as Record<string, unknown> | null, nextSibling: () => null,
+    })
+    const app = renderer.createApp(defineComponent({ setup() { workspace = useWorkspace(); return () => h('div') } }))
+    app.mount({})
+    try {
+      api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'chat', title: '群聊', status: 'active' })
+      api.groupMessages = async (_id, before) => before == null
+        ? Array.from({ length: 50 }, (_, i) => ({ id: i + 100, conversationId: 7, speakerType: 'character' as const, messageKind: 'dialogue' as const,
+          content: '已有消息', sequenceNo: i + 100, status: 'completed' as const }))
+        : [
+          { id: 98, conversationId: 7, speakerType: 'kp', messageKind: 'dice_roll', content: '{"summaryId":25,"roundNos":[1]}', sequenceNo: 98, status: 'completed' },
+          { id: 99, conversationId: 7, replyStepId: 1, speakerType: 'character', messageKind: 'dialogue', content: '旧历史快照', sequenceNo: 99, status: 'completed' },
+        ]
+      api.replyPlan = async () => []; api.currentTurn = async () => null; api.actorRuntimes = async () => []
+      api.modelApis = async () => []; api.combatOverview = async () => []; api.investigatorCards = async () => []
+      api.diceSummary = async () => { hydrating = true; return new Promise(resolve => { releaseDice = resolve }) }
+      api.diceResults = async () => []
+      streamGroupGeneration.resume = async (_id, _request, onEvent, _after, signal) => new Promise<void>((resolve, reject) => {
+        receive = onEvent; finishConnection = resolve
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+      workspace.conversations.value = [await api.conversation(7)]
+      await workspace.selectConversation(7)
+      const older = workspace.loadOlderGroupMessages()
+      await waitFor(() => hydrating)
+      if (scenario === 'replay') {
+        receive({ eventType: 'reply.started', conversationId: 7, messageId: 99, replyStepId: 1, sequence: 99, eventSequence: 1 })
+        receive({ eventType: 'message.delta', conversationId: 7, messageId: 99, replyStepId: 1, delta: '流中的最新内容', eventSequence: 2 })
+      } else {
+        // Returning to the same conversation must invalidate the earlier page request too.
+        await workspace.selectConversation(7)
+      }
+      releaseDice({ id: 25, conversationId: 7, status: 'COMPLETED' })
+      await older
+      if (scenario === 'replay') {
+        assert.equal(workspace.messages.value.filter(message => message.id === 99).length, 1)
+        assert.equal(workspace.messages.value.find(message => message.id === 99)?.content, '流中的最新内容')
+        assert.equal(workspace.messages.value.length, 52)
+        assert.deepEqual(workspace.messages.value.slice(0, 2).map(message => message.id), [98, 99])
+      } else {
+        assert.equal(workspace.messages.value.length, 50, 'old pagination must not modify the reloaded conversation')
+        assert.equal(workspace.hasOlderGroupMessages.value, true, 'old pagination must not replace the new pagination state')
+      }
+      receive({ eventType: 'turn.completed', conversationId: 7, eventSequence: 3 })
+      finishConnection()
+      await waitFor(() => !workspace.loading.sending)
+    } finally {
+      app.unmount(); Object.assign(api, savedApi); streamGroupGeneration.resume = savedResume; Object.assign(globalThis, globals)
+    }
+  })
+}
+
+for (const mode of ['chat', 'trpg'] as const) {
+  test(`${mode} reloads persisted state when the completed stream has already been released`, async () => {
+    const { api, streamGroupGeneration } = await import('../api/client.ts')
+    const { useWorkspace } = await import('../composables/useWorkspace.ts')
+    const { createRenderer, defineComponent, h } = await import('vue')
+    const globals = { window: globalThis.window, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
+    const session = storage([['galchat:generation:7', 'finished']])
+    Object.assign(globalThis, { window: { addEventListener() {}, clearTimeout, setTimeout }, localStorage: storage(), sessionStorage: session })
+    const savedApi = { conversation: api.conversation, groupMessages: api.groupMessages, replyPlan: api.replyPlan,
+      currentTurn: api.currentTurn, actorRuntimes: api.actorRuntimes, modelApis: api.modelApis,
+      combatOverview: api.combatOverview, investigatorCards: api.investigatorCards }
+    const savedResume = streamGroupGeneration.resume
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+      createElement: () => ({}), createText: (text) => ({ text }), createComment: (text) => ({ text }),
+      setText(node, text) { node.text = text }, setElementText(node, text) { node.text = text },
+      parentNode: (node) => node.parent as Record<string, unknown> | null, nextSibling: () => null,
+    })
+    const app = renderer.createApp(defineComponent({ setup() { workspace = useWorkspace(); return () => h('div') } }))
+    app.mount({})
+    try {
+      let persisted = false
+      let connections = 0
+      api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode, title: '调查', status: 'active' })
+      api.groupMessages = async () => [{ id: 10, conversationId: 7, turnId: 42, replyStepId: 1,
+        speakerType: 'character', messageKind: 'dialogue', content: persisted ? '落库的最终回复' : '',
+        sequenceNo: 10, status: persisted ? 'completed' : 'streaming' }]
+      api.replyPlan = async () => []
+      api.currentTurn = async () => null
+      api.actorRuntimes = async () => []
+      api.modelApis = async () => []
+      api.combatOverview = async () => []
+      api.investigatorCards = async () => []
+      streamGroupGeneration.resume = async (_id, requestId, onEvent, after) => {
+        assert.equal(requestId, 'finished')
+        connections++
+        if (connections === 1) {
+          onEvent({ eventType: 'message.delta', conversationId: 7, replyStepId: 1, messageId: 10, delta: '部分', eventSequence: 1 })
+          throw new Error('connection dropped')
+        }
+        assert.equal(after, 1)
+        // A duplicate transport event must not be appended twice.
+        onEvent({ eventType: 'message.delta', conversationId: 7, replyStepId: 1, messageId: 10, delta: '部分', eventSequence: 1 })
+        assert.equal(workspace.messages.value[0]?.content, '部分')
+        persisted = true
+        onEvent({ eventType: 'generation.completed', conversationId: 7 })
+      }
+      workspace.conversations.value = [await api.conversation(7)]
+      await workspace.selectConversation(7)
+      await waitFor(() => !workspace.loading.sending)
+      assert.equal(connections, 2)
+      assert.equal(session.getItem('galchat:generation:7'), null)
+      assert.deepEqual(workspace.messages.value.map(m => [m.content, m.status]), [['落库的最终回复', 'completed']])
+      assert.equal(workspace.generationFailureOpen.value, false)
+    } finally { app.unmount(); Object.assign(api, savedApi); streamGroupGeneration.resume = savedResume; Object.assign(globalThis, globals) }
+  })
+}
+
+test('shared SSE reader closes a failed subscription before recovery can open another one', async () => {
+  const { streamGroupGeneration } = await import('../api/client.ts')
+  const globals = { fetch: globalThis.fetch, localStorage: globalThis.localStorage }
+  let cancelled = false
+  Object.assign(globalThis, {
+    localStorage: storage(),
+    fetch: async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('data: {"eventType":"message.delta","delta":"partial"}\n\n')) },
+      cancel() { cancelled = true },
+    })),
+  })
+  try {
+    await assert.rejects(streamGroupGeneration.resume(7, 'request', () => { throw new Error('render failure') }), /render failure/)
+    assert.equal(cancelled, true)
+  } finally { Object.assign(globalThis, globals) }
+})
+
+test('re-entering a group cancels its old subscription and ignores that connection’s late events', async () => {
+  const { api, streamGroupGeneration } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const globals = { window: globalThis.window, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
+  const session = storage([['galchat:generation:7', 'active']])
+  Object.assign(globalThis, { window: { addEventListener() {}, clearTimeout, setTimeout }, localStorage: storage(), sessionStorage: session })
+  const savedApi = { conversation: api.conversation, groupMessages: api.groupMessages, replyPlan: api.replyPlan, currentTurn: api.currentTurn,
+    actorRuntimes: api.actorRuntimes, modelApis: api.modelApis, combatOverview: api.combatOverview, investigatorCards: api.investigatorCards }
+  const savedResume = streamGroupGeneration.resume
+  const connections: Array<{ signal: AbortSignal; receive: Parameters<typeof streamGroupGeneration.resume>[2]; finish: () => void }> = []
+  let workspace!: ReturnType<typeof useWorkspace>
+  const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+    patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {}, createElement: () => ({}), createText: text => ({ text }),
+    createComment: text => ({ text }), setText(node, text) { node.text = text }, setElementText(node, text) { node.text = text },
+    parentNode: node => node.parent as Record<string, unknown> | null, nextSibling: () => null,
+  })
+  const app = renderer.createApp(defineComponent({ setup() { workspace = useWorkspace(); return () => h('div') } }))
+  app.mount({})
+  try {
+    api.conversation = async () => ({ id: 7, userWorldId: 3, worldId: 2, mode: 'chat', title: '群聊', status: 'active' })
+    api.groupMessages = async () => [{ id: 10, conversationId: 7, replyStepId: 1, speakerType: 'character', messageKind: 'dialogue', content: '', sequenceNo: 10, status: 'streaming' }]
+    api.replyPlan = async () => []; api.currentTurn = async () => null; api.actorRuntimes = async () => []
+    api.modelApis = async () => []; api.combatOverview = async () => []; api.investigatorCards = async () => []
+    streamGroupGeneration.resume = async (_id, _request, receive, _after, signal) => new Promise<void>((resolve, reject) => {
+      assert.ok(signal)
+      connections.push({ signal, receive, finish: resolve })
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    })
+    workspace.conversations.value = [await api.conversation(7)]
+    await workspace.selectConversation(7)
+    assert.equal(connections.length, 1)
+    await workspace.selectConversation(7)
+    assert.equal(connections.length, 2)
+    assert.equal(connections[0]!.signal.aborted, true)
+    connections[0]!.receive({ eventType: 'message.delta', messageId: 10, replyStepId: 1, delta: '旧连接', eventSequence: 1 })
+    connections[1]!.receive({ eventType: 'message.delta', messageId: 10, replyStepId: 1, delta: '当前连接', eventSequence: 1 })
+    assert.equal(workspace.messages.value[0]?.content, '当前连接')
+    assert.equal(workspace.loading.sending, true)
+    connections[1]!.receive({ eventType: 'turn.completed', conversationId: 7, eventSequence: 2 })
+    connections[1]!.finish()
+    await waitFor(() => !workspace.loading.sending)
+    assert.equal(session.getItem('galchat:generation:7'), null)
+  } finally { app.unmount(); Object.assign(api, savedApi); streamGroupGeneration.resume = savedResume; Object.assign(globalThis, globals) }
+})

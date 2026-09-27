@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl.user;
 
 import com.me.galchat.service.impl.chat.SingleChatLockService;
+import com.me.galchat.service.impl.chat.SingleChatGenerationRegistry;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -58,6 +59,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
     private final UserCharacterInfoMapper userCharacterInfoMapper;
     private final TopicBoundaryService topicBoundaryService;
     private final SingleChatLockService singleChatLockService;
+    private final SingleChatGenerationRegistry singleChatGenerations;
     private final StringRedisTemplate redisTemplate;
 
     @Override
@@ -94,6 +96,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
         try {
             doWithdrawLatestUserMessage(userWorldId, characterId);
+            singleChatGenerations.evict(userWorldId, characterId);
         } finally {
             singleChatLockService.unlock(conversationLock);
         }

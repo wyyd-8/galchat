@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl.user;
 
 import com.me.galchat.service.impl.chat.SingleChatLockService;
+import com.me.galchat.service.impl.chat.SingleChatGenerationRegistry;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -62,6 +63,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     private final UserEventLogMapper userEventLogMapper;
     private final GroupChatMemberMapper groupChatMemberMapper;
     private final SingleChatLockService singleChatLockService;
+    private final SingleChatGenerationRegistry singleChatGenerations;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
 
     @Override
@@ -101,6 +103,7 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
 
         try {
             doDeleteCharacter(userWorldId, characterId);
+            singleChatGenerations.evict(userWorldId, characterId);
         } finally {
             singleChatLockService.unlock(characterLock);
         }

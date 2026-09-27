@@ -92,6 +92,7 @@ public final class GroupChatConstant {
             "scene_selection.choice";
     public static final String EVENT_MESSAGE_COMPLETED = "message.completed";
     public static final String EVENT_REPLY_FAILED = "reply.failed";
+    public static final String EVENT_GENERATION_COMPLETED = "generation.completed";
     public static final String EVENT_GENERATION_FAILED =
             "generation.failed";
     public static final String EVENT_TURN_COMPLETED = "turn.completed";

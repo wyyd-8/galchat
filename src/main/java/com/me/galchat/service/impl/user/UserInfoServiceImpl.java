@@ -45,7 +45,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final StringRedisTemplate redisTemplate;
-    // private final AliyunEmailSender emailSender;
+    private final JwtUtils jwtUtils;
 
     @Override
     public UserInfo getInfoById(Integer id) {
@@ -306,7 +306,7 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
     }
 
     private UserTokenVO buildUserToken(UserInfo userInfo) {
-        String token = JwtUtils.generateToken(Map.of(
+        String token = jwtUtils.generateToken(Map.of(
                 "id", userInfo.getId().intValue(),
                 "username", userInfo.getUsername()
         ));

@@ -29,6 +29,34 @@ import static org.mockito.Mockito.when;
 class GroupGenerationStreamRegistryTest {
 
     @Test
+    void resumesOnlyMissingEventsWithoutChangingMessageOrdering() {
+        var registry = new GroupGenerationStreamRegistry();
+        var source = reactor.core.publisher.Sinks.many().unicast().<GroupChatEvent>onBackpressureBuffer();
+        registry.start(7L, "cursor", source.asFlux());
+        source.tryEmitNext(GroupChatEvent.builder().eventType("reply.started").sequence(99L).build());
+        source.tryEmitNext(GroupChatEvent.builder().eventType("message.delta").delta("first").sequence(99L).build());
+        var resumed = registry.resume(7L, "cursor", 1).collectList().toFuture();
+        source.tryEmitNext(GroupChatEvent.builder().eventType("message.delta").delta("second").sequence(99L).build());
+        source.tryEmitComplete();
+        assertThat(resumed.join()).extracting(GroupChatEvent::getEventType)
+                .containsExactly("message.delta", "stream.caught_up", "message.delta");
+        assertThat(resumed.join()).extracting(GroupChatEvent::getEventSequence).containsExactly(2L, null, 3L);
+        assertThat(resumed.join()).extracting(GroupChatEvent::getSequence).containsExactly(99L, null, 99L);
+    }
+
+    @Test
+    void rejectsADifferentGenerationWhileTheConversationIsStillRunning() {
+        var registry = new GroupGenerationStreamRegistry();
+        var source = reactor.core.publisher.Sinks.many().unicast().<GroupChatEvent>onBackpressureBuffer();
+        registry.start(7L, "active", source.asFlux());
+        assertThatThrownBy(() -> registry.start(7L, "duplicate-action", Flux.empty()))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class);
+        source.tryEmitComplete();
+        assertThat(registry.start(7L, "next", Flux.just(event("turn.completed"))).collectList().block())
+                .isNotEmpty();
+    }
+
+    @Test
     void evictsEveryRetainedGenerationForDeletedConversation() {
         GroupGenerationStreamRegistry registry =
                 new GroupGenerationStreamRegistry(Duration.ofMinutes(5));
@@ -82,15 +110,39 @@ class GroupGenerationStreamRegistryTest {
 
         assertThat(upstreamCancelled).isFalse();
         upstream.get().next(second);
+        var resuming = registry.resume(7L, "generation-1").collectList().toFuture();
         upstream.get().complete();
 
-        List<GroupChatEvent> replayed = registry.resume(
-                7L, "generation-1").collectList().block();
+        List<GroupChatEvent> replayed = resuming.join();
 
-        assertThat(replayed).containsExactly(
-                first, second,
-                event(GroupChatConstant.EVENT_STREAM_CAUGHT_UP));
+        assertThat(replayed).extracting(GroupChatEvent::getEventType).containsExactly(
+                "reply.started", "message.delta", GroupChatConstant.EVENT_STREAM_CAUGHT_UP);
         assertThat(upstreamCancelled).isFalse();
+    }
+
+    @Test
+    void releasesCompletedStreamsAndReturnsOnlyCompletionWithoutOrphanRecovery() {
+        GroupConversationLockService locks = mock(GroupConversationLockService.class);
+        GroupTurnRecoveryService recovery = mock(GroupTurnRecoveryService.class);
+        GroupGenerationStreamRegistry registry = new GroupGenerationStreamRegistry(
+                Duration.ofMinutes(5), locks, recovery);
+        AtomicReference<FluxSink<GroupChatEvent>> upstream = new AtomicReference<>();
+        registry.start(7L, "complete", Flux.create(upstream::set));
+        upstream.get().next(GroupChatEvent.builder().eventType("message.delta")
+                .conversationId(7L).delta("private reply").build());
+        // A turn event can precede the remaining persistence work: retain until source completion.
+        upstream.get().next(event("turn.completed"));
+        assertThat(registry.resume(7L, "complete").take(1).blockFirst().getDelta())
+                .isEqualTo("private reply");
+        upstream.get().complete();
+
+        List<GroupChatEvent> resumed = registry.resume(7L, "complete").collectList().block();
+        assertThat(resumed).extracting(GroupChatEvent::getEventType)
+                .containsExactly("generation.completed");
+        assertThat(resumed.getFirst().getContent()).isNull();
+        assertThat(resumed.getFirst().getDelta()).isNull();
+        assertThat(resumed.getFirst().getErrorDetail()).isNull();
+        org.mockito.Mockito.verifyNoInteractions(locks, recovery);
     }
 
     @Test
@@ -131,7 +183,7 @@ class GroupGenerationStreamRegistryTest {
                     .block();
 
             assertThat(observedUserId).hasValue(12);
-            assertThat(events).contains(delta);
+            assertThat(events).extracting(GroupChatEvent::getEventType).contains(delta.getEventType());
         } finally {
             CurrentHolder.remove();
         }
@@ -392,7 +444,7 @@ class GroupGenerationStreamRegistryTest {
 
         assertThat(resumedFailure).isNotNull();
         assertThat(resumedFailure.getError())
-                .isEqualTo("model failed");
+                .isEqualTo("生成已中断，请读取最新状态后重试");
         assertThat(resumedFailure.getErrorDetail()).isNull();
     }
 

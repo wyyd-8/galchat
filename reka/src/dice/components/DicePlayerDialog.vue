@@ -59,14 +59,15 @@ import type {
 
 const open = defineModel<boolean>({ required: true })
 const { isMobile } = useMobileViewport()
-const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean }>()
-const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: [] }>()
+const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean; embedded?: boolean }>()
+const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: []; phaseChange: [phase: DicePlayerPhase] }>()
 
 const tray = ref<HTMLElement | null>(null)
 const surface = ref<HTMLElement | null>(null)
 const stageScroll = ref<HTMLElement | null>(null)
 const renderLayer = ref<HTMLElement | null>(null)
 const status = ref<DicePlayerPhase>('idle')
+watch(status, phase => { if (!isMobile.value) emit('phaseChange', phase) }, { immediate: true })
 const groupOutcomePhase = ref<DiceGroupOutcomePhase>('concealed')
 const revealedDiceResultGroups = ref<boolean[]>([])
 const error = ref('')
@@ -493,8 +494,8 @@ async function prepare(request: DicePlaybackRequest) {
       if (currentGeneration !== generation) return
       if (!renderLayer.value) return
       const { ThreeDiceBoard: DiceBoard } = rendererModule
-      disposeSharedRenderer = rendererModule.disposeSharedDiceRenderer
-      board = new DiceBoard(tray.value, renderLayer.value)
+      disposeSharedRenderer = props.embedded ? undefined : rendererModule.disposeSharedDiceRenderer
+      board = new DiceBoard(tray.value, renderLayer.value, props.embedded)
     }
     const activeBoard = board
     activeBoard.setSkin(request.skin)
@@ -644,9 +645,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <MobileDicePlayer v-if="isMobile" v-model="open" :request="request" :show-continue="showContinue" :auto-continue="autoContinue" @roll="emit('roll')" @complete="emit('complete')" @continue="emit('continue')" @cancel-auto-continue="emit('cancelAutoContinue')" />
+  <MobileDicePlayer @phase-change="emit('phaseChange', $event)" :embedded="embedded" v-if="isMobile" v-model="open" :request="request" :show-continue="showContinue" :auto-continue="autoContinue" @roll="emit('roll')" @complete="emit('complete')" @continue="emit('continue')" @cancel-auto-continue="emit('cancelAutoContinue')" />
   <BaseDialog
     v-else
+    :embedded="embedded"
     v-model="open"
     :title="request?.reason || '掷骰判定'"
     :description="dialogDescription"
@@ -665,12 +667,12 @@ onBeforeUnmount(() => {
             'show-die-values': presentation.showDieValues,
           },
         ]"
-        :style="stageStyle"
+        :style="embedded ? { minHeight: '0' } : stageStyle"
         :data-skin="request?.skin || 'classic'"
         :data-layout-columns="playerLayout.columns"
         :data-layout-rows="playerLayout.rows"
       >
-        <div v-if="summary" class="dice-player-stage-bar">
+        <div v-if="summary && !embedded" class="dice-player-stage-bar">
           <div class="dice-player-state" aria-live="polite">
             <i aria-hidden="true" />
             <span>
@@ -702,7 +704,7 @@ onBeforeUnmount(() => {
         </div>
         <div ref="renderLayer" class="dice-render-layer" aria-hidden="true" />
         <div ref="tray" class="dice-player-tray" />
-        <div v-if="summary" class="dice-player-selection">
+        <div v-if="summary && !embedded" class="dice-player-selection">
           <span><i class="selected" />计入结果</span>
           <span v-if="summary.selectionLabel.includes('舍弃')"><i class="discarded" />未采用</span>
           <b>{{ summary.selectionLabel }}</b>
@@ -714,7 +716,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
     <footer
-      v-if="request && summary"
+      v-if="request && summary && !embedded"
       class="dice-player-result"
       :class="{
         'has-semantic-result': request.presentation && !hasAggregateOutcome,

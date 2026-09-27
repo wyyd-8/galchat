@@ -9,16 +9,58 @@ import com.me.galchat.service.IWorldDetailService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
 import com.me.galchat.service.archive.ArchiveZipService;
+import com.me.galchat.domain.po.UserWorldPrefix;
+import com.me.galchat.exception.UserAuthException;
+import com.me.galchat.exception.UserRequestException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class UserWorldControllerTest {
+
+    @Test
+    void worldListRejectsAnotherUserBeforeReadingTheirData() {
+        IUserWorldPrefixService worlds = mock(IUserWorldPrefixService.class);
+        UserWorldController controller = worldListController(worlds);
+        CurrentHolder.setCurrentId(7);
+
+        assertThatThrownBy(() -> controller.listUserWorldBaseInfo(8L))
+                .isInstanceOf(UserAuthException.class);
+        verifyNoInteractions(worlds);
+    }
+
+    @Test
+    void worldListRequiresLogin() {
+        IUserWorldPrefixService worlds = mock(IUserWorldPrefixService.class);
+        UserWorldController controller = worldListController(worlds);
+
+        assertThatThrownBy(() -> controller.listUserWorldBaseInfo(7L))
+                .isInstanceOf(UserRequestException.class);
+        verifyNoInteractions(worlds);
+    }
+
+    @Test
+    void worldListReturnsTheCurrentUsersWorlds() {
+        IUserWorldPrefixService worlds = mock(IUserWorldPrefixService.class);
+        var expected = java.util.List.of(new UserWorldPrefix().setId(12L).setUserId(7L));
+        when(worlds.listBaseInfoByUserId(7L)).thenReturn(expected);
+        CurrentHolder.setCurrentId(7);
+
+        assertThat(worldListController(worlds).listUserWorldBaseInfo(7L).getData())
+                .isEqualTo(expected);
+    }
+
+    private UserWorldController worldListController(IUserWorldPrefixService worlds) {
+        return new UserWorldController(mock(ArchiveZipService.class), worlds, mock(IWorldTemplateService.class),
+                mock(IWorldDetailService.class), mock(IWorldArchiveService.class), mock(ObjectMapper.class));
+    }
 
     @AfterEach
     void clearCurrentUser() {

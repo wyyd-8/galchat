@@ -8,7 +8,7 @@ spring:
   ai:
     deepseek:
       base-url: https://api.deepseek.com
-      api-key: sk-e32f5daaf4824926a76fea2f0d87b473
+      api-key: ${DEEPSEEK_API_KEY}
       chat:
         model: deepseek-v4-pro
         temperature: 1.0
@@ -47,6 +47,8 @@ mybatis-plus:
       update-strategy: not_null
       id-type: auto
 galchat:
+  jwt:
+    signing-key: ${GALCHAT_JWT_SIGNING_KEY:}
   model-api:
     # 生产环境必须通过环境变量提供 Base64 编码的 32 字节主密钥。
     master-key: ${GALCHAT_MODEL_API_MASTER_KEY:}

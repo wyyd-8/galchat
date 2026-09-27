@@ -67,6 +67,8 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     environment:
+      GALCHAT_JWT_SIGNING_KEY: ${GALCHAT_JWT_SIGNING_KEY:?Set GALCHAT_JWT_SIGNING_KEY in .env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY in .env}
       GALCHAT_MODEL_API_MASTER_KEY: ${GALCHAT_MODEL_API_MASTER_KEY:-}
     network_mode: service:web
     volumes:

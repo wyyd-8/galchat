@@ -2,6 +2,8 @@ package com.me.galchat.memory;
 
 import com.me.galchat.domain.dto.ChatMessageDTO;
 import com.me.galchat.domain.po.UserChatHistory;
+import com.me.galchat.domain.po.UserWorldPrefix;
+import com.me.galchat.utils.CurrentHolder;
 import com.me.galchat.domain.vo.ChatFluxVO;
 import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.service.IUserCharacterInfoService;
@@ -53,8 +55,11 @@ class SingleChatCompressionFlowTest {
         var locks = mock(SingleChatLockService.class);
         var lock = new SingleChatLockService.OwnedLock(mock(RLock.class), 1);
         when(locks.tryLockWithOwner(1L, 2L)).thenReturn(lock);
+        var worlds = mock(IUserWorldPrefixService.class);
+        when(worlds.checkUserWorldAuth(7L, 1L, true))
+                .thenReturn(new UserWorldPrefix().setId(1L).setUserId(7L).setWorldId(3L));
         var service = new ChatServiceImpl(client, client, runtime, null, mock(UserChatHistoryMapper.class),
-                mock(IUserWorldPrefixService.class), mock(IUserCharacterInfoService.class), null, null,
+                worlds, mock(IUserCharacterInfoService.class), null, null,
                 locks, mock(TrpgRunMemoryService.class));
         var queue = new LinkedBlockingQueue<Runnable>();
         ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor", (TaskExecutor) queue::add);
@@ -64,7 +69,14 @@ class SingleChatCompressionFlowTest {
         var chunks = new CopyOnWriteArrayList<ChatFluxVO>();
         var firstReply = new CountDownLatch(1);
         var complete = new CompletableFuture<Void>();
-        service.chat(request).subscribe(chunk -> { chunks.add(chunk); firstReply.countDown(); },
+        Flux<ChatFluxVO> response;
+        CurrentHolder.setCurrentId(7);
+        try {
+            response = service.chat(request);
+        } finally {
+            CurrentHolder.remove();
+        }
+        response.subscribe(chunk -> { chunks.add(chunk); firstReply.countDown(); },
                 complete::completeExceptionally, () -> complete.complete(null));
         assertThat(firstReply.await(5, TimeUnit.SECONDS)).isTrue();
         assertThat(chunks).extracting(ChatFluxVO::getContent).contains("即时回复");

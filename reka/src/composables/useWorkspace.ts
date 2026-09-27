@@ -1,4 +1,4 @@
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { api, clearSession, currentSession, saveSession, streamGroupGeneration, streamGroupMessage, streamManualGroupMessage, streamTrpgTurn, UNAUTHORIZED_EVENT } from '@/api/client'
 import type {
   Character, CharacterTemplate, CocModule, Conversation, CurrentTurn, DiceRollAggregate, GenerationFailureState, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, InvestigatorCardSummary, ModelApi, ReplyPlan, ReplyPlanItem, TrpgCombatParticipantOverview, TrpgComposerIntent, TrpgGameTimePeriod,
@@ -14,6 +14,7 @@ import { hydrateDiceMessage } from '@/dice/domain/dicePlayback'
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
 import { useScopedChatDraft } from '@/components/chatInputState'
 import { errorMessage, notify } from './useNotice'
+import { followGeneration, isGenerationAbort, GenerationStartRejected } from '@/streaming/generationConnection'
 
 let tempMessageId = -1
 const freshPlan = (): ReplyPlan => ({ source: 'USER', displayName: '群聊', items: [] })
@@ -55,6 +56,15 @@ export function useWorkspace() {
   const hasOlderGroupMessages = ref(false)
   const diceRollCache = new Map<number, Promise<DiceRollAggregate>>()
   let catchingUpGenerationId: string | null = null
+  let generationConnection: { conversationId: number; requestId: string; controller: AbortController } | null = null
+  let conversationRevision = 0
+  function disconnectGeneration() {
+    generationConnection?.controller.abort()
+    generationConnection = null
+    catchingUpGenerationId = null
+    loading.sending = false
+  }
+  onUnmounted(disconnectGeneration)
   let acceptedPlanRefreshTurnId: number | null = null
 
   const isLoggedIn = computed(() => Boolean(session.token && session.id))
@@ -94,6 +104,7 @@ export function useWorkspace() {
     if (sessionStorage.getItem(key) === clientRequestId) sessionStorage.removeItem(key)
   }
   function resetWorkspace() {
+    conversationRevision++; disconnectGeneration()
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
     conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; modules.value = []
     latestDiceRoll.value = null; incomingDiceRolls.value = []; hasOlderGroupMessages.value = false; diceRollCache.clear()
@@ -210,6 +221,7 @@ export function useWorkspace() {
     try { worlds.value = await api.userWorlds(session.id) } finally { loading.worlds = false }
   }
   async function selectWorld(id: number) {
+    conversationRevision++; disconnectGeneration()
     selectedWorldId.value = id; selectedConversationId.value = null; messages.value = []; loading.workspace = true
     try {
       const [world, characterResult, conversationResult, saveResult] = await Promise.all([api.userWorld(id), api.characters(id), api.conversations(id), api.worldSave(id)])
@@ -292,15 +304,17 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
+    const revision = ++conversationRevision
+    disconnectGeneration()
     const worldId = selectedWorldId.value
     selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRolls.value = []; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
       const [conversationDetail, history, plans, turn, runtimes, models, overview, cards] = await Promise.all([
         api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), api.actorRuntimes(id), api.modelApis(), loadCombatOverview(id), loadInvestigatorCards(id),
       ])
-      if (selectedConversationId.value !== id || selectedWorldId.value !== worldId) return
+      if (revision !== conversationRevision || selectedConversationId.value !== id || selectedWorldId.value !== worldId) return
       const hydrated = await hydrateGroupMessages(history)
-      if (selectedConversationId.value !== id || selectedWorldId.value !== worldId) return
+      if (revision !== conversationRevision || selectedConversationId.value !== id || selectedWorldId.value !== worldId) return
       conversations.value = conversations.value.map((item) => item.id === id ? { ...item, ...conversationDetail } : item)
       messages.value = hydrated.sort((a, b) => a.sequenceNo - b.sequenceNo)
       hasOlderGroupMessages.value = history.length === 50
@@ -330,8 +344,8 @@ export function useWorkspace() {
       }
       await scrollToBottom(true)
     } catch (error) { notify('会话加载失败', errorMessage(error), 'danger') }
-    finally { if (selectedConversationId.value === id && selectedWorldId.value === worldId) loading.chat = false }
-    if (selectedConversationId.value === id && storedGeneration(id)) {
+    finally { if (revision === conversationRevision && selectedConversationId.value === id && selectedWorldId.value === worldId) loading.chat = false }
+    if (revision === conversationRevision && selectedConversationId.value === id && storedGeneration(id)) {
       void resumeGeneration(id)
     }
   }
@@ -375,6 +389,10 @@ export function useWorkspace() {
   async function loadOlderGroupMessages() {
     if (!selectedConversationId.value || !hasOlderGroupMessages.value || loading.chat) return
     const conversationId = selectedConversationId.value
+    const revision = conversationRevision
+    const worldId = selectedWorldId.value
+    const isCurrent = () => revision === conversationRevision
+      && conversationId === selectedConversationId.value && worldId === selectedWorldId.value
     const beforeId = messages.value.filter((item) => item.id > 0).reduce((minimum, item) => Math.min(minimum, item.id), Number.POSITIVE_INFINITY)
     if (!Number.isFinite(beforeId)) return
     const viewport = messageScroller.value
@@ -382,15 +400,17 @@ export function useWorkspace() {
     loading.chat = true
     try {
       const older = await api.groupMessages(conversationId, beforeId, 50)
-      if (conversationId !== selectedConversationId.value) return
+      if (!isCurrent()) return
       const previousTop = viewport?.scrollTop ?? 0
-      const known = new Set(messages.value.map((item) => item.id))
       const hydrated = await hydrateGroupMessages(older)
+      if (!isCurrent()) return
+      // Replay may insert messages while dice details are loading. Keep those live versions.
+      const known = new Set(messages.value.map((item) => item.id))
       messages.value = [...hydrated.filter((item) => !known.has(item.id)), ...messages.value].sort((a, b) => a.sequenceNo - b.sequenceNo)
       hasOlderGroupMessages.value = older.length === 50
       await nextTick()
-      if (viewport && messageScroller.value === viewport) viewport.scrollTop = previousTop + viewport.scrollHeight - previousHeight
-    } finally { loading.chat = false }
+      if (isCurrent() && viewport && messageScroller.value === viewport) viewport.scrollTop = previousTop + viewport.scrollHeight - previousHeight
+    } finally { if (isCurrent()) loading.chat = false }
   }
   async function withdrawGroupTurn() {
     if (!selectedConversationId.value) return
@@ -559,9 +579,14 @@ export function useWorkspace() {
   async function consumeGeneration(
     conversationId: number,
     clientRequestId: string,
-    connect: (onEvent: (event: GroupChatEvent) => void) => Promise<void>,
+    connect: (onEvent: (event: GroupChatEvent) => void, signal: AbortSignal) => Promise<void>,
     catchingUp = false,
   ) {
+    if (selectedConversationId.value !== conversationId) throw new DOMException('会话已切换', 'AbortError')
+    disconnectGeneration()
+    const connection = { conversationId, requestId: clientRequestId, controller: new AbortController() }
+    generationConnection = connection
+    loading.sending = true
     if (!catchingUp) {
       generationFailure.value = null
       generationFailureOpen.value = false
@@ -570,19 +595,32 @@ export function useWorkspace() {
     if (catchingUp) catchingUpGenerationId = clientRequestId
     let failed = false
     let terminal = false
+    let completed = false
     try {
-      await connect((event) => {
-        if (event.eventType === 'generation.failed') failed = true
-        if (event.eventType === 'generation.failed'
-          || event.eventType === 'turn.completed'
-          || event.eventType === 'turn.waiting_input'
-          || event.eventType === 'turn.paused') terminal = true
-        if (selectedConversationId.value === conversationId) applyEvent(event)
+      await followGeneration<GroupChatEvent>({
+        signal: connection.controller.signal,
+        initial: catchingUp ? undefined : connect,
+        resume: (receive, after, signal) => streamGroupGeneration.resume(conversationId, clientRequestId, receive, after, signal),
+        sequence: event => event.eventSequence,
+        terminal: event => ['generation.failed', 'generation.completed', 'turn.completed', 'turn.waiting_input', 'turn.paused'].includes(event.eventType),
+        onResume: () => { catchingUpGenerationId = clientRequestId },
+        receive: (event) => {
+          if (event.eventType === 'generation.failed') failed = true
+          if (event.eventType === 'generation.completed') completed = true
+          if (['generation.failed', 'generation.completed', 'turn.completed', 'turn.waiting_input', 'turn.paused'].includes(event.eventType)) terminal = true
+          if (selectedConversationId.value === conversationId) applyEvent(event)
+        },
       })
       if (terminal) forgetGeneration(conversationId, clientRequestId)
-      return { failed, terminal }
+      return { failed, terminal, completed }
+    } catch (error) {
+      if (error instanceof GenerationStartRejected) forgetGeneration(conversationId, clientRequestId)
+      throw error
     } finally {
-      if (catchingUpGenerationId === clientRequestId) catchingUpGenerationId = null
+      if (generationConnection === connection) {
+        generationConnection = null
+        catchingUpGenerationId = null
+      }
     }
   }
   async function resumeGeneration(conversationId: number) {
@@ -590,37 +628,46 @@ export function useWorkspace() {
     if (!clientRequestId) return
     loading.sending = true
     try {
-      await consumeGeneration(
+      const result = await consumeGeneration(
         conversationId,
         clientRequestId,
-        (onEvent) => streamGroupGeneration.resume(
-          conversationId, clientRequestId, onEvent),
+        (onEvent, signal) => streamGroupGeneration.resume(
+          conversationId, clientRequestId, onEvent, 0, signal),
         true,
       )
       const conversation = selectedConversation.value
-      if (conversation?.id === conversationId && conversation.mode === 'trpg') {
-        await syncTrpgState(conversation)
+      if (conversation?.id === conversationId
+        && (conversation.mode === 'trpg' || result.completed || result.failed)) {
+        await syncConversationState(conversation)
       }
-    } catch {
+    } catch (error) {
+      if (isGenerationAbort(error)) return
       // The replay cache is intentionally best-effort; persisted history
       // loaded by selectConversation remains the fallback after expiry/restart.
       const conversation = selectedConversation.value
       if (conversation?.id === conversationId
         && conversation.mode === 'trpg') {
-        await syncTrpgState(conversation).catch(() => undefined)
+        await syncConversationState(conversation).catch(() => undefined)
       }
     } finally {
-      loading.sending = false
+      if (!generationConnection) loading.sending = false
       await scrollToBottom()
     }
   }
-  async function syncTrpgState(conversation: Conversation) {
+  async function syncConversationState(conversation: Conversation) {
+    const revision = conversationRevision
+    const worldId = selectedWorldId.value
     const [detail, history, plans, turn, overview, cards] = await Promise.all([
-      api.conversation(conversation.id), api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id), loadCombatOverview(conversation.id), loadInvestigatorCards(conversation.id),
+      api.conversation(conversation.id), api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id),
+      conversation.mode === 'trpg' ? loadCombatOverview(conversation.id) : [],
+      conversation.mode === 'trpg' ? loadInvestigatorCards(conversation.id) : [],
     ])
-    if (selectedConversationId.value !== conversation.id) return
+    if (revision !== conversationRevision || selectedConversationId.value !== conversation.id || selectedWorldId.value !== worldId) return
+    const hydrated = await hydrateGroupMessages(history)
+    if (revision !== conversationRevision || selectedConversationId.value !== conversation.id || selectedWorldId.value !== worldId) return
     conversations.value = conversations.value.map((item) => item.id === conversation.id ? { ...item, ...detail } : item)
-    messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
+    messages.value = hydrated.sort((a, b) => a.sequenceNo - b.sequenceNo)
+    hasOlderGroupMessages.value = history.length === 50
     setReplyPlans(plans)
     currentTurn.value = turn
     combatOverview.value = overview
@@ -646,18 +693,19 @@ export function useWorkspace() {
       await consumeGeneration(
         conversation.id,
         clientRequestId,
-        (onEvent) => streamTrpgTurn.continue(
+        (onEvent, signal) => streamTrpgTurn.continue(
           conversation.id, clientRequestId, onEvent,
-          investigatorDirection?.trim() || undefined),
+          investigatorDirection?.trim() || undefined, signal),
       )
-      await syncTrpgState(conversation)
+      await syncConversationState(conversation)
       return true
     } catch (error) {
-      await syncTrpgState(conversation).catch(() => undefined)
+      if (isGenerationAbort(error)) return false
+      await syncConversationState(conversation).catch(() => undefined)
       notify('行动轮启动失败', errorMessage(error), 'danger')
       return false
     }
-    finally { loading.sending = false; await scrollToBottom() }
+    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
   }
   async function retryGenerationFailure() {
     const conversation = selectedConversation.value
@@ -679,16 +727,17 @@ export function useWorkspace() {
       await consumeGeneration(
         conversation.id,
         clientRequestId,
-        (onEvent) => streamTrpgTurn.selection(
+        (onEvent, signal) => streamTrpgTurn.selection(
           conversation.id, turnId, stepId,
-          { clientRequestId, optionNo }, onEvent),
+          { clientRequestId, optionNo }, onEvent, signal),
       )
-      await syncTrpgState(conversation)
+      await syncConversationState(conversation)
     } catch (error) {
-      await syncTrpgState(conversation).catch(() => undefined)
+      if (isGenerationAbort(error)) return false
+      await syncConversationState(conversation).catch(() => undefined)
       notify('地点选择失败', errorMessage(error), 'danger')
     }
-    finally { loading.sending = false; await scrollToBottom() }
+    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
   }
   async function endExploration() {
     const conversation = selectedConversation.value; const turn = currentTurn.value
@@ -700,16 +749,17 @@ export function useWorkspace() {
       await consumeGeneration(
         conversation.id,
         clientRequestId,
-        (onEvent) => streamTrpgTurn.endExploration(
+        (onEvent, signal) => streamTrpgTurn.endExploration(
           conversation.id, turnId, stepId,
-          clientRequestId, onEvent),
+          clientRequestId, onEvent, signal),
       )
-      await syncTrpgState(conversation)
+      await syncConversationState(conversation)
     } catch (error) {
-      await syncTrpgState(conversation).catch(() => undefined)
+      if (isGenerationAbort(error)) return false
+      await syncConversationState(conversation).catch(() => undefined)
       notify('结束探索失败', errorMessage(error), 'danger')
     }
-    finally { loading.sending = false; await scrollToBottom() }
+    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
   }
 
   async function askKp() {
@@ -728,18 +778,19 @@ export function useWorkspace() {
       await consumeGeneration(
         conversation.id,
         clientRequestId,
-        (onEvent) => streamTrpgTurn.inquiry(
+        (onEvent, signal) => streamTrpgTurn.inquiry(
           conversation.id, turnId, stepId,
-          { clientRequestId, question }, onEvent),
+          { clientRequestId, question }, onEvent, signal),
       )
-      await syncTrpgState(conversation)
+      await syncConversationState(conversation)
       if (inquiryInput.value.trim() === question) inquiryInput.value = ''
       composerIntent.value = 'action'
     } catch (error) {
-      await syncTrpgState(conversation).catch(() => undefined)
+      if (isGenerationAbort(error)) return false
+      await syncConversationState(conversation).catch(() => undefined)
       notify('询问 KP 失败', errorMessage(error), 'danger')
     } finally {
-      loading.sending = false
+      if (!generationConnection) loading.sending = false
       await scrollToBottom()
     }
   }
@@ -752,16 +803,17 @@ export function useWorkspace() {
       await consumeGeneration(
         conversation.id,
         clientRequestId,
-        (onEvent) => streamTrpgTurn.retry(
+        (onEvent, signal) => streamTrpgTurn.retry(
           conversation.id, message.turnId!, message.replyStepId!,
-          clientRequestId, onEvent),
+          clientRequestId, onEvent, signal),
       )
-      await syncTrpgState(conversation)
+      await syncConversationState(conversation)
     } catch (error) {
-      await syncTrpgState(conversation).catch(() => undefined)
+      if (isGenerationAbort(error)) return false
+      await syncConversationState(conversation).catch(() => undefined)
       notify('角色行动重试失败', errorMessage(error), 'danger')
     }
-    finally { loading.sending = false; await scrollToBottom() }
+    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
   }
   async function sendMessage() {
     const content = messageInput.value.trim(); const conversation = selectedConversation.value
@@ -795,41 +847,36 @@ export function useWorkspace() {
         await consumeGeneration(
           conversation.id,
           clientRequestId,
-          (onEvent) => streamTrpgTurn.message(
+          (onEvent, signal) => streamTrpgTurn.message(
             conversation.id, turnId, stepId,
-            { clientRequestId, content }, onEvent),
+            { clientRequestId, content }, onEvent, signal),
         )
-        await syncTrpgState(conversation)
+        await syncConversationState(conversation)
       } else if (manualChat) {
         const turn = currentTurn.value
         if (!turn?.stepId) throw new Error('当前人工接管步骤已变化，请重试')
         await consumeGeneration(
           conversation.id,
           clientRequestId,
-          (onEvent) => streamManualGroupMessage(
+          (onEvent, signal) => streamManualGroupMessage(
             conversation.id, turn.turnId, turn.stepId!,
-            { clientRequestId, content }, onEvent,
+            { clientRequestId, content }, onEvent, signal,
           ),
         )
-        const [history, plans, nextTurn] = await Promise.all([
-          api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id),
-        ])
-        messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo)
-        setReplyPlans(plans)
-        currentTurn.value = nextTurn
+        await syncConversationState(conversation)
       } else {
         await consumeGeneration(
           conversation.id,
           clientRequestId,
-          (onEvent) => streamGroupMessage(
-            conversation.id, { clientRequestId, content }, onEvent),
+          (onEvent, signal) => streamGroupMessage(
+            conversation.id, { clientRequestId, content }, onEvent, signal),
         )
-        const [history, plans, nextTurn] = await Promise.all([api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id)])
-        messages.value = (await hydrateGroupMessages(history)).sort((a, b) => a.sequenceNo - b.sequenceNo); setReplyPlans(plans); currentTurn.value = nextTurn
+        await syncConversationState(conversation)
       }
     } catch (error) {
+      if (isGenerationAbort(error)) return false
       if (conversation.mode === 'trpg') {
-        await syncTrpgState(conversation).catch(() => undefined)
+        await syncConversationState(conversation).catch(() => undefined)
       } else {
         messages.value = messages.value.filter((message) => message.id !== optimisticId)
         if (!messageInput.value) messageInput.value = originalInput
@@ -839,7 +886,7 @@ export function useWorkspace() {
       }
       notify('消息发送失败', errorMessage(error), 'danger')
     }
-    finally { loading.sending = false; await scrollToBottom() }
+    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
   }
 
   async function saveActorRuntime(payload: GroupActorRuntimeSavePayload) {

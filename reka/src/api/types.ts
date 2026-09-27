@@ -124,11 +124,11 @@ export interface ChatHistory {
 }
 export interface ChatMessagePayload {
   type?: string; worldId: number; userWorldId: number; characterId: number; message: string
-  isTyping?: boolean; length?: number; revision?: number; triggerType?: string
+  clientRequestId?: string; isTyping?: boolean; length?: number; revision?: number; triggerType?: string
 }
-export interface ChatFlux { type: string; content?: string }
+export interface ChatFlux { type: string; content?: string; sequence?: number }
 export interface DirectMessage {
-  id: string; historyId?: number; role: 'user' | 'assistant' | 'thinking' | 'tool'; content: string; time?: string; complete?: boolean
+  id: string; historyId?: number; userMessageId?: number; role: 'user' | 'assistant' | 'thinking' | 'tool'; content: string; time?: string; complete?: boolean
 }
 
 export type ConversationMode = 'chat' | 'trpg'
@@ -182,8 +182,8 @@ export interface GenerationErrorDetail {
   stack: string
 }
 export interface GroupChatEvent {
-  eventType: 'stream.caught_up' | 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'generation.failed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
-  conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number
+  eventType: 'stream.caught_up' | 'turn.accepted' | 'turn.waiting_input' | 'turn.paused' | 'reply.started' | 'reasoning.delta' | 'decision.delta' | 'decision.completed' | 'message.delta' | 'dice_roll.created' | 'material.created' | 'game_time.changed' | 'message.completed' | 'reply.failed' | 'generation.failed' | 'generation.completed' | 'turn.completed' | 'scene_selection.options' | 'scene_selection.choice' | 'combat.started' | 'combat.completed'
+  conversationId?: number; turnId?: number; replyStepId?: number; messageId?: number; sequence?: number; eventSequence?: number
   actionType?: string; groupName?: string; itemOrder?: number; messageKind?: string; speaker?: GroupSpeaker; delta?: string; content?: string; error?: string; toolName?: string
   promptMessageId?: number; interactionType?: string; interactionSeq?: number
   diceRoll?: DiceRollAggregate

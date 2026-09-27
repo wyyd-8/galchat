@@ -8,6 +8,7 @@ import com.me.galchat.interceptor.TokenInterceptor;
 import com.me.galchat.mapper.UserInfoMapper;
 import com.me.galchat.service.impl.user.UserInfoServiceImpl;
 import com.me.galchat.support.MybatisPlusTestSupport;
+import com.me.galchat.utils.JwtUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.support.AnnotationConfigWebApplicationContext;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
+import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -43,15 +45,16 @@ class UserPasswordRecoveryTest {
     static class Config {
         @Bean UserInfoMapper mapper() { return mock(UserInfoMapper.class); }
         @Bean StringRedisTemplate redis() { return mock(StringRedisTemplate.class); }
-        @Bean UserInfoServiceImpl service(UserInfoMapper mapper, StringRedisTemplate redis) {
-            var service = new UserInfoServiceImpl(redis);
+        @Bean JwtUtils jwt() { return new JwtUtils(java.util.Base64.getEncoder().encodeToString(new byte[32])); }
+        @Bean UserInfoServiceImpl service(UserInfoMapper mapper, StringRedisTemplate redis, JwtUtils jwt) {
+            var service = new UserInfoServiceImpl(redis, jwt);
             ReflectionTestUtils.setField(service, "baseMapper", mapper);
             ReflectionTestUtils.setField(service, "entityClass", UserInfo.class);
             return service;
         }
         @Bean UserInfoController controller(UserInfoServiceImpl service) { return new UserInfoController(service); }
         @Bean GlobalExceptionHandler errors() { return new GlobalExceptionHandler(); }
-        @Bean TokenInterceptor tokens() { return new TokenInterceptor(); }
+        @Bean TokenInterceptor tokens(JwtUtils jwt) { return new TokenInterceptor(jwt); }
         @Bean WebConfig webConfig() { return new WebConfig(); }
     }
 
@@ -81,6 +84,32 @@ class UserPasswordRecoveryTest {
 
     @AfterEach
     void close() { context.close(); }
+
+    @Test
+    void loginTokenIsAcceptedByTheConfiguredHttpInterceptor() throws Exception {
+        var user = new UserInfo().setId(42L).setUsername("test-user").setEmail(EMAIL)
+                .setPassword("fc97bb52861fcf328d0a7abe201f9632b8703e436656348f6d1b398f42e92c39");
+        doReturn(user).when(mapper).selectOne(any());
+        var response = mvc.perform(post("/user/login").contentType("application/json")
+                        .content("{\"email\":\"" + EMAIL + "\",\"password\":\"new-secret\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(1))
+                .andReturn().getResponse();
+        String token = new ObjectMapper().readTree(response.getContentAsString()).get("data").get("token").asString();
+
+        assertThat(context.getBean(JwtUtils.class).parseToken(token).get("id", Integer.class)).isEqualTo(42);
+        mvc.perform(get("/user/info").header("token", token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value(1));
+    }
+
+    @Test
+    void httpInterceptorRejectsTokensSignedWithADifferentKey() throws Exception {
+        byte[] otherKey = new byte[32];
+        java.util.Arrays.fill(otherKey, (byte) 1);
+        String token = new JwtUtils(java.util.Base64.getEncoder().encodeToString(otherKey))
+                .generateToken(java.util.Map.of("id", 42));
+
+        mvc.perform(get("/user/info").header("token", token)).andExpect(status().isUnauthorized());
+    }
 
     @Test
     void resetsPasswordWithoutLoginAndConsumesCode() throws Exception {

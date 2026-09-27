@@ -123,10 +123,11 @@ public class GroupChatController {
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<GroupChatEvent> resumeGeneration(
             @PathVariable Long conversationId,
-            @PathVariable String clientRequestId) {
+            @PathVariable String clientRequestId,
+            @RequestParam(defaultValue = "0") long after) {
         conversationService.requireAuthorized(conversationId);
         return generationStreamRegistry.resume(
-                conversationId, clientRequestId);
+                conversationId, clientRequestId, after);
     }
 
     @PostMapping(

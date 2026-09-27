@@ -60,10 +60,10 @@ class GroupChatGenerationControllerTest {
 
         controller.chat(7L, request).collectList().block();
         List<GroupChatEvent> resumed = controller.resumeGeneration(
-                7L, "generation-7").collectList().block();
+                7L, "generation-7", 0).collectList().block();
 
         assertThat(resumed).extracting(GroupChatEvent::getEventType)
-                .containsExactly("message.delta", "stream.caught_up");
+                .containsExactly("generation.completed");
     }
 
     @Test
@@ -143,10 +143,10 @@ class GroupChatGenerationControllerTest {
         controller.submitInquiry(7L, 8L, 9L, request)
                 .collectList().block();
         List<GroupChatEvent> resumed = controller.resumeGeneration(
-                7L, "ask-1").collectList().block();
+                7L, "ask-1", 0).collectList().block();
 
-        assertThat(resumed).extracting(GroupChatEvent::getContent)
-                .containsExactly("门仍然开着。", null);
+        assertThat(resumed).extracting(GroupChatEvent::getEventType)
+                .containsExactly("generation.completed");
     }
 
     @Test

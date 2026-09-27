@@ -6,6 +6,8 @@ import type {
   WorldTemplate, WorldTemplateUsage,
 } from './types'
 
+import { GenerationRequestRejected } from '../streaming/generationConnection'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 const TOKEN_KEY = 'galchat.token'
 export const UNAUTHORIZED_EVENT = 'galchat:unauthorized'
@@ -35,11 +37,17 @@ function headers(init?: HeadersInit, json = false) {
 }
 
 async function raw(path: string, init: RequestInit = {}) {
-  const response = await fetch(endpoint(path), { ...init, headers: headers(init.headers, Boolean(init.body) && !(init.body instanceof FormData)) })
+  const requestHeaders = headers(init.headers, Boolean(init.body) && !(init.body instanceof FormData))
+  const response = await fetch(endpoint(path), { ...init, headers: requestHeaders })
   if (response.status === 401) {
-    clearSession(); window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)); throw new Error('登录状态已失效')
+    if (requestHeaders.get('token') === token()) { clearSession(); window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT)) }
+    throw new Error('登录状态已失效')
   }
-  if (!response.ok) throw new Error(await readError(response))
+  if (!response.ok) {
+    const message = await readError(response)
+    if (response.status >= 400 && response.status < 500 && response.status !== 408) throw new GenerationRequestRejected(message)
+    throw new Error(message)
+  }
   return response
 }
 
@@ -241,24 +249,39 @@ export const api = {
   rollbackTrpgInitial: (id: number) => request<TrpgRollbackResult>(`/trpg-saves/${id}/rollback-initial`, { method: 'POST' }),
 }
 
-export async function streamChat(payload: ChatMessagePayload, onMessage: (message: ChatFlux) => void) {
-  const response = await raw('/ai/chat', { method: 'POST', body: body(payload) })
-  if (!response.body) return
+export async function streamChat(payload: ChatMessagePayload, onMessage: (message: ChatFlux) => void, signal?: AbortSignal) {
+  await readEventStream(await raw('/ai/chat', { method: 'POST', body: body(payload), signal }), onMessage)
+}
+
+export async function resumeChat(userWorldId: number, characterId: number, requestId: string, after: number, onMessage: (message: ChatFlux) => void, signal?: AbortSignal) {
+  await readEventStream(await raw(`/ai/chat/${userWorldId}/${characterId}/generations/${encodeURIComponent(requestId)}?after=${after}`, { signal, headers: { Accept: 'text/event-stream' } }), onMessage)
+}
+
+async function readEventStream<E>(response: Response, onMessage: (message: E) => void) {
+  if (response.headers.get('content-type')?.includes('application/json')) {
+    const result = await response.json() as ApiResult<unknown>
+    throw new GenerationRequestRejected(result.msg || '生成请求失败')
+  }
+  if (!response.body) throw new Error('回复连接为空')
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
-  const consume = (rawLine: string) => {
-    const line = rawLine.trim()
-    if (!line || line.startsWith(':')) return
-    const data = line.startsWith('data:') ? line.slice(5).trim() : line
+  let finished = false
+  function consumeBlock(block: string) {
+    const data = block.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')
     if (!data || data === '[DONE]') return
-    try { onMessage(JSON.parse(data) as ChatFlux) } catch { onMessage({ type: 'response', content: data }) }
+    onMessage(JSON.parse(data) as E)
   }
-  while (true) {
-    const { done, value } = await reader.read(); if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split(/\r?\n/); buffer = lines.pop() || ''
-    lines.forEach(consume)
+  try {
+    while (true) {
+      const { done, value } = await reader.read(); if (done) { finished = true; break }
+      buffer += decoder.decode(value, { stream: true })
+      const blocks = buffer.split(/\r?\n\r?\n/); buffer = blocks.pop() || ''
+      blocks.forEach(consumeBlock)
+    }
+    buffer += decoder.decode(); if (buffer.trim()) consumeBlock(buffer)
+  } finally {
+    if (!finished) await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
   }
-  buffer += decoder.decode(); if (buffer.trim()) consume(buffer)
 }
 
 export function createChatSocket(userWorldId: number) {
@@ -278,8 +301,8 @@ export async function uploadImage(file: File) {
   return result.data || ''
 }
 
-export async function streamGroupMessage(id: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) {
-  return streamGroupTurn(`/group-chat/conversations/${id}/messages`, payload, onEvent)
+export async function streamGroupMessage(id: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void, signal?: AbortSignal) {
+  return streamGroupTurn(`/group-chat/conversations/${id}/messages`, payload, onEvent, 'POST', signal)
 }
 
 export async function streamManualGroupMessage(
@@ -288,47 +311,34 @@ export async function streamManualGroupMessage(
   stepId: number,
   payload: { clientRequestId: string; content: string },
   onEvent: (event: GroupChatEvent) => void,
+  signal?: AbortSignal,
 ) {
-  return streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/manual-message`, payload, onEvent)
+  return streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/manual-message`, payload, onEvent, 'POST', signal)
 }
 
-async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: GroupChatEvent) => void, method = 'POST') {
-  const response = await raw(path, { method, body: payload === undefined ? undefined : body(payload), headers: { Accept: 'text/event-stream' } })
-  if (!response.body) return
-  const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''
-  const consume = (block: string) => {
-    const data = block.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('\n')
-    if (!data || data === '[DONE]') return
-    onEvent(JSON.parse(data) as GroupChatEvent)
-  }
-  while (true) {
-    const { done, value } = await reader.read(); if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const blocks = buffer.split(/\r?\n\r?\n/); buffer = blocks.pop() || ''
-    blocks.forEach(consume)
-  }
-  buffer += decoder.decode(); if (buffer.trim()) consume(buffer)
+async function streamGroupTurn(path: string, payload: unknown, onEvent: (event: GroupChatEvent) => void, method = 'POST', signal?: AbortSignal) {
+  await readEventStream(await raw(path, { method, body: payload === undefined ? undefined : body(payload), signal, headers: { Accept: 'text/event-stream' } }), onEvent)
 }
 
 export const streamGroupGeneration = {
-  resume: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/generations/${encodeURIComponent(clientRequestId)}`, undefined, onEvent, 'GET'),
+  resume: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void, after = 0, signal?: AbortSignal) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/generations/${encodeURIComponent(clientRequestId)}?after=${after}`, undefined, onEvent, 'GET', signal),
 }
 
 export const streamTrpgTurn = {
-  continue: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void, investigatorDirection?: string) =>
+  continue: (id: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void, investigatorDirection?: string, signal?: AbortSignal) =>
     streamGroupTurn(`/group-chat/conversations/${id}/turns/continue`, {
       clientRequestId,
       ...(investigatorDirection ? { investigatorDirection } : {}),
-    }, onEvent),
-  message: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/message`, payload, onEvent),
-  inquiry: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; question: string }, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/inquiry`, payload, onEvent),
-  selection: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; optionNo: string }, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/selection`, payload, onEvent),
-  endExploration: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/end-exploration`, { clientRequestId }, onEvent),
-  retry: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void) =>
-    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/retry`, { clientRequestId }, onEvent),
+    }, onEvent, 'POST', signal),
+  message: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void, signal?: AbortSignal) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/message`, payload, onEvent, 'POST', signal),
+  inquiry: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; question: string }, onEvent: (event: GroupChatEvent) => void, signal?: AbortSignal) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/inquiry`, payload, onEvent, 'POST', signal),
+  selection: (id: number, turnId: number, stepId: number, payload: { clientRequestId: string; optionNo: string }, onEvent: (event: GroupChatEvent) => void, signal?: AbortSignal) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/selection`, payload, onEvent, 'POST', signal),
+  endExploration: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void, signal?: AbortSignal) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/end-exploration`, { clientRequestId }, onEvent, 'POST', signal),
+  retry: (id: number, turnId: number, stepId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void, signal?: AbortSignal) =>
+    streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/steps/${stepId}/retry`, { clientRequestId }, onEvent, 'POST', signal),
 }

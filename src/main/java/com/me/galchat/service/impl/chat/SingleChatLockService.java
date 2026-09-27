@@ -5,6 +5,7 @@ import com.me.galchat.exception.UserRequestException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
+import org.redisson.api.RFuture;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import java.time.Duration;
@@ -12,6 +13,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.TimeUnit;
 
 /** 只保护同一用户、同一角色的单聊消息和相关状态，不参与群聊串行化。 */
@@ -22,6 +25,9 @@ public class SingleChatLockService {
 
     private static final Duration BATCH_WAIT = Duration.ofSeconds(5);
     private static final Duration CHAT_WAIT = Duration.ofSeconds(3);
+    // Detached generations outlive/reuse servlet threads. Negative task owners cannot
+    // reenter a synchronous mutation lock held under a positive Java thread ID.
+    private static final AtomicLong GENERATION_OWNER = new AtomicLong(-1);
 
     private final RedissonClient redissonClient;
 
@@ -47,13 +53,24 @@ public class SingleChatLockService {
 
     public OwnedLock tryLockWithOwner(Long userWorldId, Long characterId) {
         RLock lock = singleChatLock(userWorldId, characterId);
-        long ownerThreadId = Thread.currentThread().threadId();
+        long ownerThreadId = GENERATION_OWNER.getAndDecrement();
+        RFuture<Boolean> acquisition = lock.tryLockAsync(CHAT_WAIT.toMillis(), -1, TimeUnit.MILLISECONDS, ownerThreadId);
         try {
-            return lock.tryLock(CHAT_WAIT.toMillis(), TimeUnit.MILLISECONDS)
+            return acquisition.get()
                     ? new OwnedLock(lock, ownerThreadId) : null;
         } catch (InterruptedException e) {
+            // The Redis request may still acquire the lock after get() is interrupted.
+            acquisition.whenComplete((acquired, error) -> {
+                if (Boolean.TRUE.equals(acquired)) {
+                    lock.unlockAsync(ownerThreadId).whenComplete((ignored, failure) -> {
+                        if (failure != null) handleUnlockFailure(lock, ownerThreadId, failure);
+                    });
+                }
+            });
             Thread.currentThread().interrupt();
             throw new UserRequestException("单聊操作被中断，请稍后再试");
+        } catch (ExecutionException e) {
+            throw new IllegalStateException("获取单聊锁失败", e.getCause());
         }
     }
 

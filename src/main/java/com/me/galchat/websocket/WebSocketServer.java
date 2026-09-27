@@ -47,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 public class WebSocketServer {
     
     private final IUserWorldPrefixService userWorldService;
+    private final JwtUtils jwtUtils;
     private final StringRedisTemplate redisTemplate;
     private final RedissonClient redissonClient;
     private final ChatLuaScripts chatLuaScripts;
@@ -167,7 +168,7 @@ public class WebSocketServer {
         log.info("客户端：" + sid + "建立连接");
         Long id;
         try {
-            Claims claims = JwtUtils.parseToken(token);
+            Claims claims = jwtUtils.parseToken(token);
             id = Long.valueOf(String.valueOf(claims.get("id")));
             log.info("登录id:{}", id);
         } catch (Exception e) {
@@ -240,9 +241,7 @@ public class WebSocketServer {
             return;
         }
         data.setUserWorldId(currentPrefix.getId());
-        if (data.getWorldId() == null) {
-            data.setWorldId(currentPrefix.getWorldId());
-        }
+        data.setWorldId(currentPrefix.getWorldId());
 
         // 按消息类型分发处理
         log.info("收到来自客户端：" + sid + "的信息:" + data);

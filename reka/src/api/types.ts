@@ -122,6 +122,7 @@ export interface ChatHistory {
   id?: number; userWorldId?: number; characterId?: number; content?: string; type?: string
   userMessageId?: number; stepNo?: number; timestamp?: string
 }
+export interface CareMessagePage { messages: ChatHistory[]; nextCursor: number; hasMore: boolean }
 export interface ChatMessagePayload {
   worldId: number; userWorldId: number; characterId: number; message: string
   clientRequestId?: string

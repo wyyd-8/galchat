@@ -13,7 +13,6 @@ import com.me.galchat.service.IUserEventLogService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.me.galchat.support.MybatisPlusTestSupport;
-import com.me.galchat.websocket.WebSocketServer;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.redisson.api.RedissonClient;
@@ -44,12 +43,11 @@ class UserEventLogConsumerTest {
         var events = mock(IUserEventLogService.class);
         var eventMapper = mock(UserEventLogMapper.class);
         var histories = mock(UserChatHistoryMapper.class);
-        var socket = mock(WebSocketServer.class);
         var topics = mock(TopicBoundaryService.class);
         var client = mock(ChatClient.class);
         var request = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
         var response = mock(ChatClient.CallResponseSpec.class);
-        var consumer = new UserEventLogConsumer(mock(RedissonClient.class), socket, events, worlds,
+        var consumer = new UserEventLogConsumer(mock(RedissonClient.class), events, worlds,
                 histories, characters, topics);
         ReflectionTestUtils.setField(consumer, "userEventCareClient", client);
 
@@ -70,13 +68,12 @@ class UserEventLogConsumerTest {
 
         if (enabled) {
             String expected = hasEvent ? "考试顺利吗？" : "你如何理解勇气？";
-            verify(histories).insert(any(UserChatHistory.class));
-            verify(socket).sendMessageToSession(argThat(message ->
+            verify(histories).insert(argThat((UserChatHistory message) ->
                     message.getUserWorldId().equals(10L) && message.getCharacterId().equals(20L)
                             && expected.equals(message.getContent())));
             verify(topics).startAssistantMessageTopic(any(UserChatHistory.class));
         } else {
-            verifyNoInteractions(histories, socket, topics);
+            verifyNoInteractions(histories, topics);
             verify(client, never()).prompt();
             verify(events, never()).addUserEventLog(any());
         }

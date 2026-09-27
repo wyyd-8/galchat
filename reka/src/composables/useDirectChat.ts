@@ -1,11 +1,12 @@
-import { computed, nextTick, onUnmounted, reactive, ref, shallowRef, type ComputedRef, type Ref } from 'vue'
-import { api, createNotificationSocket, streamChat, resumeChat, currentSession } from '@/api/client'
+import { computed, nextTick, onUnmounted, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
+import { api, streamChat, resumeChat, currentSession } from '@/api/client'
 import type { Character, ChatFlux, ChatHistory, ChatMessagePayload, DirectMessage, ModelApi, UserWorld } from '@/api/types'
 import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/components/reasoningScroll'
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
 import { useScopedChatDraft } from '@/components/chatInputState'
 import { errorMessage, notify } from './useNotice'
 import { followGeneration, GenerationStartRejected } from '@/streaming/generationConnection'
+import { createCarePolling } from './carePolling'
 
 interface DirectChatContext {
   world: ComputedRef<UserWorld | null>
@@ -14,6 +15,11 @@ interface DirectChatContext {
 }
 
 function formatTime(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '' }
+function insertCareMessage(messages: DirectMessage[], message: DirectMessage) {
+  if (messages.some(item => item.historyId === message.historyId)) return
+  const index = messages.findIndex(item => (item.userMessageId ?? item.historyId ?? Infinity) > message.historyId!)
+  messages.splice(index < 0 ? messages.length : index, 0, message)
+}
 // The server pages primary messages, then expands their replies, reasoning and tools.
 function hasOlderHistory(history: ChatHistory[]) {
   return history.filter(item => item.type == null || item.type.toLowerCase() === 'user'
@@ -70,9 +76,6 @@ export function useDirectChat(context: DirectChatContext) {
     return messages.value.some((item) => item.role === 'user')
   })
 
-  let socket: WebSocket | null = null
-  let connecting: Promise<WebSocket> | null = null
-  let socketWorldId: number | null = null
   let notificationAsked = false
 
   function roleOf(item: ChatHistory): DirectMessage['role'] {
@@ -155,6 +158,7 @@ export function useDirectChat(context: DirectChatContext) {
 
   async function loadHistory(state: State, preserveOlder = false) {
     const revision = ++state.historyRevision; const ownEpoch = epoch
+    const messagesAtStart = new Set(state.messages)
     state.loading.history = true
     try {
       const [history, models] = await Promise.all([api.history(state.world!.id, state.characterId), api.modelApis()])
@@ -166,7 +170,10 @@ export function useDirectChat(context: DirectChatContext) {
         const id = message.userMessageId ?? message.historyId
         return message.complete !== false && id != null && id < boundary
       }) : []
+      const arrivedCare = state.messages.filter(message => !messagesAtStart.has(message)
+        && message.role === 'assistant' && message.historyId != null && message.userMessageId == null)
       state.messages = [...older, ...historyMessages(history), ...errors]
+      arrivedCare.forEach(message => insertCareMessage(state.messages, message))
       state.modelApis = models
       // Retained pages own the oldest cursor, including an already exhausted one.
       if (!older.length) state.hasOlder = hasOlder
@@ -177,7 +184,7 @@ export function useDirectChat(context: DirectChatContext) {
     const world = context.world.value
     if (!world) return
     const selection = ++selectionRevision
-    selectedCharacterId.value = id; closeSocket()
+    selectedCharacterId.value = id
     const key = stateKey(world.id, id)
     let state = states.get(key)
     if (!state) { state = freshState({ ...world }, id); states.set(key, state) }
@@ -185,7 +192,6 @@ export function useDirectChat(context: DirectChatContext) {
     active.value = state
     if (!state.loading.sending && !state.generation) await loadHistory(state)
     if (selection !== selectionRevision || !isActive(state) || disposed) return
-    if (world.acitvePushStatus) void ensureSocket(world.id).catch(() => undefined)
     const requestId = state.generation?.requestId || pending(state)
     if (requestId && !state.loading.sending) void consumeGeneration(state, requestId)
     // Keep active/background conversations, bound completed conversation caches.
@@ -216,7 +222,7 @@ export function useDirectChat(context: DirectChatContext) {
     finally { if (revision === state.historyRevision) state.loading.history = false }
   }
   function disposeConnections() {
-    epoch++; closeSocket()
+    epoch++; carePolling.stop()
     states.forEach(state => state.controller?.abort())
   }
   function invalidateWorld(worldId: number, characterId?: number) {
@@ -240,11 +246,7 @@ export function useDirectChat(context: DirectChatContext) {
     chatDrafts.clear(); input.value = ''; clearChatReadingPositions()
   }
   function close() {
-    selectionRevision++; selectedCharacterId.value = null; active.value = freshState(); closeSocket()
-  }
-  function closeSocket() {
-    connecting = null; socketWorldId = null
-    if (socket) { socket.close(); socket = null }
+    selectionRevision++; selectedCharacterId.value = null; active.value = freshState()
   }
   function notifyPush(item: ChatHistory) {
     if (roleOf(item) !== 'assistant' || !item.content) return
@@ -258,39 +260,47 @@ export function useDirectChat(context: DirectChatContext) {
       notificationAsked = true; void Notification.requestPermission().then((permission) => { if (permission === 'granted') show() })
     }
   }
-  function handleSocketMessage(event: MessageEvent<string>) {
-    let item: ChatHistory
-    try { item = JSON.parse(event.data) as ChatHistory } catch { return }
-    if (!item || typeof item.type !== 'string' || typeof item.content !== 'string' || item.id == null) return
-    if (disposed || item.userWorldId !== socketWorldId || item.userWorldId !== context.world.value?.id) return
-    const state = states.get(stateKey(item.userWorldId!, item.characterId!))
-    if (state?.messages.some(message => message.historyId === item.id)) return
-    notifyPush(item)
-    if (!state) return
-    const pushed = historyMessages([item])
-    state.generation?.following.push(...pushed)
-    state.messages.push(...pushed)
-    if (!isActive(state)) return
-    void scrollToBottom()
-    if (roleOf(item) === 'assistant') void context.reloadCharacters()
+  function receiveCareMessages(items: ChatHistory[]) {
+    for (const item of items) {
+      if (disposed || item.userWorldId !== context.world.value?.id || item.id == null) continue
+      const state = states.get(stateKey(item.userWorldId!, item.characterId!))
+      if (state?.messages.some(message => message.historyId === item.id)) continue
+      notifyPush(item)
+      if (!state) continue
+      const pushed = historyMessages([item])[0]!
+      if (state.generation) {
+        const generation = state.generation
+        const anchor = generation.live[0]?.historyId
+        insertCareMessage(anchor != null && item.id < anchor ? generation.base : generation.following, pushed)
+        state.messages = [...generation.base, ...generation.live, ...generation.following]
+      } else insertCareMessage(state.messages, pushed)
+      if (isActive(state)) void scrollToBottom()
+    }
+    if (items.length) void context.reloadCharacters()
   }
-  function ensureSocket(worldId: number) {
-    if (socket?.readyState === WebSocket.OPEN && socketWorldId === worldId) return Promise.resolve(socket)
-    if (connecting && socketWorldId === worldId) return connecting
-    closeSocket(); socket = createNotificationSocket(worldId); socketWorldId = worldId
-    const current = socket
-    connecting = new Promise<WebSocket>((resolve, reject) => {
-      let settled = false
-      current.addEventListener('open', () => { settled = true; if (socket === current) connecting = null; resolve(current) }, { once: true })
-      current.addEventListener('message', event => { if (socket === current) handleSocketMessage(event) })
-      current.addEventListener('error', () => { if (!settled) reject(new Error('WebSocket 连接失败')) }, { once: true })
-      current.addEventListener('close', () => {
-        if (socket === current) { socket = null; socketWorldId = null; connecting = null }
-        if (!settled) reject(new Error('WebSocket 连接已关闭'))
-      }, { once: true })
-    })
-    return connecting
-  }
+  const carePolling = createCarePolling({
+    now: () => Date.now(),
+    visible: () => typeof document !== 'undefined' && document.visibilityState !== 'hidden',
+    schedule: (callback, delay) => { const timer = setTimeout(callback, delay); return () => clearTimeout(timer) },
+    readCursor: key => {
+      try {
+        const value = localStorage.getItem(key)
+        const cursor = value == null ? NaN : Number(value)
+        return Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : undefined
+      } catch { return undefined }
+    },
+    writeCursor: (key, cursor) => { try { localStorage.setItem(key, String(cursor)) } catch { /* In-page progress still works. */ } },
+    fetchPage: (worldId, after, signal) => api.careMessages(worldId, after, signal),
+    receive: receiveCareMessages,
+  })
+  watch(() => [context.world.value?.id, context.world.value?.acitvePushStatus] as const, ([worldId, enabled]) => {
+    if (worldId != null && enabled) {
+      carePolling.start(`galchat.care-cursor:${currentSession().id ?? ''}:${worldId}`, worldId)
+    } else carePolling.stop()
+  }, { immediate: true, flush: 'sync' })
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', carePolling.visibilityChanged)
+  if (typeof window !== 'undefined') window.addEventListener?.('focus', carePolling.refresh)
+
   function applyChunk(state: State, generation: Generation, chunk: ChatFlux) {
     if (chunk.sequence != null) {
       if (chunk.sequence <= generation.sequence) return
@@ -419,6 +429,10 @@ export function useDirectChat(context: DirectChatContext) {
     finally { state.loading.model = false }
   }
 
-  onUnmounted(() => { disposed = true; disposeConnections() })
+  onUnmounted(() => {
+    disposed = true; disposeConnections()
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', carePolling.visibilityChanged)
+    if (typeof window !== 'undefined') window.removeEventListener?.('focus', carePolling.refresh)
+  })
   return { selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, selectCharacter, selectModel, loadEarlier, close, clearDrafts, invalidateWorld, send, withdraw }
 }

@@ -1,5 +1,5 @@
 import type {
-  TrpgParticipantHistory, TrpgParticipantRunPage, TrpgCompletionReport, ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
+  TrpgParticipantHistory, TrpgParticipantRunPage, TrpgCompletionReport, ApiResult, Character, CharacterCard, CharacterCardCreationDraft, CharacterCardCreationRules, CharacterTemplate, ChatFlux, ChatHistory, CareMessagePage, ChatMessagePayload, CocModule, CocModuleArchive, CocModuleClue, CocModuleDetail, CocModuleLocation, CocModuleSavePayload, ContextWindowOverview, Conversation, CurrentTurn, InvestigatorCardSummary,
   DiceResult, DiceRollDetail, DiceRollProgress, DiceRollSummary, GroupActorRuntime, GroupActorRuntimeSavePayload, GroupChatEvent, GroupMessage, ModelApi, ModelApiSavePayload, ReplyPlan, ReplyPlanRequest, Session, TrpgCombatParticipantOverview, TrpgGameTime, TrpgGameTimePeriod, TrpgRollbackOverview, TrpgRollbackResult, TrpgSave, UserInfo, UserToken,
   SingleChatRuntime, UserWorld, WorldArchive, WorldArchiveReplaceResult, WorldArchiveResult, WorldDetail, WorldSave,
   WorldTemplate, WorldTemplateUsage,
@@ -13,14 +13,6 @@ export const UNAUTHORIZED_EVENT = 'galchat:unauthorized'
 
 function endpoint(path: string) { return `${API_BASE}${path}` }
 function token() { return localStorage.getItem(TOKEN_KEY) }
-function wsEndpoint(path: string) {
-  const url = API_BASE.startsWith('http://') || API_BASE.startsWith('https://')
-    ? new URL(path, API_BASE)
-    : new URL(path, window.location.href)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  return url.toString()
-}
-
 async function readError(response: Response) {
   const text = await response.text()
   if (!text) return `${response.status} ${response.statusText}`
@@ -142,6 +134,7 @@ export const api = {
     request<CocModuleClue>(`/coc-modules/${moduleId}/clues/${clueId}/content`, { method: 'PUT', body: body({ content }) }),
   unlockCocModule: (id: number) => request<void>(`/coc-modules/${id}/unlock`, { method: 'POST' }),
 
+  careMessages: (worldId: number, after?: number, signal?: AbortSignal) => request<CareMessagePage>(`/history/care?${new URLSearchParams({ userworldid: String(worldId), ...(after != null ? { after: String(after) } : {}) })}`, { signal }),
   history: (worldId: number, characterId: number, size = 30, beforeId?: number) => request<ChatHistory[]>(`/history?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId), size: String(size), ...(beforeId ? { id: String(beforeId) } : {}) })}`),
   withdrawMessage: (worldId: number, characterId: number) => request<void>(`/history/withdraw?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId) })}`, { method: 'POST' }),
 
@@ -262,13 +255,6 @@ async function readEventStream<E>(response: Response, onMessage: (message: E) =>
   }
 }
 
-export function createNotificationSocket(userWorldId: number) {
-  const sid = crypto.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  const url = new URL(wsEndpoint(`/ws/${encodeURIComponent(sid)}`))
-  url.searchParams.set('userWorldId', String(userWorldId))
-  const current = token(); if (current) url.searchParams.set('token', current)
-  return new WebSocket(url.toString())
-}
 
 export async function uploadImage(file: File) {
   if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/x-ms-bmp'].includes(file.type)) throw new Error('仅支持 JPG、PNG、GIF、WEBP、BMP 图片')

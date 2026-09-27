@@ -13,6 +13,7 @@ import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
+import com.me.galchat.domain.vo.CareMessagePage;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterFavorLogMapper;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
@@ -61,6 +62,30 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
     private final SingleChatLockService singleChatLockService;
     private final SingleChatGenerationRegistry singleChatGenerations;
     private final StringRedisTemplate redisTemplate;
+
+    @Override
+    public CareMessagePage listCareMessages(Long userWorldId, Long after) {
+        if (userWorldId == null || (after != null && after < 0)) {
+            throw new UserRequestException("用户世界和消息游标不合法");
+        }
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, true);
+        // Proactive messages are standalone assistant messages, not replies to a user turn.
+        var query = new LambdaQueryWrapper<UserChatHistory>()
+                .eq(UserChatHistory::getUserWorldId, userWorldId)
+                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                .isNull(UserChatHistory::getUserMessageId);
+        if (after == null) {
+            var latest = baseMapper.selectList(query.select(UserChatHistory::getId)
+                    .orderByDesc(UserChatHistory::getId).last("limit 1"));
+            return new CareMessagePage(List.of(), latest.isEmpty() ? 0 : latest.getFirst().getId(), false);
+        }
+        var rows = baseMapper.selectList(query.gt(UserChatHistory::getId, after)
+                .orderByAsc(UserChatHistory::getId).last("limit 101"));
+        boolean hasMore = rows.size() > 100;
+        var messages = List.copyOf(rows.subList(0, Math.min(100, rows.size())));
+        long cursor = messages.isEmpty() ? after : messages.getLast().getId();
+        return new CareMessagePage(messages, cursor, hasMore);
+    }
 
     @Override
     public List<UserChatHistory> listHistory(Long userWorldId, Long characterId, Long id, Integer size) {

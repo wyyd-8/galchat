@@ -117,6 +117,10 @@ CREATE TABLE user_chat_history (
 CREATE INDEX idx_user_chat_history_conversation_id
     ON user_chat_history (user_world_id, character_id, id);
 
+CREATE INDEX idx_user_chat_history_care_cursor
+    ON user_chat_history (user_world_id, id)
+    WHERE type = 'assistant' AND user_message_id IS NULL;
+
 CREATE TABLE user_chat_thinking_history (
     id BIGSERIAL PRIMARY KEY,
     user_message_id BIGINT NOT NULL,

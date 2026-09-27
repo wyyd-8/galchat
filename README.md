@@ -177,7 +177,6 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 │   ├── tool/                   # 好感、KP、调查员等模型工具
 │   ├── domain/                 # PO / DTO / VO
 │   ├── mapper/                 # MyBatis Mapper
-│   ├── websocket/              # WebSocket 入口
 │   ├── consumer/               # 队列消费者
 │   ├── task/                   # 定时任务
 │   └── config/                 # Web、AI、Redis、向量库等配置
@@ -288,7 +287,7 @@ Windows：
 .\mvnw.cmd spring-boot:run
 ```
 
-默认 HTTP 地址为 `http://localhost:8080`，WebSocket 路径为 `/ws/{sid}`。Actuator 健康检查路径为 `/actuator/health`；当前鉴权拦截器未豁免该路径，需要携带 `token`。
+默认 HTTP 地址为 `http://localhost:8080`。Actuator 健康检查路径为 `/actuator/health`；当前鉴权拦截器未豁免该路径，需要携带 `token`。
 
 ### 4. 启动前端
 
@@ -298,7 +297,7 @@ npm ci
 npm run dev
 ```
 
-默认开发地址为 `http://localhost:5173`。`reka/vite.config.ts` 将 `/api` 请求转发到后端并移除 `/api` 前缀，将 `/ws` 转发到后端 WebSocket 服务。
+默认开发地址为 `http://localhost:5173`。`reka/vite.config.ts` 将 `/api` 请求转发到后端并移除 `/api` 前缀。
 
 登录后可导入或创建世界、添加角色并开始单聊或群聊；跑团需要选择模组、配置参与者和角色卡，再开始行动轮。
 
@@ -364,11 +363,13 @@ python python/character_card_pdf.py
 | 掷骰 | `GET /dice-rolls/{id}`、`GET /dice-rolls/{id}/results`、`POST /dice-roll-results/{id}/roll` |
 | 跑团存档 | `GET/POST /trpg-saves/{conversationId}`、`POST /trpg-saves/{conversationId}/load` |
 | 跑团回滚 | `GET /trpg-saves/{conversationId}/rollback-status`；`POST` 同前缀下的 `/rollback-turn`、`/rollback-scene`、`/rollback-initial` |
-| 图片与实时连接 | `POST /upload`、WebSocket `/ws/{sid}` |
+| 图片上传与关怀查询 | `POST /upload`、`GET /history/care` |
 
 单聊的 `POST /ai/chat` 支持 `clientRequestId`。同一账号、世界、角色下重复提交相同标识时，尚在生成的请求续接原流；已经完成的请求只返回完成状态，不重复调用模型。SSE 事件带递增的 `sequence`，恢复接口的 `after` 只返回该序号之后的事件；`generation.user` 提供已保存的用户消息 ID，用于合并历史，`generation.completed` / `generation.failed` 表示终态。
 
-切换角色时，单聊消息及发送状态按会话隔离，原回复继续生成。断线后前端自动尝试续接，刷新页面后重新进入对应单聊也会恢复；恢复标识保存在当前浏览器标签页的 `sessionStorage`，退出账号时清除。仅生成中的请求保留回放缓存；生成、落库及归档全部结束后立即释放原流，前端重新读取数据库历史。后端仅短期保留不含消息内容的完成标识，用于防止重复提交，不保留原流。回放缓存位于后端实例内存，多实例部署需要将续接请求路由到原实例。服务重启或缓存过期后返回 `generation.expired`，前端重新加载持久化历史，不自动重发消息；未完成的回复可撤回后重发。撤回、移除角色及读取世界存档会清除对应的单聊回放缓存。所有单聊统一使用流式请求；WebSocket 仅用于推送已持久化的主动关怀消息。
+切换角色时，单聊消息及发送状态按会话隔离，原回复继续生成。断线后前端自动尝试续接，刷新页面后重新进入对应单聊也会恢复；恢复标识保存在当前浏览器标签页的 `sessionStorage`，退出账号时清除。仅生成中的请求保留回放缓存；生成、落库及归档全部结束后立即释放原流，前端重新读取数据库历史。后端仅短期保留不含消息内容的完成标识，用于防止重复提交，不保留原流。回放缓存位于后端实例内存，多实例部署需要将续接请求路由到原实例。服务重启或缓存过期后返回 `generation.expired`，前端重新加载持久化历史，不自动重发消息；未完成的回复可撤回后重发。撤回、移除角色及读取世界存档会清除对应的单聊回放缓存。所有单聊统一使用流式请求。
+
+主动关怀仍由后端定时生成并写入聊天历史。前端在北京时间 08:00、13:00、19:00、21:00 起各 40 分钟内，每分钟通过 `GET /history/care?userworldid=…&after=…` 查询当前世界的新关怀消息。应用隐藏时暂停；进入世界或恢复前台时立即补查。接口只读取独立的助手消息，按 ID 升序分页，每页最多 100 条；前端按账号和世界保存游标，成功处理后才推进，失败时保留进度。首次查询不传 `after`，仅建立最新消息基线，避免重复提醒全部历史消息。仅在世界启用主动消息时轮询；聊天 SSE 不受影响。
 
 单聊、群聊与跑团通过公共 `GenerationStreams` 管理生成生命周期，各自保留业务事件适配。群聊恢复接口也支持 `after`；使用新增的 `eventSequence` 作为流事件游标，原有 `sequence` 仍表示消息排序。前端共用 SSE 解析及 `followGeneration` 连接逻辑，遇到断线或非正常 EOF 时最多续接两次（间隔 500ms、1s），只恢复原请求，不重新 POST。页面内续接按游标补发，刷新后从头回放当前生成并合并历史。群聊切换会话、退出账号和组件卸载会取消本地订阅，服务端生成继续执行。跨设备按会话发现当前流尚未接入，恢复入口仍依赖本地请求标识。
 
@@ -400,4 +401,4 @@ npm run type-check
 npm run build
 ```
 
-`npm run build` 已包含类型检查；前端测试直接使用 Node 的测试运行器执行 TypeScript 文件，需要使用支持直接运行 TypeScript 的 Node 版本。`npm run preview` 可预览构建产物；部署时需配置 `/api`、`/ws` 后端路由，并支持 WebSocket 和 SSE 长连接。
+`npm run build` 已包含类型检查；前端测试直接使用 Node 的测试运行器执行 TypeScript 文件，需要使用支持直接运行 TypeScript 的 Node 版本。`npm run preview` 可预览构建产物；部署时需配置 `/api` 后端路由，并支持 SSE 长连接。

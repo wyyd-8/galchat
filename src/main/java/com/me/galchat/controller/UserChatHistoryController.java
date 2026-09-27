@@ -28,6 +28,12 @@ public class UserChatHistoryController {
 
     private final IUserChatHistoryService userChatHistoryService;
 
+    @GetMapping("/care")
+    public Result listCareMessages(@RequestParam("userworldid") Long userWorldId,
+                                   @RequestParam(value = "after", required = false) Long after) {
+        return Result.success(userChatHistoryService.listCareMessages(userWorldId, after));
+    }
+
     @GetMapping
     public Result listHistory(@RequestParam("userworldid") Long userWorldId,
                               @RequestParam("characterid") Long characterId,

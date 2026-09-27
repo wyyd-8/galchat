@@ -18,10 +18,78 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.ArrayList;
 import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class UserChatHistoryServiceImplTest {
+
+    private UserChatHistoryServiceImpl careService(IUserWorldPrefixService worlds, UserChatHistoryMapper mapper) {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserChatHistory.class);
+        var service = new UserChatHistoryServiceImpl(worlds, null, null, null, null, null, null, null, null);
+        ReflectionTestUtils.setField(service, "baseMapper", mapper);
+        return service;
+    }
+
+    @Test
+    void careFeedAuthorizesWorldBeforeReadingAnyMessages() {
+        var worlds = mock(IUserWorldPrefixService.class);
+        var mapper = mock(UserChatHistoryMapper.class);
+        when(worlds.checkUserWorldAuth(3L, true)).thenThrow(new com.me.galchat.exception.UserAuthException("forbidden"));
+        var service = careService(worlds, mapper);
+
+        assertThatThrownBy(() -> service.listCareMessages(3L, 0L))
+                .isInstanceOf(com.me.galchat.exception.UserAuthException.class);
+        verifyNoInteractions(mapper);
+    }
+
+    @Test
+    void firstCareCheckCreatesBaselineWithoutReplayingOldNotifications() {
+        var worlds = mock(IUserWorldPrefixService.class);
+        var mapper = mock(UserChatHistoryMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of(new UserChatHistory().setId(99L)));
+
+        var page = careService(worlds, mapper).listCareMessages(3L, null);
+
+        assertThat(page.messages()).isEmpty();
+        assertThat(page.nextCursor()).isEqualTo(99);
+        assertThat(page.hasMore()).isFalse();
+        verify(worlds).checkUserWorldAuth(3L, true);
+    }
+
+    @Test
+    void careFeedPagesOnlyStandaloneAssistantMessagesInTheRequestedWorld() {
+        var mapper = mock(UserChatHistoryMapper.class);
+        when(mapper.selectList(any())).thenAnswer(invocation -> {
+            var query = (com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<UserChatHistory>) invocation.getArgument(0);
+            assertThat(query.getSqlSegment()).contains("user_world_id =", "type =", "user_message_id IS NULL", "id >", "ORDER BY id ASC", "limit 101");
+            assertThat(query.getParamNameValuePairs().values()).contains(3L, "assistant", 50L);
+            return java.util.stream.LongStream.rangeClosed(51, 151)
+                    .mapToObj(id -> new UserChatHistory().setId(id)).toList();
+        });
+
+        var page = careService(mock(IUserWorldPrefixService.class), mapper).listCareMessages(3L, 50L);
+
+        assertThat(page.messages()).hasSize(100);
+        assertThat(page.messages().getFirst().getId()).isEqualTo(51);
+        assertThat(page.nextCursor()).isEqualTo(150);
+        assertThat(page.hasMore()).isTrue();
+    }
+
+    @Test
+    void emptyCarePageKeepsCursorAndRejectsNegativeCursors() {
+        var mapper = mock(UserChatHistoryMapper.class);
+        var service = careService(mock(IUserWorldPrefixService.class), mapper);
+        when(mapper.selectList(any())).thenReturn(List.of());
+
+        var page = service.listCareMessages(3L, 50L);
+
+        assertThat(page.messages()).isEmpty();
+        assertThat(page.nextCursor()).isEqualTo(50);
+        assertThat(page.hasMore()).isFalse();
+        assertThatThrownBy(() -> service.listCareMessages(3L, -1L))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class);
+    }
 
     @Test
     void historyIncludesReasoningToolsRepliesAndProactiveMessagesWithoutAModeSetting() {

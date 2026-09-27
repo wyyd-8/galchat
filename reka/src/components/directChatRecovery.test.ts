@@ -379,25 +379,20 @@ test('completed direct replies preserve older pages and their exhausted cursor w
 })
 
 
-test('streams every send while notification sockets only receive persisted care messages', async () => {
-  class NotificationSocket extends EventTarget {
-    static OPEN = 1
-    static instances: NotificationSocket[] = []
-    readyState = 0
-    constructor(_url: string) {
-      super(); NotificationSocket.instances.push(this)
-      queueMicrotask(() => { this.readyState = 1; this.dispatchEvent(new Event('open')) })
-    }
-    send() { assert.fail('notification sockets must never send chat or typing payloads') }
-    close() { this.readyState = 3; this.dispatchEvent(new Event('close')) }
-    receive(item: ChatHistory) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(item) })) }
-  }
-  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window, WebSocket: globalThis.WebSocket }
+test('polls on world entry and preserves care messages received during a streamed reply', async () => {
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window, document: globalThis.document }
+  const page = new EventTarget() as EventTarget & { visibilityState: string }
+  page.visibilityState = 'visible'
   const requests: Array<{ url: string; body: Record<string, unknown> }> = []
+  const careQueries: string[] = []
+  let carePage = { messages: [] as ChatHistory[], nextCursor: 0, hasMore: false }
   let controller!: ReadableStreamDefaultController
-  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), WebSocket: NotificationSocket,
-    window: { setTimeout, clearTimeout, location: { href: 'http://localhost/' } },
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), document: page,
+    window: { setTimeout, clearTimeout },
     fetch: async (url: string, init: RequestInit) => {
+      if (String(url).includes('/history/care')) {
+        careQueries.push(String(url)); return Response.json({ code: 1, data: carePage })
+      }
       requests.push({ url: String(url), body: JSON.parse(String(init.body)) })
       return new Response(new ReadableStream({ start(c) { controller = c } }))
     },
@@ -407,28 +402,38 @@ test('streams every send while notification sockets only receive persisted care 
   const old = { history: api.history, modelApis: api.modelApis }
   api.history = async () => []; api.modelApis = async () => []
   try {
-    await chat.selectCharacter(7); await settle()
-    assert.equal(NotificationSocket.instances.length, 1)
-    const socket = NotificationSocket.instances[0]!
-    chat.input.value = '第一行\n第二行'; await settle()
+    await settle(); assert.equal(careQueries.length, 1, 'entering a world checks without opening a character')
+    await chat.selectCharacter(7)
+    chat.input.value = '第一行\n第二行'
     const sending = chat.send(); await settle()
     assert.equal(requests.length, 1)
     assert.equal(requests[0]!.url, '/api/ai/chat')
     assert.equal(requests[0]!.body.message, '第一行\n第二行')
     assert.ok(requests[0]!.body.clientRequestId)
     const care: ChatHistory = { id: 30, userWorldId: 3, characterId: 7, type: 'assistant', content: '记得休息\n早点睡' }
-    socket.receive(care); socket.receive(care)
+    carePage = { messages: [care], nextCursor: 30, hasMore: false }
+    page.dispatchEvent(new Event('visibilitychange')); await settle()
+    page.dispatchEvent(new Event('visibilitychange')); await settle()
+    assert.match(careQueries.at(-1)!, /after=30/)
     event(controller, 'generation.user', '20', 1)
     event(controller, 'response', '角色的回答', 2); await settle()
     assert.equal(chat.messages.value.filter(message => message.historyId === 30).length, 1)
     assert.equal(chat.messages.value.at(-1)!.content, care.content)
-    api.history = async () => [
+    const savedHistory = [
       { id: 20, type: 'user', content: '第一行\n第二行' },
       { id: 21, userMessageId: 20, type: 'assistant', content: '角色的回答' }, care,
     ]
-    event(controller, 'generation.completed', '', 3); controller.close(); await sending
-    assert.deepEqual(chat.messages.value.map(message => message.content), ['第一行\n第二行', '角色的回答', care.content])
+    let finishHistory!: (items: ChatHistory[]) => void
+    api.history = () => new Promise(resolve => { finishHistory = resolve })
+    event(controller, 'generation.completed', '', 3); controller.close(); await settle()
+    const laterCare = { ...care, id: 40, content: '还有一条提醒' }
+    carePage = { messages: [laterCare], nextCursor: 40, hasMore: false }
+    page.dispatchEvent(new Event('visibilitychange')); await settle()
+    finishHistory(savedHistory); await sending
+    assert.deepEqual(chat.messages.value.map(message => message.content), ['第一行\n第二行', '角色的回答', care.content, laterCare.content], 'a history request must not erase care arriving after its snapshot')
     chat.close()
-    assert.equal(socket.readyState, 3)
+    carePage = { messages: [], nextCursor: 40, hasMore: false }
+    page.dispatchEvent(new Event('visibilitychange')); await settle()
+    assert.equal(careQueries.length, 5, 'leaving the character does not disable world notifications')
   } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
 })

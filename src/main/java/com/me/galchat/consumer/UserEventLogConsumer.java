@@ -11,7 +11,6 @@ import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserEventLogService;
 import com.me.galchat.service.IUserWorldPrefixService;
-import com.me.galchat.websocket.WebSocketServer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
@@ -42,7 +41,6 @@ import java.util.concurrent.TimeUnit;
 public class UserEventLogConsumer {
 
     private final RedissonClient redissonClient;
-    private final WebSocketServer webSocketServer;
     private final IUserEventLogService userEventLogService;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final UserChatHistoryMapper userChatHistoryMapper;
@@ -196,13 +194,6 @@ public class UserEventLogConsumer {
         userChatHistoryMapper.insert(message);
         topicBoundaryService.startAssistantMessageTopic(message);
         updateLastChatInfo(message);
-
-        try {
-            webSocketServer.sendMessageToSession(message);
-        } catch (Exception e) {
-            log.warn("推送用户事件关怀消息失败, userWorldId:{}, characterId:{}, messageId:{}",
-                    message.getUserWorldId(), message.getCharacterId(), message.getId(), e);
-        }
     }
 
     private boolean isRecentlyChatted(LocalDateTime lastChatTime, LocalDateTime now) {

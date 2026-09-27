@@ -212,6 +212,33 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
         redisTemplate.delete(buildEmailVerifyCodeKey(email, verificationCode));
     }
 
+    @Override
+    public void sendPasswordResetEmailVerificationCode(String email) {
+        UserInfo userInfo = getPasswordResetUser(email);
+        sendPasswordEmailVerificationCode(Math.toIntExact(userInfo.getId()), userInfo.getEmail());
+    }
+
+    @Override
+    public void resetPassword(UserPasswordDTO userPasswordDTO) {
+        if (userPasswordDTO == null) {
+            throw new UserRequestException("请求参数不能为空");
+        }
+        UserInfo userInfo = getPasswordResetUser(userPasswordDTO.getEmail());
+        updatePassword(Math.toIntExact(userInfo.getId()), userPasswordDTO);
+    }
+
+    private UserInfo getPasswordResetUser(String email) {
+        String normalizedEmail = normalizeEmail(email);
+        if (!StringUtils.hasText(normalizedEmail)) {
+            throw new UserRequestException("邮箱不能为空");
+        }
+        UserInfo userInfo = getByEmail(normalizedEmail);
+        if (userInfo == null) {
+            throw new UserRequestException("该邮箱尚未注册");
+        }
+        return userInfo;
+    }
+
     private void checkEmailAndPassword(String email, String password) {
         if (!StringUtils.hasText(email) || !StringUtils.hasText(password)) {
             throw new UserRequestException("邮箱和密码不能为空");

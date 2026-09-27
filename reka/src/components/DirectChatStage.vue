@@ -191,7 +191,7 @@ function selectModel(event: Event) {
   <main class="chat-page direct-chat-page">
     <header class="chat-header">
       <div v-if="!isMobile" class="direct-chat-heading"><button class="icon-button bordered" aria-label="返回世界" @click="emit('back')"><ArrowLeft :size="17" /></button><span class="message-avatar large" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</span><span><small>与角色单独对话</small><h1>{{ character.characterName }}</h1></span></div>
-      <div v-if="!isMobile" class="chat-header-actions"><span class="live-status active"><i />{{ world.thinkStatus === false ? (world.eotDetectionStatus ? '自动识别输入结束' : '连续消息模式') : '逐步显示思考与回复' }}</span></div>
+      <div v-if="!isMobile" class="chat-header-actions"><span class="live-status active"><i />{{ world.thinkStatus === false ? (world.eotDetectionStatus ? '智能判断是否说完' : '连续消息模式') : '逐字显示思考和回复' }}</span></div>
       <template v-if="isMobile"><button class="icon-button" aria-label="返回世界" @click="emit('back')"><ArrowLeft :size="23" /></button><button class="mobile-chat-title" @click="profileOpen = true"><strong>{{ character.characterName }}</strong><small>{{ world.name }} · 单聊</small></button><button class="icon-button" aria-label="角色详情" @click="profileOpen = true"><MoreHorizontal :size="22" /></button></template>
     </header>
     <div class="direct-chat-layout">

@@ -1,73 +1,177 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
+import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'reka-ui'
 import { useMobileViewport } from '@/composables/useMobileViewport'
-import BaseDialog from '@/components/ui/BaseDialog.vue'
-import { ArrowUpRight, ChevronRight, ArrowRight, BookOpen, Import, Plus, Sparkles } from '@lucide/vue'
+import { ArrowUpRight, ChevronRight, BookOpen, Import, Plus } from '@lucide/vue'
 import type { UserWorld, WorldTemplate } from '@/api/types'
 
 defineProps<{ worlds: UserWorld[]; templates: WorldTemplate[]; loading: boolean }>()
 const emit = defineEmits<{ select: [id: number]; previewTemplate: [id: number]; createWorld: []; createTemplate: []; importWorld: [file: File] }>()
 const { isMobile } = useMobileViewport()
-const menuOpen = ref(false)
-function menuAction(action: 'createWorld' | 'createTemplate') { menuOpen.value = false; if (action === 'createWorld') emit('createWorld'); else emit('createTemplate') }
-function pick(event: Event) { const file = (event.target as HTMLInputElement).files?.[0]; if (file) { menuOpen.value = false; emit('importWorld', file); (event.target as HTMLInputElement).value = '' } }
+const selectedTab = ref('worlds')
+const templatesTab = ref<InstanceType<typeof TabsTrigger>>()
+const importInput = ref<HTMLInputElement>()
+async function showTemplates() {
+  selectedTab.value = 'templates'
+  await nextTick()
+  templatesTab.value?.$el.focus()
+}
+function pick(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) {
+    emit('importWorld', file)
+    input.value = ''
+  }
+}
 </script>
 
 <template>
-  <main v-if="isMobile" class="mobile-v1-library">
-    <header class="mobile-v1-top"><span class="brand-glyph">✦</span><div><strong>GalChat</strong><small>群像叙事</small></div><button class="icon-button" aria-label="世界操作" @click="menuOpen = true"><Plus :size="20" /></button></header>
-    <div class="mobile-v1-content">
-      <div class="mobile-v1-intro"><span class="eyebrow">YOUR STORIES, STILL UNFOLDING</span><h1>故事，继续。</h1><p>回到熟悉的世界，和角色再次相遇。</p></div>
-      <p v-if="loading" class="mobile-v1-notice" role="status">正在载入你的世界…</p>
-      <template v-else>
-        <button v-if="worlds[0]" class="mobile-world-hero" :style="worlds[0].image ? { backgroundImage: `linear-gradient(135deg, #284b44aa, #142d2be8), url(${worlds[0].image})` } : {}" @click="emit('select', worlds[0].id)"><span class="mobile-cover-ornament" aria-hidden="true">◈</span><span class="eyebrow">我的世界 · {{ worlds[0].myWorld === true ? '自有模板' : worlds[0].myWorld === false ? '他人模板' : '世界' }}</span><h2>{{ worlds[0].name }}</h2><span class="mobile-cover-cta">进入世界 <ArrowUpRight :size="20" /></span></button>
-        <div class="mobile-v1-section"><h2>我的世界</h2><button class="mobile-v1-link" @click="emit('createWorld')">创建世界 ＋</button></div>
-        <button v-for="world in worlds.slice(1)" :key="world.id" class="mobile-v1-row" @click="emit('select', world.id)"><span class="mobile-v1-avatar" :style="world.image ? { backgroundImage: `url(${world.image})` } : {}">{{ world.image ? '' : world.name.slice(0, 1) }}</span><span><strong>{{ world.name }}</strong><small>{{ world.myWorld === true ? '自有模板' : world.myWorld === false ? '他人模板' : '世界' }}</small></span><ChevronRight :size="16" /></button>
-        <p v-if="!worlds.length" class="mobile-v1-notice">还没有自己的世界。从一个模板开始，或创建全新的设定。</p>
-      </template>
-      <div class="mobile-v1-section"><h2>世界模板</h2><button class="mobile-v1-link" @click="emit('createTemplate')">创建模板 ＋</button></div>
-      <div class="mobile-template-grid"><button v-for="(template, index) in templates" :key="template.id" class="mobile-template-tile" :class="{ sand: index % 2 }" :style="template.image ? { backgroundImage: `linear-gradient(180deg, #142d2b22, #142d2bc0), url(${template.image})`, color: '#fffefa' } : {}" :disabled="!template.id" @click="template.id && emit('previewTemplate', template.id)"><small>{{ String(index + 1).padStart(2, '0') }} / WORLD</small><strong>{{ template.name }}</strong></button></div>
-    </div>
-    <BaseDialog v-model="menuOpen" title="世界操作" content-class="mobile-v1-menu"><button class="mobile-v1-row" @click="menuAction('createWorld')"><Plus :size="20" /><span><strong>创建世界</strong><small>从模板开始新的故事</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" @click="menuAction('createTemplate')"><BookOpen :size="20" /><span><strong>创建世界模板</strong><small>维护背景、设定和角色</small></span><ChevronRight :size="16" /></button><label class="mobile-v1-row file-button"><Import :size="20" /><span><strong>导入世界模板</strong><small>选择已有的 JSON 文件</small></span><input type="file" accept="application/json,.json" @change="pick" /></label></BaseDialog>
-  </main>
-  <main v-else class="library-page">
-    <header class="library-hero">
-      <div class="library-hero-copy">
-        <span class="eyebrow"><Sparkles :size="14" /> GALCHAT WORKSPACE</span>
-        <h1><span class="hero-title-line">让角色身处同一个世界，</span><span class="hero-title-line">让每次回应自然发生。</span></h1>
-        <p>创建世界，连接角色，开始属于你的故事。</p>
-      </div>
-      <div class="hero-actions"><button class="button primary" @click="emit('createWorld')"><Plus :size="17" />创建世界</button><label class="button secondary file-button"><Import :size="17" />导入世界模板<input type="file" accept="application/json" @change="pick" /></label></div>
+  <main class="world-library">
+    <header v-if="isMobile" class="library-mobile-header">
+      <div class="library-brand"><span class="brand-glyph">✦</span><strong>GalChat</strong></div>
+      <button class="icon-button" aria-label="创建世界：选择世界模板" @click="showTemplates"><Plus :size="22" /></button>
     </header>
-    <section class="content-section">
-      <div class="section-title"><div><h2>继续你的世界</h2></div><span class="count-label">{{ worlds.length }} 个世界</span></div>
-      <div v-if="worlds.length" class="world-grid">
-        <button v-for="world in worlds" :key="world.id" class="world-card" @click="emit('select', world.id)">
-          <span class="world-cover" :style="world.image ? { backgroundImage: `linear-gradient(180deg, transparent 40%, rgba(15,18,22,.72)), url(${world.image})` } : {}"><BookOpen v-if="!world.image" :size="30" /></span>
-          <span class="world-card-copy"><small>{{ world.myWorld === true ? '自有模板' : world.myWorld === false ? '他人模板' : '世界' }}</small><strong>{{ world.name }}</strong><span>进入世界 <ArrowRight :size="15" /></span></span>
-        </button>
-      </div>
-      <div v-else class="empty-panel"><BookOpen :size="28" /><h3>还没有自己的世界</h3><p>从公开模板开始，或创建一套全新的设定。</p></div>
-    </section>
-    <section class="content-section muted-section">
-      <div class="section-title"><div><h2>世界模板</h2></div><button class="button ghost" @click="emit('createTemplate')"><Plus :size="16" />创建模板</button></div>
-      <div class="template-strip"><button v-for="template in templates.slice(0, 6)" :key="template.id" class="template-card" :disabled="!template.id" @click="template.id && emit('previewTemplate', template.id)"><div class="template-cover" :style="template.image ? { backgroundImage: `url(${template.image})` } : {}" /><small>查看世界模板</small><h3>{{ template.name }}</h3><p>查看作者与世界背景</p></button></div>
-    </section>
+    <div class="library-body">
+      <header class="library-welcome">
+        <div><span v-if="!isMobile" class="eyebrow">GALCHAT · YOUR STORIES</span><h1>故事，继续。</h1><p>回到熟悉的世界，或开启新的故事。</p></div>
+        <div v-if="!isMobile" class="library-welcome-actions">
+          <button class="button primary" @click="showTemplates"><Plus :size="17" />创建世界</button>
+          <button class="button secondary" @click="importInput?.click()"><Import :size="17" />导入世界模板</button>
+        </div>
+      </header>
+      <input ref="importInput" class="library-file-input" type="file" accept="application/json,.json" aria-label="选择世界模板文件" @change="pick" />
+      <TabsRoot v-model="selectedTab" class="library-tabs">
+        <TabsList class="library-tab-list" aria-label="世界内容">
+          <TabsTrigger class="library-tab" value="worlds">已有世界 <span>{{ worlds.length }}</span></TabsTrigger>
+          <TabsTrigger ref="templatesTab" class="library-tab" value="templates">世界模板 <span>{{ templates.length }}</span></TabsTrigger>
+        </TabsList>
+        <TabsContent value="worlds" class="library-panel">
+          <div class="library-panel-heading"><p>继续你的世界</p></div>
+          <p v-if="loading" class="library-notice" role="status">正在载入你的世界…</p>
+          <template v-else>
+            <div v-if="!worlds.length" class="library-empty"><BookOpen :size="28" /><h2>还没有自己的世界</h2><p>从一个世界模板开始新的故事。</p></div>
+            <div class="library-world-grid">
+              <button v-for="world in worlds" :key="world.id" class="library-world-card" @click="emit('select', world.id)">
+                <span class="library-world-cover" :style="world.image ? { backgroundImage: `url(${world.image})` } : {}"><BookOpen v-if="!world.image" :size="26" /></span>
+                <span class="library-world-copy"><strong>{{ world.name }}</strong><span>进入世界 <ArrowUpRight v-if="!isMobile" :size="16" /></span></span>
+                <ChevronRight v-if="isMobile" class="library-world-chevron" :size="17" />
+              </button>
+              <button class="library-new-world" @click="showTemplates"><Plus :size="20" /><span>{{ isMobile ? '从模板开启新世界' : '开启新的世界' }}</span><small v-if="!isMobile">去世界模板挑选</small></button>
+            </div>
+          </template>
+        </TabsContent>
+        <TabsContent value="templates" class="library-panel">
+          <div class="library-panel-heading">
+            <p>{{ isMobile ? '挑选新的故事' : '从一个模板，开始新的故事' }}</p>
+            <div class="library-template-actions">
+              <button aria-label="创建世界模板" @click="emit('createTemplate')"><Plus :size="16" />{{ isMobile ? '创建' : '创建模板' }}</button>
+              <button aria-label="导入世界模板" @click="importInput?.click()"><Import :size="16" />{{ isMobile ? '导入' : '导入模板' }}</button>
+            </div>
+          </div>
+          <p v-if="loading" class="library-notice" role="status">正在载入世界模板…</p>
+          <div v-else-if="templates.length" class="library-template-grid">
+            <button v-for="(template, index) in templates" :key="template.id" class="library-template-card" :disabled="!template.id" @click="template.id && emit('previewTemplate', template.id)">
+              <span class="library-template-cover" :class="{ sand: index % 2, 'has-image': template.image }" :style="template.image ? { backgroundImage: `linear-gradient(180deg, transparent, #142d2b99), url(${template.image})` } : {}"><span>{{ template.name }}</span></span>
+              <span class="library-template-copy"><strong>{{ template.name }}</strong><span>查看背景与角色 <ArrowUpRight :size="16" /></span></span>
+            </button>
+          </div>
+          <div v-else class="library-empty"><BookOpen :size="28" /><h2>暂无世界模板</h2><p>创建一套新设定，或导入已有的模板文件。</p><button class="button secondary" @click="emit('createWorld')">创建世界</button></div>
+        </TabsContent>
+      </TabsRoot>
+    </div>
   </main>
 </template>
 
 <style scoped>
+.world-library { max-width: 1440px; margin: 0 auto; padding: 42px clamp(28px, 5vw, 72px) 64px; }
+.library-welcome { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 30px; }
+.library-welcome h1 { margin: 9px 0; font-family: var(--font-display); font-size: 32px; font-weight: 600; letter-spacing: -.5px; }
+.library-welcome p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.library-welcome-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex-shrink: 0; }
+.library-tab-list { display: flex; gap: 28px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
+.library-tab { min-height: 48px; padding: 10px 2px 14px; border: 0; border-bottom: 3px solid transparent; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: transparent; color: var(--muted); font-size: 16px; cursor: pointer; }
+.library-tab[data-state="active"] { color: var(--pine); border-bottom-color: var(--pine); font-weight: 600; }
+.library-tab > span { min-width: 22px; padding: 2px 6px; border-radius: 5px; background: var(--surface); font-size: 11px; font-weight: 400; }
+.library-tab[data-state="active"] > span { background: var(--pine-soft); }
+.library-panel-heading { min-height: 44px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+.library-panel-heading p { margin: 0; color: var(--muted); font-size: 12px; }
+.library-template-actions { display: flex; align-items: center; gap: 18px; }
+.library-template-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--pine); font-size: 12px; cursor: pointer; }
+.library-file-input { display: none; }
+.library-world-grid, .library-template-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.library-world-card, .library-template-card { min-width: 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); text-align: left; cursor: pointer; transition: border-color 150ms ease, box-shadow 150ms ease; }
+.library-world-card:hover, .library-template-card:not(:disabled):hover { border-color: var(--line-strong); box-shadow: 0 8px 24px rgba(49,48,41,.08); }
+.library-world-cover { height: 145px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #e6e9df, #c7d4c7); background-size: cover; background-position: center; color: var(--pine); }
+.library-world-copy, .library-template-copy { display: block; padding: 16px; }
+.library-world-copy strong, .library-template-copy strong { display: block; font-size: 15px; font-weight: 550; overflow-wrap: anywhere; }
+.library-world-copy > span, .library-template-copy > span { margin-top: 9px; display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--muted); font-size: 11px; }
+.library-world-copy svg, .library-template-copy svg { flex-shrink: 0; color: var(--pine); }
+.library-new-world { min-height: 225px; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: transparent; color: var(--pine); font-size: 13px; cursor: pointer; }
+.library-new-world:hover { background: var(--surface); }
+.library-new-world small { color: var(--muted); font-size: 11px; }
+.library-template-cover { min-height: 180px; padding: 20px; display: flex; align-items: flex-end; color: var(--pine); background: linear-gradient(135deg, #e6e9df, #c7d4c7); background-size: cover; background-position: center; }
+.library-template-cover.sand { color: #7b603d; background-color: #f1e5d4; background-image: linear-gradient(135deg, #f5ecdf, #ddceb4); }
+.library-template-cover.has-image { color: #fffefa; }
+.library-template-cover > span { font-size: 23px; font-weight: 550; letter-spacing: 1px; overflow-wrap: anywhere; }
+.library-empty { padding: 40px 16px; text-align: center; color: var(--muted); }
+.library-empty h2 { margin: 14px 0 8px; font-size: 17px; color: var(--ink); }
+.library-empty p, .library-notice { font-size: 13px; line-height: 1.8; color: var(--muted); }
+.library-empty .button { margin-top: 10px; }
+@media (min-width: 768px) {
+  .library-welcome { flex-wrap: wrap; padding: 24px 28px; border: 1px solid #344b43; border-radius: 14px; color: #f7f4ed; background: radial-gradient(circle at 80% 20%, rgba(191,137,66,.25), transparent 35%), linear-gradient(125deg, #223d39, #182c2a 60%, #302c26); }
+  .library-welcome .eyebrow { color: #c0cbc2; }
+  .library-welcome p { color: #cbd2c9; }
+  .library-welcome .button.primary { color: var(--pine); background: #f7f4ed; border-color: #f7f4ed; box-shadow: none; }
+  .library-welcome .button.primary:hover { background: #e8e8dd; border-color: #e8e8dd; }
+  .library-welcome .button.secondary { color: #f7f4ed; border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.08); }
+  .library-welcome .button.secondary:hover { background: rgba(255,255,255,.16); }
+  .library-welcome .button:focus-visible { outline-color: #f7f4ed; }
+  .library-world-grid, .library-template-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+  .library-world-cover { height: 105px; }
+  .library-world-copy, .library-template-copy { padding: 12px; }
+  .library-world-copy > span, .library-template-copy > span { margin-top: 7px; }
+  .library-new-world { min-height: 178px; gap: 8px; }
+  .library-template-cover { min-height: 120px; padding: 14px; }
+  .library-template-cover > span { font-size: 20px; }
+}
 @media (max-width: 767px) {
-  .mobile-v1-top .brand-glyph { width: 38px; height: 38px; border-radius: 11px; margin: 0 9px; font-size: 22px; }
-  .mobile-world-hero { width: 100%; min-height: 218px; position: relative; overflow: hidden; border: 0; border-radius: 17px; padding: 28px 24px; text-align: left; color: #faf5e7; background: radial-gradient(ellipse at 90% 0%,#7e805875,transparent 58%),linear-gradient(135deg,#284b44,#142d2b); background-size: cover; background-position: center; }
-  .mobile-world-hero .eyebrow { color: #c1d0c4; font-weight: 400; }
-  .mobile-world-hero h2 { position: relative; margin: 35px 0 6px; font-size: 30px; font-weight: 550; overflow-wrap: anywhere; }
-  .mobile-cover-ornament { position: absolute; right: 15px; top: 0; font: 180px Georgia; color: #b0bba118; transform: rotate(-20deg); line-height: 1; }
-  .mobile-cover-cta { display: flex; align-items: center; justify-content: space-between; margin-top: 17px; font-size: 12px; }
-  .mobile-template-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .mobile-template-tile { min-height: 122px; border: 0; border-radius: 12px; display: flex; flex-direction: column; justify-content: space-between; align-items: start; padding: 17px; text-align: left; color: #38574b; background: #dce3d8; background-size: cover; background-position: center; }
-  .mobile-template-tile.sand { background-color: #f1e5d4; color: #7b603d; }
-  .mobile-template-tile small { font: 10px var(--font-mono); letter-spacing: 1px; opacity: .65; }
-  .mobile-template-tile strong { font-size: 19px; font-weight: 550; overflow-wrap: anywhere; margin-top: 20px; }
+  .world-library { width: 100%; height: 100%; min-height: 0; padding: 0; display: flex; flex: 1; flex-direction: column; }
+  .library-mobile-header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: max(10px, env(safe-area-inset-top)) 18px 5px; }
+  .library-brand { display: flex; align-items: center; gap: 9px; }
+  .library-brand strong { font-size: 17px; font-weight: 600; }
+  .library-mobile-header .icon-button { width: 44px; height: 44px; color: var(--pine); }
+  .library-body { width: 100%; max-width: 640px; margin: 0 auto; flex: 1; min-height: 0; padding: 0 18px 24px; overflow-y: auto; overscroll-behavior: contain; }
+  .library-welcome { padding: 17px 2px 22px; margin: 0; }
+  .library-welcome h1 { font-size: 27px; margin: 0 0 7px; }
+  .library-welcome p { font-size: 12px; }
+  .library-tab-list { position: sticky; top: 0; z-index: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 0; border-radius: 12px; background: var(--pine-soft); margin-bottom: 12px; }
+  .library-tab { min-height: 44px; padding: 8px 4px; border: 0; border-radius: 9px; font-size: 14px; }
+  .library-tab[data-state="active"] { background: var(--surface-strong); box-shadow: 0 2px 6px rgba(40,61,41,.06); }
+  .library-tab > span, .library-tab[data-state="active"] > span { min-width: 0; padding: 0; background: transparent; }
+  .library-panel-heading { margin-bottom: 8px; }
+  .library-template-actions { gap: 14px; }
+  .library-world-grid { display: flex; flex-direction: column; gap: 0; }
+  .library-world-card { display: flex; align-items: center; gap: 13px; padding: 12px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+  .library-world-card:first-child { padding-top: 0; }
+  .library-world-card:hover { box-shadow: none; }
+  .library-world-cover { width: 55px; height: 55px; flex-shrink: 0; border-radius: 9px; }
+  .library-world-copy { min-width: 0; flex: 1; padding: 0; }
+  .library-world-copy > span { margin-top: 5px; }
+  .library-world-chevron { flex-shrink: 0; color: var(--muted); }
+  .library-new-world { min-height: 45px; flex-direction: row; gap: 8px; margin-top: 18px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .library-template-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .library-template-cover { min-height: 137px; padding: 15px; }
+  .library-template-cover > span { font-size: 21px; }
+  .library-template-copy { padding: 12px; }
+  .library-template-copy strong { font-size: 14px; }
+  .library-template-copy > span { gap: 3px; }
+}
+@media (max-width: 360px) {
+  .library-body { padding-inline: 14px; }
+  .library-template-actions { gap: 10px; }
+  .library-template-cover { padding: 12px; min-height: 120px; }
+  .library-template-cover > span { font-size: 19px; }
+  .library-template-copy { padding: 10px; }
 }
 </style>

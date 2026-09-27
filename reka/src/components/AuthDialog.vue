@@ -33,7 +33,7 @@ async function sendCode() {
 <template>
   <BaseDialog v-model="open" :title="title" :description="isMobile ? undefined : '世界、角色、单聊与群聊记录会保存在当前账号下。'" mobile-presentation="page" :content-class="mode === 'login' ? 'auth-dialog auth-login-dialog' : 'auth-dialog'" :mobile-back="() => mode === 'register' ? mode = 'login' : open = false" size="sm">
     <div v-if="isMobile && mode === 'login'" class="auth-hero"><span class="auth-brand">✦</span><span class="eyebrow">GALCHAT</span><h1>回到你的世界。</h1><p>角色、故事和每一次相遇，<br />都保存在你的账号里。</p></div>
-    <form class="form-stack auth-form" @submit.prevent="submit">
+    <form id="auth-form" class="form-stack auth-form" @submit.prevent="submit">
       <label class="field"><span>邮箱</span><input v-model.trim="form.email" type="email" autocomplete="email" :placeholder="mode === 'register' ? '8 位学号@bjtu.edu.cn' : '请输入账号邮箱'" /></label>
       <label class="field"><span>密码</span><input v-model="form.password" type="password" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" placeholder="请输入密码" /></label>
       <label v-if="mode === 'register'" class="field"><span>确认密码</span><input v-model="form.confirmPassword" type="password" autocomplete="new-password" /></label>
@@ -42,7 +42,7 @@ async function sendCode() {
     </form>
     <template v-if="!isMobile || mode === 'register'" #footer>
       <button class="button ghost" @click="mode = mode === 'login' ? 'register' : 'login'">{{ mode === 'login' ? '创建账号' : '已有账号' }}</button>
-      <button class="button primary" :disabled="busy" @click="submit">{{ busy ? '请稍候…' : mode === 'login' ? '进入 GalChat' : '完成注册' }}</button>
+      <button class="button primary" type="submit" form="auth-form" :disabled="busy">{{ busy ? '请稍候…' : mode === 'login' ? '进入 GalChat' : '完成注册' }}</button>
     </template>
   </BaseDialog>
 </template>

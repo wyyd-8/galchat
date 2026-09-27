@@ -67,8 +67,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setAcitvePushStatus(userWorldPrefix.getAcitvePushStatus())
                 .setDailyCompanionMode(Boolean.TRUE.equals(userWorldPrefix.getDailyCompanionMode()))
                 .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
-                .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus())
-                .setThinkStatus(userWorldPrefix.getThinkStatus())
                 .setAddSpecialPrompt(userWorldPrefix.getAddSpecialPrompt())
                 .setMyWorld(template.getAuthorId().equals(userId));
         save(newUserWorld);
@@ -110,8 +108,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
                 .setId(oldUserWorld.getId())
                 .setName(userWorldPrefix.getName())
                 .setAcitvePushStatus(userWorldPrefix.getAcitvePushStatus())
-                .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus())
-                .setEotDetectionStatus(userWorldPrefix.getEotDetectionStatus());
+                .setFavorSystemStatus(userWorldPrefix.getFavorSystemStatus());
         updateById(updateUserWorld);
     }
 
@@ -188,7 +185,6 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
         String worldFieldPrefix = userWorldId + ":";
         redisTemplate.opsForHash().delete(RedisConstant.WORLD_USER_AUTH_KEY, String.valueOf(userWorldId));
         deleteHashFieldsByPattern(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, worldFieldPrefix + "*");
-        deleteKeysByPattern(RedisConstant.CHAT_KEY_PREFIX + worldFieldPrefix + "*");
         deleteKeysByPattern(RedisConstant.USER_CHARACTER_PROMPT_INFO_KEY_PREFIX + worldFieldPrefix + "*");
         deleteKeysByPattern(RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + worldFieldPrefix + "*");
     }

@@ -198,12 +198,8 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     }
 
     private List<String> characterCacheKeys(Long userWorldId, Long characterId) {
-        String conversationKey = RedisConstant.CHAT_KEY_PREFIX + userWorldId + ":" + characterId;
         return List.of(
                 buildPromptInfoCacheKey(userWorldId, characterId),
-                conversationKey + RedisConstant.TYPING_SUFFIX,
-                conversationKey + RedisConstant.INPUT_SUFFIX,
-                conversationKey + RedisConstant.LAST_ASSISTANT_SUFFIX,
                 RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + userWorldId + ":" + characterId
         );
     }

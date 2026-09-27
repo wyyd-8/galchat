@@ -42,10 +42,6 @@ public class UserWorldPrefix implements Serializable {
 
     private String favorSystemStatus;
 
-    private Boolean eotDetectionStatus;
-
-    private Boolean thinkStatus;
-
     private Boolean addSpecialPrompt;
 
     private Boolean myWorld;

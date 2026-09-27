@@ -32,14 +32,6 @@ public class CommonConfiguration {
     }
 
     @Bean
-    public ChatClient singleChatNonThinkingClient(
-            DeepSeekChatModel model,
-            SingleChatClientFactory clientFactory) {
-        return clientFactory.create(ChatClient.builder(model)
-                .defaultOptions(DeepSeekChatOptions.builder().disableThinking()));
-    }
-
-    @Bean
     public ChatClient chatGroupChatClient(
             DeepSeekChatModel model,
             GroupChatClientFactory clientFactory) {

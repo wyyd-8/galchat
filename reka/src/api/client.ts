@@ -262,7 +262,7 @@ async function readEventStream<E>(response: Response, onMessage: (message: E) =>
   }
 }
 
-export function createChatSocket(userWorldId: number) {
+export function createNotificationSocket(userWorldId: number) {
   const sid = crypto.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2)}`
   const url = new URL(wsEndpoint(`/ws/${encodeURIComponent(sid)}`))
   url.searchParams.set('userWorldId', String(userWorldId))

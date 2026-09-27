@@ -17,8 +17,6 @@
                acitve_push_status,
                daily_companion_mode,
                favor_system_status,
-               eot_detection_status,
-               think_status,
                add_special_prompt,
                my_world
         FROM user_world_prefix

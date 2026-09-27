@@ -1,5 +1,5 @@
-import { computed, nextTick, onUnmounted, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
-import { api, createChatSocket, streamChat, resumeChat, currentSession } from '@/api/client'
+import { computed, nextTick, onUnmounted, reactive, ref, shallowRef, type ComputedRef, type Ref } from 'vue'
+import { api, createNotificationSocket, streamChat, resumeChat, currentSession } from '@/api/client'
 import type { Character, ChatFlux, ChatHistory, ChatMessagePayload, DirectMessage, ModelApi, UserWorld } from '@/api/types'
 import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/components/reasoningScroll'
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
@@ -14,11 +14,6 @@ interface DirectChatContext {
 }
 
 function formatTime(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '' }
-function splitContent(value: string) {
-  const parts = value.split(/\r?\n/).map((part) => part.trim()).filter(Boolean)
-  return parts.length ? parts : [value]
-}
-
 // The server pages primary messages, then expands their replies, reasoning and tools.
 function hasOlderHistory(history: ChatHistory[]) {
   return history.filter(item => item.type == null || item.type.toLowerCase() === 'user'
@@ -78,9 +73,6 @@ export function useDirectChat(context: DirectChatContext) {
   let socket: WebSocket | null = null
   let connecting: Promise<WebSocket> | null = null
   let socketWorldId: number | null = null
-  let lastTypingKey: string | null = null
-  let composing = false
-  let ignoreInputWatch = false
   let notificationAsked = false
 
   function roleOf(item: ChatHistory): DirectMessage['role'] {
@@ -89,7 +81,7 @@ export function useDirectChat(context: DirectChatContext) {
     if (item.type === 'ASSISTANT' || item.type === 'assistant') return 'assistant'
     return 'user'
   }
-  function historyMessages(history: ChatHistory[], split = false): DirectMessage[] {
+  function historyMessages(history: ChatHistory[]): DirectMessage[] {
     const result: DirectMessage[] = []
     let currentUserMessageId: number | undefined
     let currentThinking: { message: DirectMessage; reasoning: string; toolCount: number } | null = null
@@ -137,22 +129,21 @@ export function useDirectChat(context: DirectChatContext) {
       }
 
       currentThinking = null
-      const parts = split ? splitContent(content) : [content]
-      result.push(...parts.map((part, index) => ({
-        id: `history-${item.id || Date.now()}-${index}`,
+      result.push({
+        id: `history-${item.id || Date.now()}-0`,
         historyId: item.id,
         userMessageId: item.userMessageId ?? (role === 'user' ? item.id : undefined),
         role,
-        content: part,
+        content,
         time: formatTime(item.timestamp),
-      })))
+      })
     })
     return result
   }
   function payload(message = ''): ChatMessagePayload | null {
     const world = context.world.value; const character = selectedCharacter.value
     if (!world?.id || !world.worldId || !character) return null
-    return { type: 'chat', worldId: world.worldId, userWorldId: world.id, characterId: character.characterId, message }
+    return { worldId: world.worldId, userWorldId: world.id, characterId: character.characterId, message }
   }
   async function scrollToBottom(force = false) {
     await nextTick()
@@ -175,7 +166,7 @@ export function useDirectChat(context: DirectChatContext) {
         const id = message.userMessageId ?? message.historyId
         return message.complete !== false && id != null && id < boundary
       }) : []
-      state.messages = [...older, ...historyMessages(history, state.world?.thinkStatus === false), ...errors]
+      state.messages = [...older, ...historyMessages(history), ...errors]
       state.modelApis = models
       // Retained pages own the oldest cursor, including an already exhausted one.
       if (!older.length) state.hasOlder = hasOlder
@@ -194,7 +185,7 @@ export function useDirectChat(context: DirectChatContext) {
     active.value = state
     if (!state.loading.sending && !state.generation) await loadHistory(state)
     if (selection !== selectionRevision || !isActive(state) || disposed) return
-    if (world.thinkStatus === false) void ensureSocket(world.id).catch(() => undefined)
+    if (world.acitvePushStatus) void ensureSocket(world.id).catch(() => undefined)
     const requestId = state.generation?.requestId || pending(state)
     if (requestId && !state.loading.sending) void consumeGeneration(state, requestId)
     // Keep active/background conversations, bound completed conversation caches.
@@ -215,7 +206,7 @@ export function useDirectChat(context: DirectChatContext) {
     try {
       const history = await api.history(state.world.id, state.characterId, 30, beforeId)
       if (disposed || ownEpoch !== epoch || revision !== state.historyRevision) return
-      const older = historyMessages(history, state.world.thinkStatus === false)
+      const older = historyMessages(history)
       if (state.generation) state.generation.base = [...older, ...state.generation.base]
       state.messages = [...older, ...state.messages]; state.hasOlder = hasOlderHistory(history)
       const previousTop = viewport?.scrollTop ?? 0
@@ -252,7 +243,7 @@ export function useDirectChat(context: DirectChatContext) {
     selectionRevision++; selectedCharacterId.value = null; active.value = freshState(); closeSocket()
   }
   function closeSocket() {
-    connecting = null; socketWorldId = null; lastTypingKey = null
+    connecting = null; socketWorldId = null
     if (socket) { socket.close(); socket = null }
   }
   function notifyPush(item: ChatHistory) {
@@ -270,12 +261,15 @@ export function useDirectChat(context: DirectChatContext) {
   function handleSocketMessage(event: MessageEvent<string>) {
     let item: ChatHistory
     try { item = JSON.parse(event.data) as ChatHistory } catch { return }
-    if (typeof item.type !== 'string' || typeof item.content !== 'string') return
+    if (!item || typeof item.type !== 'string' || typeof item.content !== 'string' || item.id == null) return
     if (disposed || item.userWorldId !== socketWorldId || item.userWorldId !== context.world.value?.id) return
-    notifyPush(item)
     const state = states.get(stateKey(item.userWorldId!, item.characterId!))
+    if (state?.messages.some(message => message.historyId === item.id)) return
+    notifyPush(item)
     if (!state) return
-    state.messages.push(...historyMessages([item], true))
+    const pushed = historyMessages([item])
+    state.generation?.following.push(...pushed)
+    state.messages.push(...pushed)
     if (!isActive(state)) return
     void scrollToBottom()
     if (roleOf(item) === 'assistant') void context.reloadCharacters()
@@ -283,7 +277,7 @@ export function useDirectChat(context: DirectChatContext) {
   function ensureSocket(worldId: number) {
     if (socket?.readyState === WebSocket.OPEN && socketWorldId === worldId) return Promise.resolve(socket)
     if (connecting && socketWorldId === worldId) return connecting
-    closeSocket(); socket = createChatSocket(worldId); socketWorldId = worldId
+    closeSocket(); socket = createNotificationSocket(worldId); socketWorldId = worldId
     const current = socket
     connecting = new Promise<WebSocket>((resolve, reject) => {
       let settled = false
@@ -297,25 +291,6 @@ export function useDirectChat(context: DirectChatContext) {
     })
     return connecting
   }
-  async function sendTyping(isTyping: boolean) {
-    if (context.world.value?.thinkStatus !== false) return
-    const data = payload(); if (!data) return
-    const key = `${data.worldId}:${data.userWorldId}:${data.characterId}`
-    if (isTyping && lastTypingKey === key) return
-    if (!isTyping && lastTypingKey !== key) return
-    lastTypingKey = isTyping ? key : null
-    try {
-      const current = isTyping ? await ensureSocket(data.userWorldId) : socket
-      if (current?.readyState === WebSocket.OPEN) current.send(JSON.stringify({ ...data, type: 'typing', isTyping }))
-    } catch { if (isTyping) lastTypingKey = null }
-  }
-  function setComposing(value: boolean, currentInput: string) { composing = value; void sendTyping(composing || currentInput.length > 0) }
-  function focus() { if (composing || input.value.length > 0) void sendTyping(true) }
-  watch(input, (value) => {
-    if (ignoreInputWatch) { ignoreInputWatch = false; return }
-    void sendTyping(composing || value.length > 0)
-  })
-
   function applyChunk(state: State, generation: Generation, chunk: ChatFlux) {
     if (chunk.sequence != null) {
       if (chunk.sequence <= generation.sequence) return
@@ -328,8 +303,9 @@ export function useDirectChat(context: DirectChatContext) {
       const anchor = Number(chunk.content)
       if (Number.isSafeInteger(anchor) && anchor > 0) {
         const owner = (message: DirectMessage) => message.userMessageId ?? message.historyId ?? 0
-        generation.following = generation.base.filter(message => owner(message) > anchor)
-        generation.base = generation.base.filter(message => owner(message) < anchor)
+        const persisted = [...generation.base, ...generation.following]
+        generation.following = persisted.filter(message => owner(message) > anchor)
+        generation.base = persisted.filter(message => owner(message) < anchor)
         if (live[0]?.role === 'user') { live[0].historyId = anchor; live[0].userMessageId = anchor }
       }
     } else if (chunk.type === 'thinking' || chunk.type === 'tool') {
@@ -392,7 +368,7 @@ export function useDirectChat(context: DirectChatContext) {
       if (valid()) {
         if (payload && error instanceof GenerationStartRejected) {
           remember(state, null); state.generation = null
-          state.messages = generation.base
+          state.messages = [...generation.base, ...generation.following]
           if (isActive(state) && !input.value) input.value = payload.message
           notifyFor(state, '单聊消息发送失败', errorMessage(error))
         } else notifyFor(state, '单聊连接中断', `${errorMessage(error)}。重新进入此单聊可继续恢复。`)
@@ -411,25 +387,8 @@ export function useDirectChat(context: DirectChatContext) {
     if (!content || !data || state.loading.sending || state.loading.history || state.loading.withdrawing) return
     const requestId = state.generation?.requestId || pending(state)
     if (requestId) { await consumeGeneration(state, requestId); return }
-    ignoreInputWatch = true; input.value = ''
-    if (state.world?.thinkStatus !== false) {
-      await consumeGeneration(state, crypto.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2)}`, { ...data, message: content })
-      return
-    }
-    const ownEpoch = epoch
-    state.messages.push({ id: `user-${Date.now()}`, role: 'user', content, time: '刚刚' }); state.loading.sending = true
-    try {
-      const current = await ensureSocket(data.userWorldId)
-      if (disposed || ownEpoch !== epoch) return
-      current.send(JSON.stringify({ ...data, type: 'fragment', message: `${content}\n` }))
-      current.send(JSON.stringify({ ...data, type: 'typing', message: '', isTyping: false }))
-      lastTypingKey = null
-    } catch (error) {
-      if (ownEpoch === epoch && !disposed) {
-        state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: '发送失败，请稍后再试。', complete: false })
-        notifyFor(state, '单聊消息发送失败', errorMessage(error))
-      }
-    } finally { state.loading.sending = false; if (isActive(state)) await scrollToBottom() }
+    input.value = ''
+    await consumeGeneration(state, crypto.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2)}`, { ...data, message: content })
   }
   async function withdraw() {
     const state = active.value
@@ -461,5 +420,5 @@ export function useDirectChat(context: DirectChatContext) {
   }
 
   onUnmounted(() => { disposed = true; disposeConnections() })
-  return { selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, selectCharacter, selectModel, loadEarlier, close, clearDrafts, invalidateWorld, send, withdraw, focus, setComposing }
+  return { selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, selectCharacter, selectModel, loadEarlier, close, clearDrafts, invalidateWorld, send, withdraw }
 }

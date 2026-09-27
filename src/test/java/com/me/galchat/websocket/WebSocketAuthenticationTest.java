@@ -1,8 +1,10 @@
 package com.me.galchat.websocket;
 
 import com.me.galchat.domain.po.UserWorldPrefix;
-import com.me.galchat.domain.dto.ChatMessageDTO;
-import com.me.galchat.redis.ChatLuaScripts;
+import com.me.galchat.domain.po.UserChatHistory;
+import jakarta.websocket.RemoteEndpoint;
+import jakarta.websocket.SendHandler;
+import org.json.JSONObject;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.utils.JwtUtils;
 import jakarta.websocket.CloseReason;
@@ -10,62 +12,49 @@ import jakarta.websocket.EndpointConfig;
 import jakarta.websocket.Session;
 import jakarta.websocket.server.HandshakeRequest;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.NullSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
-import org.redisson.api.RDelayedQueue;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class WebSocketAuthenticationTest {
-    @ParameterizedTest
-    @NullSource
-    @ValueSource(longs = {3L, 999L})
-    void queuesOnlyTheAuthenticatedWorldWithoutAdditionalLookups(Long requestedWorldId) throws Exception {
+    @Test
+    void pushesPersistedMessagesOnlyToTheAuthenticatedWorldAndStopsAfterClose() throws Exception {
         JwtUtils jwt = new JwtUtils(Base64.getEncoder().encodeToString(new byte[32]));
         IUserWorldPrefixService worlds = mock(IUserWorldPrefixService.class);
-        UserWorldPrefix owned = new UserWorldPrefix().setId(10L).setUserId(7L)
-                .setWorldId(3L).setThinkStatus(false).setEotDetectionStatus(false);
-        when(worlds.checkUserWorldAuth(7L, 10L, true)).thenReturn(owned);
-        when(worlds.getById(10L)).thenReturn(owned);
-        StringRedisTemplate redis = mock(StringRedisTemplate.class);
-        ChatLuaScripts scripts = new ChatLuaScripts();
-        when(redis.execute(eq(scripts.updateTypingScript()), anyList(), eq("0"), anyString()))
-                .thenReturn("0:5:1");
-        WebSocketServer server = new WebSocketServer(worlds, jwt, redis, null, scripts, null);
-        @SuppressWarnings("unchecked")
-        RDelayedQueue<ChatMessageDTO> queue = mock(RDelayedQueue.class);
-        Object previousQueue = ReflectionTestUtils.getField(WebSocketServer.class, "delayedQueue");
-        ReflectionTestUtils.setField(WebSocketServer.class, "delayedQueue", queue);
+        when(worlds.checkUserWorldAuth(7L, 10L, true))
+                .thenReturn(new UserWorldPrefix().setId(10L).setUserId(7L));
+        WebSocketServer server = new WebSocketServer(worlds, jwt);
         Session session = session(jwt.generateToken(Map.of("id", 7)));
+        RemoteEndpoint.Async remote = mock(RemoteEndpoint.Async.class);
+        when(session.isOpen()).thenReturn(true);
+        when(session.getAsyncRemote()).thenReturn(remote);
+        server.onOpen(session, config());
         try {
-            server.onOpen(session, config());
-            String worldField = requestedWorldId == null ? "" : ",\"worldId\":" + requestedWorldId;
+            UserChatHistory message = new UserChatHistory().setId(42L).setUserWorldId(99L)
+                    .setCharacterId(2L).setType("assistant").setContent("记得休息");
+            server.sendMessageToSession(message);
+            verifyNoInteractions(remote);
 
-            server.onMessage("{\"type\":\"typing\",\"userWorldId\":888,\"characterId\":2,\"isTyping\":false"
-                    + worldField + "}", session);
+            message.setUserWorldId(10L);
+            server.sendMessageToSession(message);
+            ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+            verify(remote).sendText(payload.capture(), any(SendHandler.class));
+            JSONObject json = new JSONObject(payload.getValue());
+            assertEquals(42L, json.getLong("id"));
+            assertEquals(10L, json.getLong("userWorldId"));
+            assertEquals("记得休息", json.getString("content"));
 
-            ArgumentCaptor<ChatMessageDTO> task = ArgumentCaptor.forClass(ChatMessageDTO.class);
-            verify(queue).offer(task.capture(), anyLong(), eq(TimeUnit.MILLISECONDS));
-            assertEquals(3L, task.getValue().getWorldId());
-            assertEquals(10L, task.getValue().getUserWorldId());
-            assertEquals(2L, task.getValue().getCharacterId());
-            verify(worlds).checkUserWorldAuth(7L, 10L, true);
-            verify(worlds).getById(10L);
-            verifyNoMoreInteractions(worlds);
+            server.onClose(session);
+            server.sendMessageToSession(message);
+            verifyNoMoreInteractions(remote);
         } finally {
             server.onClose(session);
-            ReflectionTestUtils.setField(WebSocketServer.class, "delayedQueue", previousQueue);
         }
     }
 
@@ -75,7 +64,7 @@ class WebSocketAuthenticationTest {
         IUserWorldPrefixService worlds = mock(IUserWorldPrefixService.class);
         when(worlds.checkUserWorldAuth(7L, 10L, true))
                 .thenReturn(new UserWorldPrefix().setId(10L).setUserId(7L));
-        WebSocketServer server = new WebSocketServer(worlds, jwt, null, null, null, null);
+        WebSocketServer server = new WebSocketServer(worlds, jwt);
         Session session = session(jwt.generateToken(Map.of("id", 7)));
 
         server.onOpen(session, config());
@@ -92,7 +81,7 @@ class WebSocketAuthenticationTest {
         java.util.Arrays.fill(otherKey, (byte) 1);
         JwtUtils other = new JwtUtils(Base64.getEncoder().encodeToString(otherKey));
         IUserWorldPrefixService worlds = mock(IUserWorldPrefixService.class);
-        WebSocketServer server = new WebSocketServer(worlds, jwt, null, null, null, null);
+        WebSocketServer server = new WebSocketServer(worlds, jwt);
         Session session = session(other.generateToken(Map.of("id", 7)));
 
         server.onOpen(session, config());

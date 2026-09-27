@@ -696,7 +696,6 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
     private void evictRedisData(Long userWorldId, List<Long> deletedUserMessageIds, UserWorldSaveSnapshotDTO snapshot) {
         String worldFieldPrefix = userWorldId + ":";
         deleteHashFieldsByPattern(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, worldFieldPrefix + "*");
-        deleteKeysByPattern(RedisConstant.CHAT_KEY_PREFIX + worldFieldPrefix + "*");
         deleteKeysByPattern(RedisConstant.USER_CHARACTER_PROMPT_INFO_KEY_PREFIX + worldFieldPrefix + "*");
         deleteKeysByPattern(RedisConstant.TOPIC_BOUNDARY_KEY_PREFIX + worldFieldPrefix + "*");
 

@@ -23,8 +23,8 @@ class ChatServiceImplTest {
     private final IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
     private final IUserCharacterInfoService userCharacterInfoService = mock(IUserCharacterInfoService.class);
     private final TrpgRunMemoryService runMemoryService = mock(TrpgRunMemoryService.class);
-    private final ChatServiceImpl chatService = new ChatServiceImpl(null, null, null, null, null, userWorldPrefixService,
-            userCharacterInfoService, null, null, null, runMemoryService);
+    private final ChatServiceImpl chatService = new ChatServiceImpl(null, null, null, null, userWorldPrefixService,
+            userCharacterInfoService, null, null, runMemoryService);
 
     @Test
     void ordinaryChatGetsFreshRunIndexWithoutAddingItToBaseRolePrompt() {

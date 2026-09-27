@@ -96,8 +96,6 @@ CREATE TABLE user_world_prefix (
     acitve_push_status BOOLEAN DEFAULT FALSE,
     daily_companion_mode BOOLEAN DEFAULT FALSE,
     favor_system_status VARCHAR(50) DEFAULT 'EASY',
-    eot_detection_status BOOLEAN NOT NULL DEFAULT FALSE,
-    think_status BOOLEAN NOT NULL DEFAULT FALSE,
     my_world boolean DEFAULT FALSE,
     add_special_prompt BOOLEAN DEFAULT FALSE
 );

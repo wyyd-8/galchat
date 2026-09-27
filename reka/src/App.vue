@@ -176,7 +176,7 @@ const uploading = reactive({ world: false, character: false })
 const templateMode = ref<'create' | 'edit'>('create')
 const characterTemplateMode = ref<'create' | 'edit'>('create')
 const editingCharacterTemplateId = ref<number | null>(null)
-const worldForm = reactive({ worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
+const worldForm = reactive({ worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', addSpecialPrompt: false })
 const templateForm = reactive<WorldTemplate>({ name: '', author: '', image: '', background: '', visible: true })
 const conversationForm = reactive({ title: '', mode: 'chat' as 'chat' | 'trpg', moduleId: '', characterIds: [] as number[] })
 const conversationStep = ref<1 | 2>(1)
@@ -440,7 +440,7 @@ const characterPickerPhase = ref<'closed' | 'moving' | 'expanded'>('closed')
 const characterTemplateForm = reactive<CharacterTemplate>({ name: '', image: '', background: '', personality: '', cocPlayStyle: '', initFavor: 0, favorability: {} })
 const favorabilityRows = ref<FavorabilityRow[]>([])
 const selectedCharacterId = ref<number | null>(null)
-const settingsForm = reactive({ name: '', acitvePushStatus: false, favorSystemStatus: 'NORMAL', eotDetectionStatus: true })
+const settingsForm = reactive({ name: '', acitvePushStatus: false, favorSystemStatus: 'NORMAL' })
 const detailForm = reactive<WorldDetail>({ about: '', details: '' })
 const settingsTab = ref<'general' | 'lore' | 'data'>('general')
 const detailComposerOpen = ref(false)
@@ -478,7 +478,6 @@ let characterPickerTransition = 0
 watch(isMobile, mobile => { if (!mobile && view.value === 'profile') home() })
 watch(() => [workspace.selectedWorldId.value, direct.selectedCharacter.value?.characterId], () => { directSettingsError.value = '' })
 watch(() => workspace.isLoggedIn.value, (loggedIn) => { authOpen.value = !loggedIn; if (!loggedIn) { direct.close(); direct.clearDrafts(); view.value = 'library' } })
-watch(() => worldForm.thinkStatus, (thinking) => { if (thinking) worldForm.eotDetectionStatus = false; else worldForm.addSpecialPrompt = false })
 watch(settingsTab, (tab) => { if (tab !== 'lore') resetDetailComposer() })
 watch(
   () => workspace.incomingDiceRolls.value.length,
@@ -556,7 +555,7 @@ async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
 }
 
 function openNewWorld() {
-  Object.assign(worldForm, { worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
+  Object.assign(worldForm, { worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', addSpecialPrompt: false })
   dialogs.world = true
 }
 async function openTemplatePreview(id: number) {
@@ -670,7 +669,7 @@ function openCharacter(id: number) {
 }
 function openSettings() {
   const world = workspace.selectedWorld.value; if (!world) return
-  Object.assign(settingsForm, { name: world.name, acitvePushStatus: world.acitvePushStatus ?? true, favorSystemStatus: world.favorSystemStatus || 'NORMAL', eotDetectionStatus: world.eotDetectionStatus !== false })
+  Object.assign(settingsForm, { name: world.name, acitvePushStatus: world.acitvePushStatus ?? true, favorSystemStatus: world.favorSystemStatus || 'NORMAL' })
   settingsTab.value = 'general'
   resetDetailComposer()
   dialogs.settings = true
@@ -849,7 +848,7 @@ async function changePassword() {
       <WorldLibrary v-else-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" @select="selectWorld" @preview-template="openTemplatePreview" @create-template="openCreateTemplate" @import-world="importWorld" />
       <CocModuleLibrary v-else-if="view === 'modules'" @changed="workspace.loadModules" @detail-open-change="moduleDetailOpen = $event" />
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @back="home" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
-      <DirectChatStage ref="directStage" :removing="directCharacterRemoving" @remove="removeDirectCharacter" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
+      <DirectChatStage ref="directStage" :removing="directCharacterRemoving" @remove="removeDirectCharacter" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" />
       <TrpgCompletionStage v-else-if="view === 'group' && completionAvailable && !completionTranscript" :key="workspace.selectedConversationId.value || 0" :report="completionReport" :loading="completionLoading" :busy="completionBusy || workspace.loading.sending" :error="completionError" @reload="loadCompletion" @archive="archiveCompletion" @back="completionTranscript = true" />
       <GroupChatStage ref="groupStage" v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" :persist-actor-runtime="workspace.saveActorRuntime" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
@@ -863,19 +862,17 @@ async function changePassword() {
     <div class="form-stack"><label class="field"><span>世界模板</span><select v-model="worldForm.worldId"><option value="">请选择</option><option v-for="item in workspace.templates.value" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label><label class="field"><span>世界名称</span><input v-model.trim="worldForm.name" placeholder="留空则使用模板名称" /></label><label v-if="isMobile" class="field"><span>好感变化幅度</span><select v-model="worldForm.favorSystemStatus"><option value="NORMAL">标准</option><option value="EASY">较易提升</option><option value="HARD">较难提升</option></select></label><div v-else class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: worldForm.favorSystemStatus === item }" @click="worldForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div>
       <fieldset class="world-option-group">
         <legend>系统</legend>
-        <p class="world-option-description">设置角色何时发消息，以及聊天时如何收发消息。</p>
+        <p class="world-option-description">设置角色是否主动发来消息。</p>
         <label class="switch-row"><span><strong>主动发消息</strong><small>开启后，角色可能主动发来事件提醒、关心问候或晚间话题；关闭后，不再发送这些主动消息。</small></span><input v-model="worldForm.acitvePushStatus" type="checkbox" /></label>
-        <label class="switch-row"><span><strong>逐字显示思考和回复</strong><small>开启后，每次发送都会开始一轮回复，逐步显示思考和回答，回复结束后才能继续发送；关闭后，你可以连续发送多条消息，角色会等你说完再一起回复。</small></span><input v-model="worldForm.thinkStatus" type="checkbox" /></label>
-        <label v-if="!worldForm.thinkStatus" class="switch-row"><span><strong>智能判断是否说完</strong><small>开启后，系统会判断你发送的话是否说完，完整时更快开始回复；关闭后，通常会等你停止输入约 3 秒再开始回复。</small></span><input v-model="worldForm.eotDetectionStatus" type="checkbox" /></label>
       </fieldset>
       <fieldset class="world-option-group">
         <legend>提示词</legend>
         <p class="world-option-description">引导角色如何与你相处、如何表达。</p>
         <label class="switch-row"><span><strong>现实日常陪伴</strong><small>开启后，角色会把你当作来自现实世界的朋友，陪你聊生活、学习和心情；关闭后，更侧重故事中的互动，回应你的动作和当前场景。</small></span><input v-model="worldForm.dailyCompanionMode" type="checkbox" /></label>
-        <label v-if="worldForm.thinkStatus" class="switch-row"><span><strong>用角色口吻写内心独白</strong><small>开启后，会引导角色用“我……”写内心独白，例如“（心想：我想再听听你的看法。）”；关闭后，不额外要求思考的写法。实际效果取决于所用模型。</small></span><input v-model="worldForm.addSpecialPrompt" type="checkbox" /></label>
+        <label class="switch-row"><span><strong>用角色口吻写内心独白</strong><small>开启后，会引导角色用“我……”写内心独白，例如“（心想：我想再听听你的看法。）”；关闭后，不额外要求思考的写法。实际效果取决于所用模型。</small></span><input v-model="worldForm.addSpecialPrompt" type="checkbox" /></label>
       </fieldset>
     </div>
-    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.world = false">取消</button><button class="button primary" :disabled="!worldForm.worldId || busy" @click="run(() => workspace.createWorld({ ...worldForm, worldId: Number(worldForm.worldId), eotDetectionStatus: worldForm.thinkStatus ? false : worldForm.eotDetectionStatus, addSpecialPrompt: worldForm.thinkStatus && worldForm.addSpecialPrompt }), 'world')">创建</button></template>
+    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.world = false">取消</button><button class="button primary" :disabled="!worldForm.worldId || busy" @click="run(() => workspace.createWorld({ ...worldForm, worldId: Number(worldForm.worldId) }), 'world')">创建</button></template>
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.template" mobile-presentation="page" :title="templateDialogTitle" :description="isMobile ? '' : templateDialogDescription" size="lg">
@@ -1086,7 +1083,6 @@ async function changePassword() {
           <label class="field"><span>世界名称</span><input v-model.trim="settingsForm.name" /></label>
           <label v-if="isMobile" class="field"><span>好感变化幅度</span><select v-model="settingsForm.favorSystemStatus"><option value="NORMAL">标准</option><option value="EASY">较易提升</option><option value="HARD">较难提升</option></select></label><div v-else class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: settingsForm.favorSystemStatus === item }" @click="settingsForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div>
           <label class="switch-row"><span><strong>主动发消息</strong><small>开启后，角色可能主动发来事件提醒、关心问候或晚间话题；关闭后，不再发送这些主动消息。</small></span><input v-model="settingsForm.acitvePushStatus" type="checkbox" /></label>
-          <label v-if="workspace.selectedWorld.value?.thinkStatus === false" class="switch-row"><span><strong>智能判断是否说完</strong><small>开启后，系统会判断你发送的话是否说完，完整时更快开始回复；关闭后，通常会等你停止输入约 3 秒再开始回复。</small></span><input v-model="settingsForm.eotDetectionStatus" type="checkbox" /></label>
         </div>
         <template v-if="isMobile"><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="settingsTab = 'lore'"><span><strong>世界设定</strong><small>主题与内容 · 仅模板作者维护</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" @click="settingsTab = 'data'"><span><strong>数据管理</strong><small>导入、导出与清理</small></span><ChevronRight :size="16" /></button></template>
         <div v-if="!isMobile" class="dialog-inline-actions settings-general-actions"><button v-if="workspace.canEditSelectedWorld.value" class="button secondary" @click="openEditTemplate"><Pencil :size="16" />编辑世界模板</button><button class="button primary" @click="run(() => workspace.updateWorld({ ...settingsForm }))">保存设置</button></div>

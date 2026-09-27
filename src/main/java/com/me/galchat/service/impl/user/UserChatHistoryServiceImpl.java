@@ -64,7 +64,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     @Override
     public List<UserChatHistory> listHistory(Long userWorldId, Long characterId, Long id, Integer size) {
-        Boolean thinkStatus = userWorldPrefixService.checkUserWorldAuth(userWorldId, true).getThinkStatus();
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, true);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }
@@ -72,10 +72,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         List<UserChatHistory> primaryMessages = listPrimaryMessages(userWorldId, characterId, id, size);
         if (primaryMessages.isEmpty()) {
             return List.of();
-        }
-
-        if (!Boolean.TRUE.equals(thinkStatus)) {
-            return listVisibleMessages(userWorldId, characterId, primaryMessages);
         }
 
         return listThinkingMessages(userWorldId, characterId, primaryMessages);
@@ -304,25 +300,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                         latestAssistant == null ? null : latestAssistant.getTimestamp())
                 .set(UserCharacterInfo::getLastChatContent,
                         latestAssistant == null ? null : latestAssistant.getContent()));
-
-        String lastAssistantKey = buildLastAssistantKey(userWorldId, characterId);
-        if (latestAssistant == null) {
-            redisTemplate.delete(lastAssistantKey);
-            return;
-        }
-        redisTemplate.opsForValue().set(lastAssistantKey, latestAssistant.getContent(),
-                RedisConstant.LAST_ASSISTANT_TTL);
-    }
-
-    private List<UserChatHistory> listVisibleMessages(Long userWorldId, Long characterId,
-                                                      List<UserChatHistory> primaryMessages) {
-        Set<Long> userMessageIds = userMessageIds(primaryMessages);
-        List<UserChatHistory> assistantMessages = listLinkedAssistantMessages(userWorldId, characterId, userMessageIds);
-        List<UserChatHistory> messages = new ArrayList<>(primaryMessages.size() + assistantMessages.size());
-        messages.addAll(primaryMessages);
-        messages.addAll(assistantMessages);
-        messages.sort(Comparator.comparing(UserChatHistory::getId));
-        return messages;
     }
 
     private List<UserChatHistory> listThinkingMessages(Long userWorldId, Long characterId,
@@ -445,10 +422,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     private String buildPromptInfoCacheKey(Long userWorldId, Long characterId) {
         return RedisConstant.USER_CHARACTER_PROMPT_INFO_KEY_PREFIX + userWorldId + ":" + characterId;
-    }
-
-    private String buildLastAssistantKey(Long userWorldId, Long characterId) {
-        return RedisConstant.CHAT_KEY_PREFIX + userWorldId + ":" + characterId + RedisConstant.LAST_ASSISTANT_SUFFIX;
     }
 
     private List<Integer> stepNos(Long userMessageId,

@@ -46,8 +46,6 @@ class WorldArchiveServiceImplTest {
                 .setAcitvePushStatus(true)
                 .setDailyCompanionMode(false)
                 .setFavorSystemStatus("NORMAL")
-                .setEotDetectionStatus(false)
-                .setThinkStatus(true)
                 .setAddSpecialPrompt(false)
                 .setMyWorld(true);
         WorldTemplate worldTemplate = new WorldTemplate()

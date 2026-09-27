@@ -2,7 +2,7 @@
 
 GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目。用户可以创建或导入世界，与角色单独聊天、组织群聊，也可以选择模组，由 KP（主持人）和调查员共同推进跑团。聊天记忆、角色好感、行动轮、掷骰结果和存档共同构成可持续恢复的游戏状态。
 
-后端基于 Java 21、Spring Boot 和 Spring AI；前端位于 `reka/`，使用 Vue 3、TypeScript、Reka UI 和 Three.js。`python/` 提供输入完整性判断、检索重排和角色卡 PDF 工具。
+后端基于 Java 21、Spring Boot 和 Spring AI；前端位于 `reka/`，使用 Vue 3、TypeScript、Reka UI 和 Three.js。`python/` 提供检索重排和角色卡 PDF 工具。
 
 ## 功能介绍
 
@@ -150,7 +150,7 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 | AI | DeepSeek、OpenAI 兼容 API、Ollama Embedding、Spring AI Tool Calling |
 | 数据与并发 | PostgreSQL、pgvector、Redis、Redisson |
 | 前端 | Vue 3.5、TypeScript 6、Vite 8、Reka UI 2、Three.js |
-| Python 辅助服务 | FastAPI、PyTorch、Transformers、jieba |
+| Python 辅助服务 | FastAPI、PyTorch、Transformers |
 | 文件与邮件 | Aliyun OSS、Aliyun Direct Mail |
 
 ## 项目结构
@@ -193,7 +193,6 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 │   ├── src/dice/               # 骰子展示与播放逻辑
 │   └── test/                   # 前端测试；部分测试与源文件同目录
 ├── python/
-│   ├── bert.py                # 输入完整性判断，localhost:8081
 │   ├── reranker_server.py     # 检索重排，localhost:8082
 │   ├── character_card_pdf.py  # 角色卡 PDF 服务（渲染、接口、启动）
 │   └── character_card/        # 字体、模板与字体许可证
@@ -306,13 +305,7 @@ npm run dev
 ### 5. 可选：启动 Python 辅助服务
 
 ```bash
-python -m pip install fastapi uvicorn torch "transformers>=4.36.0" pydantic jieba
-```
-
-输入完整性判断服务需要事先在 `python/bert_model/` 放置可加载的分类模型与 tokenizer；该模型不随 Git 仓库提供。
-
-```bash
-python python/bert.py
+python -m pip install fastapi uvicorn torch "transformers>=4.36.0" pydantic
 ```
 
 检索重排服务默认加载 `Alibaba-NLP/gte-multilingual-reranker-base`，首次启动可能需要下载模型：
@@ -327,9 +320,9 @@ python python/reranker_server.py
 RERANKER_MODEL_PATH=/path/to/gte-multilingual-reranker-base python python/reranker_server.py
 ```
 
-reranker 还支持 `RERANKER_DEVICE`、`RERANKER_MAX_LENGTH`、`RERANKER_BATCH_SIZE` 和 `RERANKER_TORCH_DTYPE`。Java 当前直接调用本机 `8081` 和 `8082`；异机部署需要调整 Java 侧地址。
+reranker 还支持 `RERANKER_DEVICE`、`RERANKER_MAX_LENGTH`、`RERANKER_BATCH_SIZE` 和 `RERANKER_TORCH_DTYPE`。Java 当前直接调用本机 `8082`；异机部署需要调整 Java 侧地址。
 
-这两个服务调用失败时，BERT 判断会使用延迟任务兜底，reranker 会保留原始向量召回顺序，可先不启动它们来验证主流程。
+重排服务调用失败时会保留原始向量召回顺序，可先不启动它来验证主流程。
 
 ### 可选：生成角色卡 PDF
 
@@ -373,9 +366,9 @@ python python/character_card_pdf.py
 | 跑团回滚 | `GET /trpg-saves/{conversationId}/rollback-status`；`POST` 同前缀下的 `/rollback-turn`、`/rollback-scene`、`/rollback-initial` |
 | 图片与实时连接 | `POST /upload`、WebSocket `/ws/{sid}` |
 
-单聊思考模式的 `POST /ai/chat` 支持 `clientRequestId`。同一账号、世界、角色下重复提交相同标识时，尚在生成的请求续接原流；已经完成的请求只返回完成状态，不重复调用模型。SSE 事件带递增的 `sequence`，恢复接口的 `after` 只返回该序号之后的事件；`generation.user` 提供已保存的用户消息 ID，用于合并历史，`generation.completed` / `generation.failed` 表示终态。
+单聊的 `POST /ai/chat` 支持 `clientRequestId`。同一账号、世界、角色下重复提交相同标识时，尚在生成的请求续接原流；已经完成的请求只返回完成状态，不重复调用模型。SSE 事件带递增的 `sequence`，恢复接口的 `after` 只返回该序号之后的事件；`generation.user` 提供已保存的用户消息 ID，用于合并历史，`generation.completed` / `generation.failed` 表示终态。
 
-切换角色时，单聊消息及发送状态按会话隔离，原回复继续生成。断线后前端自动尝试续接，刷新页面后重新进入对应单聊也会恢复；恢复标识保存在当前浏览器标签页的 `sessionStorage`，退出账号时清除。仅生成中的请求保留回放缓存；生成、落库及归档全部结束后立即释放原流，前端重新读取数据库历史。后端仅短期保留不含消息内容的完成标识，用于防止重复提交，不保留原流。回放缓存位于后端实例内存，多实例部署需要将续接请求路由到原实例。服务重启或缓存过期后返回 `generation.expired`，前端重新加载持久化历史，不自动重发消息；未完成的回复可撤回后重发。撤回、移除角色及读取世界存档会清除对应的单聊回放缓存。非思考模式沿用 WebSocket 队列生成与历史加载机制。
+切换角色时，单聊消息及发送状态按会话隔离，原回复继续生成。断线后前端自动尝试续接，刷新页面后重新进入对应单聊也会恢复；恢复标识保存在当前浏览器标签页的 `sessionStorage`，退出账号时清除。仅生成中的请求保留回放缓存；生成、落库及归档全部结束后立即释放原流，前端重新读取数据库历史。后端仅短期保留不含消息内容的完成标识，用于防止重复提交，不保留原流。回放缓存位于后端实例内存，多实例部署需要将续接请求路由到原实例。服务重启或缓存过期后返回 `generation.expired`，前端重新加载持久化历史，不自动重发消息；未完成的回复可撤回后重发。撤回、移除角色及读取世界存档会清除对应的单聊回放缓存。所有单聊统一使用流式请求；WebSocket 仅用于推送已持久化的主动关怀消息。
 
 单聊、群聊与跑团通过公共 `GenerationStreams` 管理生成生命周期，各自保留业务事件适配。群聊恢复接口也支持 `after`；使用新增的 `eventSequence` 作为流事件游标，原有 `sequence` 仍表示消息排序。前端共用 SSE 解析及 `followGeneration` 连接逻辑，遇到断线或非正常 EOF 时最多续接两次（间隔 500ms、1s），只恢复原请求，不重新 POST。页面内续接按游标补发，刷新后从头回放当前生成并合并历史。群聊切换会话、退出账号和组件卸载会取消本地订阅，服务端生成继续执行。跨设备按会话发现当前流尚未接入，恢复入口仍依赖本地请求标识。
 

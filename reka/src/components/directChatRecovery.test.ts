@@ -27,11 +27,11 @@ registerHooks({
   },
 })
 
-async function mountDirectChat() {
+async function mountDirectChat(acitvePushStatus = false) {
   const { api } = await import('../api/client.ts')
   const { useDirectChat } = await import('../composables/useDirectChat.ts')
   const { computed, createRenderer, defineComponent, h, ref } = await import('vue')
-  const world = computed<UserWorld>(() => ({ id: 3, worldId: 2, name: '测试世界', thinkStatus: true }))
+  const world = computed<UserWorld>(() => ({ id: 3, worldId: 2, name: '测试世界', acitvePushStatus }))
   const characters = ref<Character[]>([{ userWorldId: 3, characterId: 7, characterName: '测试角色' }, { userWorldId: 3, characterId: 8, characterName: '角色B' }])
   let chat!: ReturnType<typeof useDirectChat>
   const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
@@ -376,4 +376,59 @@ test('completed direct replies preserve older pages and their exhausted cursor w
   assert.equal(new Set(chat.messages.value.map(item => item.id)).size, chat.messages.value.length)
   await chat.selectCharacter(7)
   assert.equal(chat.messages.value[0]?.historyId, 102, 're-enter still reloads authoritative history')
+})
+
+
+test('streams every send while notification sockets only receive persisted care messages', async () => {
+  class NotificationSocket extends EventTarget {
+    static OPEN = 1
+    static instances: NotificationSocket[] = []
+    readyState = 0
+    constructor(_url: string) {
+      super(); NotificationSocket.instances.push(this)
+      queueMicrotask(() => { this.readyState = 1; this.dispatchEvent(new Event('open')) })
+    }
+    send() { assert.fail('notification sockets must never send chat or typing payloads') }
+    close() { this.readyState = 3; this.dispatchEvent(new Event('close')) }
+    receive(item: ChatHistory) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(item) })) }
+  }
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window, WebSocket: globalThis.WebSocket }
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = []
+  let controller!: ReadableStreamDefaultController
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), WebSocket: NotificationSocket,
+    window: { setTimeout, clearTimeout, location: { href: 'http://localhost/' } },
+    fetch: async (url: string, init: RequestInit) => {
+      requests.push({ url: String(url), body: JSON.parse(String(init.body)) })
+      return new Response(new ReadableStream({ start(c) { controller = c } }))
+    },
+  })
+  const { api, chat, app } = await mountDirectChat(true)
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis }
+  api.history = async () => []; api.modelApis = async () => []
+  try {
+    await chat.selectCharacter(7); await settle()
+    assert.equal(NotificationSocket.instances.length, 1)
+    const socket = NotificationSocket.instances[0]!
+    chat.input.value = '第一行\n第二行'; await settle()
+    const sending = chat.send(); await settle()
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0]!.url, '/api/ai/chat')
+    assert.equal(requests[0]!.body.message, '第一行\n第二行')
+    assert.ok(requests[0]!.body.clientRequestId)
+    const care: ChatHistory = { id: 30, userWorldId: 3, characterId: 7, type: 'assistant', content: '记得休息\n早点睡' }
+    socket.receive(care); socket.receive(care)
+    event(controller, 'generation.user', '20', 1)
+    event(controller, 'response', '角色的回答', 2); await settle()
+    assert.equal(chat.messages.value.filter(message => message.historyId === 30).length, 1)
+    assert.equal(chat.messages.value.at(-1)!.content, care.content)
+    api.history = async () => [
+      { id: 20, type: 'user', content: '第一行\n第二行' },
+      { id: 21, userMessageId: 20, type: 'assistant', content: '角色的回答' }, care,
+    ]
+    event(controller, 'generation.completed', '', 3); controller.close(); await sending
+    assert.deepEqual(chat.messages.value.map(message => message.content), ['第一行\n第二行', '角色的回答', care.content])
+    chat.close()
+    assert.equal(socket.readyState, 3)
+  } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
 })

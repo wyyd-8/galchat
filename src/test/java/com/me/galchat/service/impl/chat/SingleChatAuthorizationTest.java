@@ -16,8 +16,8 @@ class SingleChatAuthorizationTest {
     private final IUserWorldPrefixService worlds = mock(IUserWorldPrefixService.class);
     private final SingleChatLockService locks = mock(SingleChatLockService.class);
     private final SingleChatRuntimeService runtime = mock(SingleChatRuntimeService.class);
-    private final ChatServiceImpl service = new ChatServiceImpl(null, null, runtime, null,
-            null, worlds, null, null, null, locks, null);
+    private final ChatServiceImpl service = new ChatServiceImpl(null, runtime, null,
+            null, worlds, null, null, locks, null);
 
     @AfterEach
     void clearCurrentUser() {

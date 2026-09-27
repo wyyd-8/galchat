@@ -53,7 +53,7 @@ export interface WorldTemplate {
 }
 export interface UserWorld {
   id: number; userId?: number; worldId?: number; name: string; image?: string; acitvePushStatus?: boolean
-  dailyCompanionMode?: boolean; favorSystemStatus?: string; eotDetectionStatus?: boolean; thinkStatus?: boolean
+  dailyCompanionMode?: boolean; favorSystemStatus?: string
   addSpecialPrompt?: boolean; myWorld?: boolean
 }
 export interface WorldDetail { id?: number; worldId?: number; about?: string; details?: string }
@@ -123,8 +123,8 @@ export interface ChatHistory {
   userMessageId?: number; stepNo?: number; timestamp?: string
 }
 export interface ChatMessagePayload {
-  type?: string; worldId: number; userWorldId: number; characterId: number; message: string
-  clientRequestId?: string; isTyping?: boolean; length?: number; revision?: number; triggerType?: string
+  worldId: number; userWorldId: number; characterId: number; message: string
+  clientRequestId?: string
 }
 export interface ChatFlux { type: string; content?: string; sequence?: number }
 export interface DirectMessage {

@@ -31,7 +31,7 @@ async function mountDirectChat() {
   const { api } = await import('../api/client.ts')
   const { useDirectChat } = await import('../composables/useDirectChat.ts')
   const { computed, createRenderer, defineComponent, h, ref } = await import('vue')
-  const world = computed<UserWorld>(() => ({ id: 3, worldId: 2, name: '测试世界', thinkStatus: true }))
+  const world = computed<UserWorld>(() => ({ id: 3, worldId: 2, name: '测试世界' }))
   const characters = ref<Character[]>([{ userWorldId: 3, characterId: 7, characterName: '测试角色' }])
   let chat!: ReturnType<typeof useDirectChat>
   const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({

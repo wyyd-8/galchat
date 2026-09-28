@@ -185,6 +185,7 @@ export function useDirectChat(context: DirectChatContext) {
       arrivedCare.forEach(message => insertCareMessage(state.messages, message))
       // Retained pages own the oldest cursor, including an already exhausted one.
       if (!older.length) state.hasOlder = hasOlder
+      return history
     } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '单聊记录加载失败', errorMessage(error)) }
     finally { if (revision === state.historyRevision) state.loading.history = false }
   }
@@ -356,12 +357,13 @@ export function useDirectChat(context: DirectChatContext) {
     if (payload) applyChunk(state, generation, { type: 'generation.started', content: payload.message })
     const controller = new AbortController(); state.controller = controller
     const valid = () => !disposed && ownEpoch === epoch && !controller.signal.aborted && state.generation === generation
-    let terminal = false; let expired = false
+    let terminal = false; let expired = false; let failed = false
     const receive = (chunk: ChatFlux) => {
       if (!valid()) return
       applyChunk(state, generation, chunk)
       terminal ||= ['generation.completed', 'generation.failed', 'generation.expired'].includes(chunk.type)
       expired ||= chunk.type === 'generation.expired'
+      failed ||= chunk.type === 'generation.failed'
     }
     try {
       await followGeneration<ChatFlux>({
@@ -376,7 +378,17 @@ export function useDirectChat(context: DirectChatContext) {
       if (!valid()) return
       if (terminal) {
         remember(state, null); state.generation = null
-        await loadHistory(state, true)
+        const history = await loadHistory(state, true)
+        if (disposed || ownEpoch !== epoch || controller.signal.aborted) return
+        const userMessage = generation.live.find(message => message.role === 'user')
+        if (failed && userMessage && userMessage.historyId == null) {
+          // The user row can be saved before generation.user reaches the browser.
+          // An older message with identical text must not prevent draft recovery.
+          const previousIds = new Set(generation.base.map(message => message.historyId))
+          const saved = history?.some(message => roleOf(message) === 'user' && message.id != null
+            && !previousIds.has(message.id) && message.content === userMessage.content)
+          if (!saved) chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: userMessage.content })
+        }
         if (expired) {
           if (ownEpoch === epoch && !disposed) notifyFor(state, '回复续接已失效', '已重新加载历史；若回复未完成，可撤回后重新发送。')
         }
@@ -432,7 +444,9 @@ export function useDirectChat(context: DirectChatContext) {
     try {
       const runtime = await api.updateCharacterModel(state.world.id, state.characterId, modelApiId)
       if (disposed || ownEpoch !== epoch) return
-      character.modelApiId = runtime.modelApiId
+      const currentCharacter = context.characters.value.find(item => item.userWorldId === state.world!.id
+        && item.characterId === state.characterId)
+      if (currentCharacter) currentCharacter.modelApiId = runtime.modelApiId
       if (isActive(state)) notify('回复模型已更新', runtime.modelApiName || '已恢复默认模型', 'success')
     } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '回复模型更新失败', errorMessage(error)) }
     finally { state.loading.model = false }

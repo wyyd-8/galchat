@@ -108,6 +108,8 @@ class SingleChatFavorRollbackTest {
         assertThat(query.getParamNameValuePairs().values()).containsExactlyInAnyOrder(3L, 7L, 20L);
 
         when(characters.selectOne(any())).thenAnswer(i -> new UserCharacterInfo().setFavorValue(dbFavor.get()));
+        when(characters.compareAndSetFavorValue(eq(3L), eq(7L), anyInt(), anyInt()))
+                .thenAnswer(i -> dbFavor.compareAndSet(i.getArgument(2), i.getArgument(3)) ? 1 : 0);
         var characterService = new UserCharacterInfoServiceImpl(mock(ICharacterTemplateService.class),
                 mock(IUserWorldPrefixService.class), redis, favors, histories, mock(UserChatThinkingHistoryMapper.class),
                 mock(UserChatToolCallMapper.class), events, mock(GroupChatMemberMapper.class), locks,

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import test from 'node:test'
-import type { Character, ChatHistory, UserWorld } from '../api/types.ts'
+import type { Character, ChatHistory, SingleChatRuntime, UserWorld } from '../api/types.ts'
 
 const sourceRoot = new URL('../', import.meta.url)
 registerHooks({
@@ -31,7 +31,8 @@ async function mountDirectChat(acitvePushStatus = false) {
   const { api } = await import('../api/client.ts')
   const { useDirectChat } = await import('../composables/useDirectChat.ts')
   const { computed, createRenderer, defineComponent, h, ref } = await import('vue')
-  const world = computed<UserWorld>(() => ({ id: 3, worldId: 2, name: '测试世界', acitvePushStatus }))
+  const worldState = ref<UserWorld>({ id: 3, worldId: 2, name: '测试世界', acitvePushStatus })
+  const world = computed(() => worldState.value)
   const characters = ref<Character[]>([{ userWorldId: 3, characterId: 7, characterName: '测试角色' }, { userWorldId: 3, characterId: 8, characterName: '角色B' }])
   let chat!: ReturnType<typeof useDirectChat>
   const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
@@ -57,7 +58,7 @@ async function mountDirectChat(acitvePushStatus = false) {
     },
   }))
   app.mount({})
-  return { api, chat, app }
+  return { api, chat, app, characters, worldState }
 }
 
 
@@ -211,6 +212,91 @@ test('a rejected background send restores its own draft without changing the act
     await chat.selectCharacter(8)
     assert.equal(chat.input.value, '留给 B 的草稿')
   } finally { rejectSend?.(); app.unmount(); clearTimeout(notice.timer); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
+for (const persisted of ['none', 'anchor', 'history'] as const) test(`a failed generation restores only an unsaved message (persisted=${persisted})`, async () => {
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout },
+    fetch: async () => new Response([
+      { type: 'generation.started', content: '请保留原文', sequence: 1 },
+      ...(persisted === 'anchor' ? [{ type: 'generation.user', content: '20', sequence: 2 }] : []),
+      { type: 'generation.failed', content: '角色回复生成失败', sequence: 3 },
+    ].map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('')),
+  })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis }
+  const previous = { id: 10, type: 'user', content: '请保留原文' }
+  let reads = 0
+  api.history = async () => ++reads === 1 || persisted === 'none' ? [previous]
+    : [previous, { id: 20, type: 'user', content: '请保留原文' }]
+  api.modelApis = async () => []
+  try {
+    await chat.selectCharacter(7)
+    chat.input.value = '请保留原文'
+    await chat.send()
+    assert.equal(chat.input.value, persisted === 'none' ? '请保留原文' : '')
+    assert.equal(chat.messages.value.filter(message => message.role === 'user').length, persisted === 'none' ? 1 : 2)
+    assert.equal(chat.messages.value.at(-1)?.content, '角色回复生成失败')
+    assert.equal(chat.loading.sending, false)
+    assert.equal(sessionStorage.length, 0)
+  } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
+for (const newerDraft of ['', 'A 的新草稿']) test(`a failed background generation preserves conversation drafts (newerDraft=${Boolean(newerDraft)})`, async () => {
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  let controller!: ReadableStreamDefaultController
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout },
+    fetch: async () => new Response(new ReadableStream({ start(c) { controller = c } })),
+  })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis }
+  api.history = async () => []; api.modelApis = async () => []
+  try {
+    await chat.selectCharacter(7)
+    chat.input.value = '发送给 A 的原文'
+    const sending = chat.send(); await settle()
+    chat.input.value = newerDraft
+    await chat.selectCharacter(8)
+    chat.input.value = 'B 的草稿'
+    event(controller, 'generation.failed', '当前单聊正在处理中', 1); controller.close()
+    await sending
+    assert.equal(chat.input.value, 'B 的草稿')
+    await chat.selectCharacter(7)
+    assert.equal(chat.input.value, newerDraft || '发送给 A 的原文')
+    await chat.selectCharacter(8)
+    assert.equal(chat.input.value, 'B 的草稿')
+  } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
+for (const scope of ['same-character', 'other-character', 'other-world', 'logout'] as const) test(`model selection updates the current scoped character after a list refresh (${scope})`, async () => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  const { api, chat, app, characters, worldState } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis, updateCharacterModel: api.updateCharacterModel }
+  api.history = async () => []; api.modelApis = async () => []
+  let finish!: (runtime: SingleChatRuntime) => void
+  api.updateCharacterModel = async () => new Promise(resolve => { finish = resolve })
+  try {
+    await chat.selectCharacter(7)
+    const changing = chat.selectModel(9)
+    characters.value = characters.value.map(character => ({ ...character }))
+    if (scope === 'other-character') await chat.selectCharacter(8)
+    if (scope === 'other-world') {
+      chat.close()
+      worldState.value = { id: 4, worldId: 2, name: '另一个世界' }
+      characters.value = characters.value.map(character => ({ ...character, userWorldId: 4 }))
+      await chat.selectCharacter(7)
+    }
+    if (scope === 'logout') { chat.close(); chat.clearDrafts() }
+    finish({ modelApiId: 9, modelApiName: '新模型', modelApiAvailable: true })
+    await changing
+    assert.equal(characters.value.find(character => character.characterId === 7)?.modelApiId,
+      scope === 'other-world' || scope === 'logout' ? undefined : 9)
+    assert.equal(characters.value.find(character => character.characterId === 8)?.modelApiId, undefined)
+  } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
 })
 
 for (const modelState of ['failed', 'pending'] as const) test(`history loads independently when the model list is ${modelState}`, async () => {

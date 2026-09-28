@@ -27,6 +27,7 @@ import com.me.galchat.service.ICharacterTemplateService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -53,7 +54,10 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoMapper, UserCharacterInfo> implements IUserCharacterInfoService {
+
+    private static final int FAVOR_UPDATE_ATTEMPTS = 3;
 
     private final ICharacterTemplateService characterTemplateService;
     private final IUserWorldPrefixService userWorldPrefixService;
@@ -246,20 +250,53 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     @Transactional(rollbackFor = Exception.class)
     public void updateFavorValue(Long userWorldId, Long characterId, Integer favorChange,
                                  String bindingType, Long bindingChat) {
-        if (favorChange == null) {
-            favorChange = 0;
+        int change = favorChange == null ? 0 : favorChange;
+        Object cached = redisTemplate.opsForHash().get(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
+                buildFavorCacheKey(userWorldId, characterId));
+        Integer expectedFavor = cached == null ? null : Integer.valueOf(cached.toString());
+        for (int attempt = 0; attempt < FAVOR_UPDATE_ATTEMPTS; attempt++) {
+            if (expectedFavor == null) {
+                expectedFavor = readFavorValueFromDatabase(userWorldId, characterId);
+            }
+            int newFavor = (int) Math.max(0L, Math.min(100L, (long) expectedFavor + change));
+            if (baseMapper.compareAndSetFavorValue(userWorldId, characterId, expectedFavor, newFavor) == 1) {
+                insertFavorLog(userWorldId, characterId, newFavor - expectedFavor, bindingType, bindingChat);
+                publishFavorAfterCommit(userWorldId, characterId, newFavor);
+                return;
+            }
+            // A failed UPDATE clears MyBatis's session cache. Retry against the
+            // database even if Redis still contains another transaction's old value.
+            expectedFavor = null;
         }
+        throw new UserRequestException("好感值正在被其他对话更新，请稍后重试");
+    }
 
-        Integer oldFavorValue = getFavorValueByUserWorldIdAndCharacterId(userWorldId, characterId).getFavorValue();
-        Integer favorValue = baseMapper.updateFavorValue(userWorldId, characterId, favorChange);
-        if (favorValue == null) {
-            throw new UserRequestException("角色不存在");
+    private void publishFavorAfterCommit(Long userWorldId, Long characterId, int favorValue) {
+        Runnable publish = () -> {
+            try {
+                try {
+                    redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
+                            buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
+                } finally {
+                    evictPromptInfoCache(userWorldId, characterId);
+                }
+            } catch (RuntimeException error) {
+                // The database and log are already committed; a cache failure must
+                // not report a failed tool call that could apply the same delta again.
+                log.warn("好感缓存更新失败, userWorldId:{}, characterId:{}", userWorldId, characterId, error);
+            }
+        };
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish.run();
+                }
+            });
+        } else {
+            publish.run();
         }
-        redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
-                buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
-        evictPromptInfoCache(userWorldId, characterId);
-        insertFavorLog(userWorldId, characterId, favorValue - oldFavorValue, bindingType, bindingChat);
-        return;
     }
 
     @Override
@@ -336,22 +373,16 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 .one();
     }
 
-    private UserCharacterInfo getFavorValueByUserWorldIdAndCharacterId(Long userWorldId, Long characterId) {
-        String cacheKey = buildFavorCacheKey(userWorldId, characterId);
-        Object cachedFavorValue = redisTemplate.opsForHash().get(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, cacheKey);
-        if (cachedFavorValue != null) {
-            return new UserCharacterInfo().setFavorValue(Integer.valueOf(String.valueOf(cachedFavorValue)));
-        }
-
+    private int readFavorValueFromDatabase(Long userWorldId, Long characterId) {
         UserCharacterInfo userCharacterInfo = lambdaQuery()
-                .select(UserCharacterInfo::getFavorValue)
+                .select(UserCharacterInfo::getUserWorldId, UserCharacterInfo::getFavorValue)
                 .eq(UserCharacterInfo::getUserWorldId, userWorldId)
                 .eq(UserCharacterInfo::getCharacterId, characterId)
                 .one();
-        if (userCharacterInfo != null && userCharacterInfo.getFavorValue() != null) {
-            redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY, cacheKey, String.valueOf(userCharacterInfo.getFavorValue()));
+        if (userCharacterInfo == null) {
+            throw new UserRequestException("角色不存在");
         }
-        return userCharacterInfo;
+        return userCharacterInfo.getFavorValue() == null ? 0 : userCharacterInfo.getFavorValue();
     }
 
     private UserCharacterInfo getPromptInfoByUserWorldIdAndCharacterId(Long userWorldId, Long characterId) {

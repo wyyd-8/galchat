@@ -32,6 +32,8 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import java.util.Comparator;
 import java.util.List;
@@ -105,7 +107,18 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
             doDeleteCharacter(userWorldId, characterId);
             singleChatGenerations.evict(userWorldId, characterId);
         } finally {
-            singleChatLockService.unlock(characterLock);
+            // Keep new chat requests out until deletion commits or rolls back.
+            if (TransactionSynchronizationManager.isActualTransactionActive()
+                    && TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCompletion(int status) {
+                        singleChatLockService.unlock(characterLock);
+                    }
+                });
+            } else {
+                singleChatLockService.unlock(characterLock);
+            }
         }
     }
 

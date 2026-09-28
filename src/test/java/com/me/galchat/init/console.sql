@@ -583,10 +583,14 @@ CREATE TABLE user_event_log (
     id BIGSERIAL PRIMARY KEY,
     user_world_id BIGINT NOT NULL,
     character_id BIGINT,
+    source_user_message_id BIGINT,
     time TIMESTAMP,
     event_description TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE UNIQUE INDEX idx_user_event_log_source_message
+    ON user_event_log (source_user_message_id) WHERE source_user_message_id IS NOT NULL;
 
 CREATE INDEX idx_user_event_log_world_time
     ON user_event_log (user_world_id, time, id);

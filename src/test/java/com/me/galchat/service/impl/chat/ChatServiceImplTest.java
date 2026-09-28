@@ -96,4 +96,20 @@ class ChatServiceImplTest {
                         org.assertj.core.groups.Tuple.tuple(ChatConstant.RESPONSE_TYPE, "答案"));
     }
 
+    @Test
+    void preservesWhitespaceDeltasInBothResponseAndReasoning() {
+        List<ChatFluxVO> events = Flux.fromIterable(List.of("Hello", " ", "world", "\n\n", "\t", "next", ""))
+                .concatMap(delta -> {
+                    var response = new ChatResponse(List.of(new Generation(AssistantMessage.builder()
+                            .content(delta).properties(Map.of("reasoningContent", delta)).build())));
+                    return ReflectionTestUtils.<Flux<ChatFluxVO>>invokeMethod(chatService, "toChatFlux", response);
+                }).collectList().block();
+
+        for (String type : List.of(ChatConstant.RESPONSE_TYPE, ChatConstant.THINKING_TYPE)) {
+            assertThat(events.stream().filter(event -> type.equals(event.getType()))
+                    .map(ChatFluxVO::getContent).toList())
+                    .containsExactly("Hello", " ", "world", "\n\n", "\t", "next");
+        }
+    }
+
 }

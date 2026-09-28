@@ -13,6 +13,8 @@ import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
+import com.me.galchat.domain.po.UserEventLog;
+import com.me.galchat.mapper.UserEventLogMapper;
 import com.me.galchat.domain.vo.CareMessagePage;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterFavorLogMapper;
@@ -29,6 +31,8 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -62,6 +66,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
     private final SingleChatLockService singleChatLockService;
     private final SingleChatGenerationRegistry singleChatGenerations;
     private final StringRedisTemplate redisTemplate;
+    private final UserEventLogMapper userEventLogMapper;
 
     @Override
     public CareMessagePage listCareMessages(Long userWorldId, Long after) {
@@ -119,7 +124,19 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
             doWithdrawLatestUserMessage(userWorldId, characterId);
             singleChatGenerations.evict(userWorldId, characterId);
         } finally {
-            singleChatLockService.unlock(conversationLock);
+            // The transaction interceptor commits after this method returns. Keep
+            // concurrent chat requests out until both commit and rollback finish.
+            if (TransactionSynchronizationManager.isActualTransactionActive()
+                    && TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCompletion(int status) {
+                        singleChatLockService.unlock(conversationLock);
+                    }
+                });
+            } else {
+                singleChatLockService.unlock(conversationLock);
+            }
         }
     }
 
@@ -142,6 +159,10 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
         if (userRound) {
             reverseFavorUpdates(userWorldId, characterId, anchorId);
+            userEventLogMapper.delete(new LambdaUpdateWrapper<UserEventLog>()
+                    .eq(UserEventLog::getUserWorldId, userWorldId)
+                    .eq(UserEventLog::getCharacterId, characterId)
+                    .eq(UserEventLog::getSourceUserMessageId, anchorId));
             deleteLinkedMessages(userWorldId, characterId, anchorId);
             deleteAutoSearchInfoAfter(userWorldId, characterId, anchorId);
             deleteStepNoKey(anchorId);
@@ -236,9 +257,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
             if (favorValue == null) {
                 throw new UserRequestException("角色不存在");
             }
-            redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
-                    buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
-            redisTemplate.delete(buildPromptInfoCacheKey(userWorldId, characterId));
+            invalidateFavorCacheAfterCompletion(userWorldId, characterId);
         }
 
         userCharacterFavorLogMapper.delete(new LambdaUpdateWrapper<UserCharacterFavorLog>()
@@ -246,6 +265,29 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                 .eq(UserCharacterFavorLog::getCharacterId, characterId)
                 .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.SINGLE_MESSAGE)
                 .eq(UserCharacterFavorLog::getBindingChat, userMessageId));
+    }
+
+    private void invalidateFavorCacheAfterCompletion(Long userWorldId, Long characterId) {
+        Runnable invalidate = () -> {
+            try {
+                redisTemplate.opsForHash().delete(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
+                        buildFavorCacheKey(userWorldId, characterId));
+            } finally {
+                redisTemplate.delete(buildPromptInfoCacheKey(userWorldId, characterId));
+            }
+        };
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    // Neither a rolled-back value nor a pre-commit refill may survive.
+                    invalidate.run();
+                }
+            });
+        } else {
+            invalidate.run();
+        }
     }
 
     private void deleteLinkedMessages(Long userWorldId, Long characterId, Long userMessageId) {

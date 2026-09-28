@@ -261,7 +261,7 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
 
 《太阳与九英镑》提供[个人模组导入 JSON](data/modules/sun-and-nine-pounds.json) 和[系统默认模组 SQL](data/modules/sun-and-nine-pounds.sql)，两种方式任选其一。该模组按可回访的地点网络组织，保留场景原文并补充 AI 主持说明；封面与 10 份展示材料已填写上传地址。
 
-模组与用户世界数据按需导入，不随建表自动创建。《古树林中》的当前导入 SQL 已包含七个时间场景及最终场景主持说明。历史武器修正和跑团重置属于旧数据维护，不参与空库初始化。已有数据库升级需备份后对照当前结构处理，不要重跑 `console.sql`。
+模组与用户世界数据按需导入，不随建表自动创建。《古树林中》的当前导入 SQL 已包含七个时间场景及最终场景主持说明。历史武器修正和跑团重置属于旧数据维护，不参与空库初始化。已有数据库升级需备份后对照当前结构处理，不要重跑 `console.sql`。单聊事件来源关联需要在部署新版后端前执行 [`20260928-user-event-source.sql`](data/migrations/20260928-user-event-source.sql)；历史事件保留为空来源，不做推测性回填。
 
 ### 2. 准备 Redis、Ollama 和后端配置
 

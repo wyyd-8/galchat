@@ -49,6 +49,7 @@ class ConsoleSqlIntegrationTest {
                 "execution_mode", "model_api_id");
         assertThat(columns(schema, "user_character_info"))
                 .contains("model_api_id");
+        assertThat(columns(schema, "user_event_log")).contains("source_user_message_id");
         assertThat(columns(schema, "trpg_completion"))
                 .containsExactly("conversation_id", "turn_id", "data");
         for (var table : com.baomidou.mybatisplus.core.metadata.TableInfoHelper.getTableInfos()) {
@@ -74,6 +75,7 @@ class ConsoleSqlIntegrationTest {
                 "idx_reply_step_root_interaction",
                 "idx_reply_step_prompt_message",
                 "idx_binding_chat",
+                "idx_user_event_log_source_message",
                 "uk_tool_call_id");
 
         assertThat(jdbcTemplate.queryForObject(

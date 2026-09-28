@@ -73,7 +73,8 @@ export function useDirectChat(context: DirectChatContext) {
   const selectedCharacter = computed(() => context.characters.value.find((item) => item.characterId === selectedCharacterId.value) || null)
   const canWithdraw = computed(() => {
     if (loading.history || loading.sending || loading.withdrawing || active.value.generation) return false
-    return messages.value.some((item) => item.role === 'user')
+    return messages.value.some((item) => item.role === 'user'
+      || (item.role === 'assistant' && item.historyId != null && item.userMessageId == null && item.complete !== false))
   })
 
   let notificationAsked = false
@@ -405,6 +406,7 @@ export function useDirectChat(context: DirectChatContext) {
     if (!state.world || !canWithdraw.value || state.generation) return
     const ownEpoch = epoch
     state.loading.withdrawing = true
+    carePolling.pause()
     try {
       await api.withdrawMessage(state.world.id, state.characterId)
       if (disposed || ownEpoch !== epoch) return
@@ -412,7 +414,7 @@ export function useDirectChat(context: DirectChatContext) {
       await loadHistory(state)
       if (isActive(state)) { await context.reloadCharacters(); notify('已撤回上一轮消息', '', 'success') }
     } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '撤回失败', errorMessage(error)) }
-    finally { state.loading.withdrawing = false }
+    finally { state.loading.withdrawing = false; carePolling.resume() }
   }
 
   async function selectModel(modelApiId?: number) {

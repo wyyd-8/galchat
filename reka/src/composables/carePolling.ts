@@ -27,6 +27,7 @@ export function createCarePolling(options: PollingOptions) {
   let scope: { key: string; worldId: number; cursor?: number } | undefined
   let revision = 0
   let running = false
+  let pauses = 0
   let cancelTimer: (() => void) | undefined
   let controller: AbortController | undefined
 
@@ -35,13 +36,20 @@ export function createCarePolling(options: PollingOptions) {
     controller?.abort(); controller = undefined; running = false
   }
   function stop() { suspend(); scope = undefined }
+  // Multiple conversations can withdraw while the user switches between them.
+  function pause() { pauses++; suspend() }
+  function resume() {
+    if (pauses === 0) return
+    pauses--
+    if (pauses === 0) void poll(true)
+  }
   function schedule() {
     cancelTimer?.(); cancelTimer = undefined
-    if (!scope || !options.visible()) return
+    if (!scope || pauses > 0 || !options.visible()) return
     cancelTimer = options.schedule(() => void poll(false), carePollingWindow(options.now()).delay)
   }
   async function poll(force: boolean) {
-    if (!scope || running || !options.visible()) return
+    if (!scope || pauses > 0 || running || !options.visible()) return
     if (!force && !carePollingWindow(options.now()).active) { schedule(); return }
     cancelTimer?.(); cancelTimer = undefined
     const current = scope; const ownRevision = revision
@@ -79,5 +87,5 @@ export function createCarePolling(options: PollingOptions) {
     suspend()
     if (options.visible()) void poll(true)
   }
-  return { start, stop, visibilityChanged, refresh: () => poll(true) }
+  return { start, stop, pause, resume, visibilityChanged, refresh: () => poll(true) }
 }

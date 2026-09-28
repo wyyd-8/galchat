@@ -70,6 +70,95 @@ function event(controller: ReadableStreamDefaultController, type: string, conten
 }
 async function settle() { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)) }
 
+test('withdraws a standalone care message without requiring a user message in the loaded page', async () => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis, withdrawMessage: api.withdrawMessage }
+  let withdrawn = false
+  api.history = async () => withdrawn ? [] : [{ id: 20, type: 'assistant', content: '主动关怀', userWorldId: 3, characterId: 7 }]
+  api.modelApis = async () => []
+  api.withdrawMessage = async (worldId, characterId) => {
+    assert.equal(worldId, 3); assert.equal(characterId, 7)
+    withdrawn = true
+  }
+  try {
+    await chat.selectCharacter(7)
+    assert.equal(chat.canWithdraw.value, true)
+    await chat.withdraw()
+    assert.equal(withdrawn, true)
+    assert.deepEqual(chat.messages.value, [])
+    assert.equal(chat.canWithdraw.value, false)
+  } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
+for (const fails of [false, true]) test(`withdrawal discards stale care responses and catches up afterward (fails=${fails})`, async () => {
+  await import('vue')
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window, document: globalThis.document }
+  const page = new EventTarget() as EventTarget & { visibilityState: string }
+  page.visibilityState = 'visible'
+  const care = { id: 20, userWorldId: 3, characterId: 7, type: 'assistant', content: '旧关怀' }
+  const other = { ...care, id: 30, content: '新关怀' }
+  let finishOldPoll!: (response: Response) => void
+  let finishWithdrawal!: () => void
+  let withdrawn = false
+  const polls: Array<{ url: string; signal: AbortSignal }> = []
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), document: page,
+    window: { setTimeout, clearTimeout }, fetch: async (url: string, init: RequestInit) => {
+      polls.push({ url: String(url), signal: init.signal as AbortSignal })
+      if (polls.length === 1) return new Promise<Response>(resolve => { finishOldPoll = resolve })
+      return Response.json({ code: 1, data: { messages: withdrawn ? [other] : [care, other], nextCursor: 30, hasMore: false } })
+    },
+  })
+  localStorage.setItem('galchat.care-cursor::3', '10')
+  const { api, chat, app } = await mountDirectChat(true)
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis, withdrawMessage: api.withdrawMessage }
+  api.history = async () => withdrawn ? [] : [care]
+  api.modelApis = async () => []
+  api.withdrawMessage = () => new Promise<void>((resolve, reject) => {
+    finishWithdrawal = () => {
+      if (fails) reject(new Error('撤回失败'))
+      else { withdrawn = true; resolve() }
+    }
+  })
+  try {
+    await chat.selectCharacter(7)
+    const withdrawing = chat.withdraw()
+    page.dispatchEvent(new Event('visibilitychange')); await settle()
+    assert.equal(polls.length, 1, 'foreground events must not restart polling during withdrawal')
+    finishWithdrawal(); await withdrawing; await settle()
+    assert.equal(polls[0]!.signal.aborted, true)
+    assert.equal(polls.length, 2)
+    assert.match(polls[1]!.url, /after=10/, 'the cancelled page must not advance the cursor')
+    finishOldPoll(Response.json({ code: 1, data: { messages: [care], nextCursor: 20, hasMore: false } }))
+    await settle()
+    assert.deepEqual(chat.messages.value.map(message => message.historyId), fails ? [20, 30] : [30])
+    assert.equal(localStorage.getItem('galchat.care-cursor::3'), '30')
+  } finally {
+    app.unmount()
+    finishOldPoll?.(Response.json({ code: 1, data: { messages: [], nextCursor: 10, hasMore: false } }))
+    finishWithdrawal?.()
+    await settle()
+    clearTimeout(notice.timer); Object.assign(api, old); Object.assign(globalThis, original)
+  }
+})
+
+test('a linked assistant reply or a local error alone cannot enable withdrawal', async () => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage() })
+  const { api, chat, app } = await mountDirectChat()
+  const old = { history: api.history, modelApis: api.modelApis }
+  api.history = async () => [{ id: 21, userMessageId: 20, type: 'assistant', content: '关联回复' }]
+  api.modelApis = async () => []
+  try {
+    await chat.selectCharacter(7)
+    chat.messages.value.push({ id: 'local-error', role: 'assistant', content: '生成失败', complete: false })
+    assert.equal(chat.canWithdraw.value, false)
+  } finally { app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
 test('a rejected send preserves the server error and draft without resuming a nonexistent generation', async () => {
   const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
   const urls: string[] = []

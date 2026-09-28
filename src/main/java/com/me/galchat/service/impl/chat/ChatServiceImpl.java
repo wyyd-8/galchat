@@ -150,7 +150,7 @@ public class ChatServiceImpl implements IChatService {
     }
 
     private void addContent(List<ChatFluxVO> messages, String type, String content) {
-        if (StringUtils.hasText(content)) {
+        if (content != null && !content.isEmpty()) {
             messages.add(new ChatFluxVO(type, content));
         }
     }

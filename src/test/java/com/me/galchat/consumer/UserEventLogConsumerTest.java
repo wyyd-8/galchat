@@ -11,11 +11,14 @@ import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserEventLogService;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.service.impl.chat.SingleChatLockService;
+import com.me.galchat.service.impl.chat.SingleChatRuntimeService;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.me.galchat.support.MybatisPlusTestSupport;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.redisson.api.RedissonClient;
+import org.redisson.api.RLock;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -47,8 +50,12 @@ class UserEventLogConsumerTest {
         var client = mock(ChatClient.class);
         var request = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
         var response = mock(ChatClient.CallResponseSpec.class);
+        var locks = mock(SingleChatLockService.class);
+        var runtime = mock(SingleChatRuntimeService.class);
+        when(runtime.careClient(10L, 20L, client)).thenReturn(client);
+        when(locks.tryLock(10L, 20L)).thenReturn(mock(RLock.class));
         var consumer = new UserEventLogConsumer(mock(RedissonClient.class), events, worlds,
-                histories, characters, topics);
+                histories, characters, topics, locks, runtime);
         ReflectionTestUtils.setField(consumer, "userEventCareClient", client);
 
         when(worlds.getById(10L)).thenReturn(new UserWorldPrefix().setId(10L).setAcitvePushStatus(enabled));

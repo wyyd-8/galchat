@@ -26,7 +26,7 @@ class UserChatHistoryServiceImplTest {
 
     private UserChatHistoryServiceImpl careService(IUserWorldPrefixService worlds, UserChatHistoryMapper mapper) {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserChatHistory.class);
-        var service = new UserChatHistoryServiceImpl(worlds, null, null, null, null, null, null, null, null);
+        var service = new UserChatHistoryServiceImpl(worlds, null, null, null, null, null, null, null, null, null);
         ReflectionTestUtils.setField(service, "baseMapper", mapper);
         return service;
     }
@@ -110,7 +110,7 @@ class UserChatHistoryServiceImplTest {
                 .setId(1L).setUserMessageId(10L).setStepNo(1).setReasoningContent("思考")));
         when(tools.selectList(any())).thenReturn(List.of(new UserChatToolCall()
                 .setId(1L).setUserMessageId(10L).setStepNo(1)));
-        var service = new UserChatHistoryServiceImpl(worlds, thoughts, tools, null, null, null, null, null, null);
+        var service = new UserChatHistoryServiceImpl(worlds, thoughts, tools, null, null, null, null, null, null, null);
         ReflectionTestUtils.setField(service, "baseMapper", histories);
         ReflectionTestUtils.setField(service, "entityClass", UserChatHistory.class);
 

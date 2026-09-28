@@ -35,6 +35,27 @@ function fixture(hhmm = '07:59') {
   }
 }
 
+test('nested pauses block foreground refresh until every history mutation finishes', async () => {
+  const f = fixture('08:00')
+  f.cursors.set('a', 10)
+  let finish!: (page: CareMessagePage) => void
+  f.fetch(() => new Promise(resolve => { finish = resolve }))
+  f.poller.start('a', 3)
+  f.poller.pause(); f.poller.pause()
+  assert.equal(f.calls[0]!.signal.aborted, true)
+  f.visibility(true); await f.poller.refresh(); await f.advance(60_000)
+  f.poller.resume(); await settle()
+  assert.equal(f.calls.length, 1)
+  f.fetch(async () => ({ messages: [{ id: 12 }], nextCursor: 12, hasMore: false }))
+  f.poller.resume(); await settle()
+  assert.equal(f.calls.length, 2)
+  assert.equal(f.calls[1]!.after, 10)
+  finish({ messages: [{ id: 11 }], nextCursor: 11, hasMore: false }); await settle()
+  assert.deepEqual(f.received.map(item => item.id), [12])
+  assert.equal(f.cursors.get('a'), 12)
+  f.poller.stop()
+})
+
 test('uses four Beijing windows of exactly forty minutes including timezone and day rollover', () => {
   for (const hour of [8, 13, 19, 21]) {
     assert.equal(carePollingWindow(time(`${hour.toString().padStart(2, '0')}:00`)).active, true)

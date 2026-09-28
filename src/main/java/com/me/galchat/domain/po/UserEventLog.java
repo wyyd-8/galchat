@@ -32,6 +32,8 @@ public class UserEventLog implements Serializable {
 
     private Long characterId;
 
+    private Long sourceUserMessageId;
+
     private LocalDateTime time;
 
     private String eventDescription;

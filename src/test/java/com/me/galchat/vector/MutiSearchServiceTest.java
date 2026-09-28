@@ -20,6 +20,36 @@ import static org.mockito.Mockito.when;
 class MutiSearchServiceTest {
 
     @Test
+    void searchBeforeGroupChatLimitsWorldAndGroupHistoryWithoutSingleChatOrRerank() {
+        ChatHistoryVectorService singleHistory = mock(ChatHistoryVectorService.class);
+        WorldDetailVectorService worldDetails = mock(WorldDetailVectorService.class);
+        GroupTopicVectorService groupHistory = mock(GroupTopicVectorService.class);
+        RecentChatMemoryService recentMemory = mock(RecentChatMemoryService.class);
+        IUserWorldPrefixService userWorlds = mock(IUserWorldPrefixService.class);
+        DocumentReranker reranker = mock(DocumentReranker.class);
+        MutiSearchService service = new MutiSearchService(singleHistory, worldDetails, groupHistory,
+                recentMemory, userWorlds, reranker);
+        when(worldDetails.queryWorldDetail(99L, "query")).thenReturn(List.of(
+                document("world 1"), document("world 2"), document("world 3"), document("world 4")));
+        when(groupHistory.queryBeforeWindow(7L, 20L, "query")).thenReturn(List.of(
+                document("group 1"), document("group 2"), document("group 3")));
+
+        String result = service.searchBeforeGroupChat(99L, 7L, 20L, "query");
+
+        assertThat(result).isEqualTo("来源: world_detail\n时间戳: 未知\n内容: world 1\n---\n"
+                + "来源: world_detail\n时间戳: 未知\n内容: world 2\n---\n"
+                + "来源: world_detail\n时间戳: 未知\n内容: world 3\n---\n"
+                + "来源: group_topic\n时间戳: 未知\n内容: group 1\n---\n"
+                + "来源: group_topic\n时间戳: 未知\n内容: group 2");
+        when(worldDetails.queryWorldDetail(99L, "query")).thenReturn(List.of());
+        assertThat(service.searchBeforeGroupChat(99L, 7L, 20L, "query"))
+                .contains("group 1", "group 2").doesNotContain("group 3", "world_detail");
+        when(groupHistory.queryBeforeWindow(7L, 20L, "query")).thenReturn(List.of());
+        assertThat(service.searchBeforeGroupChat(99L, 7L, 20L, "query")).isEmpty();
+        verifyNoInteractions(singleHistory, recentMemory, userWorlds, reranker);
+    }
+
+    @Test
     void searchBeforeChatLimitsDocumentsBySourceAndSkipsRerank() {
         ChatHistoryVectorService chatHistoryVectorService = mock(ChatHistoryVectorService.class);
         WorldDetailVectorService worldDetailVectorService = mock(WorldDetailVectorService.class);
@@ -35,17 +65,20 @@ class MutiSearchServiceTest {
         when(worldDetailVectorService.queryWorldDetail(99L, "query")).thenReturn(List.of(
                 document("world detail 1"),
                 document("world detail 2"),
-                document("world detail 3")));
+                document("world detail 3"),
+                document("world detail 4")));
         when(chatHistoryVectorService.queryChatHistory(1L, 2L, "query")).thenReturn(List.of(
                 document("chat history 1"),
-                document("chat history 2")));
+                document("chat history 2"),
+                document("chat history 3")));
         String result = mutiSearchService.searchBeforeChat(1L, 2L, "query");
 
         assertThat(result).contains("来源: " + VectorConstant.WORLD_DETAIL_SOURCE);
         assertThat(result).contains("来源: " + VectorConstant.CHAT_HISTORY_SOURCE);
-        assertThat(result).contains("world detail 1", "world detail 2", "chat history 1");
+        assertThat(result).contains("world detail 1", "world detail 2", "world detail 3",
+                "chat history 1", "chat history 2");
         assertThat(result).doesNotContain(
-                "world detail 3", "chat history 2",
+                "world detail 4", "chat history 3",
                 "world event 1", "world event 2");
         verifyNoInteractions(documentReranker);
     }

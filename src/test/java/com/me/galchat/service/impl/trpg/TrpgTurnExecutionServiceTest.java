@@ -558,8 +558,9 @@ class TrpgTurnExecutionServiceTest {
         verify(planResolver).onTurnCompleted(conversation, turn);
     }
 
-    @Test
-    void retryRerunsFailedCharacterStepAndRestoredBlockedTailOnly() {
+    @ParameterizedTest
+    @ValueSource(strings = {"retry", "continue"})
+    void retryUsesCurrentRuntimeForFailedStepAndRestoredBlockedTail(String entry) {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupConversationLockService lockService =
@@ -628,8 +629,11 @@ class TrpgTurnExecutionServiceTest {
                         .setActionType(
                                 GroupChatConstant.ACTION_TRPG_SCENE)
                         .setSpeakerType(
-                                GroupChatConstant.ACTOR_CHARACTER)
-                        .setSpeakerId(9L)
+                                "continue".equals(entry) ? GroupChatConstant.ACTOR_KP
+                                        : GroupChatConstant.ACTOR_CHARACTER)
+                        .setSpeakerId("continue".equals(entry) ? null : 9L)
+                        .setExecutionMode(GroupChatConstant.CONTROL_MODEL)
+                        .setModelApiId(3L)
                         .setOutputMessageId(203L)
                         .setStatus(GroupChatConstant.STATUS_FAILED);
         GroupChatReplyStep blocked =
@@ -639,6 +643,8 @@ class TrpgTurnExecutionServiceTest {
                         .setActionType(
                                 GroupChatConstant.ACTION_TRPG_SCENE)
                         .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                        .setExecutionMode(GroupChatConstant.CONTROL_MODEL)
+                        .setModelApiId(3L)
                         .setErrorMessage("前序步骤失败")
                         .setStatus(GroupChatConstant.STATUS_BLOCKED);
         when(conversationService.requireAuthorized(7L))
@@ -652,14 +658,13 @@ class TrpgTurnExecutionServiceTest {
         when(stepMapper.selectById(103L)).thenReturn(failed);
         when(stepMapper.selectList(any()))
                 .thenReturn(List.of(failed, blocked));
-        when(checkpointService.restore(turn, failed))
-                .thenAnswer(invocation -> {
-                    failed.setOutputMessageId(null)
-                            .setStatus(GroupChatConstant.STATUS_PENDING)
-                            .setErrorMessage(null);
-                    turn.setStatus(GroupChatConstant.STATUS_RUNNING);
-                    return true;
-                });
+        org.mockito.Mockito.doAnswer(invocation -> {
+            failed.setOutputMessageId(null)
+                    .setStatus(GroupChatConstant.STATUS_PENDING)
+                    .setErrorMessage(null);
+            turn.setStatus(GroupChatConstant.STATUS_RUNNING);
+            return null;
+        }).when(checkpointService).restore(turn, failed);
         when(groupChatService.streamPersistedStep(
                 conversation, turn, failed))
                 .thenReturn(Flux.empty());
@@ -667,8 +672,14 @@ class TrpgTurnExecutionServiceTest {
                 conversation, turn, blocked))
                 .thenReturn(Flux.empty());
 
-        List<GroupChatEvent> events = service.retry(
-                7L, 101L, 103L).collectList().block();
+        Flux<GroupChatEvent> source;
+        if ("continue".equals(entry)) {
+            when(turnMapper.selectList(any())).thenReturn(List.of(turn));
+            source = service.continueTurn(7L, new GroupTurnContinueDTO());
+        } else {
+            source = service.retry(7L, 101L, 103L);
+        }
+        List<GroupChatEvent> events = source.collectList().block();
 
         assertThat(events)
                 .extracting(GroupChatEvent::getEventType)
@@ -690,6 +701,10 @@ class TrpgTurnExecutionServiceTest {
         assertThat(failed.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_PENDING);
         assertThat(failed.getOutputMessageId()).isNull();
+        assertThat(failed.getExecutionMode()).isNull();
+        assertThat(failed.getModelApiId()).isNull();
+        assertThat(blocked.getExecutionMode()).isNull();
+        assertThat(blocked.getModelApiId()).isNull();
         assertThat(blocked.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_PENDING);
         assertThat(blocked.getErrorMessage()).isNull();
@@ -698,8 +713,9 @@ class TrpgTurnExecutionServiceTest {
                 org.mockito.ArgumentMatchers.any());
     }
 
-    @Test
-    void retryWithoutCheckpointRerunsTheWholeTurn() {
+    @ParameterizedTest
+    @ValueSource(strings = {"retry", "continue"})
+    void retryWithoutCheckpointReportsRecoveryGuidanceWithoutRerunningSteps(String entry) {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupConversationLockService lockService =
@@ -718,6 +734,8 @@ class TrpgTurnExecutionServiceTest {
                 mock(TrpgCombatLifecycleService.class);
         GroupTurnCheckpointService checkpointService =
                 mock(GroupTurnCheckpointService.class);
+        TrpgTurnDirectionStore directionStore = mock(TrpgTurnDirectionStore.class);
+        TrpgSceneSelectionStore sceneSelectionStore = mock(TrpgSceneSelectionStore.class);
         TrpgTurnExecutionService service =
                 new TrpgTurnExecutionService(
                         conversationService,
@@ -732,7 +750,7 @@ class TrpgTurnExecutionServiceTest {
                         immediateTransactionTemplate(),
                         mock(TrpgSceneSelectionService.class),
                         mock(TrpgSceneLifecycleService.class),
-                        mock(TrpgSceneSelectionStore.class),
+                        sceneSelectionStore,
                         mock(TrpgParticipantService.class),
                         decisionStore,
                         mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
@@ -743,6 +761,7 @@ class TrpgTurnExecutionServiceTest {
                         checkpointService,
                         mock(TrpgUnconsciousRecoveryService.class),
                         mock(ITrpgSaveService.class));
+        service.setTurnDirectionStore(directionStore);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setMode(GroupChatConstant.MODE_TRPG)
@@ -752,12 +771,6 @@ class TrpgTurnExecutionServiceTest {
                 .setConversationId(7L)
                 .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
                 .setStatus(GroupChatConstant.STATUS_FAILED);
-        GroupChatReplyStep first = new GroupChatReplyStep()
-                .setId(102L).setTurnId(101L).setStepNo(1)
-                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
-                .setSpeakerType(GroupChatConstant.ACTOR_KP)
-                .setOutputMessageId(202L)
-                .setStatus(GroupChatConstant.STATUS_COMPLETED);
         GroupChatReplyStep failed = new GroupChatReplyStep()
                 .setId(103L).setTurnId(101L).setStepNo(2)
                 .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
@@ -765,59 +778,53 @@ class TrpgTurnExecutionServiceTest {
                 .setSpeakerId(9L)
                 .setOutputMessageId(203L)
                 .setStatus(GroupChatConstant.STATUS_FAILED);
-        GroupChatReplyStep blocked = new GroupChatReplyStep()
-                .setId(104L).setTurnId(101L).setStepNo(3)
-                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE)
-                .setSpeakerType(GroupChatConstant.ACTOR_KP)
-                .setStatus(GroupChatConstant.STATUS_BLOCKED);
-        List<GroupChatReplyStep> allSteps =
-                List.of(first, failed, blocked);
         when(conversationService.requireAuthorized(7L))
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
-                new GroupConversationLockService.OwnedLock(
-                        mock(RLock.class), 1L));
+        var lock = new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L);
+        when(lockService.tryLock(7L)).thenReturn(lock);
         when(turnMapper.selectById(101L)).thenReturn(turn);
-        when(stepMapper.selectById(102L)).thenReturn(first);
         when(stepMapper.selectById(103L)).thenReturn(failed);
-        when(stepMapper.selectById(104L)).thenReturn(blocked);
-        when(stepMapper.selectList(any())).thenReturn(allSteps);
-        when(checkpointService.restore(turn, failed))
-                .thenAnswer(invocation -> {
-                    allSteps.forEach(step -> step
-                            .setStatus(GroupChatConstant.STATUS_PENDING)
-                            .setOutputMessageId(null)
-                            .setErrorMessage(null));
-                    turn.setStatus(GroupChatConstant.STATUS_RUNNING);
-                    return false;
-                });
-        when(groupChatService.streamPersistedStep(
-                org.mockito.ArgumentMatchers.eq(conversation),
-                org.mockito.ArgumentMatchers.eq(turn),
-                any(GroupChatReplyStep.class)))
-                .thenReturn(Flux.empty());
+        String guidance = "未找到匹配的可恢复检查点，无法重试。请打开「跑团工具 → 存档」，使用「回退至上一轮」恢复后继续。";
+        org.mockito.Mockito.doThrow(new UserRequestException(guidance))
+                .when(checkpointService).restore(turn, failed);
 
-        List<GroupChatEvent> events = service.retry(
-                7L, 101L, 103L).collectList().block();
+        Flux<GroupChatEvent> source;
+        if ("continue".equals(entry)) {
+            when(turnMapper.selectList(any())).thenReturn(List.of(turn));
+            when(stepMapper.selectList(any())).thenReturn(List.of(failed));
+            source = service.continueTurn(7L, new GroupTurnContinueDTO());
+        } else {
+            source = service.retry(7L, 101L, 103L);
+        }
+        var registry = new com.me.galchat.service.impl.group.GroupGenerationStreamRegistry();
+        List<GroupChatEvent> events = registry.start(7L, "retry-without-checkpoint",
+                source).collectList().block();
 
-        assertThat(events)
-                .extracting(GroupChatEvent::getEventType)
-                .containsExactly(
-                        GroupChatConstant.EVENT_TURN_ACCEPTED,
-                        GroupChatConstant.EVENT_TURN_COMPLETED);
-        verify(groupChatService).streamPersistedStep(
-                conversation, turn, first);
-        verify(groupChatService).streamPersistedStep(
-                conversation, turn, failed);
-        verify(groupChatService).streamPersistedStep(
-                conversation, turn, blocked);
-        allSteps.forEach(step -> {
-            verify(decisionStore).deleteByReplyStepId(step.getId());
-            verify(combatLifecycleService)
-                    .clearControlMarkersForRetry(step.getId());
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(GroupChatConstant.EVENT_GENERATION_FAILED,
+                        GroupChatConstant.EVENT_STREAM_CAUGHT_UP);
+        assertThat(events.getFirst()).satisfies(event -> {
+            assertThat(event.getEventType()).isEqualTo(GroupChatConstant.EVENT_GENERATION_FAILED);
+            assertThat(event.getError()).isEqualTo(guidance);
+            assertThat(event.getErrorDetail()).isNotNull();
+            assertThat(event.getErrorDetail().getMessage()).isEqualTo(guidance);
         });
+        assertThat(failed.getStatus()).isEqualTo(GroupChatConstant.STATUS_FAILED);
+        assertThat(failed.getOutputMessageId()).isEqualTo(203L);
+        assertThat(turn.getStatus()).isEqualTo(GroupChatConstant.STATUS_FAILED);
+        verifyNoInteractions(groupChatService, decisionStore, combatLifecycleService,
+                directionStore, sceneSelectionStore);
+        if ("continue".equals(entry)) {
+            verify(stepMapper).selectList(any());
+            verify(turnMapper).selectList(any());
+        } else {
+            verify(stepMapper).selectById(103L);
+            verify(turnMapper).selectById(101L);
+        }
+        org.mockito.Mockito.verifyNoMoreInteractions(stepMapper, turnMapper);
+        verify(lockService).unlock(lock);
     }
 
     @Test

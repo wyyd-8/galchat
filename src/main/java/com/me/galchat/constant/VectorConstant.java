@@ -4,8 +4,8 @@ public final class VectorConstant {
 
     public static final int RERANK_TOP_N = 5;
     public static final int GROUP_TOPIC_TOP_K = 5;
-    public static final int PRE_CHAT_WORLD_DETAIL_LIMIT = 2;
-    public static final int PRE_CHAT_HISTORY_LIMIT = 1;
+    public static final int PRE_CHAT_WORLD_DETAIL_LIMIT = 3;
+    public static final int PRE_CHAT_HISTORY_LIMIT = 2;
     public static final double GROUP_TOPIC_DISTANCE_THRESHOLD = 0.5;
 
     public static final String SOURCE_METADATA_KEY = "source";

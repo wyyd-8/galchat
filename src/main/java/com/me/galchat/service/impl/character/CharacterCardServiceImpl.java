@@ -538,6 +538,8 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
             CocCharacter character, List<CocSkillDef> definitions,
             String restrainedByCharacterName) {
         Map<String, Integer> checkValues = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        Map<String, Integer> baseCheckValues = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        Map<String, CocSkillDef> definitionsByName = skillResolver.definitionsByName(definitions);
         putAliases(checkValues, character.getStr(), "STR", "力量");
         putAliases(checkValues, character.getCon(), "CON", "体质");
         putAliases(checkValues, character.getSiz(), "SIZ", "体型");
@@ -557,6 +559,14 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
             if (skill.getDisplayName() != null && !skill.getDisplayName().isBlank()
                     && skill.getValue() != null) {
                 checkValues.put(skill.getDisplayName().trim(), skill.getValue());
+                Integer baseValue = skillResolver.resolveDefaultValue(
+                        skillResolver.findDefinition(skill.getDisplayName(), definitionsByName), character);
+                if (baseValue == null) {
+                    baseValue = skill.getBaseValue();
+                }
+                if (baseValue != null) {
+                    baseCheckValues.put(skill.getDisplayName().trim(), baseValue);
+                }
             }
         }
         return new CocDiceCharacterVO(
@@ -584,7 +594,8 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
                 character.getStunnedRemainingRounds(),
                 character.getRestrainedByCharacterId(),
                 restrainedByCharacterName,
-                character.getMeleeAttackedThisRound());
+                character.getMeleeAttackedThisRound(),
+                Collections.unmodifiableMap(baseCheckValues));
     }
 
     private String resolveRestrainerName(CocCharacter character) {

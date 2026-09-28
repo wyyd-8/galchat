@@ -192,7 +192,10 @@ public class ChatServiceImpl implements IChatService {
         StringBuilder prompt = new StringBuilder();
         appendPrompt(prompt, ChatConstant.CHAT_SYSTEM_INSTRUCTIONS_TEMPLATE
                 .formatted(buildInteractionRequirements(userWorldId)));
-        appendPrompt(prompt, userWorldPrefixService.buildWorldPrompt(worldId));
+        String worldBackground = userWorldPrefixService.buildWorldPrompt(worldId);
+        if (StringUtils.hasText(worldBackground)) {
+            appendPrompt(prompt, "【世界背景】\n" + worldBackground);
+        }
         return prompt.toString();
     }
 

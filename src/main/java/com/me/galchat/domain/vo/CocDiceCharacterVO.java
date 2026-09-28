@@ -1,5 +1,6 @@
 package com.me.galchat.domain.vo;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.Map;
 
 public record CocDiceCharacterVO(
@@ -27,7 +28,8 @@ public record CocDiceCharacterVO(
         Integer stunnedRemainingRounds,
         Long restrainedByCharacterId,
         String restrainedByCharacterName,
-        Boolean meleeAttackedThisRound) {
+        Boolean meleeAttackedThisRound,
+        @JsonIgnore Map<String, Integer> baseCheckValues) {
 
     public CocDiceCharacterVO(
             Long cardId,
@@ -123,5 +125,41 @@ public record CocDiceCharacterVO(
                 inCover, coverActionForfeitPending,
                 stunnedRemainingRounds, restrainedByCharacterId, null,
                 meleeAttackedThisRound);
+    }
+
+    public CocDiceCharacterVO(
+            Long cardId,
+            String actorType,
+            Long participantId,
+            String name,
+            Map<String, Integer> checkValues,
+            Integer hpCurrent,
+            Integer hpMax,
+            Integer sanCurrent,
+            Integer sanMax,
+            Integer con,
+            Integer build,
+            Integer armor,
+            Boolean majorWound,
+            Boolean unconscious,
+            Boolean dying,
+            Boolean dead,
+            Boolean temporaryInsanity,
+            String temporaryInsanityPhase,
+            Integer temporaryInsanityRemainingHours,
+            Boolean inCover,
+            Boolean coverActionForfeitPending,
+            Integer stunnedRemainingRounds,
+            Long restrainedByCharacterId,
+            String restrainedByCharacterName,
+            Boolean meleeAttackedThisRound) {
+        this(cardId, actorType, participantId, name, checkValues,
+                hpCurrent, hpMax, sanCurrent, sanMax, con, build, armor,
+                majorWound, unconscious, dying, dead,
+                temporaryInsanity, temporaryInsanityPhase,
+                temporaryInsanityRemainingHours,
+                inCover, coverActionForfeitPending,
+                stunnedRemainingRounds, restrainedByCharacterId,
+                restrainedByCharacterName, meleeAttackedThisRound, Map.of());
     }
 }

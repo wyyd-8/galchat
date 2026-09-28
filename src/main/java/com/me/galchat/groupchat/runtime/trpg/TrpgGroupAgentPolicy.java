@@ -380,25 +380,23 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     .map(card -> characterCardService.getById(card.cardId()))
                     .filter(java.util.Objects::nonNull)
                     .toList();
-            messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, actor) + "\n"
-                    + investigatorCardContext + "\n"
-                    + investigatorWeaponContext + "\n"
-                    + abnormalWeaponRules + "\n"
-                    + characterCardFormatter.formatNpcs(npcCards)
-                    + "\n" + characterCardFormatter.formatActiveNpcs(
-                            activeNpcCards)
-                    + (combatPhase
-                    ? TrpgRulePrompts.combatActionReference() : "")
-                    + TrpgRulePrompts.residentRules()
-                    + TrpgRulePrompts.skillIndex()
-                    + (combatAdjudicate
-                    ? TrpgRulePrompts.combatRules() : "")
-                    + """
-
+            messages.add(new SystemMessage("""
                     你是当前 TRPG 群聊唯一的KP，当前阶段是%s。KP不是可见的调查员。
                     %s
                     不得输出隐藏思考过程。
-                    """.formatted(phase, kpPhaseExecutionRules)));
+                    """.formatted(phase, kpPhaseExecutionRules)
+                    + TrpgRulePrompts.residentRules()
+                    + TrpgRulePrompts.skillIndex()
+                    + (combatPhase
+                    ? TrpgRulePrompts.combatActionReference() : "")
+                    + (combatAdjudicate
+                    ? TrpgRulePrompts.combatRules() : "")
+                    + abnormalWeaponRules + "\n"
+                    + investigatorCardContext + "\n"
+                    + investigatorWeaponContext + "\n"
+                    + characterCardFormatter.formatNpcs(npcCards)
+                    + "\n" + characterCardFormatter.formatActiveNpcs(
+                            activeNpcCards)));
         } else {
             List<CharacterCardVO> otherInvestigatorCards =
                     investigatorCards.stream()
@@ -411,17 +409,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             String combatNpcOverview = combatPhase
                     ? investigatorCombatNpcOverview(conversation, cards)
                     : "";
-            messages.add(new SystemMessage(
-                    investigatorContextAssembler.format(
-                            conversation, action) + "\n"
-                    + characterCardFormatter.formatOtherInvestigators(
-                            otherInvestigatorCards)
-                    + (combatPhase
-                    ? TrpgRulePrompts.investigatorCombatReference() : "")
-                    + combatNpcOverview
-                    + TrpgRulePrompts.investigatorResidentRules()
-                    + """
-
+            messages.add(new SystemMessage("""
                     你是调查员操控 Agent。Agent身份名是“%s”，操控的调查员名是“%s”。
                     “%s”不是调查员姓名，只提供性格和决策倾向；你正在 TRPG 群聊中扮演“%s”。
                     对外发言、自称和行动一律使用“%s”，不得使用Agent身份名代替。当前阶段是%s。
@@ -429,7 +417,16 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     """.formatted(
                             agentName, investigatorName, agentName,
                             investigatorName, investigatorName, phase)
-                    + TrpgRulePrompts.investigatorThinkingModeRules()));
+                    + TrpgRulePrompts.investigatorResidentRules()
+                    + TrpgRulePrompts.investigatorThinkingModeRules()
+                    + "\n"
+                    + (combatPhase
+                    ? TrpgRulePrompts.investigatorCombatReference() : "")
+                    + investigatorContextAssembler.format(
+                            conversation, action) + "\n"
+                    + characterCardFormatter.formatOtherInvestigators(
+                            otherInvestigatorCards)
+                    + combatNpcOverview));
         }
         messages.addAll(context.messages());
         if (GroupChatConstant.ACTOR_CHARACTER.equals(actor.type())

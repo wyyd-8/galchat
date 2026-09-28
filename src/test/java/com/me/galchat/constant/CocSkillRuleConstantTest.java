@@ -29,6 +29,17 @@ class CocSkillRuleConstantTest {
     }
 
     @Test
+    void kpIndexExplainsOmittedChecksAndMarksOnlySpecializedCategories() {
+        assertThat(CocSkillRuleConstant.KP_SKILL_INDEX)
+                .contains("基础值且基础值≤5", "仍可发起检定", "以kp-skill-index为准")
+                .contains("- 人类学：理解社会结构")
+                .contains("- 格斗：大类：", "- 科学：大类：", "- 艺术和手艺：大类：",
+                        "- 射击：大类：", "- 语言：大类：", "- 生存：大类：",
+                        "- 操纵：大类：", "- 学识：大类：")
+                .doesNotContain("范围：", "- 斗殴：大类：", "- 母语：大类：", "- 科学:化学：大类：");
+    }
+
+    @Test
     void shootingRuleListsEverySupportedRangedWeaponForAcquisition() {
         String shooting = CocSkillRuleConstant.SKILL_RULES_BY_NAME
                 .get("射击");

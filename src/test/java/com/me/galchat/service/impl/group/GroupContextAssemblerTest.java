@@ -88,7 +88,7 @@ class GroupContextAssemblerTest {
     }
 
     @Test
-    void kpAuthoredMessageIsAssistantOnlyForKpAndUsesWorldOnlyPrompt() {
+    void kpAuthoredMessageIsAssistantOnlyForKpAndSkipsOrdinaryChatPrompt() {
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
         GroupConversationService conversationService = mock(GroupConversationService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
@@ -110,13 +110,14 @@ class GroupContextAssemblerTest {
                 any(), org.mockito.ArgumentMatchers.eq(kp))).thenReturn(Map.of(41L, List.of()));
         when(toolHistoryAssembler.beforeMessages(
                 any(), org.mockito.ArgumentMatchers.eq(investigator))).thenReturn(Map.of(41L, List.of()));
-        when(chatService.buildWorldSystemPrompt(2L, 1L)).thenReturn("仅世界提示词");
+        when(chatService.buildWorldSystemPrompt(2L, 1L)).thenReturn("普通聊天世界背景");
 
         assertThat(assembler.assembleContextFrom(conversation, kp, 1L).getFirst())
                 .isInstanceOf(AssistantMessage.class);
         assertThat(assembler.assembleContextFrom(conversation, investigator, 1L).getFirst())
                 .isInstanceOf(UserMessage.class);
-        assertThat(assembler.baseSystemPrompt(conversation, kp)).contains("仅世界提示词");
+        assertThat(assembler.baseSystemPrompt(conversation, kp)).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(chatService);
     }
 
     @Test

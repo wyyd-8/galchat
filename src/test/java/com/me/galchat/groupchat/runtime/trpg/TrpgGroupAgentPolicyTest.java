@@ -255,7 +255,7 @@ class TrpgGroupAgentPolicyTest {
     }
 
     @Test
-    void kpUsesWorldPromptAllCardsAndDirectDiceInstructions() {
+    void kpUsesTrpgCardsAndRulesWithoutOrdinaryWorldPrompt() {
         ChatClient client = mock(ChatClient.class);
         GroupContextAssembler contextAssembler = mock(GroupContextAssembler.class);
         ICharacterCardService cardService = mock(ICharacterCardService.class);
@@ -354,6 +354,7 @@ class TrpgGroupAgentPolicyTest {
                 com.me.galchat.tool.InvestigatorKpInquiryTools.class);
         policy.setInvestigatorKpInquiryTools(
                 investigatorInquiryTools);
+        var existingContext = new SystemMessage("当前时间与模组上下文，保持原位");
         var invocation = policy.prepare(
                 conversation,
                 new GroupActionSpec(
@@ -365,10 +366,16 @@ class TrpgGroupAgentPolicyTest {
                         1,
                         1),
                 new GroupContextMaterial(
-                        List.of(), Set.of(81L), Set.of(71L)));
+                        List.of(existingContext), Set.of(81L), Set.of(71L)));
 
+        assertThat(invocation.prompt().getInstructions().get(1)).isSameAs(existingContext);
+        org.mockito.Mockito.verify(contextAssembler, org.mockito.Mockito.never())
+                .baseSystemPrompt(conversation, kp);
+        assertPromptOrder(invocation.prompt().getInstructions().getFirst().getText(),
+                "你是当前 TRPG 群聊唯一的KP", "<kp-resident-rules>",
+                "<kp-skill-index>", "<investigator-cards>", "<npc-roster>");
         assertThat(invocation.prompt().getInstructions().getFirst().getText())
-                .contains("仅世界提示词")
+                .doesNotContain("仅世界提示词")
                 .contains("<investigator-card name=\"林恩\"")
                 .contains("<investigator-card name=\"艾琳\"")
                 .contains("<npc-roster>", "食尸鬼")
@@ -938,6 +945,7 @@ class TrpgGroupAgentPolicyTest {
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setWorldId(2L).setUserWorldId(5L);
 
+        var existingContext = new SystemMessage("调查员当前上下文，保持原位");
         var invocation = policy.prepare(
                 conversation,
                 new GroupActionSpec(
@@ -949,9 +957,10 @@ class TrpgGroupAgentPolicyTest {
                         1,
                         1),
                 new GroupContextMaterial(
-                        List.of(), Set.of(), Set.of(),
+                        List.of(existingContext), Set.of(), Set.of(),
                         "优先确认地下室入口。"));
 
+        assertThat(invocation.prompt().getInstructions().get(1)).isSameAs(existingContext);
         assertThat(invocation.tools())
                 .containsExactly(sceneTools, inquiryTools);
         assertThat(invocation.prompt().getInstructions())
@@ -1006,7 +1015,10 @@ class TrpgGroupAgentPolicyTest {
                 .contains("HP 为 0 不等于自动处于濒死")
                 .doesNotContain("接受失败、改变目标、改变方法")
                 .doesNotContain("<kp-resident-rules>");
-        assertThat(investigatorSystem).endsWith("""
+        assertPromptOrder(investigatorSystem,
+                "你是调查员操控 Agent", "<investigator-resident-rules>",
+                "【思维模式要求】", "<controlled-investigator>", "<other-investigators>");
+        assertThat(investigatorSystem).contains("""
                 【思维模式要求】在你的思考过程（<think>标签内）中，请遵守以下规则：
                 1. 禁止使用圆括号包裹内心独白，例如"（心想：……）"或"(内心OS：……)"，所有分析内容直接陈述即可
                 2. 禁止以角色第一人称描写内心活动，例如"我心想""我觉得""我暗自"等，请用分析性语言替代
@@ -1359,4 +1371,14 @@ class TrpgGroupAgentPolicyTest {
         }
         return names;
     }
+    private void assertPromptOrder(String text, String... sections) {
+        int previous = -1;
+        for (String section : sections) {
+            int position = text.indexOf(section);
+            assertThat(position).as("prompt section %s must follow previous section", section)
+                    .isGreaterThan(previous);
+            previous = position;
+        }
+    }
+
 }

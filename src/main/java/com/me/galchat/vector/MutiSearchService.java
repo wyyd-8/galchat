@@ -40,12 +40,27 @@ public class MutiSearchService {
             return "";
         }
 
+        return searchBeforeChat(userWorld.getWorldId(), query,
+                () -> chatHistoryVectorService.queryChatHistory(userWorldId, characterId, query),
+                VectorConstant.CHAT_HISTORY_SOURCE);
+    }
+
+    public String searchBeforeGroupChat(Long worldId, Long conversationId, Long windowStartSequence, String query) {
+        if (worldId == null || conversationId == null || windowStartSequence == null || !StringUtils.hasText(query)) {
+            return "";
+        }
+        return searchBeforeChat(worldId, query,
+                () -> groupTopicVectorService.queryBeforeWindow(conversationId, windowStartSequence, query),
+                VectorConstant.GROUP_TOPIC_SOURCE);
+    }
+
+    private String searchBeforeChat(Long worldId, String query,
+                                    Supplier<List<Document>> historyQuery, String historySource) {
         CompletableFuture<List<Document>> worldDetailFuture = CompletableFuture.supplyAsync(() ->
-                queryWithSource(() -> worldDetailVectorService.queryWorldDetail(userWorld.getWorldId(), query),
+                queryWithSource(() -> worldDetailVectorService.queryWorldDetail(worldId, query),
                         VectorConstant.WORLD_DETAIL_SOURCE, VectorConstant.PRE_CHAT_WORLD_DETAIL_LIMIT));
         CompletableFuture<List<Document>> chatHistoryFuture = CompletableFuture.supplyAsync(() ->
-                queryWithSource(() -> chatHistoryVectorService.queryChatHistory(userWorldId, characterId, query),
-                        VectorConstant.CHAT_HISTORY_SOURCE, VectorConstant.PRE_CHAT_HISTORY_LIMIT));
+                queryWithSource(historyQuery, historySource, VectorConstant.PRE_CHAT_HISTORY_LIMIT));
         List<Document> documents = new ArrayList<>();
         documents.addAll(worldDetailFuture.join());
         documents.addAll(chatHistoryFuture.join());

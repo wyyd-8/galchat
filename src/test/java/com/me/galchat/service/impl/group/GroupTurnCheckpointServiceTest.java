@@ -9,6 +9,7 @@ import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
@@ -63,46 +64,51 @@ class GroupTurnCheckpointServiceTest {
                 fixture.messageMapper(), fixture.toolCallMapper());
     }
 
-    @Test
-    void missingCheckpointRestartsTheWholeTurn() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "missing", "different-turn", "different-step",
+            "completed", "unknown-type", "missing-type"
+    })
+    void unusableCheckpointRejectsRetryWithoutChangingState(String scenario) {
         Fixture fixture = fixture(GroupTurnCheckpointService.STEP_START);
-        GroupChatReplyStep completed = new GroupChatReplyStep()
-                .setId(102L)
+        GroupTurnCheckpoint checkpoint = new GroupTurnCheckpoint()
+                .setConversationId(7L)
                 .setTurnId(101L)
-                .setStepNo(1)
-                .setStatus(GroupChatConstant.STATUS_COMPLETED)
-                .setOutputMessageId(201L);
-        GroupChatReplyStep failed = fixture.step()
-                .setStepNo(2)
-                .setErrorMessage("模型调用失败");
+                .setReplyStepId(103L)
+                .setCheckpointType(GroupTurnCheckpointService.STEP_START)
+                .setMessageId(202L)
+                .setToolCallId(9L);
+        switch (scenario) {
+            case "missing" -> checkpoint = null;
+            case "different-turn" -> checkpoint.setTurnId(100L);
+            case "different-step" -> checkpoint.setReplyStepId(102L);
+            case "completed" -> checkpoint.setCheckpointType(
+                    GroupTurnCheckpointService.COMPLETED);
+            case "unknown-type" -> checkpoint.setCheckpointType("UNKNOWN");
+            case "missing-type" -> checkpoint.setCheckpointType(null);
+            default -> throw new AssertionError(scenario);
+        }
         when(fixture.checkpointMapper().selectById(7L))
-                .thenReturn(null);
-        when(fixture.stepMapper().selectList(
-                org.mockito.ArgumentMatchers.any()))
-                .thenReturn(List.of(completed, failed));
+                .thenReturn(checkpoint);
+        fixture.step().setErrorMessage("模型调用失败");
 
-        boolean checkpointRestored = fixture.service().restore(
-                fixture.turn(), failed);
+        assertThatThrownBy(() -> fixture.service().restore(
+                fixture.turn(), fixture.step()))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessage("未找到匹配的可恢复检查点，无法重试。请打开「跑团工具 → 存档」，使用「回退至上一轮」恢复后继续。");
 
-        assertThat(checkpointRestored).isFalse();
-        assertThat(List.of(completed, failed))
-                .allSatisfy(step -> {
-                    assertThat(step.getStatus())
-                            .isEqualTo(GroupChatConstant.STATUS_PENDING);
-                    assertThat(step.getOutputMessageId()).isNull();
-                    assertThat(step.getErrorMessage()).isNull();
-                });
+        assertThat(fixture.step().getStatus())
+                .isEqualTo(GroupChatConstant.STATUS_FAILED);
+        assertThat(fixture.step().getOutputMessageId()).isEqualTo(203L);
+        assertThat(fixture.step().getErrorMessage()).isEqualTo("模型调用失败");
         assertThat(fixture.turn().getStatus())
-                .isEqualTo(GroupChatConstant.STATUS_RUNNING);
-        verify(fixture.toolCallMapper()).delete(
-                org.mockito.ArgumentMatchers.any());
-        verify(fixture.messageMapper()).delete(
-                org.mockito.ArgumentMatchers.any());
-        verify(fixture.stepMapper(), org.mockito.Mockito.times(2)).update(
-                org.mockito.ArgumentMatchers.isNull(),
-                org.mockito.ArgumentMatchers.any());
-        verify(fixture.turnMapper()).updateById(fixture.turn());
-        verify(fixture.checkpointMapper()).deleteById(7L);
+                .isEqualTo(GroupChatConstant.STATUS_FAILED);
+        verifyNoInteractions(fixture.messageMapper(), fixture.toolCallMapper(),
+                fixture.stepMapper(), fixture.turnMapper(),
+                fixture.characterCardService(), fixture.diceRollSummaryMapper(),
+                fixture.diceMessageCodec());
+        verify(fixture.checkpointMapper()).selectById(7L);
+        org.mockito.Mockito.verifyNoMoreInteractions(fixture.checkpointMapper());
     }
 
     @Test
@@ -149,9 +155,8 @@ class GroupTurnCheckpointServiceTest {
                         .setMessageId(202L)
                         .setToolCallId(9L));
 
-        boolean restored = service.restore(turn, step);
+        service.restore(turn, step);
 
-        assertThat(restored).isTrue();
         assertThat(step.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_PENDING);
         assertThat(step.getOutputMessageId()).isNull();
@@ -187,10 +192,9 @@ class GroupTurnCheckpointServiceTest {
         when(fixture.diceMessageCodec().encode(501L, List.of(1)))
                 .thenReturn("{\"summaryId\":501,\"roundNos\":[1]}");
 
-        boolean restored = fixture.service().restore(
+        fixture.service().restore(
                 fixture.turn(), fixture.step());
 
-        assertThat(restored).isTrue();
         assertThat(fixture.step().getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_WAITING_DICE);
         assertThat(fixture.turn().getStatus())
@@ -215,10 +219,9 @@ class GroupTurnCheckpointServiceTest {
                         .setId(501L)
                         .setStatus(DiceRollConstant.STATUS_COMPLETED));
 
-        boolean restored = fixture.service().restore(
+        fixture.service().restore(
                 fixture.turn(), fixture.step());
 
-        assertThat(restored).isTrue();
         assertThat(fixture.step().getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_PENDING);
         assertThat(fixture.turn().getStatus())
@@ -359,10 +362,9 @@ class GroupTurnCheckpointServiceTest {
                 org.mockito.ArgumentMatchers.any()))
                 .thenReturn(List.of(failedAdjustment));
 
-        boolean restored = fixture.service().restore(
+        fixture.service().restore(
                 fixture.turn(), fixture.step());
 
-        assertThat(restored).isTrue();
         verifyNoInteractions(fixture.characterCardService());
         verify(fixture.toolCallMapper())
                 .deleteAfterCheckpoint(103L, 9L);

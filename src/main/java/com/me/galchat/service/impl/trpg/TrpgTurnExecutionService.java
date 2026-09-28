@@ -170,12 +170,6 @@ public class TrpgTurnExecutionService {
                     turn = prepared.turn();
                 } else if (!GroupChatConstant.STATUS_RUNNING.equals(
                         turn.getStatus())) {
-                    if (GroupChatConstant.STATUS_FAILED.equals(
-                            turn.getStatus())
-                            || GroupChatConstant.STATUS_BLOCKED.equals(
-                            turn.getStatus())) {
-                        clearTurnDirection(conversationId);
-                    }
                     resumeTurn(turn);
                 }
                 GroupChatTurn selected = turn;
@@ -267,26 +261,23 @@ public class TrpgTurnExecutionService {
                         conversationService.requireActive(
                                 conversationId);
                 requireTrpg(conversation);
-                clearTurnDirection(conversationId);
                 GroupChatTurn turn = requireFailedTurn(
                         conversationId, turnId);
                 GroupChatReplyStep failedStep =
                         requireRetryableStep(turnId, stepId);
-                boolean wholeTurnRestarted = Boolean.TRUE.equals(
-                        transactionTemplate.execute(status ->
-                                restoreFailedStep(turn, failedStep)));
+                transactionTemplate.execute(status -> {
+                    restoreFailedStep(turn, failedStep);
+                    return null;
+                });
+                clearTurnDirection(conversationId);
                 List<GroupChatReplyStep> remaining =
                         stepMapper.selectList(
                                 new LambdaQueryWrapper<
                                         GroupChatReplyStep>()
                                         .eq(GroupChatReplyStep::getTurnId,
                                                 turnId)
-                                        .ge(!wholeTurnRestarted,
-                                                GroupChatReplyStep::getStepNo,
+                                        .ge(GroupChatReplyStep::getStepNo,
                                                 failedStep.getStepNo())
-                                        .isNull(wholeTurnRestarted,
-                                                GroupChatReplyStep
-                                                        ::getParentStepId)
                                         .eq(GroupChatReplyStep::getStatus,
                                                 GroupChatConstant
                                                         .STATUS_PENDING)
@@ -460,6 +451,7 @@ public class TrpgTurnExecutionService {
                         "失败行动轮没有可恢复的步骤");
             }
             restoreFailedStep(turn, step);
+            clearTurnDirection(turn.getConversationId());
             return;
         }
         if (step == null) {
@@ -525,33 +517,18 @@ public class TrpgTurnExecutionService {
         return step;
     }
 
-    private boolean restoreFailedStep(
+    private void restoreFailedStep(
             GroupChatTurn turn, GroupChatReplyStep failedStep) {
         if (isCompletionAction(failedStep)) {
+            clearRuntimeSnapshotForRetry(failedStep);
             failedStep.setStatus(GroupChatConstant.STATUS_PENDING).setErrorMessage(null).setUpdatedAt(LocalDateTime.now());
             persistRetryableStep(failedStep);
             turn.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
             turnMapper.updateById(turn);
-            return false;
+            return;
         }
-        boolean restored = checkpointService.restore(
-                turn, failedStep);
-        if (!restored) {
-            List<GroupChatReplyStep> allSteps = stepMapper.selectList(
-                    new LambdaQueryWrapper<GroupChatReplyStep>()
-                            .eq(GroupChatReplyStep::getTurnId,
-                                    turn.getId())
-                            .orderByAsc(GroupChatReplyStep::getStepNo));
-            if (allSteps != null) {
-                for (GroupChatReplyStep step : allSteps) {
-                    decisionStore.deleteByReplyStepId(step.getId());
-                    combatLifecycleService.clearControlMarkersForRetry(
-                            step.getId());
-                }
-            }
-            sceneSelectionStore.clear(turn.getConversationId());
-            return true;
-        }
+        checkpointService.restore(turn, failedStep);
+        clearRuntimeSnapshotForRetry(failedStep);
         decisionStore.deleteByReplyStepId(failedStep.getId());
         combatLifecycleService.clearControlMarkersForRetry(
                 failedStep.getId());
@@ -572,6 +549,7 @@ public class TrpgTurnExecutionService {
                                         GroupChatReplyStep
                                                 ::getStepNo));
         for (GroupChatReplyStep blocked : blockedTail) {
+            clearRuntimeSnapshotForRetry(blocked);
             blocked.setStatus(GroupChatConstant.STATUS_PENDING)
                     .setErrorMessage(null)
                     .setUpdatedAt(now);
@@ -583,7 +561,17 @@ public class TrpgTurnExecutionService {
                     .setUpdatedAt(now);
             turnMapper.updateById(turn);
         }
-        return false;
+    }
+
+    private void clearRuntimeSnapshotForRetry(GroupChatReplyStep step) {
+        // A failed action starts a new attempt with the user's current model selection.
+        // Paused actions and pending dice keep their snapshot during ordinary continuation.
+        step.setExecutionMode(null).setModelApiId(null);
+        stepMapper.update(null,
+                new LambdaUpdateWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getId, step.getId())
+                        .set(GroupChatReplyStep::getExecutionMode, null)
+                        .set(GroupChatReplyStep::getModelApiId, null));
     }
 
     private void persistRetryableStep(GroupChatReplyStep step) {

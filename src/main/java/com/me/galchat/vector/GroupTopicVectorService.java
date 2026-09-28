@@ -37,7 +37,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 public class GroupTopicVectorService {
@@ -110,23 +109,18 @@ public class GroupTopicVectorService {
                 .build()));
     }
 
-    public String search(Long conversationId, Long windowStartSequence, String question) {
+    public List<Document> queryBeforeWindow(Long conversationId, Long windowStartSequence, String question) {
         if (conversationId == null || windowStartSequence == null || !StringUtils.hasText(question)) {
-            return "";
+            return List.of();
         }
         FilterExpressionBuilder builder = new FilterExpressionBuilder();
         Filter.Expression filter = builder.and(
                 builder.eq(VectorConstant.CONVERSATION_ID_METADATA_KEY, conversationId),
                 builder.lte(VectorConstant.END_SEQUENCE_METADATA_KEY, windowStartSequence)).build();
-        List<Document> documents = retriever.retrieve(Query.builder()
+        return retriever.retrieve(Query.builder()
                 .text(question)
                 .context(Map.of(VectorStoreDocumentRetriever.FILTER_EXPRESSION, filter))
                 .build());
-        return documents.stream()
-                .filter(Document::isText)
-                .map(Document::getText)
-                .filter(StringUtils::hasText)
-                .collect(Collectors.joining(VectorConstant.DOCUMENT_SEPARATOR));
     }
 
     public List<Document> queryGroupTopics(Long userWorldId, Long characterId, String question) {

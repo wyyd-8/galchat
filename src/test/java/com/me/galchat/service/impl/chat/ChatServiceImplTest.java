@@ -7,6 +7,9 @@ import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.impl.trpg.TrpgRunMemoryService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -75,6 +78,27 @@ class ChatServiceImplTest {
         String prompt = chatService.buildWorldSystemPrompt(10L, 1L);
 
         assertThat(prompt).contains("世界背景").doesNotContain("Alice角色信息");
+    }
+
+    @Test
+    void sharedChatPromptLabelsWorldBackgroundBeforeCharacterInformation() {
+        when(userWorldPrefixService.buildWorldPrompt(10L)).thenReturn("故事发生在骑士学院。");
+        when(userCharacterInfoService.buildCharacterPrompt(1L, 2L)).thenReturn("name: Alice");
+
+        String prompt = chatService.buildChatSystemPrompt(10L, 1L, 2L);
+
+        assertThat(prompt).containsOnlyOnce("【世界背景】")
+                .contains("【世界背景】\n故事发生在骑士学院。\nname: Alice");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"", "   "})
+    void missingWorldBackgroundDoesNotEmitAnEmptySection(String background) {
+        when(userWorldPrefixService.buildWorldPrompt(10L)).thenReturn(background);
+
+        assertThat(chatService.buildChatSystemPrompt(10L, 1L, 2L))
+                .doesNotContain("【世界背景】");
     }
 
     @Test

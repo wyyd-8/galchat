@@ -8,6 +8,7 @@ import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupModelInvocation;
 import com.me.galchat.service.impl.group.GroupContextAssembler;
 import com.me.galchat.tool.UserCharacterFavorTools;
+import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
 import com.me.galchat.tool.TrpgRunMemoryTools;
 import org.springframework.ai.chat.client.ChatClient;
@@ -27,17 +28,20 @@ public class ChatGroupAgentPolicy implements GroupAgentPolicy {
     private final GroupContextAssembler contextAssembler;
     private final VectorTools vectorTools;
     private final UserCharacterFavorTools favorTools;
+    private final UserCharacterInfoTools infoTools;
     private final TrpgRunMemoryTools runMemoryTools;
 
     public ChatGroupAgentPolicy(@Qualifier("chatGroupChatClient") ChatClient chatClient,
                                 GroupContextAssembler contextAssembler,
                                 VectorTools vectorTools,
                                 UserCharacterFavorTools favorTools,
+                                UserCharacterInfoTools infoTools,
                                 TrpgRunMemoryTools runMemoryTools) {
         this.chatClient = chatClient;
         this.contextAssembler = contextAssembler;
         this.vectorTools = vectorTools;
         this.favorTools = favorTools;
+        this.infoTools = infoTools;
         this.runMemoryTools = runMemoryTools;
     }
 
@@ -46,10 +50,10 @@ public class ChatGroupAgentPolicy implements GroupAgentPolicy {
                                         GroupContextMaterial context) {
         String name = actorName(conversation.getUserWorldId(), action.actor());
         List<Message> messages = new ArrayList<>();
-        messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, action.actor()) + """
-
+        messages.add(new SystemMessage("""
                 你正在一个多人群聊中扮演%s。
                 聊天记录中的 speaker 标记是真实发言者身份；其他角色的消息不是你的经历或台词。
+                用户本轮的话以聊天记录中用户的 speaker 标记为准；末尾的轮到谁回复是系统调度指令，不是用户的新发言。
                 不得输出隐藏思考过程。
 
                 【群聊中的记忆检索】
@@ -69,12 +73,17 @@ public class ChatGroupAgentPolicy implements GroupAgentPolicy {
                 - 查询指定跑团的当前状态、自己的调查员人物卡、骰运统计、场景或已结束跑团的总结，使用 getTrpgRunDetails。
                 - 回忆指定跑团中发生过的具体事件或对话，使用 searchTrpgChatRounds，针对缺失内容填写关键词。
                 - <recent-trpg-runs> 只提供最近跑团的简要索引，不代表已知具体剧情。当前索引或上下文已能明确确定目标跑团 runId 及所需参与者对应关系时，可直接调用对应的详情或事件检索工具，无需先调用 listTrpgRuns；无法确定时，先调用 listTrpgRuns 确认，不要猜测 runId。
-                """.formatted(name)));
+
+                【群聊中的长期用户信息】
+                只有用户本人明确表达的个人信息、偏好或长期约定，才可通过 appendUserInfoPrompt 记录到当前角色的用户信息中。不要把其他角色的自述或推测记成用户信息。
+
+                """.formatted(name)
+                + contextAssembler.baseSystemPrompt(conversation, action.actor())));
         messages.addAll(context.messages());
         messages.add(new UserMessage("现在轮到" + name + "回复。只生成" + name
                 + "本人的言语、动作或感受，不要代替用户或其他角色发言，不要输出发言者标签。"));
         return new GroupModelInvocation(chatClient, new Prompt(messages),
-                List.of(vectorTools, favorTools, runMemoryTools));
+                List.of(vectorTools, favorTools, infoTools, runMemoryTools));
     }
 
     @Override

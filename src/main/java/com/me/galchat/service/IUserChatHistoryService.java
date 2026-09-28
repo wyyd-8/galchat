@@ -20,6 +20,6 @@ public interface IUserChatHistoryService extends IService<UserChatHistory> {
 
     CareMessagePage listCareMessages(Long userWorldId, Long after);
 
-    void withdrawLatestUserMessage(Long userWorldId, Long characterId);
+    void withdrawLatestUserMessage(Long userWorldId, Long characterId, Long expectedMessageId);
 
 }

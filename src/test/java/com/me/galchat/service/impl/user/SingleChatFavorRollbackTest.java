@@ -90,10 +90,10 @@ class SingleChatFavorRollbackTest {
         var transactional = (IUserChatHistoryService) factory.getProxy();
 
         if (rollback) {
-            assertThatThrownBy(() -> transactional.withdrawLatestUserMessage(3L, 7L))
+            assertThatThrownBy(() -> transactional.withdrawLatestUserMessage(3L, 7L, 20L))
                     .hasMessage("vector cleanup failed");
         } else {
-            transactional.withdrawLatestUserMessage(3L, 7L);
+            transactional.withdrawLatestUserMessage(3L, 7L, 20L);
         }
 
         assertThat(dbFavor.get()).isEqualTo(rollback ? 15 : 10);

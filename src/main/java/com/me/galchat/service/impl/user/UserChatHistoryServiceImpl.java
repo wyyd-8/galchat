@@ -109,10 +109,13 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void withdrawLatestUserMessage(Long userWorldId, Long characterId) {
+    public void withdrawLatestUserMessage(Long userWorldId, Long characterId, Long expectedMessageId) {
         userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
+        }
+        if (expectedMessageId == null || expectedMessageId <= 0) {
+            throw new UserRequestException("撤回消息id必须为正数");
         }
 
         RLock conversationLock = singleChatLockService.tryLock(userWorldId, characterId);
@@ -121,7 +124,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         }
 
         try {
-            doWithdrawLatestUserMessage(userWorldId, characterId);
+            doWithdrawLatestUserMessage(userWorldId, characterId, expectedMessageId);
             singleChatGenerations.evict(userWorldId, characterId);
         } finally {
             // The transaction interceptor commits after this method returns. Keep
@@ -140,10 +143,14 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         }
     }
 
-    private void doWithdrawLatestUserMessage(Long userWorldId, Long characterId) {
+    private void doWithdrawLatestUserMessage(Long userWorldId, Long characterId, Long expectedMessageId) {
         WithdrawCandidate candidate = latestWithdrawCandidate(userWorldId, characterId);
         if (candidate.anchor() == null) {
             throw new UserRequestException("没有可撤回的消息");
+        }
+        // Compare under the conversation lock before deleting rows or reversing side effects.
+        if (!Objects.equals(candidate.anchor().getId(), expectedMessageId)) {
+            throw new UserRequestException("聊天记录已变化，请刷新后重试");
         }
         if (candidate.consecutiveWithdrawCount() >= ChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT) {
             throw new UserRequestException("最多只能连续撤回3条消息");

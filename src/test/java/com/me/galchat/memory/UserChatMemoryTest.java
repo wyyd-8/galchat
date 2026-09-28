@@ -73,14 +73,17 @@ class UserChatMemoryTest {
                 .toolCalls(List.of(new AssistantMessage.ToolCall("functions.searchInfo:0", "function", "searchInfo", "{}")))
                 .build();
 
-        memory.saveAssistantMessages(new ConversationInfo(1L, 2L, null), 10L, List.of(message));
-        memory.saveAssistantMessages(new ConversationInfo(3L, 4L, null), 20L, List.of(message));
-        memory.saveAssistantMessages(new ConversationInfo(3L, 4L, null), 20L, List.of(message));
+        memory.saveToolExecution(new ConversationInfo(1L, 2L, null), 10L,
+                new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(message))), null);
+        memory.saveToolExecution(new ConversationInfo(3L, 4L, null), 20L,
+                new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(message))), null);
+        memory.saveToolExecution(new ConversationInfo(3L, 4L, null), 20L,
+                new org.springframework.ai.chat.model.ChatResponse(List.of(new org.springframework.ai.chat.model.Generation(message))), null);
 
         assertThat(savedCalls).extracting(UserChatToolCall::getUserMessageId).containsExactly(10L, 20L);
         assertThat(savedCalls).extracting(UserChatToolCall::getToolCallId)
                 .containsExactly("functions.searchInfo:0", "functions.searchInfo:0");
-        assertThat(savedReplies).extracting(UserChatHistory::getUserMessageId).containsExactly(10L, 20L);
+        assertThat(savedReplies).isEmpty();
     }
 
     @Test
@@ -172,7 +175,7 @@ class UserChatMemoryTest {
     }
 
     @Test
-    void saveAssistantMessagesTrimsAlreadySavedReasoningPrefix() {
+    void saveAssistantMessagesKeepsCompleteReasoning() {
         UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
         UserChatThinkingHistoryMapper thinkingMapper = mock(UserChatThinkingHistoryMapper.class);
         UserChatThinkingHistory savedThinking = new UserChatThinkingHistory()
@@ -196,7 +199,7 @@ class UserChatMemoryTest {
 
         var thinkingCaptor = forClass(UserChatThinkingHistory.class);
         verify(thinkingMapper).insert(thinkingCaptor.capture());
-        assertThat(thinkingCaptor.getValue().getReasoningContent()).isEqualTo("工具成功后组织回复。");
+        assertThat(thinkingCaptor.getValue().getReasoningContent()).isEqualTo("先决定调用工具。工具成功后组织回复。");
         assertThat(thinkingCaptor.getValue().getStepNo()).isEqualTo(2);
     }
 
@@ -224,7 +227,7 @@ class UserChatMemoryTest {
     }
 
     @Test
-    void saveAssistantMessagesTrimsAlreadySavedVisibleAssistantPrefix() {
+    void saveAssistantMessagesKeepsCompleteVisibleContent() {
         UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
         List<UserChatHistory> savedAssistantHistories = new ArrayList<>(List.of(new UserChatHistory()
                 .setId(10L)
@@ -250,6 +253,6 @@ class UserChatMemoryTest {
 
         var historyCaptor = forClass(UserChatHistory.class);
         verify(historyMapper).insert(historyCaptor.capture());
-        assertThat(historyCaptor.getValue().getContent()).isEqualTo("工具返回后继续回复。");
+        assertThat(historyCaptor.getValue().getContent()).isEqualTo("工具调用前说一句。工具返回后继续回复。");
     }
 }

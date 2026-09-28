@@ -136,7 +136,7 @@ export const api = {
 
   careMessages: (worldId: number, after?: number, signal?: AbortSignal) => request<CareMessagePage>(`/history/care?${new URLSearchParams({ userworldid: String(worldId), ...(after != null ? { after: String(after) } : {}) })}`, { signal }),
   history: (worldId: number, characterId: number, size = 30, beforeId?: number) => request<ChatHistory[]>(`/history?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId), size: String(size), ...(beforeId ? { id: String(beforeId) } : {}) })}`),
-  withdrawMessage: (worldId: number, characterId: number) => request<void>(`/history/withdraw?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId) })}`, { method: 'POST' }),
+  withdrawMessage: (worldId: number, characterId: number, expectedMessageId: number) => request<void>(`/history/withdraw?${new URLSearchParams({ userworldid: String(worldId), characterid: String(characterId), expectedMessageId: String(expectedMessageId) })}`, { method: 'POST' }),
 
   conversations: (worldId: number, status?: 'active' | 'closed') => request<Conversation[]>(`/group-chat/conversations?${new URLSearchParams({ userWorldId: String(worldId), ...(status ? { status } : {}) })}`),
   participantHistory: (worldId: number) => request<TrpgParticipantHistory[]>(`/group-chat/participant-history?${new URLSearchParams({ userWorldId: String(worldId) })}`),

@@ -114,7 +114,16 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         }
         Long userMessageId = (Long) chatClientResponse.context().get(ChatConstant.TOPIC_USER_MESSAGE_ID_CONTEXT_KEY);
 
-        List<Message> assistantMessages = chatClientResponse.chatResponse()
+        // The inner recorder sees every model chunk before ToolCallingAdvisor filters it.
+        var responseToSave = chatClientResponse.chatResponse();
+        Object recorded = chatClientResponse.context().get(SingleChatResponseRecordingAdvisor.CONTEXT_KEY);
+        if (recorded instanceof ChatClientMessageAggregator.AggregationState turn) {
+            ChatClientResponse completeTurn = turn.toChatClientResponse();
+            if (completeTurn != null) {
+                responseToSave = completeTurn.chatResponse();
+            }
+        }
+        List<Message> assistantMessages = responseToSave
                 .getResults()
                 .stream()
                 .map(Generation::getOutput)
@@ -350,6 +359,8 @@ public class TopicAwareMessageChatMemoryAdvisor implements BaseChatMemoryAdvisor
         Map<String, Object> newContext = new HashMap<>(context);
         newContext.put(ChatConstant.TOPIC_CONVERSATION_INFO_CONTEXT_KEY, conversationInfo);
         newContext.put(ChatConstant.TOPIC_USER_MESSAGE_ID_CONTEXT_KEY, userMessageId);
+        newContext.put(SingleChatResponseRecordingAdvisor.CONTEXT_KEY,
+                new ChatClientMessageAggregator.AggregationState());
         return newContext;
     }
 

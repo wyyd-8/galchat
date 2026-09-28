@@ -71,6 +71,23 @@ function event(controller: ReadableStreamDefaultController, type: string, conten
 }
 async function settle() { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)) }
 
+test('withdrawal HTTP request includes the expected message ID', async (t) => {
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage }
+  t.after(() => Object.assign(globalThis, original))
+  let requested = false
+  Object.assign(globalThis, { localStorage: storage(), fetch: async (url: string, init: RequestInit) => {
+    const request = new URL(String(url), 'http://localhost')
+    assert.equal(init.method, 'POST')
+    assert.equal(request.pathname, '/api/history/withdraw')
+    assert.deepEqual(Object.fromEntries(request.searchParams), { userworldid: '3', characterid: '7', expectedMessageId: '20' })
+    requested = true
+    return Response.json({ code: 1 })
+  } })
+  const { api } = await import('../api/client.ts')
+  await api.withdrawMessage(3, 7, 20)
+  assert.equal(requested, true)
+})
+
 test('withdraws a standalone care message without requiring a user message in the loaded page', async () => {
   const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
   Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
@@ -80,8 +97,9 @@ test('withdraws a standalone care message without requiring a user message in th
   let withdrawn = false
   api.history = async () => withdrawn ? [] : [{ id: 20, type: 'assistant', content: '主动关怀', userWorldId: 3, characterId: 7 }]
   api.modelApis = async () => []
-  api.withdrawMessage = async (worldId, characterId) => {
+  api.withdrawMessage = async (worldId, characterId, expectedMessageId) => {
     assert.equal(worldId, 3); assert.equal(characterId, 7)
+    assert.equal(expectedMessageId, 20)
     withdrawn = true
   }
   try {
@@ -92,6 +110,99 @@ test('withdraws a standalone care message without requiring a user message in th
     assert.deepEqual(chat.messages.value, [])
     assert.equal(chat.canWithdraw.value, false)
   } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
+test('withdraws the latest user anchor, excluding its replies and local errors', async (t) => {
+  const originalWindow = globalThis.window
+  Object.assign(globalThis, { window: { setTimeout, clearTimeout } })
+  t.after(() => { globalThis.window = originalWindow })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer) })
+  t.mock.method(api, 'modelApis', async () => [])
+  let withdrawn = false
+  t.mock.method(api, 'history', async () => withdrawn ? [] : [
+    { id: 10, type: 'assistant', content: '关怀' },
+    { id: 20, type: 'user', content: '问题' },
+    { id: 21, type: 'assistant', userMessageId: 20, content: '回复' },
+  ])
+  t.mock.method(api, 'withdrawMessage', async (worldId: number, characterId: number, expectedMessageId: number) => {
+    assert.deepEqual([worldId, characterId, expectedMessageId], [3, 7, 20])
+    withdrawn = true
+  })
+  await chat.selectCharacter(7)
+  chat.messages.value.push({ id: 'error', role: 'assistant', content: '旧错误', complete: false })
+  await chat.withdraw()
+  assert.equal(withdrawn, true)
+})
+
+test('failed history refresh after withdrawal blocks further withdrawals until a successful reload', async (t) => {
+  const originalWindow = globalThis.window
+  Object.assign(globalThis, { window: { setTimeout, clearTimeout } })
+  t.after(() => { globalThis.window = originalWindow })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer) })
+  t.mock.method(api, 'modelApis', async () => [])
+  let withdrawals = 0; let refreshFails = true
+  const older = { id: 10, type: 'user', content: '更早一轮' }
+  t.mock.method(api, 'history', async () => {
+    if (withdrawals && refreshFails) throw new Error('历史读取暂时失败')
+    return withdrawals ? [older] : [older, { id: 20, type: 'user', content: '最后一轮' },
+      { id: 21, type: 'assistant', userMessageId: 20, content: '最后一轮回复' }]
+  })
+  t.mock.method(api, 'withdrawMessage', async () => { withdrawals++ })
+  await chat.selectCharacter(7); await chat.withdraw()
+  assert.equal(chat.canWithdraw.value, false)
+  assert.ok(!chat.messages.value.some(message => message.historyId === 20 || message.userMessageId === 20))
+  assert.match(notice.title + notice.message, /加载失败|刷新失败/)
+  await chat.withdraw()
+  assert.equal(withdrawals, 1)
+  refreshFails = false
+  await chat.selectCharacter(7)
+  assert.equal(chat.canWithdraw.value, true)
+})
+
+test('a rejected stale withdrawal refreshes the target before the next attempt', async (t) => {
+  const originalWindow = globalThis.window
+  Object.assign(globalThis, { window: { setTimeout, clearTimeout } })
+  t.after(() => { globalThis.window = originalWindow })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer) })
+  t.mock.method(api, 'modelApis', async () => [])
+  let stale = true
+  t.mock.method(api, 'history', async () => [{ id: stale ? 20 : 30, type: 'user', content: '问题' }])
+  const targets: number[] = []
+  t.mock.method(api, 'withdrawMessage', async (_world: number, _character: number, expectedMessageId: number) => {
+    targets.push(expectedMessageId)
+    if (stale) { stale = false; throw new Error('聊天记录已变化，请刷新后重试') }
+  })
+  await chat.selectCharacter(7); await chat.withdraw()
+  assert.deepEqual(chat.messages.value.map(message => message.historyId), [30])
+  assert.match(notice.message, /聊天记录已变化/)
+  await chat.withdraw()
+  assert.deepEqual(targets, [20, 30])
+})
+
+for (const persisted of [false, true]) test(`expired resume recovers only an unsaved draft (persisted=${persisted})`, async (t) => {
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout },
+    fetch: async (_url: string, init: RequestInit) => {
+      if (init.method === 'POST') throw new TypeError('Failed to fetch')
+      return new Response('data: {"type":"generation.expired"}\n\n')
+    },
+  })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer); Object.assign(globalThis, original) })
+  let reads = 0
+  t.mock.method(api, 'modelApis', async () => [])
+  t.mock.method(api, 'history', async () => ++reads > 1 && persisted
+    ? [{ id: 20, type: 'user', content: '不能丢失的长消息' }] : [])
+  await chat.selectCharacter(7); chat.input.value = '不能丢失的长消息'; await chat.send()
+  assert.equal(chat.input.value, persisted ? '' : '不能丢失的长消息')
+  assert.equal(sessionStorage.length, 0)
 })
 
 for (const fails of [false, true]) test(`withdrawal discards stale care responses and catches up afterward (fails=${fails})`, async () => {
@@ -146,7 +257,7 @@ for (const fails of [false, true]) test(`withdrawal discards stale care response
   }
 })
 
-test('a linked assistant reply or a local error alone cannot enable withdrawal', async () => {
+test('linked replies, local errors and unpersisted user messages cannot enable withdrawal', async () => {
   const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
   Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage() })
   const { api, chat, app } = await mountDirectChat()
@@ -156,6 +267,7 @@ test('a linked assistant reply or a local error alone cannot enable withdrawal',
   try {
     await chat.selectCharacter(7)
     chat.messages.value.push({ id: 'local-error', role: 'assistant', content: '生成失败', complete: false })
+    chat.messages.value.push({ id: 'local-user', role: 'user', content: '未保存的输入' })
     assert.equal(chat.canWithdraw.value, false)
   } finally { app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
 })

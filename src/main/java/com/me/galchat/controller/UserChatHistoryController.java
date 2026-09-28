@@ -50,9 +50,10 @@ public class UserChatHistoryController {
 
     @PostMapping("/withdraw")
     public Result withdrawLatestUserMessage(@RequestParam("userworldid") Long userWorldId,
-                                            @RequestParam("characterid") Long characterId) {
+                                            @RequestParam("characterid") Long characterId,
+                                            @RequestParam("expectedMessageId") Long expectedMessageId) {
         checkRequest(userWorldId, characterId);
-        userChatHistoryService.withdrawLatestUserMessage(userWorldId, characterId);
+        userChatHistoryService.withdrawLatestUserMessage(userWorldId, characterId, expectedMessageId);
         return Result.success();
     }
 

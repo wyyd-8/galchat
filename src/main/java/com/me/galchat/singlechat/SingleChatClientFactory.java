@@ -3,6 +3,7 @@ package com.me.galchat.singlechat;
 import com.me.galchat.memory.TopicAwareMessageChatMemoryAdvisor;
 import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.memory.UserChatMemory;
+import com.me.galchat.memory.SingleChatResponseRecordingAdvisor;
 import com.me.galchat.tool.RecordingToolCallingManager;
 import com.me.galchat.tool.TrpgRunMemoryTools;
 import com.me.galchat.tool.UserCharacterFavorTools;
@@ -56,6 +57,7 @@ public class SingleChatClientFactory {
                 .defaultAdvisors(TopicAwareMessageChatMemoryAdvisor.builder(
                         chatMemory, topicBoundaryService, mutiSearchService).build())
                 .defaultAdvisors(toolAdvisor)
+                .defaultAdvisors(new SingleChatResponseRecordingAdvisor(toolAdvisor.getOrder() + 1))
                 .defaultTools(vectorTools, userCharacterFavorTools,
                         userCharacterInfoTools, trpgRunMemoryTools)
                 .build();

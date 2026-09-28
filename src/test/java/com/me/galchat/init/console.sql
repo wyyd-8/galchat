@@ -148,7 +148,7 @@ CREATE INDEX idx_user_chat_tool_call_tool_call_id
     ON user_chat_tool_call (tool_call_id);
 
 CREATE UNIQUE INDEX uk_tool_call_id
-    ON user_chat_tool_call (tool_call_id);
+    ON user_chat_tool_call (user_message_id, tool_call_id);
 
 CREATE TABLE coc_module (
     id BIGSERIAL PRIMARY KEY,

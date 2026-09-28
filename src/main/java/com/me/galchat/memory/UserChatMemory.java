@@ -263,7 +263,7 @@ public class UserChatMemory implements ChatMemory {
         }
 
         if (message instanceof AssistantMessage assistantMessage) {
-            if (userChatToolCallMapper != null && assistantMessage.hasToolCalls() && !hasNewToolCall(assistantMessage)) {
+            if (userChatToolCallMapper != null && assistantMessage.hasToolCalls() && !hasNewToolCall(userMessageId, assistantMessage)) {
                 return;
             }
             int stepNo = nextStepNo(userMessageId);
@@ -405,7 +405,7 @@ public class UserChatMemory implements ChatMemory {
         }
 
         for (AssistantMessage.ToolCall toolCall : assistantMessage.getToolCalls()) {
-            if (!StringUtils.hasText(toolCall.id()) || hasToolCall(toolCall.id())) {
+            if (!StringUtils.hasText(toolCall.id()) || hasToolCall(userMessageId, toolCall.id())) {
                 continue;
             }
             UserChatToolCall userChatToolCall = new UserChatToolCall()
@@ -846,23 +846,26 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 判断指定 tool_call id 是否已经保存。
+     * 判断当前用户消息下指定 tool_call id 是否已经保存，模型提供的 ID 不保证跨轮次唯一。
      *
+     * @param userMessageId 当前用户消息 id
      * @param toolCallId 模型返回的 tool_call id
      * @return true 表示已存在
      */
-    private boolean hasToolCall(String toolCallId) {
+    private boolean hasToolCall(Long userMessageId, String toolCallId) {
         return userChatToolCallMapper.selectCount(new LambdaQueryWrapper<UserChatToolCall>()
+                .eq(UserChatToolCall::getUserMessageId, userMessageId)
                 .eq(UserChatToolCall::getToolCallId, toolCallId)) > 0;
     }
 
     /**
      * 判断 assistant 消息里是否包含尚未保存的新 tool_call。
      *
+     * @param userMessageId 当前用户消息 id
      * @param assistantMessage assistant 消息
      * @return true 表示至少有一个新 tool_call
      */
-    private boolean hasNewToolCall(AssistantMessage assistantMessage) {
+    private boolean hasNewToolCall(Long userMessageId, AssistantMessage assistantMessage) {
         if (userChatToolCallMapper == null || CollectionUtils.isEmpty(assistantMessage.getToolCalls())) {
             return false;
         }
@@ -870,7 +873,7 @@ public class UserChatMemory implements ChatMemory {
                 .stream()
                 .map(AssistantMessage.ToolCall::id)
                 .filter(StringUtils::hasText)
-                .anyMatch(toolCallId -> !hasToolCall(toolCallId));
+                .anyMatch(toolCallId -> !hasToolCall(userMessageId, toolCallId));
     }
 
     /**

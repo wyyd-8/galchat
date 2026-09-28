@@ -1,6 +1,7 @@
 package com.me.galchat.memory;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.me.galchat.constant.ChatConstant;
 import com.me.galchat.domain.po.ConversationInfo;
@@ -38,6 +39,48 @@ class UserChatMemoryTest {
     static void initMybatisPlusTableInfo() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserChatHistory.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserChatThinkingHistory.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserChatToolCall.class);
+    }
+
+    @Test
+    void repeatedToolIdsAreSavedInDifferentRoundsButDeduplicatedWithinEachRound() {
+        UserChatHistoryMapper historyMapper = mock(UserChatHistoryMapper.class);
+        UserChatToolCallMapper toolCallMapper = mock(UserChatToolCallMapper.class);
+        List<UserChatToolCall> savedCalls = new ArrayList<>();
+        List<UserChatHistory> savedReplies = new ArrayList<>();
+        when(historyMapper.selectList(any())).thenReturn(List.of());
+        // Simulate the database lookup using the actual predicates emitted by memory.
+        when(toolCallMapper.selectCount(any())).thenAnswer(invocation -> {
+            LambdaQueryWrapper<UserChatToolCall> query = invocation.getArgument(0);
+            String sql = query.getSqlSegment();
+            var parameters = query.getParamNameValuePairs().values();
+            return savedCalls.stream()
+                    .filter(call -> parameters.contains(call.getToolCallId()))
+                    .filter(call -> !sql.contains("user_message_id") || parameters.contains(call.getUserMessageId()))
+                    .count();
+        });
+        when(toolCallMapper.insert(any(UserChatToolCall.class))).thenAnswer(invocation -> {
+            savedCalls.add(invocation.getArgument(0));
+            return 1;
+        });
+        when(historyMapper.insert(any(UserChatHistory.class))).thenAnswer(invocation -> {
+            savedReplies.add(invocation.getArgument(0));
+            return 1;
+        });
+        UserChatMemory memory = UserChatMemory.builder(historyMapper).toolCallMapper(toolCallMapper).build();
+        AssistantMessage message = AssistantMessage.builder()
+                .content("正在查找资料")
+                .toolCalls(List.of(new AssistantMessage.ToolCall("functions.searchInfo:0", "function", "searchInfo", "{}")))
+                .build();
+
+        memory.saveAssistantMessages(new ConversationInfo(1L, 2L, null), 10L, List.of(message));
+        memory.saveAssistantMessages(new ConversationInfo(3L, 4L, null), 20L, List.of(message));
+        memory.saveAssistantMessages(new ConversationInfo(3L, 4L, null), 20L, List.of(message));
+
+        assertThat(savedCalls).extracting(UserChatToolCall::getUserMessageId).containsExactly(10L, 20L);
+        assertThat(savedCalls).extracting(UserChatToolCall::getToolCallId)
+                .containsExactly("functions.searchInfo:0", "functions.searchInfo:0");
+        assertThat(savedReplies).extracting(UserChatHistory::getUserMessageId).containsExactly(10L, 20L);
     }
 
     @Test

@@ -183,6 +183,80 @@ test('a rejected send preserves the server error and draft without resuming a no
   } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
 })
 
+test('a rejected background send restores its own draft without changing the active character draft', async () => {
+  const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  let rejectSend!: () => void
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout },
+    fetch: async () => new Promise<Response>(resolve => {
+      rejectSend = () => resolve(Response.json({ code: 0, msg: '当前会话正在生成回复' }))
+    }),
+  })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis }
+  api.history = async () => []; api.modelApis = async () => []
+  try {
+    await chat.selectCharacter(7)
+    chat.input.value = '发送给 A 的原文'
+    const sending = chat.send(); await settle()
+    await chat.selectCharacter(8)
+    chat.input.value = '留给 B 的草稿'
+    rejectSend(); await sending
+    assert.equal(chat.input.value, '留给 B 的草稿')
+    await chat.selectCharacter(7)
+    assert.equal(chat.input.value, '发送给 A 的原文')
+    assert.deepEqual(chat.messages.value, [])
+    assert.equal(chat.loading.sending, false)
+    assert.equal(sessionStorage.length, 0)
+    await chat.selectCharacter(8)
+    assert.equal(chat.input.value, '留给 B 的草稿')
+  } finally { rejectSend?.(); app.unmount(); clearTimeout(notice.timer); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
+for (const modelState of ['failed', 'pending'] as const) test(`history loads independently when the model list is ${modelState}`, async () => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  const old = { history: api.history, modelApis: api.modelApis }
+  let finishModels: (() => void) | undefined
+  api.history = async () => [{ id: 10, type: 'user', content: '已有聊天记录' }]
+  api.modelApis = () => modelState === 'failed'
+    ? Promise.reject(new Error('模型列表暂时不可用'))
+    : new Promise(resolve => { finishModels = () => resolve([]) })
+  let selection: Promise<void> | undefined
+  try {
+    selection = chat.selectCharacter(7); await settle()
+    assert.deepEqual(chat.messages.value.map(message => message.content), ['已有聊天记录'])
+    assert.equal(chat.loading.history, false)
+    assert.equal(chat.canWithdraw.value, true)
+    if (modelState === 'failed') assert.match(notice.message, /模型列表/)
+  } finally {
+    finishModels?.(); await selection; app.unmount(); clearTimeout(notice.timer)
+    Object.assign(api, old); Object.assign(globalThis, original)
+  }
+})
+
+test('loading older history does not discard a pending model list', async () => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage() })
+  const { api, chat, app } = await mountDirectChat()
+  const old = { history: api.history, modelApis: api.modelApis }
+  const models = [{ id: 5, name: '测试模型', baseUrl: 'https://example.com', modelName: 'test', requestOverrides: {},
+    apiKeyHint: '****', status: 'UNTESTED', chatCapability: 'UNKNOWN', streamingCapability: 'UNKNOWN',
+    toolCallingCapability: 'UNKNOWN', reasoningOutputStatus: 'UNKNOWN' }] satisfies Awaited<ReturnType<typeof api.modelApis>>
+  let finishModels!: () => void
+  api.modelApis = () => new Promise(resolve => { finishModels = () => resolve(models) })
+  api.history = async (_world, _character, _size, before) => before ? []
+    : Array.from({ length: 30 }, (_, index) => ({ id: index + 10, type: 'user', content: '消息' }))
+  try {
+    await chat.selectCharacter(7)
+    await chat.loadEarlier()
+    finishModels(); await settle()
+    assert.deepEqual(chat.modelApis.value, models)
+  } finally { finishModels?.(); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
 test('keeps concurrent character replies, errors and sending flags in their own conversations', async () => {
   const requests: Array<{ controller: ReadableStreamDefaultController; payload: any }> = []
   const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }

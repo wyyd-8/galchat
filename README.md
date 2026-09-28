@@ -263,6 +263,13 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
 
 模组与用户世界数据按需导入，不随建表自动创建。《古树林中》的当前导入 SQL 已包含七个时间场景及最终场景主持说明。历史武器修正和跑团重置属于旧数据维护，不参与空库初始化。已有数据库升级需备份后对照当前结构处理，不要重跑 `console.sql`。单聊事件来源关联需要在部署新版后端前执行 [`20260928-user-event-source.sql`](data/migrations/20260928-user-event-source.sql)；历史事件保留为空来源，不做推测性回填。
 
+单聊工具调用去重范围改为 `(user_message_id, tool_call_id)`。已有数据库需在部署对应后端前执行以下迁移；脚本在事务内重建索引，不修改历史记录，可重复执行。新建数据库使用上面的 `console.sql` 即可。
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f data/migrations/20260928-single-chat-tool-call-scope.sql
+```
+
 ### 2. 准备 Redis、Ollama 和后端配置
 
 启动 Redis 与 Ollama，拉取 embedding 模型：

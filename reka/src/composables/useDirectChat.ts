@@ -35,7 +35,7 @@ export function useDirectChat(context: DirectChatContext) {
     return reactive({ world, characterId, messages: [] as DirectMessage[], modelApis: [] as ModelApi[],
       loading: { history: false, sending: false, withdrawing: false, model: false },
       hasOlder: false, generation: null as Generation | null,
-      controller: null as AbortController | null, historyRevision: 0 })
+      controller: null as AbortController | null, historyRevision: 0, modelListRevision: 0 })
   }
   type State = ReturnType<typeof freshState>
   const states = new Map<string, State>()
@@ -161,9 +161,17 @@ export function useDirectChat(context: DirectChatContext) {
     const revision = ++state.historyRevision; const ownEpoch = epoch
     const messagesAtStart = new Set(state.messages)
     state.loading.history = true
+    const valid = () => !disposed && ownEpoch === epoch && revision === state.historyRevision
+    const modelRevision = ++state.modelListRevision
+    const validModels = () => !disposed && ownEpoch === epoch && modelRevision === state.modelListRevision
+    void api.modelApis().then(models => {
+      if (validModels()) state.modelApis = models
+    }).catch(error => {
+      if (validModels()) notifyFor(state, '模型列表加载失败', errorMessage(error))
+    })
     try {
-      const [history, models] = await Promise.all([api.history(state.world!.id, state.characterId), api.modelApis()])
-      if (disposed || ownEpoch !== epoch || revision !== state.historyRevision) return
+      const history = await api.history(state.world!.id, state.characterId)
+      if (!valid()) return
       const errors = state.messages.filter(message => message.complete === false)
       const hasOlder = hasOlderHistory(history)
       const boundary = Math.min(...history.flatMap(item => item.id == null ? [] : [item.id]))
@@ -175,7 +183,6 @@ export function useDirectChat(context: DirectChatContext) {
         && message.role === 'assistant' && message.historyId != null && message.userMessageId == null)
       state.messages = [...older, ...historyMessages(history), ...errors]
       arrivedCare.forEach(message => insertCareMessage(state.messages, message))
-      state.modelApis = models
       // Retained pages own the oldest cursor, including an already exhausted one.
       if (!older.length) state.hasOlder = hasOlder
     } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '单聊记录加载失败', errorMessage(error)) }
@@ -229,7 +236,7 @@ export function useDirectChat(context: DirectChatContext) {
   function invalidateWorld(worldId: number, characterId?: number) {
     for (const [key, state] of states) {
       if (state.world?.id !== worldId || (characterId != null && state.characterId !== characterId)) continue
-      state.controller?.abort(); state.generation = null; state.historyRevision++
+      state.controller?.abort(); state.generation = null; state.historyRevision++; state.modelListRevision++
       remember(state, null); states.delete(key)
       if (active.value === state) close()
     }
@@ -380,7 +387,7 @@ export function useDirectChat(context: DirectChatContext) {
         if (payload && error instanceof GenerationStartRejected) {
           remember(state, null); state.generation = null
           state.messages = [...generation.base, ...generation.following]
-          if (isActive(state) && !input.value) input.value = payload.message
+          chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: payload.message })
           notifyFor(state, '单聊消息发送失败', errorMessage(error))
         } else notifyFor(state, '单聊连接中断', `${errorMessage(error)}。重新进入此单聊可继续恢复。`)
       }

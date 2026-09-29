@@ -6,6 +6,8 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupContextSummaryMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.service.ITrpgRedisStateService;
+import com.me.galchat.utils.RedisAfterCommitCleanup;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import java.time.LocalDateTime;
@@ -20,6 +22,7 @@ public class GroupConversationLifecycleService {
     private final GroupContextSummaryMapper summaryMapper;
     private final GroupTurnRecoveryService recoveryService;
     private final TransactionTemplate transactionTemplate;
+    private final ITrpgRedisStateService redisStateService;
 
     public GroupConversationLifecycleService(GroupConversationService conversationService,
                                              GroupConversationLockService lockService,
@@ -27,7 +30,8 @@ public class GroupConversationLifecycleService {
                                              GroupReplyPlanService replyPlanService,
                                              GroupContextSummaryMapper summaryMapper,
                                              GroupTurnRecoveryService recoveryService,
-                                             TransactionTemplate transactionTemplate) {
+                                             TransactionTemplate transactionTemplate,
+                                             ITrpgRedisStateService redisStateService) {
         this.conversationService = conversationService;
         this.lockService = lockService;
         this.conversationMapper = conversationMapper;
@@ -35,6 +39,7 @@ public class GroupConversationLifecycleService {
         this.summaryMapper = summaryMapper;
         this.recoveryService = recoveryService;
         this.transactionTemplate = transactionTemplate;
+        this.redisStateService = redisStateService;
     }
 
     public GroupConversation close(Long conversationId) {
@@ -74,6 +79,7 @@ public class GroupConversationLifecycleService {
         replyPlanService.clearConversationPlans(conversation);
         conversation.setSummary(summary).setStatus(GroupChatConstant.STATUS_CLOSED).setClosedAt(now).setUpdatedAt(now);
         conversationMapper.updateById(conversation);
+        clearTrpgStateAfterCommit(conversation);
     }
 
     private void requireActive(GroupConversation conversation) {
@@ -101,7 +107,16 @@ public class GroupConversationLifecycleService {
                 .setClosedAt(now)
                 .setUpdatedAt(now);
         conversationMapper.updateById(conversation);
+        clearTrpgStateAfterCommit(conversation);
         return conversation;
+    }
+
+    private void clearTrpgStateAfterCommit(GroupConversation conversation) {
+        if (GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) {
+            Long conversationId = conversation.getId();
+            RedisAfterCommitCleanup.run("结束跑团 " + conversationId,
+                    () -> redisStateService.clear(conversationId));
+        }
     }
 
 }

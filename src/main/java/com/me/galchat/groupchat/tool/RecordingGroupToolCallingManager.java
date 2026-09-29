@@ -89,7 +89,9 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
             throw new UserRequestException(
                     "枪械攻击工具已自动更新武器状态，不能在同一裁定步骤重复覆盖");
         }
-        if (diceToolCount == 1 || clarification) {
+        if (diceToolCount == 1 || clarification
+                || toolNames.contains("purchaseEquipment")
+                || toolNames.contains("showMaterial")) {
             return transactionTemplate.execute(status ->
                     executeAndRecord(prompt, response, replyStepId));
         }

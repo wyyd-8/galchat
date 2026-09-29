@@ -1210,8 +1210,7 @@ class TrpgCombatLifecycleServiceTest {
                 .setRestrainedByCharacterId(72L)
                 .setMeleeAttackedThisRound(true);
         when(characterMapper.selectList(any())).thenReturn(List.of(card));
-        when(characterMapper.updateById(any(CocCharacter.class)))
-                .thenReturn(1);
+        var writes = com.me.galchat.support.CocCharacterSqlTestSupport.assertUpdatesClearRestraint(characterMapper);
         var participants = JsonMapper.builder().build().createArrayNode();
         participants.addObject().put("characterId", 71L);
 
@@ -1222,8 +1221,8 @@ class TrpgCombatLifecycleServiceTest {
         assertThat(card.getCoverActionForfeitPending()).isFalse();
         assertThat(card.getStunnedRemainingRounds()).isZero();
         assertThat(card.getRestrainedByCharacterId()).isNull();
+        assertThat(writes.get()).isEqualTo(1);
         assertThat(card.getMeleeAttackedThisRound()).isFalse();
-        verify(characterMapper).updateById(card);
     }
 
     private CocCharacter card(

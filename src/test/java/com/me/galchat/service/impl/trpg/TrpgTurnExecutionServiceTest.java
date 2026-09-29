@@ -968,9 +968,9 @@ class TrpgTurnExecutionServiceTest {
                         GroupChatConstant.STATUS_COMPLETED);
         var stepCaptor = org.mockito.ArgumentCaptor.forClass(
                 GroupChatReplyStep.class);
-        verify(stepMapper)
+        verify(stepMapper, org.mockito.Mockito.times(2))
                 .insert(stepCaptor.capture());
-        assertThat(stepCaptor.getValue())
+        assertThat(stepCaptor.getAllValues().getFirst())
                 .extracting(
                         GroupChatReplyStep::getActionType,
                         GroupChatReplyStep::getSpeakerType,
@@ -981,6 +981,8 @@ class TrpgTurnExecutionServiceTest {
                         GroupChatConstant.ACTOR_KP,
                         null,
                         GroupChatConstant.STATUS_PENDING);
+        assertThat(stepCaptor.getAllValues().getLast().getActionType())
+                .isEqualTo(GroupChatConstant.ACTION_TRPG_TURN_FINALIZE);
     }
 
     @Test
@@ -1080,9 +1082,11 @@ class TrpgTurnExecutionServiceTest {
         service.continueTurn(7L, new GroupTurnContinueDTO())
                 .collectList().block();
 
-        assertThat(insertedSteps).hasSize(25);
+        assertThat(insertedSteps).hasSize(26);
         assertThat(insertedSteps.getFirst().getActionType())
                 .isEqualTo(GroupChatConstant.ACTION_COMBAT_INTRO);
+        assertThat(insertedSteps.getLast().getActionType())
+                .isEqualTo(GroupChatConstant.ACTION_TRPG_TURN_FINALIZE);
     }
 
     @Test

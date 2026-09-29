@@ -217,6 +217,7 @@ public class GroupTurnRecoveryService {
             GroupChatReplyStep step) {
         return GroupChatConstant.ACTION_TRPG_SUMMARY.equals(step.getActionType())
                 || GroupChatConstant.ACTION_TRPG_RUN_SCENE_CLOSE.equals(step.getActionType())
+                || GroupChatConstant.ACTION_TRPG_TURN_FINALIZE.equals(step.getActionType())
                 || GroupChatConstant.ACTION_TRPG_SCENE.equals(
                 step.getActionType())
                 || GroupChatConstant.ACTION_TRPG_COMBAT.equals(

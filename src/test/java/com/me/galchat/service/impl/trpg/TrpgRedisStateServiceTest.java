@@ -124,7 +124,15 @@ class TrpgRedisStateServiceTest {
                 "user:401");
         verify(valueOperations).set(
                 RedisConstant.TRPG_SCENE_PROGRESS_PREFIX + "51:301:finish",
-                "1", TrpgRedisStateService.TRANSIENT_TTL);
+                "1");
+        verify(valueOperations).set(
+                RedisConstant.TRPG_SCENE_SELECTION_PREFIX + "51:active", "77");
+        verify(redisTemplate, org.mockito.Mockito.never()).expire(
+                org.mockito.ArgumentMatchers.startsWith(RedisConstant.TRPG_SCENE_SELECTION_PREFIX),
+                any(java.time.Duration.class));
+        verify(redisTemplate, org.mockito.Mockito.never()).expire(
+                org.mockito.ArgumentMatchers.startsWith(RedisConstant.TRPG_SCENE_PROGRESS_PREFIX),
+                any(java.time.Duration.class));
     }
 
     @Test
@@ -145,5 +153,33 @@ class TrpgRedisStateServiceTest {
                 RedisConstant.TRPG_SCENE_SELECTION_PREFIX + "51:active",
                 RedisConstant.TRPG_CONTEXT_WINDOW_PREFIX + "51",
                 RedisConstant.TRPG_TURN_DIRECTION_PREFIX + "51"));
+    }
+
+    @Test
+    void endingOneRunDoesNotDeleteAnotherRunsSceneWithTheSameNumericId() {
+        var keys = new java.util.LinkedHashSet<>(List.of(
+                "trpg:group:scene-progress:7:20:finish",
+                "trpg:group:scene-selection:7:9:choices",
+                "trpg:group:proposal-order:7:state",
+                "trpg:group:scene-progress:17:7:finish",
+                "trpg:group:scene-selection:17:7:options"));
+        when(redisTemplate.scan(any())).thenAnswer(call -> {
+            String pattern = call.<org.springframework.data.redis.core.ScanOptions>getArgument(0).getPattern();
+            var matching = keys.stream().filter(key ->
+                    org.springframework.util.PatternMatchUtils.simpleMatch(pattern, key)).toList().iterator();
+            Cursor<String> scan = org.mockito.Mockito.mock(Cursor.class);
+            when(scan.hasNext()).thenAnswer(ignored -> matching.hasNext());
+            when(scan.next()).thenAnswer(ignored -> matching.next());
+            return scan;
+        });
+        when(redisTemplate.delete(any(java.util.Collection.class))).thenAnswer(call -> {
+            keys.removeAll(call.getArgument(0));
+            return 1L;
+        });
+
+        service.clear(7L);
+
+        assertThat(keys).containsExactlyInAnyOrder(
+                "trpg:group:scene-progress:17:7:finish", "trpg:group:scene-selection:17:7:options");
     }
 }

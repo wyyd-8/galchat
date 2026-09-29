@@ -99,8 +99,9 @@ class RecordingGroupToolCallingManagerTest {
                 org.mockito.ArgumentMatchers.any());
     }
 
-    @Test
-    void diceToolExecutionAndRecordingUseOneTransaction() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"requestCheck", "showMaterial", "purchaseEquipment"})
+    void recoverableToolExecutionAndRecordingUseOneTransaction(String toolName) {
         ToolCallingManager delegate = mock(ToolCallingManager.class);
         GroupToolCallStore store = mock(GroupToolCallStore.class);
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
@@ -108,7 +109,7 @@ class RecordingGroupToolCallingManagerTest {
                 delegate, store, transactionTemplate);
         Prompt prompt = prompt(Map.of(
                 ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L));
-        ChatResponse response = responseWithCalls("requestCheck");
+        ChatResponse response = responseWithCalls(toolName);
         ToolExecutionResult result = mock(ToolExecutionResult.class);
         when(delegate.executeToolCalls(prompt, response)).thenReturn(result);
         when(transactionTemplate.execute(any())).thenAnswer(invocation ->
@@ -122,6 +123,43 @@ class RecordingGroupToolCallingManagerTest {
         order.verify(delegate).executeToolCalls(prompt, response);
         order.verify(store).saveExecution(41L, response, result);
         verify(transactionTemplate).execute(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"purchaseEquipment,false", "purchaseEquipment,true", "showMaterial,false", "showMaterial,true"})
+    void toolEffectAndRecordShareCommitWithoutAdvancingCheckpoint(String toolName, boolean recordFails) {
+        var mapper = mock(com.me.galchat.mapper.GroupChatToolCallMapper.class);
+        var checkpoints = mock(GroupTurnCheckpointService.class);
+        var store = new GroupToolCallStore(mapper, tools.jackson.databind.json.JsonMapper.builder().build(), checkpoints);
+        List<String> events = new java.util.ArrayList<>();
+        var tx = new TransactionTemplate(new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+            @Override protected Object doGetTransaction() { return new Object(); }
+            @Override protected void doBegin(Object t, org.springframework.transaction.TransactionDefinition d) { events.add("begin"); }
+            @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus s) { events.add("commit"); }
+            @Override protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus s) { events.add("rollback"); }
+        });
+        ToolCallingManager delegate = mock(ToolCallingManager.class);
+        Prompt prompt = prompt(Map.of(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L));
+        ChatResponse response = responseWithCalls(toolName);
+        String callId = response.getResult().getOutput().getToolCalls().getFirst().id();
+        var result = mock(ToolExecutionResult.class);
+        when(result.conversationHistory()).thenReturn(List.of(org.springframework.ai.chat.messages.ToolResponseMessage.builder()
+                .responses(List.of(new org.springframework.ai.chat.messages.ToolResponseMessage.ToolResponse(callId, toolName, "{\"entries\":[],\"undo\":[]}"))).build()));
+        when(delegate.executeToolCalls(prompt, response)).thenAnswer(i -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            events.add("effect"); return result;
+        });
+        when(mapper.insert(any(com.me.galchat.domain.po.GroupChatToolCall.class))).thenAnswer(i -> {
+            events.add("record");
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            if (recordFails) throw new IllegalStateException("record failed");
+            i.<com.me.galchat.domain.po.GroupChatToolCall>getArgument(0).setId(9L); return 1;
+        });
+        var manager = new RecordingGroupToolCallingManager(delegate, store, tx);
+        if (recordFails) assertThatThrownBy(() -> manager.executeToolCalls(prompt, response)).hasMessage("record failed");
+        else assertThat(manager.executeToolCalls(prompt, response)).isSameAs(result);
+        assertThat(events).containsExactly("begin", "effect", "record", recordFails ? "rollback" : "commit");
+        verifyNoInteractions(checkpoints);
     }
 
     @Test

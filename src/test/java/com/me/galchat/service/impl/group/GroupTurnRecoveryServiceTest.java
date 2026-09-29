@@ -48,7 +48,7 @@ class GroupTurnRecoveryServiceTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"trpg_scene_action", "trpg_summary", "trpg_run_scene_close"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"trpg_scene_action", "trpg_summary", "trpg_run_scene_close", "trpg_turn_finalize"})
     void recoveryBlocksTailAfterInterruptedRetryableStep(String actionType) {
         GroupChatTurnMapper turnMapper =
                 mock(GroupChatTurnMapper.class);

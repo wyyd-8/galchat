@@ -22,8 +22,9 @@ import static org.mockito.Mockito.when;
 
 class TrpgMaterialServiceTest {
 
-    @Test
-    void showMaterialPersistsRecoverableMaterialMessageByExactName() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void survivingMessageDecidesWhetherStaleRedisFlagSuppressesDisplay(boolean hasSurvivingMessage) {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         CocModuleMaterialMapper materialMapper =
@@ -64,9 +65,21 @@ class TrpgMaterialServiceTest {
             return 1;
         }).when(messageMapper).insert(any(GroupChatMessage.class));
 
+        when(stateStore.isShown(7L, 31L)).thenReturn(true);
+        if (hasSurvivingMessage) {
+            when(messageMapper.selectList(any())).thenReturn(List.of(new GroupChatMessage()
+                    .setContent("{\"materialId\":31}")));
+        }
+
         var result = service.showMaterial(
                 7L, 41L, " 玛德琳的信 ");
 
+        if (hasSurvivingMessage) {
+            assertThat(result.shown()).isFalse();
+            org.mockito.Mockito.verify(messageMapper, org.mockito.Mockito.never()).insert(any(GroupChatMessage.class));
+            verify(stateStore).markShown(7L, 31L);
+            return;
+        }
         assertThat(result.shown()).isTrue();
         assertThat(result.message().getSceneId()).isEqualTo(21L);
         assertThat(result.message().getMessageKind())

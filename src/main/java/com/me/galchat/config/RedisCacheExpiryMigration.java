@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 
-/** Upgrade existing cache entries only; queues, locks and topic boundaries are business state. */
+/** Upgrade cache deadlines and remove obsolete deadlines from durable TRPG workflow state. */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -24,6 +24,8 @@ public class RedisCacheExpiryMigration implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         try {
+            persistMatching(RedisConstant.TRPG_SCENE_PROGRESS_PREFIX + "*");
+            persistMatching(RedisConstant.TRPG_SCENE_SELECTION_PREFIX + "*");
             RedisCacheExpiry.ensure(redis, RedisConstant.WORLD_USER_AUTH_KEY, RedisConstant.WORLD_USER_AUTH_TTL);
             RedisCacheExpiry.ensure(redis, RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
                     RedisConstant.USER_CHARACTER_FAVOR_VALUE_TTL);
@@ -33,7 +35,14 @@ public class RedisCacheExpiryMigration implements ApplicationRunner {
             expireMatching(cacheConfiguration.getKeyPrefixFor("characterTemplate") + "*", templateTtl);
             expireMatching(cacheConfiguration.getKeyPrefixFor("worldPrompt") + "*", templateTtl);
         } catch (RuntimeException error) {
-            log.warn("旧 Redis 缓存过期时间补齐失败，下次启动时重试", error);
+            log.warn("Redis 键过期策略迁移失败，下次启动时重试", error);
+        }
+    }
+
+    private void persistMatching(String pattern) {
+        try (var keys = redis.scan(ScanOptions.scanOptions().match(pattern)
+                .count(RedisConstant.REDIS_SCAN_COUNT).build())) {
+            while (keys.hasNext()) redis.persist(keys.next());
         }
     }
 

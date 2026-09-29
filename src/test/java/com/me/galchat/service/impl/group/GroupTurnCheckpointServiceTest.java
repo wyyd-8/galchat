@@ -134,7 +134,9 @@ class GroupTurnCheckpointServiceTest {
                         mock(com.me.galchat.groupchat.dice
                                 .DiceRollMessageCodec.class),
                         mock(ICharacterCardService.class),
-                        JsonMapper.builder().build(), mock(GroupChatFavorRollbackService.class));
+                        JsonMapper.builder().build(), mock(GroupChatFavorRollbackService.class),
+                        mock(com.me.galchat.service.impl.trpg.TrpgEquipmentService.class),
+                        mock(com.me.galchat.service.impl.trpg.TrpgMaterialRecoveryService.class));
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(101L)
                 .setConversationId(7L)
@@ -450,7 +452,9 @@ class GroupTurnCheckpointServiceTest {
                         diceRollSummaryMapper,
                         codec,
                         characterCardService,
-                        JsonMapper.builder().build(), mock(GroupChatFavorRollbackService.class));
+                        JsonMapper.builder().build(), mock(GroupChatFavorRollbackService.class),
+                        mock(com.me.galchat.service.impl.trpg.TrpgEquipmentService.class),
+                        mock(com.me.galchat.service.impl.trpg.TrpgMaterialRecoveryService.class));
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(101L)
                 .setConversationId(7L)

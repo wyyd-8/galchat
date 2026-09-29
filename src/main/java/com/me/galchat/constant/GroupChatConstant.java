@@ -4,6 +4,7 @@ public final class GroupChatConstant {
     public static final String TURN_SOURCE_SUMMARY = "summary";
     public static final String ACTION_TRPG_SUMMARY = "trpg_summary";
     public static final String ACTION_TRPG_RUN_SCENE_CLOSE = "trpg_run_scene_close";
+    public static final String ACTION_TRPG_TURN_FINALIZE = "trpg_turn_finalize";
 
     private GroupChatConstant() {
     }

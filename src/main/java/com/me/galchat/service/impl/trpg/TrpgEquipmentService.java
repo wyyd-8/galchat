@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl.trpg;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.KpEquipmentDTOs;
@@ -25,6 +26,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -162,6 +164,7 @@ public class TrpgEquipmentService {
         Map<Long, CocCharacterProfile> profiles = new HashMap<>();
         List<KpEquipmentDTOs.PurchaseLineResult> results =
                 new ArrayList<>();
+        List<KpEquipmentDTOs.PurchaseUndo> undo = new ArrayList<>();
         for (ValidatedPurchase entry : validated) {
             if (entry.type() == KpEquipmentDTOs.PurchaseType.WEAPON) {
                 CocCharacterWeapon weapon = catalogWeapon(
@@ -169,20 +172,65 @@ public class TrpgEquipmentService {
                 if (weaponMapper.insert(weapon) != 1) {
                     throw new UserRequestException("武器添加失败");
                 }
+                undo.add(new KpEquipmentDTOs.PurchaseUndo(entry.character().getId(),
+                        null, null, null, weapon.getId()));
             } else {
                 CocCharacterProfile profile = profiles.computeIfAbsent(
                         entry.character().getId(), this::requireProfile);
+                String before = profile.getEquipmentText();
                 profile.setEquipmentText(appendEquipment(
                         profile.getEquipmentText(), entry.name()));
                 if (profileMapper.updateById(profile) != 1) {
                     throw new UserRequestException("物品栏更新失败");
                 }
+                undo.add(new KpEquipmentDTOs.PurchaseUndo(entry.character().getId(),
+                        profile.getId(), before, profile.getEquipmentText(), null));
             }
             results.add(new KpEquipmentDTOs.PurchaseLineResult(
                     entry.character().getName(), entry.type(),
                     entry.name()));
         }
-        return new KpEquipmentDTOs.PurchaseResult(List.copyOf(results));
+        return new KpEquipmentDTOs.PurchaseResult(List.copyOf(results), List.copyOf(undo));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void rollbackPurchase(Long runId, KpEquipmentDTOs.PurchaseResult result) {
+        if (result == null || result.entries() == null || result.undo() == null
+                || result.entries().size() != result.undo().size()) {
+            throw new IllegalStateException("购买记录缺少撤销数据，无法安全重试，请使用跑团存档回退");
+        }
+        for (KpEquipmentDTOs.PurchaseUndo undo : result.undo().reversed()) {
+            if (undo == null || undo.characterId() == null
+                    || (undo.weaponId() == null) == (undo.profileId() == null)) {
+                throw new IllegalStateException("购买撤销数据不完整，已中止重试");
+            }
+            List<CocCharacter> characters = characterMapper.selectList(
+                    new LambdaQueryWrapper<CocCharacter>()
+                            .eq(CocCharacter::getId, undo.characterId())
+                            .eq(CocCharacter::getRunId, runId).last("FOR UPDATE"));
+            if (characters.size() != 1) {
+                throw new IllegalStateException("购买记录引用的人物卡不存在，已中止重试");
+            }
+            if (undo.weaponId() != null) {
+                if (weaponMapper.delete(new LambdaQueryWrapper<CocCharacterWeapon>()
+                        .eq(CocCharacterWeapon::getId, undo.weaponId())
+                        .eq(CocCharacterWeapon::getCharacterId, undo.characterId())) != 1) {
+                    throw new IllegalStateException("购买的武器已发生变化，无法安全撤销");
+                }
+            } else {
+                CocCharacterProfile profile = requireProfile(undo.characterId());
+                if (!Objects.equals(profile.getId(), undo.profileId())
+                        || !Objects.equals(profile.getEquipmentText(), undo.equipmentAfter())) {
+                    throw new IllegalStateException("物品栏已发生变化，无法安全撤销购买");
+                }
+                // Explicit SET is required to restore an originally null inventory.
+                if (profileMapper.update(null, new LambdaUpdateWrapper<CocCharacterProfile>()
+                        .set(CocCharacterProfile::getEquipmentText, undo.equipmentBefore())
+                        .eq(CocCharacterProfile::getId, undo.profileId())) != 1) {
+                    throw new IllegalStateException("购买撤销失败");
+                }
+            }
+        }
     }
 
     private CocCharacter requireCharacter(Long runId, String name) {

@@ -13,6 +13,9 @@ import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.exception.GroupCheckpointUnavailableException;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.domain.dto.KpEquipmentDTOs;
+import com.me.galchat.service.impl.trpg.TrpgEquipmentService;
+import com.me.galchat.service.impl.trpg.TrpgMaterialRecoveryService;
 import com.me.galchat.domain.vo.KpDiceToolResult;
 import com.me.galchat.exception.TurnCheckpointUnavailableException;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
@@ -52,6 +55,8 @@ public class GroupTurnCheckpointService {
     private final ICharacterCardService characterCardService;
     private final ObjectMapper objectMapper;
     private final GroupChatFavorRollbackService chatFavorRollbackService;
+    private final TrpgEquipmentService equipmentService;
+    private final TrpgMaterialRecoveryService materialRecoveryService;
     private com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -149,7 +154,7 @@ public class GroupTurnCheckpointService {
             throw new IllegalStateException(
                     "骰点检查点缺少已提交的工具调用");
         }
-        rollbackAttributeAdjustments(
+        rollbackToolEffects(
                 turn.getConversationId(),
                 toolCallMapper.selectList(
                         new LambdaQueryWrapper<GroupChatToolCall>()
@@ -157,10 +162,12 @@ public class GroupTurnCheckpointService {
                                         step.getId())
                                 .gt(GroupChatToolCall::getId,
                                         zero(checkpoint.getToolCallId()))
-                                .eq(GroupChatToolCall::getToolName,
-                                        "adjustBasicAttributes")
+                                .in(GroupChatToolCall::getToolName,
+                                        "adjustBasicAttributes", "purchaseEquipment")
                                 .isNotNull(GroupChatToolCall::getToolResult)
                                 .orderByDesc(GroupChatToolCall::getId)));
+        materialRecoveryService.restoreAfterCheckpoint(turn.getConversationId(),
+                step.getId(), zero(checkpoint.getMessageId()));
         messageMapper.deleteAfterCheckpoint(
                 step.getId(), zero(checkpoint.getMessageId()));
         toolCallMapper.deleteAfterCheckpoint(
@@ -276,16 +283,25 @@ public class GroupTurnCheckpointService {
                                 step.getUpdatedAt()));
     }
 
-    private void rollbackAttributeAdjustments(
+    private void rollbackToolEffects(
             Long runId, List<GroupChatToolCall> calls) {
         if (calls == null || calls.isEmpty()) {
             return;
         }
         for (GroupChatToolCall call : calls) {
             String toolResult = call.getToolResult();
-            // Successful adjustments are JSON objects; tool failures are text.
+            // Successful tool effects are JSON objects; tool failures are text.
             if (toolResult == null
                     || !toolResult.stripLeading().startsWith("{")) {
+                continue;
+            }
+            if ("purchaseEquipment".equals(call.getToolName())) {
+                try {
+                    equipmentService.rollbackPurchase(runId,
+                            objectMapper.readValue(toolResult, KpEquipmentDTOs.PurchaseResult.class));
+                } catch (JacksonException exception) {
+                    throw new IllegalStateException("购买记录无法解析，已中止重试", exception);
+                }
                 continue;
             }
             KpCharacterAttributeDTOs.Result result;

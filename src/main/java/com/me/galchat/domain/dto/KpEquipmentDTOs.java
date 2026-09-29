@@ -54,6 +54,11 @@ public final class KpEquipmentDTOs {
             String name) {
     }
 
-    public record PurchaseResult(List<PurchaseLineResult> entries) {
+    /** Stored with the tool result so retry can undo only this purchase. */
+    public record PurchaseUndo(Long characterId, Long profileId,
+                               String equipmentBefore, String equipmentAfter, Long weaponId) {
+    }
+
+    public record PurchaseResult(List<PurchaseLineResult> entries, List<PurchaseUndo> undo) {
     }
 }

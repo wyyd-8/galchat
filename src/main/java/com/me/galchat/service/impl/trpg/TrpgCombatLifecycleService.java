@@ -690,7 +690,10 @@ public class TrpgCombatLifecycleService {
                     .setRestrainedByCharacterId(null)
                     .setMeleeAttackedThisRound(false)
                     .setUpdatedAt(now);
-            if (characterMapper.updateById(card) == 0) {
+            if (characterMapper.update(card,
+                    new LambdaUpdateWrapper<CocCharacter>()
+                            .eq(CocCharacter::getId, card.getId())
+                            .set(CocCharacter::getRestrainedByCharacterId, null)) == 0) {
                 throw new UserRequestException("战斗人物卡状态清理失败");
             }
         }

@@ -2,6 +2,7 @@ package com.me.galchat.service.impl.group;
 
 import com.me.galchat.domain.po.*;
 import com.me.galchat.mapper.*;
+import com.me.galchat.service.ITrpgRedisStateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
@@ -20,8 +21,9 @@ class GroupConversationLifecycleServiceTest {
     final GroupContextSummaryMapper summaries = mock(GroupContextSummaryMapper.class);
     final GroupTurnRecoveryService recovery = mock(GroupTurnRecoveryService.class);
     final TransactionTemplate transactions = mock(TransactionTemplate.class);
+    final ITrpgRedisStateService redisState = mock(ITrpgRedisStateService.class);
     final GroupConversationLifecycleService service = new GroupConversationLifecycleService(
-            conversations, locks, mapper, plans, summaries, recovery, transactions);
+            conversations, locks, mapper, plans, summaries, recovery, transactions, redisState);
     final GroupConversation conversation = new GroupConversation().setId(7L).setMode("trpg").setStatus("active");
 
     @BeforeEach
@@ -49,6 +51,7 @@ class GroupConversationLifecycleServiceTest {
         service.close(7L);
         assertThat(conversation.getStatus()).isEqualTo("closed");
         verifyNoInteractions(summaries);
+        verifyNoInteractions(redisState);
     }
 
     @Test
@@ -67,5 +70,46 @@ class GroupConversationLifecycleServiceTest {
         assertThat(conversation.getSummary()).isEqualTo("最终概要");
         verify(summaries).insert(any(GroupContextSummary.class));
         verify(summaries, never()).delete(any(com.baomidou.mybatisplus.core.conditions.Wrapper.class));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"manual,commit", "manual,rollback", "manual,commit_failure",
+            "generated,commit", "generated,rollback", "generated,commit_failure", "generated,redis_failure"})
+    void endingRunCleansPersistentRedisStateOnlyAfterCommit(String entry, String outcome) {
+        var events = new java.util.ArrayList<String>();
+        var outer = new TransactionTemplate(new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+            @Override protected Object doGetTransaction() { return new Object(); }
+            @Override protected void doBegin(Object tx, org.springframework.transaction.TransactionDefinition definition) { }
+            @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) {
+                if (outcome.equals("commit_failure")) throw new IllegalStateException("commit failed");
+                events.add("commit");
+            }
+            @Override protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) { }
+        });
+        doAnswer(call -> {
+            events.add("cleanup");
+            if (outcome.equals("redis_failure")) throw new IllegalStateException("redis unavailable");
+            return null;
+        }).when(redisState).clear(7L);
+
+        var failure = catchThrowable(() -> outer.executeWithoutResult(status -> {
+            if (entry.equals("manual")) service.close(7L);
+            else service.closeWithCompletionUnderLock(conversation,
+                    new com.me.galchat.domain.dto.TrpgCompletionModels.Materials("灯塔", null, 42, 3,
+                            List.of(), List.of(), List.of(), List.of()), "最终概要");
+            verifyNoInteractions(redisState);
+            if (outcome.equals("rollback")) status.setRollbackOnly();
+        }));
+
+        if (outcome.equals("commit_failure")) {
+            assertThat(failure).hasMessage("commit failed");
+            verifyNoInteractions(redisState);
+        } else if (outcome.equals("rollback")) {
+            assertThat(failure).isNull();
+            verifyNoInteractions(redisState);
+        } else {
+            assertThat(failure).isNull();
+            assertThat(events).containsExactly("commit", "cleanup");
+        }
     }
 }

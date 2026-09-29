@@ -2,18 +2,16 @@ package com.me.galchat.service.impl.trpg;
 
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
+import com.me.galchat.utils.RedisAfterCommitCleanup;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
 public class TrpgSceneSelectionStore {
-
-    private static final Duration TTL = Duration.ofDays(7);
 
     private final StringRedisTemplate redisTemplate;
 
@@ -38,7 +36,7 @@ public class TrpgSceneSelectionStore {
         String key = choicesKey(conversationId, turnId);
         redisTemplate.opsForHash().put(
                 key, actorKey(actor), locationId.toString());
-        redisTemplate.expire(key, TTL);
+        redisTemplate.persist(key);
     }
 
     public Map<Long, Long> getAll(Long conversationId) {
@@ -91,10 +89,9 @@ public class TrpgSceneSelectionStore {
                 redisTemplate.opsForHash().put(
                         key, number,
                         option.locationId() + "\t" + option.name()));
-        redisTemplate.expire(key, TTL);
         redisTemplate.opsForValue().set(
                 activeTurnKey(conversationId),
-                turnId.toString(), TTL);
+                turnId.toString());
     }
 
     public Map<String, LocationOption> getOptions(
@@ -127,13 +124,15 @@ public class TrpgSceneSelectionStore {
 
     public void clear(Long conversationId) {
         Long turnId = currentTurnId(conversationId);
+        var keys = new java.util.ArrayList<String>();
         if (turnId != null) {
-            redisTemplate.delete(choicesKey(
+            keys.add(choicesKey(
                     conversationId, turnId));
-            redisTemplate.delete(optionsKey(
+            keys.add(optionsKey(
                     conversationId, turnId));
         }
-        redisTemplate.delete(activeTurnKey(conversationId));
+        keys.add(activeTurnKey(conversationId));
+        RedisAfterCommitCleanup.run(activeTurnKey(conversationId), () -> redisTemplate.delete(keys));
     }
 
     public Long currentTurnId(Long conversationId) {

@@ -86,6 +86,7 @@ class TrpgCombatStateServiceTest {
 
     @Test
     void emptyRestrainerNameClearsRestraintWithoutChangingOtherStates() {
+        var writes = com.me.galchat.support.CocCharacterSqlTestSupport.assertUpdatesClearRestraint(characterMapper);
         target.setInCover(true)
                 .setCoverActionForfeitPending(true)
                 .setRestrainedByCharacterId(72L);
@@ -96,6 +97,7 @@ class TrpgCombatStateServiceTest {
                                 "林恩", null, null, ""))));
 
         assertThat(target.getRestrainedByCharacterId()).isNull();
+        assertThat(writes.get()).isEqualTo(1);
         assertThat(target.getInCover()).isTrue();
         assertThat(target.getCoverActionForfeitPending()).isTrue();
     }

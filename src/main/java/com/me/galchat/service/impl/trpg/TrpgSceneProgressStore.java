@@ -1,18 +1,16 @@
 package com.me.galchat.service.impl.trpg;
 
 import com.me.galchat.constant.RedisConstant;
+import com.me.galchat.utils.RedisAfterCommitCleanup;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
-import java.time.Duration;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
 public class TrpgSceneProgressStore {
-
-    private static final Duration TTL = Duration.ofDays(7);
 
     private final StringRedisTemplate redisTemplate;
 
@@ -22,7 +20,7 @@ public class TrpgSceneProgressStore {
         String key = readyKey(conversationId, sceneId);
         redisTemplate.opsForSet().add(
                 key, actorKey(subjectCharacterId));
-        redisTemplate.expire(key, TTL);
+        redisTemplate.persist(key);
     }
 
     public Set<Long> readyCharacterIds(
@@ -52,9 +50,9 @@ public class TrpgSceneProgressStore {
     public void clearReady(
             Long conversationId, Long sceneId,
             Long subjectCharacterId) {
-        redisTemplate.opsForSet().remove(
-                readyKey(conversationId, sceneId),
-                actorKey(subjectCharacterId));
+        String key = readyKey(conversationId, sceneId);
+        String actor = actorKey(subjectCharacterId);
+        RedisAfterCommitCleanup.run(key, () -> redisTemplate.opsForSet().remove(key, actor));
     }
 
     public static String actorKey(Long subjectCharacterId) {
@@ -67,7 +65,7 @@ public class TrpgSceneProgressStore {
 
     public void requestFinish(Long conversationId, Long sceneId) {
         String key = finishKey(conversationId, sceneId);
-        redisTemplate.opsForValue().set(key, "1", TTL);
+        redisTemplate.opsForValue().set(key, "1");
     }
 
     public boolean isFinishRequested(Long conversationId, Long sceneId) {
@@ -76,9 +74,10 @@ public class TrpgSceneProgressStore {
     }
 
     public void clear(Long conversationId, Long sceneId) {
-        redisTemplate.delete(java.util.List.of(
+        var keys = java.util.List.of(
                 readyKey(conversationId, sceneId),
-                finishKey(conversationId, sceneId)));
+                finishKey(conversationId, sceneId));
+        RedisAfterCommitCleanup.run(baseKey(conversationId, sceneId), () -> redisTemplate.delete(keys));
     }
 
     private String readyKey(Long conversationId, Long sceneId) {

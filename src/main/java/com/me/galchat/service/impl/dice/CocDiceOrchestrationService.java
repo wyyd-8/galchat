@@ -787,13 +787,13 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             if (damage.hpFormula() != null) {
                 rule.put("conValue", card.con());
                 drafts.add(damageDraft(
-                        card.participantId(), displayOrder++,
+                        automaticRoller(card), displayOrder++,
                         request.reason().trim(), damage.hpFormula(),
                         null, rule));
             }
             if (damage.stun()) {
                 drafts.add(stunDraft(
-                        card.participantId(), displayOrder++,
+                        automaticRoller(card), displayOrder++,
                         request.reason().trim(), null, rule));
             }
         }
@@ -867,7 +867,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     target.sourceCharacterName()));
 
             DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
-            draft.setCharacterId(card.participantId());
+            draft.setCharacterId(automaticRoller(card));
             draft.setDisplayOrder(index + 1);
             draft.setDisplayType(DiceRollConstant.TYPE_HEALING);
             draft.setReason(request.reason().trim());
@@ -2197,7 +2197,7 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
             rule.put("tieWinnerCharacterName", tieWinnerCharacterName);
         }
         DiceRollResultCreateDTO draft = new DiceRollResultCreateDTO();
-        draft.setCharacterId(card.participantId());
+        draft.setCharacterId(automaticRoller(card));
         draft.setDisplayOrder(displayOrder);
         draft.setDisplayType(type);
         draft.setReason(reason.trim());

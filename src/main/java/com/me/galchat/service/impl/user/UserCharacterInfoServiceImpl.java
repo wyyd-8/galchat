@@ -1,5 +1,7 @@
 package com.me.galchat.service.impl.user;
 
+import com.me.galchat.utils.RedisCacheExpiry;
+
 import com.me.galchat.service.impl.chat.SingleChatLockService;
 import com.me.galchat.service.impl.chat.SingleChatGenerationRegistry;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -277,6 +279,8 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
                 try {
                     redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
                             buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
+                    RedisCacheExpiry.ensure(redisTemplate, RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
+                            RedisConstant.USER_CHARACTER_FAVOR_VALUE_TTL);
                 } finally {
                     evictPromptInfoCache(userWorldId, characterId);
                 }
@@ -311,6 +315,8 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         }
         redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
                 buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
+        RedisCacheExpiry.ensure(redisTemplate, RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
+                RedisConstant.USER_CHARACTER_FAVOR_VALUE_TTL);
         evictPromptInfoCache(userWorldId, characterId);
     }
 
@@ -436,6 +442,8 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
         redisTemplate.opsForHash().putAll(buildPromptInfoCacheKey(userWorldId, characterId), Map.of(
                 RedisConstant.FAVOR_VALUE_HASH_FIELD, String.valueOf(userCharacterInfo.getFavorValue()),
                 RedisConstant.USER_INFO_PROMPT_HASH_FIELD, userCharacterInfo.getUserInfoPrompt()));
+        RedisCacheExpiry.ensure(redisTemplate, buildPromptInfoCacheKey(userWorldId, characterId),
+                RedisConstant.USER_CHARACTER_PROMPT_INFO_TTL);
     }
 
     private void evictPromptInfoCache(Long userWorldId, Long characterId) {

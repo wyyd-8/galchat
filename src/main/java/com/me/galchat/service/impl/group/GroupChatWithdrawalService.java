@@ -2,31 +2,23 @@ package com.me.galchat.service.impl.group;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.me.galchat.constant.FavorBindingType;
 import com.me.galchat.constant.GroupChatConstant;
-import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
-import com.me.galchat.domain.po.UserCharacterFavorLog;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.groupchat.context.GroupTopicService;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
-import com.me.galchat.mapper.UserCharacterFavorLogMapper;
-import com.me.galchat.mapper.UserCharacterInfoMapper;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 @Service
 public class GroupChatWithdrawalService {
@@ -38,9 +30,8 @@ public class GroupChatWithdrawalService {
     private final GroupChatReplyStepMapper stepMapper;
     private final GroupChatToolCallMapper toolCallMapper;
     private final GroupTurnRecoveryService recoveryService;
-    private final UserCharacterFavorLogMapper favorLogMapper;
-    private final UserCharacterInfoMapper characterInfoMapper;
-    private final StringRedisTemplate redisTemplate;
+    private final GroupChatFavorRollbackService favorRollbackService;
+    private final GroupTurnCheckpointService checkpointService;
     private final GroupTopicService topicService;
     private final TransactionTemplate transactionTemplate;
 
@@ -51,9 +42,8 @@ public class GroupChatWithdrawalService {
                                       GroupChatReplyStepMapper stepMapper,
                                       GroupChatToolCallMapper toolCallMapper,
                                       GroupTurnRecoveryService recoveryService,
-                                      UserCharacterFavorLogMapper favorLogMapper,
-                                      UserCharacterInfoMapper characterInfoMapper,
-                                      StringRedisTemplate redisTemplate,
+                                      GroupChatFavorRollbackService favorRollbackService,
+                                      GroupTurnCheckpointService checkpointService,
                                       GroupTopicService topicService,
                                       TransactionTemplate transactionTemplate) {
         this.conversationService = conversationService;
@@ -63,14 +53,17 @@ public class GroupChatWithdrawalService {
         this.stepMapper = stepMapper;
         this.toolCallMapper = toolCallMapper;
         this.recoveryService = recoveryService;
-        this.favorLogMapper = favorLogMapper;
-        this.characterInfoMapper = characterInfoMapper;
-        this.redisTemplate = redisTemplate;
+        this.favorRollbackService = favorRollbackService;
+        this.checkpointService = checkpointService;
         this.topicService = topicService;
         this.transactionTemplate = transactionTemplate;
     }
 
     public void withdrawLatestTurn(Long conversationId) {
+        withdrawLatestTurn(conversationId, null);
+    }
+
+    public void withdrawLatestTurn(Long conversationId, Long expectedTurnId) {
         GroupConversation conversation = conversationService.requireActive(conversationId);
         if (!GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
             throw new UserRequestException("跑团群聊不支持撤回");
@@ -85,13 +78,13 @@ public class GroupChatWithdrawalService {
                 throw new UserRequestException("跑团群聊不支持撤回");
             }
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
-            transactionTemplate.executeWithoutResult(status -> withdrawLocked(lockedConversation));
+            transactionTemplate.executeWithoutResult(status -> withdrawLocked(lockedConversation, expectedTurnId));
         } finally {
             lockService.unlock(lock);
         }
     }
 
-    private void withdrawLocked(GroupConversation conversation) {
+    private void withdrawLocked(GroupConversation conversation, Long expectedTurnId) {
         List<GroupChatTurn> recentTurns = turnMapper.selectList(new LambdaQueryWrapper<GroupChatTurn>()
                 .eq(GroupChatTurn::getConversationId, conversation.getId())
                 .orderByDesc(GroupChatTurn::getId)
@@ -105,6 +98,9 @@ public class GroupChatWithdrawalService {
         }
 
         GroupChatTurn turn = candidate.turn();
+        if (expectedTurnId != null && !expectedTurnId.equals(turn.getId())) {
+            throw new UserRequestException("群聊记录已变化，请刷新后再撤回");
+        }
         GroupChatMessage trigger = turn.getTriggerMessageId() == null
                 ? null : messageMapper.selectById(turn.getTriggerMessageId());
         List<GroupChatReplyStep> steps = stepMapper.selectList(new LambdaQueryWrapper<GroupChatReplyStep>()
@@ -112,7 +108,8 @@ public class GroupChatWithdrawalService {
                 .orderByAsc(GroupChatReplyStep::getStepNo));
         List<Long> stepIds = steps.stream().map(GroupChatReplyStep::getId).filter(Objects::nonNull).toList();
 
-        rollbackFavor(conversation.getUserWorldId(), stepIds);
+        favorRollbackService.rollback(conversation.getUserWorldId(), stepIds);
+        checkpointService.clear(conversation.getId());
         if (!stepIds.isEmpty()) {
             toolCallMapper.delete(new LambdaQueryWrapper<GroupChatToolCall>()
                     .in(GroupChatToolCall::getReplyStepId, stepIds));
@@ -135,34 +132,6 @@ public class GroupChatWithdrawalService {
                 .set(GroupChatTurn::getStatus, turn.getStatus())
                 .set(GroupChatTurn::getRevision, turn.getRevision())
                 .set(GroupChatTurn::getUpdatedAt, turn.getUpdatedAt()));
-    }
-
-    private void rollbackFavor(Long userWorldId, List<Long> stepIds) {
-        if (stepIds.isEmpty()) {
-            return;
-        }
-        List<UserCharacterFavorLog> logs = favorLogMapper.selectList(
-                new LambdaQueryWrapper<UserCharacterFavorLog>()
-                        .eq(UserCharacterFavorLog::getUserWorldId, userWorldId)
-                        .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.GROUP_REPLY_STEP)
-                        .in(UserCharacterFavorLog::getBindingChat, stepIds));
-        Map<Long, Integer> updateByCharacter = logs.stream()
-                .filter(log -> log.getCharacterId() != null && log.getFavorUpdate() != null)
-                .collect(Collectors.groupingBy(UserCharacterFavorLog::getCharacterId,
-                        Collectors.summingInt(UserCharacterFavorLog::getFavorUpdate)));
-        updateByCharacter.forEach((characterId, update) -> {
-            Integer value = characterInfoMapper.updateFavorValue(userWorldId, characterId, -update);
-            if (value != null) {
-                redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
-                        userWorldId + ":" + characterId, String.valueOf(value));
-                redisTemplate.delete(RedisConstant.USER_CHARACTER_PROMPT_INFO_KEY_PREFIX
-                        + userWorldId + ":" + characterId);
-            }
-        });
-        favorLogMapper.delete(new LambdaQueryWrapper<UserCharacterFavorLog>()
-                .eq(UserCharacterFavorLog::getUserWorldId, userWorldId)
-                .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.GROUP_REPLY_STEP)
-                .in(UserCharacterFavorLog::getBindingChat, stepIds));
     }
 
     static WithdrawCandidate selectWithdrawCandidate(List<GroupChatTurn> recentTurns) {

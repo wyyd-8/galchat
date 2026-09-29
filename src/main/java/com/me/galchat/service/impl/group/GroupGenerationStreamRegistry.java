@@ -5,6 +5,8 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.vo.GroupChatEvent;
 import com.me.galchat.domain.vo.GenerationErrorDetailVO;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.exception.TurnCheckpointUnavailableException;
+import com.me.galchat.exception.GroupCheckpointUnavailableException;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
@@ -18,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class GroupGenerationStreamRegistry {
@@ -73,19 +74,15 @@ public class GroupGenerationStreamRegistry {
         }
         FailureTrace trace = new FailureTrace();
         trace.requestContext = requestContext;
-        AtomicBoolean recovered = new AtomicBoolean();
-        Runnable recover = () -> {
-            if (recovered.compareAndSet(false, true)) recoverInterrupted(conversationId);
-        };
+        // Execution services recover their own failures while holding the conversation lock.
+        // A rejected source may never have acquired it, so this layer must not mutate turns.
         Flux<GroupChatEvent> traced = source.map(event -> {
             trace.record(event);
             if (GroupChatConstant.EVENT_REPLY_FAILED.equals(event.getEventType())) {
-                recover.run();
                 return trace.failureEvent(conversationId, event, new IllegalStateException(event.getError()));
             }
             return event;
         }).onErrorResume(error -> {
-            recover.run();
             return Flux.just(trace.failureEvent(conversationId, null, error));
         });
         return streams.start(conversationId, clientRequestId.trim(), traced, events(conversationId));
@@ -116,10 +113,6 @@ public class GroupGenerationStreamRegistry {
 
     public void evict(Long conversationId) {
         if (conversationId != null) streams.evict(conversationId::equals);
-    }
-
-    private void recoverInterrupted(Long conversationId) {
-        if (recoveryService != null) recoveryService.recoverInterrupted(conversationId);
     }
 
     private GenerationStreams.Events<GroupChatEvent> events(Long conversationId) {
@@ -199,12 +192,15 @@ public class GroupGenerationStreamRegistry {
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("eventCount", totalEvents);
             response.put("events", List.copyOf(responseEvents));
+            boolean requiresRollback = error instanceof TurnCheckpointUnavailableException;
+            boolean requiresWithdrawal = error instanceof GroupCheckpointUnavailableException;
             return GenerationErrorDetailVO.builder()
                     .errorId(UUID.randomUUID().toString())
-                    .code("GENERATION_FAILED")
+                    .code(requiresRollback ? TurnCheckpointUnavailableException.CODE
+                            : requiresWithdrawal ? GroupCheckpointUnavailableException.CODE : "GENERATION_FAILED")
                     .category("GENERATION")
                     .message(message)
-                    .retryable(true)
+                    .retryable(!requiresRollback && !requiresWithdrawal)
                     .occurredAt(Instant.now().toString())
                     .operation(requestContext == null
                             || !StringUtils.hasText(

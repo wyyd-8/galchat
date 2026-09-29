@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import test from 'node:test'
+import type { Conversation, GroupMessage } from '../api/types.ts'
 
 const sourceRoot = new URL('../', import.meta.url)
 registerHooks({
@@ -236,8 +237,10 @@ test('clears a completed generation but retains an interrupted generation for re
   }
 })
 
-for (const completionStatus of [undefined, 'pending', 'failed'] as const) {
-test(`keeps the generation error dialog open after ${completionStatus || 'normal turn'} state sync and allows retry`, async () => {
+for (const scenario of [undefined, 'pending', 'failed', 'checkpoint-unavailable'] as const) {
+const checkpointUnavailable = scenario === 'checkpoint-unavailable'
+const completionStatus = checkpointUnavailable ? undefined : scenario
+test(`keeps the generation error dialog open after ${scenario || 'normal turn'} state sync`, async () => {
   const { api, streamTrpgTurn } = await import('../api/client.ts')
   const { useWorkspace } = await import('../composables/useWorkspace.ts')
   const { createRenderer, defineComponent, h } = await import('vue')
@@ -270,12 +273,12 @@ test(`keeps the generation error dialog open after ${completionStatus || 'normal
       }
       onEvent({
         eventType: 'generation.failed', conversationId,
-        turnId: 42, replyStepId: 9, messageId: 100,
-        error: '模型调用失败',
+        ...(checkpointUnavailable ? {} : { turnId: 42, replyStepId: 9, messageId: 100 }),
+        error: checkpointUnavailable ? '请使用「回退至上一轮」恢复后继续。' : '模型调用失败',
         errorDetail: {
-          errorId: 'error-1', code: 'GENERATION_FAILED',
-          category: 'GENERATION', message: '模型调用失败',
-          retryable: true, occurredAt: '2026-08-27T00:00:00Z',
+          errorId: 'error-1', code: checkpointUnavailable ? 'TURN_CHECKPOINT_UNAVAILABLE' : 'GENERATION_FAILED',
+          category: 'GENERATION', message: checkpointUnavailable ? '请使用「回退至上一轮」恢复后继续。' : '模型调用失败',
+          retryable: !checkpointUnavailable, occurredAt: '2026-08-27T00:00:00Z',
           operation: 'continue-trpg-turn',
           request: { method: 'POST' }, response: { eventCount: 2 },
           stack: 'java.lang.IllegalStateException: model failed',
@@ -328,6 +331,14 @@ test(`keeps the generation error dialog open after ${completionStatus || 'normal
     assert.equal(session.getItem('galchat:generation:7'), null)
     assert.equal([...Array.from({ length: local.length }, (_, index) => local.key(index))]
       .some((key) => key?.includes('error-1')), false)
+
+    if (checkpointUnavailable) {
+      assert.equal(workspace.generationFailure.value?.detail.code, 'TURN_CHECKPOINT_UNAVAILABLE')
+      assert.equal(workspace.generationFailure.value?.detail.retryable, false)
+      assert.equal(workspace.generationFailure.value?.message, '请使用「回退至上一轮」恢复后继续。')
+      assert.equal(requestIds.length, 1)
+      return
+    }
 
     const retry = (workspace as unknown as Record<string, unknown>)
       .retryGenerationFailure
@@ -860,3 +871,309 @@ for (const mode of ['chat', 'trpg'] as const) {
     assert.equal(workspace.hasOlderGroupMessages.value, false)
   })
 }
+
+for (const missingCheckpoint of [false, true]) {
+test(`ordinary group retry ${missingCheckpoint ? 'offers withdrawal when checkpoint is missing' : 'keeps completed replies without resending the user message'}`, async () => {
+  const { api } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previous = { window: globalThis.window, localStorage: globalThis.localStorage,
+    sessionStorage: globalThis.sessionStorage, fetch: globalThis.fetch }
+  Object.assign(globalThis, { window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: storage(), sessionStorage: storage() })
+  const original = { conversation: api.conversation, groupMessages: api.groupMessages,
+    replyPlan: api.replyPlan, currentTurn: api.currentTurn, withdrawGroupTurn: api.withdrawGroupTurn }
+  try {
+    const conversation: Conversation = { id: 7, userWorldId: 3, worldId: 2, mode: 'chat' as const, title: '群聊', status: 'active' }
+    const userMessage: GroupMessage = { id: 100, conversationId: 7, turnId: 42, speakerType: 'user',
+      messageKind: 'dialogue', content: '开始', sequenceNo: 1, status: 'completed' }
+    const completed: GroupMessage = { id: 101, conversationId: 7, turnId: 42, replyStepId: 8, speakerType: 'character',
+      messageKind: 'dialogue', content: 'A已完成', sequenceNo: 2, status: 'completed' }
+    const failed: GroupMessage = { id: 102, conversationId: 7, turnId: 42, replyStepId: 9, speakerType: 'character',
+      messageKind: 'dialogue', content: 'B未完成', sequenceNo: 3, status: 'failed' }
+    const failedTurn = { turnId: 42, planSource: 'USER' as const, status: 'failed', waitingForUser: false,
+      sceneOptions: {}, steps: [{ stepId: 8, itemOrder: 1, actorType: 'character', status: 'completed' },
+        { stepId: 9, itemOrder: 2, actorType: 'character', status: 'failed' }] }
+    let withdrawn = false
+    let requestedBody: Record<string, unknown> | null = null
+    const requests: string[] = []
+    api.conversation = async () => conversation
+    api.replyPlan = async () => []
+    api.currentTurn = async () => !withdrawn && missingCheckpoint ? failedTurn : null
+    api.groupMessages = async () => withdrawn ? [] : missingCheckpoint ? [userMessage, completed, failed]
+      : [userMessage, completed, { ...failed, id: 103, status: 'completed', content: 'B重新完成' }]
+    api.withdrawGroupTurn = async (id, expectedTurnId) => {
+      assert.equal(id, 7)
+      assert.equal(expectedTurnId, 42)
+      withdrawn = true
+    }
+    globalThis.fetch = async (url, init) => {
+      requests.push(String(url))
+      assert.match(String(url), /\/conversations\/7\/turns\/42\/retry$/)
+      requestedBody = JSON.parse(String(init?.body))
+      const events = missingCheckpoint ? [{ eventType: 'generation.failed', conversationId: 7,
+        error: '请使用「撤回本轮对话」后重新发送。', errorDetail: {
+          errorId: 'missing-chat-checkpoint', code: 'GROUP_CHECKPOINT_UNAVAILABLE', category: 'GENERATION',
+          message: '请使用「撤回本轮对话」后重新发送。', retryable: false, occurredAt: '2026-09-29T00:00:00Z',
+          operation: 'retry-group-turn', request: {}, response: {}, stack: '' },
+      }] : [{ eventType: 'turn.accepted', conversationId: 7, turnId: 42 },
+        { eventType: 'turn.completed', conversationId: 7, turnId: 42 }]
+      return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''),
+        { headers: { 'Content-Type': 'text/event-stream' } })
+    }
+    let workspace!: ReturnType<typeof useWorkspace>
+    const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+      patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+      createElement: () => ({}), createText: text => ({ text }), createComment: text => ({ text }),
+      setText(node, text) { node.text = text }, setElementText(node, text) { node.text = text },
+      parentNode: node => node.parent as Record<string, unknown> | null, nextSibling: () => null,
+    })
+    renderer.createApp(defineComponent({ setup() { workspace = useWorkspace(); return () => h('div') } })).mount({})
+    workspace.conversations.value = [conversation]
+    workspace.selectedConversationId.value = 7
+    workspace.currentTurn.value = failedTurn
+    workspace.messages.value = [userMessage, completed, failed]
+
+    await workspace.retryGroupTurn()
+
+    assert.equal(requests.length, 1)
+    assert.deepEqual(Object.keys(requestedBody!), ['clientRequestId'])
+    assert.deepEqual(workspace.messages.value.slice(0, 2), [userMessage, completed])
+    if (missingCheckpoint) {
+      assert.equal(workspace.generationFailureOpen.value, true)
+      assert.equal(workspace.generationFailure.value?.detail.code, 'GROUP_CHECKPOINT_UNAVAILABLE')
+      assert.equal(workspace.generationFailure.value?.turnId, 42)
+      assert.equal(workspace.generationFailure.value?.detail.retryable, false)
+      await workspace.withdrawGenerationFailure()
+      assert.equal(withdrawn, true)
+      assert.equal(workspace.messages.value.length, 0)
+      assert.equal(workspace.currentTurn.value, null)
+      assert.equal(workspace.generationFailureOpen.value, false)
+    } else {
+      assert.equal(workspace.messages.value[2]?.content, 'B重新完成')
+      assert.equal(workspace.currentTurn.value, null)
+    }
+  } finally {
+    Object.assign(api, original)
+    Object.assign(globalThis, previous)
+  }
+})
+}
+
+for (const operation of ['plan', 'runtime'] as const) {
+  for (const navigation of ['stay', 'other', 'reenter'] as const) {
+    test(`${operation} save only updates the originating conversation view (${navigation})`, async () => {
+      const { api } = await import('../api/client.ts')
+      const { useWorkspace } = await import('../composables/useWorkspace.ts')
+      const { createRenderer, defineComponent, h } = await import('vue')
+      const globals = { window: globalThis.window, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage }
+      Object.assign(globalThis, { window: { addEventListener() {}, clearTimeout, setTimeout }, localStorage: storage(), sessionStorage: storage() })
+      const savedApi = { ...api }
+      let workspace!: ReturnType<typeof useWorkspace>
+      const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+        patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+        createElement: () => ({}), createText: text => ({ text }), createComment: text => ({ text }),
+        setText(node, text) { node.text = text }, setElementText(node, text) { node.text = text },
+        parentNode: node => node.parent as Record<string, unknown> | null, nextSibling: () => null,
+      })
+      const app = renderer.createApp(defineComponent({ setup() { workspace = useWorkspace(); return () => h('div') } }))
+      app.mount({})
+      try {
+        api.conversation = async id => ({ id, userWorldId: 3, worldId: 2, mode: 'chat', title: String(id), status: 'active' })
+        api.groupMessages = async () => []; api.currentTurn = async () => null; api.modelApis = async () => []
+        api.replyPlan = async id => [{ source: 'USER', displayName: `loaded-${id}`, items: [{ order: 1, actorType: 'character', actorId: 101 }] }]
+        api.actorRuntimes = async () => [{ actorType: 'character', actorId: 101, controlMode: 'MODEL', modelApiAvailable: true }]
+        let release!: () => void
+        const response = new Promise<void>(resolve => { release = resolve })
+        api.saveReplyPlan = async id => {
+          assert.equal(id, 7)
+          await response
+          return { source: 'USER', displayName: 'saved-7', items: [{ order: 1, actorType: 'character', actorId: 101 }] }
+        }
+        api.saveActorRuntime = async id => {
+          assert.equal(id, 7)
+          await response
+          return { actorType: 'character', actorId: 101, controlMode: 'MANUAL', modelApiAvailable: true }
+        }
+        workspace.selectedWorldId.value = 3
+        workspace.conversations.value = [await api.conversation(7), await api.conversation(8)]
+        await workspace.selectConversation(7)
+        const pending = operation === 'plan' ? workspace.savePlan()
+          : workspace.saveActorRuntime({ actorType: 'character', actorId: 101, controlMode: 'MANUAL' })
+        if (navigation !== 'stay') await workspace.selectConversation(8)
+        if (navigation === 'reenter') await workspace.selectConversation(7)
+        release()
+        await pending
+        if (operation === 'plan') {
+          assert.equal(workspace.replyPlan.value.displayName, navigation === 'stay' ? 'saved-7' : `loaded-${navigation === 'other' ? 8 : 7}`)
+        } else {
+          assert.equal(workspace.actorRuntimes.value[0]?.controlMode, navigation === 'stay' ? 'MANUAL' : 'MODEL')
+        }
+      } finally { app.unmount(); Object.assign(api, savedApi); Object.assign(globalThis, globals) }
+    })
+  }
+}
+
+async function groupMutationFixture(t: import('node:test').TestContext) {
+  const { api } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const globals = { window: globalThis.window, localStorage: globalThis.localStorage,
+    sessionStorage: globalThis.sessionStorage, fetch: globalThis.fetch }
+  Object.assign(globalThis, { window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: storage(), sessionStorage: storage() })
+  t.after(() => Object.assign(globalThis, globals))
+  let workspace!: ReturnType<typeof useWorkspace>
+  const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+    patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+    createElement: () => ({}), createText: text => ({ text }), createComment: text => ({ text }),
+    setText(node, text) { node.text = text }, setElementText(node, text) { node.text = text },
+    parentNode: node => node.parent as Record<string, unknown> | null, nextSibling: () => null,
+  })
+  const app = renderer.createApp(defineComponent({ setup() { workspace = useWorkspace(); return () => h('div') } }))
+  app.mount({})
+  t.after(() => app.unmount())
+  const conversations: Conversation[] = [7, 8].map(id => ({ id, userWorldId: 3, worldId: 2,
+    mode: 'chat', title: String(id), status: 'active', characterIds: [101, 102] }))
+  t.mock.method(api, 'conversation', async (id: number) => conversations.find(item => item.id === id)!)
+  t.mock.method(api, 'conversations', async () => conversations.filter(item => item.id !== 7))
+  t.mock.method(api, 'groupMessages', async (id: number): Promise<GroupMessage[]> => [{ id: id * 10,
+    conversationId: id, speakerType: 'user', messageKind: 'dialogue', content: `history-${id}`, sequenceNo: 1, status: 'completed' }])
+  t.mock.method(api, 'replyPlan', async () => [{ source: 'USER', displayName: '群聊',
+    items: [{ order: 1, actorType: 'character', actorId: 101 }] }])
+  t.mock.method(api, 'currentTurn', async () => null)
+  t.mock.method(api, 'actorRuntimes', async () => [])
+  t.mock.method(api, 'modelApis', async () => [])
+  workspace.selectedWorldId.value = 3
+  workspace.conversations.value = conversations
+  await workspace.selectConversation(7)
+  return { workspace, api }
+}
+
+test('group mutation: reopening a saved reply plan keeps omitted members available', async t => {
+  const { workspace } = await groupMutationFixture(t)
+  workspace.characters.value = [101, 102].map(characterId => ({ userWorldId: 3, characterId, characterName: String(characterId) }))
+  await workspace.selectConversation(8)
+  await workspace.selectConversation(7)
+  assert.deepEqual(workspace.availablePlanCharacters.value.map(item => item.characterId), [102])
+  workspace.addPlanItem(102)
+  assert.deepEqual(workspace.replyPlan.value.items.map(item => item.actorId), [101, 102])
+})
+
+for (const navigation of ['stay', 'conversation', 'world'] as const) {
+  test(`group mutation: deletion preserves the current view after ${navigation}`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    let release!: () => void
+    t.mock.method(api, 'deleteConversation', async (id: number) => {
+      assert.equal(id, 7)
+      await new Promise<void>(resolve => { release = resolve })
+    })
+    const pending = workspace.deleteConversation()
+    if (navigation !== 'stay') await workspace.selectConversation(8)
+    if (navigation === 'world') {
+      workspace.selectedWorldId.value = 4
+      workspace.conversations.value = [{ id: 9, userWorldId: 4, worldId: 2, mode: 'chat', title: 'new world', status: 'active' }]
+      workspace.selectedConversationId.value = 9
+    }
+    const messages = [...workspace.messages.value]
+    release()
+    const shouldLeaveConversation = await pending
+    if (navigation === 'stay') {
+      assert.equal(workspace.selectedConversationId.value, null)
+      assert.deepEqual(workspace.messages.value, [])
+      assert.equal(shouldLeaveConversation, true)
+    } else {
+      assert.equal(workspace.selectedConversationId.value, navigation === 'world' ? 9 : 8)
+      assert.deepEqual(workspace.messages.value, messages)
+      assert.equal(shouldLeaveConversation, false)
+    }
+    assert.deepEqual(workspace.conversations.value.map(item => item.id), navigation === 'world' ? [9] : [8])
+  })
+}
+
+for (const outcome of ['completed', 'rejected', 'generation-failed'] as const) {
+  test(`group mutation: history read failure preserves the ${outcome} send outcome`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    globalThis.fetch = async () => outcome === 'rejected'
+      ? new Response('request rejected', { status: 400 })
+      : new Response([
+        { eventType: 'turn.accepted', conversationId: 7, turnId: 42 },
+        { eventType: outcome === 'completed' ? 'turn.completed' : 'generation.failed',
+          conversationId: 7, turnId: 42, error: outcome === 'generation-failed' ? 'model failed' : undefined },
+      ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''))
+    t.mock.method(api, 'groupMessages', async () => { throw new Error('history read failed') })
+    workspace.messageInput.value = 'hello'
+    await workspace.sendMessage()
+    assert.equal(workspace.messageInput.value, outcome === 'rejected' ? 'hello' : '')
+    assert.equal(workspace.replyTurnState.value?.phase, outcome === 'completed' ? 'completed' : 'failed')
+    if (outcome === 'generation-failed') assert.equal(workspace.replyTurnState.value?.error, 'model failed')
+    assert.equal(workspace.messages.value.some(item => item.content === 'hello'), outcome !== 'rejected')
+    assert.equal(workspace.loading.sending, false)
+  })
+}
+
+for (const phase of ['world', 'details', 'reenter'] as const) {
+  test(`world loading ignores an obsolete ${phase} response`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    let release!: () => void
+    let started!: () => void
+    const entered = new Promise<void>(resolve => { started = resolve })
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    let first = true
+    t.mock.method(api, 'userWorld', async (id: number) => {
+      if (id === 3 && phase !== 'details' && first) { first = false; started(); await blocked }
+      return { id, worldId: id + 100 }
+    })
+    t.mock.method(api, 'characters', async (id: number) => [{ userWorldId: id, characterId: id * 100, characterName: String(id) }])
+    t.mock.method(api, 'conversations', async (id: number) => [{ id: id + 10, userWorldId: id, worldId: id + 100,
+      mode: 'chat', title: String(id), status: 'active' }])
+    t.mock.method(api, 'worldSave', async () => null)
+    t.mock.method(api, 'characterTemplates', async (id: number) => {
+      if (id === 103 && phase === 'details' && first) { first = false; started(); await blocked }
+      return [{ id, characterName: `template-${id}` }]
+    })
+    t.mock.method(api, 'worldDetails', async (id: number) => [{ id, title: String(id), content: String(id) }])
+    t.mock.method(api, 'conversation', async (id: number) => ({ id, userWorldId: id - 10, worldId: id + 90,
+      mode: 'chat', title: String(id), status: 'active' }))
+    const old = workspace.selectWorld(3)
+    await entered
+    await workspace.selectWorld(4)
+    if (phase === 'reenter') {
+      await workspace.selectWorld(3)
+      workspace.conversations.value.push({ id: 19, userWorldId: 3, worldId: 103, mode: 'chat', title: 'chosen', status: 'active' })
+      await workspace.selectConversation(19)
+    }
+    release()
+    const navigate = await old
+    const worldId = phase === 'reenter' ? 3 : 4
+    assert.equal(workspace.selectedWorldId.value, worldId)
+    assert.equal(workspace.selectedConversationId.value, phase === 'reenter' ? 19 : 14)
+    assert.deepEqual(workspace.characters.value.map(item => item.userWorldId), [worldId])
+    assert.deepEqual(workspace.characterTemplates.value.map(item => item.id), [worldId + 100])
+    assert.deepEqual(workspace.details.value.map(item => item.id), [worldId + 100])
+    assert.equal(navigate, false)
+    assert.equal(workspace.loading.workspace, false)
+  })
+}
+
+test('an obsolete world failure cannot clear the new loading indicator', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  let rejectOld!: (error: Error) => void
+  let finishNew!: () => void
+  t.mock.method(api, 'userWorld', async (id: number) => {
+    if (id === 3) await new Promise<void>((_resolve, reject) => { rejectOld = reject })
+    else await new Promise<void>(resolve => { finishNew = resolve })
+    return { id }
+  })
+  t.mock.method(api, 'characters', async () => [])
+  t.mock.method(api, 'conversations', async () => [])
+  t.mock.method(api, 'worldSave', async () => null)
+  const old = workspace.selectWorld(3)
+  const current = workspace.selectWorld(4)
+  rejectOld(new Error('old load failed'))
+  await old
+  assert.equal(workspace.loading.workspace, true)
+  finishNew()
+  assert.equal(await current, true)
+  assert.equal(workspace.loading.workspace, false)
+})

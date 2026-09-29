@@ -39,7 +39,7 @@ const props = withDefaults(defineProps<{ conversation: Conversation; username: s
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; openCompletion: []; generateCompletion: []; skipCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; openCompletion: []; generateCompletion: []; skipCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; retryGroupTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const { isMobile } = useMobileViewport()
 const panelOpen = ref(false)
 const modelActor = ref<TrpgExecutionActor | null>(null)
@@ -117,6 +117,8 @@ const sceneProposalRole = computed(() => props.currentTurn?.waitingForUser && pr
   ? (props.currentTurn.itemOrder === 1 ? 'lead' : 'contributor')
   : null)
 const canEditPlan = computed(() => props.conversation.mode === 'chat' && props.replyPlan.source === 'USER')
+const canRetryGroupTurn = computed(() => props.conversation.mode === 'chat'
+  && props.conversation.status === 'active' && props.currentTurn?.status === 'failed')
 const planLocked = computed(() => props.sending || props.conversation.status !== 'active')
 const showSavePlan = computed(() => shouldShowSavePlan(canEditPlan.value, loadedPlanSignature.value, items.value))
 const replyTurnPhaseLabels = { starting: '准备回复', running: '回复进行中', completed: '本轮已完成', failed: '本轮失败' } as const
@@ -493,7 +495,8 @@ function handleReasoningScroll(event: Event) {
         :items="items" :characters="characters" :username="username" :available-characters="availableCharacters"
         :actor-runtimes="actorRuntimes" :model-apis="modelApis" :messages="messages" :turn-state="replyTurnState"
         :can-edit="canEditPlan" :locked="planLocked || loading" :sending="sending" :loading="loading"
-        :closed="conversation.status !== 'active'" :dirty="showSavePlan"
+        :closed="conversation.status !== 'active'" :dirty="showSavePlan" :can-retry="canRetryGroupTurn"
+        @retry="emit('retryGroupTurn')"
         @save="emit('savePlan')" @move="(from, to) => emit('movePlanItem', from, to)"
         @remove="emit('deletePlanItem', $event)" @add="emit('addPlanItem', $event)"
         @save-model="emit('saveActorRuntime', $event)" />
@@ -548,7 +551,7 @@ function handleReasoningScroll(event: Event) {
     <BaseDialog v-if="isMobile" v-model="panelOpen" :title="conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序'" mobile-presentation="page" content-class="mobile-chat-panel mobile-reply-page">
       <template v-if="conversation.mode === 'chat'">
         <p v-if="planLocked" class="mobile-chat-notice">{{ sending ? '当前轮正在生成，顺序暂不可编辑。' : '会话已经结束，顺序不可编辑。' }}</p>
-        <section v-if="replyTurnState" class="mobile-current-replies"><h3>当前回复状态</h3><div v-for="actor in replyTurnActors" :key="`${actor.item.actorType}:${actor.item.actorId}`" class="mobile-chat-row"><span class="mobile-chat-avatar" :style="planCharacter(actor.item)?.characterImage ? {backgroundImage: `url(${planCharacter(actor.item)?.characterImage})`} : {}">{{ planCharacter(actor.item)?.characterImage ? '' : planActorName(actor.item).slice(0, 1) }}</span><span><strong>{{ planActorName(actor.item) }}</strong><small>{{ replyActorPhaseLabels[actor.phase] }}</small></span><span>{{ actor.phase === 'completed' ? '✓' : actor.phase === 'replying' ? '•••' : actor.phase === 'failed' ? '失败' : '等待' }}</span></div><p v-if="replyTurnState.error" class="mobile-chat-error">{{ replyTurnState.error }}</p></section>
+        <section v-if="replyTurnState || canRetryGroupTurn" class="mobile-current-replies"><h3>当前回复状态</h3><div v-for="actor in replyTurnActors" :key="`${actor.item.actorType}:${actor.item.actorId}`" class="mobile-chat-row"><span class="mobile-chat-avatar" :style="planCharacter(actor.item)?.characterImage ? {backgroundImage: `url(${planCharacter(actor.item)?.characterImage})`} : {}">{{ planCharacter(actor.item)?.characterImage ? '' : planActorName(actor.item).slice(0, 1) }}</span><span><strong>{{ planActorName(actor.item) }}</strong><small>{{ replyActorPhaseLabels[actor.phase] }}</small></span><span>{{ actor.phase === 'completed' ? '✓' : actor.phase === 'replying' ? '•••' : actor.phase === 'failed' ? '失败' : '等待' }}</span></div><p v-if="replyTurnState?.error" class="mobile-chat-error">{{ replyTurnState.error }}</p><button v-if="canRetryGroupTurn" class="button secondary" :disabled="sending" @click="panelOpen = false; emit('retryGroupTurn')">重试本轮回复</button></section>
         <h3>下一轮回复顺序</h3>
         <div class="mobile-chat-card mobile-order-card"><div v-for="(item, index) in items" :key="`${item.actorType}:${item.actorId}`" class="mobile-order-item"><button class="mobile-order-name" :class="{ selected: mobileSelectedActor === item }" @click="selectedReplyActor = `${item.actorType}:${item.actorId}`"><small>{{ String(index + 1).padStart(2, '0') }}</small>{{ planActorName(item) }}</button><button v-if="canEditPlan" class="button secondary" :disabled="planLocked || index === 0" :aria-label="`上移${planActorName(item)}`" @click="emit('movePlanItem', index, index - 1)">上移</button><button v-if="canEditPlan" class="button secondary" :disabled="planLocked || index === items.length - 1" :aria-label="`下移${planActorName(item)}`" @click="emit('movePlanItem', index, index + 1)">下移</button></div><p v-if="!items.length" class="mobile-chat-muted">暂无回复角色</p></div>
         <template v-if="canEditPlan"><label class="field"><span>添加参与角色</span><select v-model="addActorId" :disabled="planLocked || !availableCharacters.length"><option value="">{{ availableCharacters.length ? '选择角色' : '没有可添加角色' }}</option><option v-for="actor in availableCharacters" :key="actor.characterId" :value="String(actor.characterId)">{{ actor.characterName }}</option></select></label><button class="button secondary" :disabled="planLocked || !addActorId" @click="addActor"><Plus :size="17" />添加到回复列表</button></template>

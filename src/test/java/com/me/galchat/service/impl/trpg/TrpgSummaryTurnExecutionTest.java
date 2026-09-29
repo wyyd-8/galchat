@@ -52,7 +52,7 @@ class TrpgSummaryTurnExecutionTest {
                 mock(TrpgUnconsciousRecoveryService.class), saves);
         service.setCompletionService(completion);
         when(conversations.requireActive(7L)).thenReturn(conversation);
-        when(locks.tryLock(7L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        when(locks.tryLockWithOwner(7L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         when(turns.selectList(any())).thenAnswer(call -> turn == null ? List.of() : List.of(turn));
         when(turns.selectById(any())).thenAnswer(call -> turn);
         when(steps.selectList(any())).thenAnswer(call -> step == null ? List.of() : List.of(step));

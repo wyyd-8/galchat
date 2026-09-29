@@ -35,7 +35,7 @@ import { useWorkspace } from '@/composables/useWorkspace'
 import { canCreateTrpgRun, hasMissingBindings } from '@/components/trpgSetupState'
 import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
 import { mergeAutoAdvanceDiceSummaryIds } from '@/components/trpgTurnExperiments'
-import { mergeGenerationResponseEvents } from '@/components/generationErrorFormatting'
+import GenerationErrorDialog from '@/components/GenerationErrorDialog.vue'
 import {
   createDicePostRollPlaybackPlan,
   createDiceInitialAnimationPlan,
@@ -159,19 +159,29 @@ async function skipCompletion() {
 }
 const dialogs = reactive({ world: false, template: false, templatePreview: false, templateDelete: false, templateReplaceConfirm: false, conversation: false, trpgBinding: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, modelApis: false, end: false, deleteConversation: false, trpgTools: false })
 const busy = ref(false)
+const canRollbackGenerationFailure = computed(() => {
+  const failure = workspace.generationFailure.value
+  const conversation = workspace.selectedConversation.value
+  return failure?.detail.code === 'TURN_CHECKPOINT_UNAVAILABLE'
+    && failure.conversationId === conversation?.id
+    && conversation?.mode === 'trpg'
+})
+const canWithdrawGenerationFailure = computed(() => {
+  const failure = workspace.generationFailure.value
+  const conversation = workspace.selectedConversation.value
+  return failure?.detail.code === 'GROUP_CHECKPOINT_UNAVAILABLE'
+    && failure.conversationId === conversation?.id
+    && conversation?.mode === 'chat'
+})
 const canRetryGenerationFailure = computed(() => {
   const failure = workspace.generationFailure.value
   const conversation = workspace.selectedConversation.value
   const turn = workspace.currentTurn.value
   return Boolean(failure?.detail.retryable
     && failure.conversationId === conversation?.id
-    && conversation?.mode === 'trpg'
+    && (conversation?.mode === 'trpg' || conversation?.mode === 'chat')
     && (turn?.status === 'failed' || turn?.status === 'blocked'))
 })
-function formatDebugValue(value: unknown) {
-  if (typeof value === 'string') return value
-  try { return JSON.stringify(value, null, 2) } catch { return String(value) }
-}
 const uploading = reactive({ world: false, character: false })
 const templateMode = ref<'create' | 'edit'>('create')
 const characterTemplateMode = ref<'create' | 'edit'>('create')
@@ -200,6 +210,10 @@ const diceAutoContinue = computed(() => {
     && autoAdvanceDiceSummaryIds.value.has(summaryId)
 })
 const trpgToolsCardId = ref<number | null>(null)
+const trpgToolsRollback = ref<'turn' | null>(null)
+watch(() => dialogs.trpgTools, (visible) => {
+  if (!visible) trpgToolsRollback.value = null
+})
 const trpgBindingTargetKey = ref<string | null>(null)
 const trpgBindingCreationMethod = ref<CharacterCardCreationMethod | null>(null)
 const returnToTrpgToolsAfterBinding = ref(false)
@@ -296,6 +310,14 @@ async function locateDiceMessage(messageId: number) {
     messageId,
   )
   target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function rollbackGenerationFailure() {
+  if (!canRollbackGenerationFailure.value) return
+  workspace.generationFailureOpen.value = false
+  trpgToolsCardId.value = null
+  trpgToolsRollback.value = 'turn'
+  dialogs.trpgTools = true
 }
 
 function openTrpgTools() {
@@ -506,8 +528,9 @@ function openConversationDelete() {
   dialogs.deleteConversation = true
 }
 async function permanentlyDeleteConversation() {
-  const deleted = await run(workspace.deleteConversation, 'deleteConversation')
-  if (deleted) view.value = 'world'
+  await run(async () => {
+    if (await workspace.deleteConversation()) view.value = 'world'
+  }, 'deleteConversation')
 }
 async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) {
   const authenticated = await run(async () => { await workspace.authenticate(payload); authOpen.value = false })
@@ -516,7 +539,7 @@ async function authenticate(payload: { mode: 'login' | 'register'; email: string
 function logout() { direct.close(); direct.clearDrafts(); workspace.logout() }
 function home() { direct.close(); workspace.selectedWorldId.value = null; workspace.selectedConversationId.value = null; view.value = 'library' }
 function openModuleLibrary() { direct.close(); workspace.selectedConversationId.value = null; view.value = 'modules' }
-async function selectWorld(id: number) { direct.close(); await workspace.selectWorld(id); view.value = 'world' }
+async function selectWorld(id: number) { direct.close(); if (await workspace.selectWorld(id)) view.value = 'world' }
 async function selectConversation(id: number) {
   completionTranscript.value = true
   direct.close()
@@ -850,7 +873,7 @@ async function changePassword() {
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @back="home" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage ref="directStage" :removing="directCharacterRemoving" @remove="removeDirectCharacter" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" />
       <TrpgCompletionStage v-else-if="view === 'group' && completionAvailable && !completionTranscript" :key="workspace.selectedConversationId.value || 0" :report="completionReport" :loading="completionLoading" :busy="completionBusy || workspace.loading.sending" :error="completionError" @reload="loadCompletion" @archive="archiveCompletion" @back="completionTranscript = true" />
-      <GroupChatStage ref="groupStage" v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" :persist-actor-runtime="workspace.saveActorRuntime" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
+      <GroupChatStage ref="groupStage" v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" :persist-actor-runtime="workspace.saveActorRuntime" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @retry-group-turn="workspace.retryGroupTurn" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
     <MobileNavigation v-if="rootNavigationVisible" :current="view === 'modules' ? 'modules' : view === 'profile' ? 'profile' : 'library'" @navigate="navigateMobile" />
   </div>
@@ -1181,42 +1204,30 @@ async function changePassword() {
     <div class="destructive-confirmation"><strong>确认删除“{{ workspace.selectedConversation.value?.title || '当前会话' }}”？</strong><p>删除普通群聊不会撤销已经产生的好感度变化，但聊天记录会被清除。</p></div>
     <template #footer><button class="button ghost" :disabled="busy" @click="dialogs.deleteConversation = false">取消</button><button class="button danger" :disabled="busy" @click="permanentlyDeleteConversation"><Trash2 :size="16" />确认永久删除</button></template>
   </BaseDialog>
-  <BaseDialog
+  <GenerationErrorDialog
     v-if="workspace.generationFailure.value"
     v-model="workspace.generationFailureOpen.value"
     :title="workspace.selectedConversation.value?.mode === 'trpg' ? '行动轮执行失败' : '回复生成失败'"
-    :description="workspace.generationFailure.value.message"
-    size="lg"
-    content-class="generation-error-dialog" mobile-presentation="page"
+    :message="workspace.generationFailure.value.message"
+    :detail="workspace.generationFailure.value.detail"
   >
-    <div class="generation-error-overview">
-      <dl>
-        <div><dt>错误编号</dt><dd>{{ workspace.generationFailure.value.detail.errorId }}</dd></div>
-        <div><dt>错误代码</dt><dd>{{ workspace.generationFailure.value.detail.code }}</dd></div>
-        <div><dt>发生时间</dt><dd>{{ workspace.generationFailure.value.detail.occurredAt }}</dd></div>
-        <div><dt>操作</dt><dd>{{ workspace.generationFailure.value.detail.operation }}</dd></div>
-      </dl>
-      <p>详细信息仅保留在当前页面中，刷新后会清除。</p>
-    </div>
-    <div class="generation-error-details">
-      <details open>
-        <summary>Request</summary>
-        <pre>{{ formatDebugValue(workspace.generationFailure.value.detail.request) }}</pre>
-      </details>
-      <details>
-        <summary>Response</summary>
-        <pre>{{ formatDebugValue(mergeGenerationResponseEvents(workspace.generationFailure.value.detail.response)) }}</pre>
-      </details>
-      <details>
-        <summary>Stack trace</summary>
-        <pre>{{ formatDebugValue(workspace.generationFailure.value.detail.stack) }}</pre>
-      </details>
-    </div>
-    <template #footer>
-      <button class="button ghost" @click="workspace.generationFailureOpen.value = false">关闭</button>
-      <button v-if="canRetryGenerationFailure" class="button primary" :disabled="workspace.loading.sending" @click="workspace.retryGenerationFailure">重试此行动轮</button>
+    <template #actions>
+      <button v-if="canRollbackGenerationFailure" class="button primary" :disabled="workspace.loading.sending" @click="rollbackGenerationFailure">回退至上一轮</button>
+      <button v-else-if="canWithdrawGenerationFailure" class="button primary" :disabled="busy || workspace.loading.sending" @click="run(workspace.withdrawGenerationFailure)">撤回本轮对话</button>
+      <button v-else-if="canRetryGenerationFailure" class="button primary" :disabled="workspace.loading.sending" @click="workspace.retryGenerationFailure">{{ workspace.selectedConversation.value?.mode === 'trpg' ? '重试此行动轮' : '重试本轮回复' }}</button>
     </template>
-  </BaseDialog>
+  </GenerationErrorDialog>
+  <GenerationErrorDialog
+    v-if="view === 'direct' && direct.generationFailure.value"
+    v-model="direct.generationFailureOpen.value"
+    title="回复生成失败"
+    :message="direct.generationFailure.value.message"
+    :detail="direct.generationFailure.value.detail"
+  >
+    <template #actions>
+      <button v-if="direct.generationFailure.value.detail.retryable" class="button primary" :disabled="!direct.canRetryGenerationFailure.value" @click="direct.retryGenerationFailure">重试本轮回复</button>
+    </template>
+  </GenerationErrorDialog>
   <TrpgCharacterBindingDialog
     v-if="workspace.selectedConversation.value?.mode === 'trpg'"
     v-model="dialogs.trpgBinding"
@@ -1230,7 +1241,7 @@ async function changePassword() {
     @update:model-value="handleTrpgBindingVisibility"
     @complete="completeTrpgBinding"
   />
-  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" @turn-settings="openMobileTurnSettings" @open-scene="openMobileScene" @end-trpg="dialogs.end = true" @restored="restoreTrpg" @open-dice="openDiceMessage" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
+  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" :requested-rollback="trpgToolsRollback" @turn-settings="openMobileTurnSettings" @open-scene="openMobileScene" @end-trpg="dialogs.end = true" @restored="restoreTrpg" @open-dice="openDiceMessage" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
   <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" :auto-continue="diceAutoContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" @cancel-auto-continue="cancelDiceAutoAdvance" />
   <BaseDialog v-if="isMobile" v-model="mobileTemplateMenu" title="模板操作" content-class="mobile-v1-menu"><template v-if="ownsSelectedTemplate"><label class="mobile-v1-row file-button"><RotateCcw :size="20" /><span><strong>上传并替换模板</strong><small>按角色名称匹配，确认后替换</small></span><input type="file" accept="application/json,.json" :disabled="busy" @change="mobileTemplateMenu = false; replaceTemplateFromFile($event)" /></label><button class="mobile-v1-row danger-text" :disabled="!selectedTemplateUsage?.deletable || busy" @click="mobileTemplateMenu = false; openTemplateDeleteConfirmation()"><Trash2 :size="20" /><span><strong>删除模板</strong><small>{{ selectedTemplateUsage?.deletable ? '永久删除模板及其设定和角色' : `已有 ${selectedTemplateUsage?.associatedWorldCount || 0} 个世界使用，不能删除` }}</small></span></button></template><p v-else class="mobile-v1-notice">这是其他作者的模板。可以查看资料并使用它创建世界。</p></BaseDialog>
   <BaseDialog v-if="isMobile" v-model="mobileTemplateCharacterOpen" title="角色资料" mobile-presentation="page"><div v-if="mobileTemplateCharacter"><div class="mobile-v1-profile"><span class="mobile-v1-avatar" :style="mobileTemplateCharacter.image ? { backgroundImage: `url(${mobileTemplateCharacter.image})` } : {}">{{ mobileTemplateCharacter.image ? '' : mobileTemplateCharacter.name.slice(0, 1) }}</span><h1>{{ mobileTemplateCharacter.name }}</h1><p>{{ selectedTemplatePreview?.name }}</p></div><p class="mobile-v1-prose">{{ mobileTemplateCharacter.background || '模板预览提供角色名称与头像。使用模板创建世界后，即可与角色开始对话。' }}</p></div></BaseDialog>

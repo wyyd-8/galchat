@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -365,36 +364,20 @@ class GroupGenerationStreamRegistryTest {
                 .doesNotContain(GroupChatConstant.EVENT_REPLY_FAILED);
     }
 
-    @Test
-    void persistsInterruptedStateBeforePublishingTheFailureEvent() {
-        GroupConversationLockService lockService =
-                mock(GroupConversationLockService.class);
-        GroupTurnRecoveryService recoveryService =
-                mock(GroupTurnRecoveryService.class);
-        List<String> lifecycle = new CopyOnWriteArrayList<>();
-        doAnswer(invocation -> {
-            lifecycle.add("recovered");
-            return null;
-        }).when(recoveryService).recoverInterrupted(7L);
-        GroupGenerationStreamRegistry registry =
-                new GroupGenerationStreamRegistry(
-                        Duration.ofMinutes(5), lockService,
-                        recoveryService);
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void failedSourcesDoNotRecoverTurnsWithoutOwningTheirLock(boolean domainFailure) {
+        var locks = mock(GroupConversationLockService.class);
+        var recovery = mock(GroupTurnRecoveryService.class);
+        var registry = new GroupGenerationStreamRegistry(Duration.ofMinutes(5), locks, recovery);
+        Flux<GroupChatEvent> source = domainFailure
+                ? Flux.just(GroupChatEvent.builder().eventType("reply.failed").error("failed").build())
+                : Flux.error(new com.me.galchat.exception.UserRequestException("当前群聊正在生成回复"));
 
-        registry.start(
-                        7L, "recover-before-event",
-                        Flux.error(new IllegalStateException("failed")))
-                .doOnNext(event -> {
-                    if ("generation.failed".equals(
-                            event.getEventType())) {
-                        lifecycle.add("failure-event");
-                    }
-                })
-                .collectList()
-                .block();
+        var events = registry.start(7L, "rejected", source).collectList().block();
 
-        assertThat(lifecycle).containsSubsequence(
-                "recovered", "failure-event");
+        assertThat(events).extracting(GroupChatEvent::getEventType).contains("generation.failed");
+        org.mockito.Mockito.verifyNoInteractions(locks, recovery);
     }
 
     @Test

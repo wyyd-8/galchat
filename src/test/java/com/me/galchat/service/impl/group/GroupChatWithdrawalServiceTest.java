@@ -9,11 +9,8 @@ import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatToolCallMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
-import com.me.galchat.mapper.UserCharacterFavorLogMapper;
-import com.me.galchat.mapper.UserCharacterInfoMapper;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 import java.util.List;
@@ -32,8 +29,9 @@ class GroupChatWithdrawalServiceTest {
                 GroupChatTurn.class);
     }
 
-    @Test
-    void withdrawsCompletedTurnWithoutAccessingReplyPlan() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void withdrawsOnlyTheExpectedTurnAndClearsItsCheckpoint(boolean staleRequest) {
         GroupConversationService conversationService = mock(GroupConversationService.class);
         GroupConversationLockService lockService = mock(GroupConversationLockService.class);
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
@@ -41,6 +39,8 @@ class GroupChatWithdrawalServiceTest {
         GroupChatReplyStepMapper stepMapper = mock(GroupChatReplyStepMapper.class);
         GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
+        GroupTurnCheckpointService checkpoints = mock(GroupTurnCheckpointService.class);
+        GroupChatFavorRollbackService favor = mock(GroupChatFavorRollbackService.class);
         GroupChatWithdrawalService service = new GroupChatWithdrawalService(
                 conversationService,
                 lockService,
@@ -49,9 +49,7 @@ class GroupChatWithdrawalServiceTest {
                 stepMapper,
                 mock(GroupChatToolCallMapper.class),
                 recoveryService,
-                mock(UserCharacterFavorLogMapper.class),
-                mock(UserCharacterInfoMapper.class),
-                mock(StringRedisTemplate.class),
+                favor, checkpoints,
                 mock(GroupTopicService.class),
                 transactionTemplate);
         GroupConversation conversation = new GroupConversation()
@@ -77,8 +75,15 @@ class GroupChatWithdrawalServiceTest {
             return null;
         }).when(transactionTemplate).executeWithoutResult(any());
 
-        service.withdrawLatestTurn(7L);
-
+        if (staleRequest) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.withdrawLatestTurn(7L, 9L))
+                    .hasMessageContaining("群聊记录已变化");
+            org.mockito.Mockito.verifyNoInteractions(favor, checkpoints, stepMapper, messageMapper);
+            return;
+        }
+        service.withdrawLatestTurn(7L, 10L);
+        verify(checkpoints).clear(7L);
+        verify(favor).rollback(1L, List.of(11L));
         verify(recoveryService).assertConversationHasNoNonTerminalTurns(7L);
         verify(stepMapper).delete(any());
         verify(turnMapper).update(

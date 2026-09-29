@@ -150,7 +150,7 @@ export const api = {
   updateGameTime: (id: number, payload: { dayNo: number; period: TrpgGameTimePeriod; revision: number }) =>
     request<TrpgGameTime>(`/group-chat/conversations/${id}/game-time`, { method: 'PUT', body: body(payload) }),
   groupMessages: (id: number, beforeId?: number, size = 50) => request<GroupMessage[]>(`/group-chat/conversations/${id}/messages?size=${size}${beforeId ? `&beforeId=${beforeId}` : ''}`),
-  withdrawGroupTurn: (id: number) => request<void>(`/group-chat/conversations/${id}/withdraw`, { method: 'POST' }),
+  withdrawGroupTurn: (id: number, expectedTurnId?: number) => request<void>(`/group-chat/conversations/${id}/withdraw${expectedTurnId == null ? '' : `?expectedTurnId=${expectedTurnId}`}`, { method: 'POST' }),
   replyPlan: (id: number) => request<ReplyPlan[]>(`/group-chat/conversations/${id}/reply-plan`),
   saveReplyPlan: (id: number, plan: ReplyPlanRequest) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
   finishReplyPlan: (id: number) => request<ReplyPlan | null>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),
@@ -267,6 +267,10 @@ export async function uploadImage(file: File) {
 
 export async function streamGroupMessage(id: number, payload: { clientRequestId: string; content: string }, onEvent: (event: GroupChatEvent) => void, signal?: AbortSignal) {
   return streamGroupTurn(`/group-chat/conversations/${id}/messages`, payload, onEvent, 'POST', signal)
+}
+
+export async function streamGroupRetry(id: number, turnId: number, clientRequestId: string, onEvent: (event: GroupChatEvent) => void, signal?: AbortSignal) {
+  return streamGroupTurn(`/group-chat/conversations/${id}/turns/${turnId}/retry`, { clientRequestId }, onEvent, 'POST', signal)
 }
 
 export async function streamManualGroupMessage(

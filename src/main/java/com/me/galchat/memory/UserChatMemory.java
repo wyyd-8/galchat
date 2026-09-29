@@ -123,7 +123,7 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 查询指定会话窗口内可见的 UserChatHistory 行。
+     * 查询指定会话窗口内可见的 UserChatHistory 行；缺少话题起点时最多取最近 30 条。
      *
      * @param conversationInfo 会话定位信息，start 表示最小历史 id
      * @return 按时间正序排列的历史行
@@ -137,7 +137,8 @@ public class UserChatMemory implements ChatMemory {
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
                         .notIn(UserChatHistory::getType, excludedTypes()))
-                .orderByDesc(UserChatHistory::getId);
+                .orderByDesc(UserChatHistory::getId)
+                .last(conversationInfo.getStart() == null, "limit 30");
         List<UserChatHistory> histories = userChatHistoryMapper.selectList(queryWrapper);
         Collections.reverse(histories);
         return histories;

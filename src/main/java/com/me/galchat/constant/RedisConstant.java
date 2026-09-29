@@ -30,6 +30,10 @@ public final class RedisConstant {
     public static final String USER_INFO_PROMPT_HASH_FIELD = "userInfoPrompt";
 
     public static final Duration CHAT_MEMORY_STEP_TTL = Duration.ofDays(1);
+    public static final Duration USER_CHARACTER_PROMPT_INFO_TTL = Duration.ofMinutes(5);
+    public static final Duration USER_CHARACTER_FAVOR_VALUE_TTL = Duration.ofMinutes(5);
+    public static final Duration WORLD_USER_AUTH_TTL = Duration.ofMinutes(30);
+    public static final Duration TEMPLATE_CACHE_TTL = Duration.ofHours(1);
     public static final Duration EMAIL_VERIFY_CODE_TTL = Duration.ofMinutes(5);
     public static final Duration EMAIL_VERIFY_COOLDOWN_TTL = Duration.ofMinutes(1);
     public static final Duration EMAIL_VERIFY_ATTEMPT_TTL = Duration.ofMinutes(1);

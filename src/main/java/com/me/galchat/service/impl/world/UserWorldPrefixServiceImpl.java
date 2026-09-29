@@ -1,5 +1,7 @@
 package com.me.galchat.service.impl.world;
 
+import com.me.galchat.utils.RedisCacheExpiry;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.constant.RedisConstant;
@@ -73,6 +75,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
         redisTemplate.opsForHash().put(RedisConstant.WORLD_USER_AUTH_KEY,
                 String.valueOf(newUserWorld.getId()),
                 String.valueOf(userId));
+        RedisCacheExpiry.ensure(redisTemplate, RedisConstant.WORLD_USER_AUTH_KEY, RedisConstant.WORLD_USER_AUTH_TTL);
     }
 
     @Override
@@ -161,6 +164,7 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
         }
 
         redisTemplate.opsForHash().put(RedisConstant.WORLD_USER_AUTH_KEY, String.valueOf(userWorldId), String.valueOf(userId));
+        RedisCacheExpiry.ensure(redisTemplate, RedisConstant.WORLD_USER_AUTH_KEY, RedisConstant.WORLD_USER_AUTH_TTL);
         return userWorld;
     }
 

@@ -118,7 +118,7 @@ class TrpgTurnExecutionServiceTest {
         when(conversations.requireAuthorized(7L)).thenReturn(conversation);
         when(conversations.requireActive(7L)).thenReturn(conversation);
         when(conversations.nextSequence(7L)).thenReturn(9L);
-        when(locks.tryLock(7L)).thenReturn(
+        when(locks.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turns.selectById(101L)).thenReturn(turn);
@@ -211,7 +211,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversations.requireActive(7L))
                 .thenReturn(conversation);
-        when(locks.tryLock(7L)).thenReturn(
+        when(locks.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turns.selectById(101L)).thenReturn(turn);
@@ -338,7 +338,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversations.requireActive(7L))
                 .thenReturn(conversation);
-        when(locks.tryLock(7L)).thenReturn(
+        when(locks.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turns.selectList(any())).thenReturn(List.of(turn));
@@ -458,7 +458,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectList(any())).thenReturn(List.of(turn));
@@ -533,7 +533,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectList(any())).thenReturn(List.of(turn));
@@ -651,7 +651,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectById(101L)).thenReturn(turn);
@@ -783,11 +783,11 @@ class TrpgTurnExecutionServiceTest {
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
         var lock = new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L);
-        when(lockService.tryLock(7L)).thenReturn(lock);
+        when(lockService.tryLockWithOwner(7L)).thenReturn(lock);
         when(turnMapper.selectById(101L)).thenReturn(turn);
         when(stepMapper.selectById(103L)).thenReturn(failed);
         String guidance = "未找到匹配的可恢复检查点，无法重试。请打开「跑团工具 → 存档」，使用「回退至上一轮」恢复后继续。";
-        org.mockito.Mockito.doThrow(new UserRequestException(guidance))
+        org.mockito.Mockito.doThrow(new com.me.galchat.exception.TurnCheckpointUnavailableException())
                 .when(checkpointService).restore(turn, failed);
 
         Flux<GroupChatEvent> source;
@@ -810,6 +810,8 @@ class TrpgTurnExecutionServiceTest {
             assertThat(event.getError()).isEqualTo(guidance);
             assertThat(event.getErrorDetail()).isNotNull();
             assertThat(event.getErrorDetail().getMessage()).isEqualTo(guidance);
+            assertThat(event.getErrorDetail().getCode()).isEqualTo("TURN_CHECKPOINT_UNAVAILABLE");
+            assertThat(event.getErrorDetail().getRetryable()).isFalse();
         });
         assertThat(failed.getStatus()).isEqualTo(GroupChatConstant.STATUS_FAILED);
         assertThat(failed.getOutputMessageId()).isEqualTo(203L);
@@ -878,7 +880,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
@@ -1024,7 +1026,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(runtimeRegistry.require(GroupChatConstant.MODE_TRPG))
@@ -1158,7 +1160,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectById(101L)).thenReturn(turn);
@@ -1294,7 +1296,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectList(any()))
@@ -1407,7 +1409,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectById(101L)).thenReturn(turn);
@@ -1511,7 +1513,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectById(101L)).thenReturn(turn);
@@ -1601,6 +1603,10 @@ class TrpgTurnExecutionServiceTest {
         assertThat(current.status())
                 .isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
         assertThat(current.itemOrder()).isEqualTo(1);
+        if (GroupChatConstant.MODE_CHAT.equals(mode)) {
+            turn.setStatus(GroupChatConstant.STATUS_COMPLETED);
+            assertThat(service.current(7L)).isNull();
+        }
     }
 
     @ParameterizedTest
@@ -1745,7 +1751,7 @@ class TrpgTurnExecutionServiceTest {
                         mock(GroupTurnCheckpointService.class),
                         mock(TrpgUnconsciousRecoveryService.class),
                         mock(ITrpgSaveService.class));
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectCount(any())).thenReturn(1L);
@@ -1825,7 +1831,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectList(any())).thenReturn(List.of(completed));
@@ -1907,7 +1913,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.selectList(any())).thenReturn(List.of(waiting));
@@ -2044,7 +2050,7 @@ class TrpgTurnExecutionServiceTest {
                 .thenReturn(conversation);
         when(conversations.requireActive(7L))
                 .thenReturn(conversation);
-        when(locks.tryLock(7L)).thenReturn(
+        when(locks.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turns.selectList(any())).thenReturn(List.of(turn));
@@ -2137,7 +2143,7 @@ class TrpgTurnExecutionServiceTest {
         when(conversations.requireActive(7L))
                 .thenReturn(conversation);
         when(conversations.nextSequence(7L)).thenReturn(9L);
-        when(locks.tryLock(7L)).thenReturn(
+        when(locks.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turns.selectById(101L)).thenReturn(turn);
@@ -2225,7 +2231,7 @@ class TrpgTurnExecutionServiceTest {
         when(conversations.requireAuthorized(7L)).thenReturn(conversation);
         when(conversations.requireActive(7L)).thenReturn(conversation);
         when(conversations.nextSequence(7L)).thenReturn(9L);
-        when(locks.tryLock(7L)).thenReturn(
+        when(locks.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turns.selectById(101L)).thenReturn(turn);

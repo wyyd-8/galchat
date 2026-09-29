@@ -21,6 +21,9 @@ import com.me.galchat.mapper.GroupReplyPlanMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -105,9 +108,6 @@ public class TrpgSceneLifecycleService {
             throw new UserRequestException(
                     "当前调查员行动未绑定人物卡");
         }
-        progressStore.markReady(
-                conversationId, execution.plan().getId(),
-                execution.step().getSubjectCharacterId());
         Set<String> participantActors = itemMapper.selectList(
                         new LambdaQueryWrapper<GroupReplyPlanItem>()
                                 .eq(GroupReplyPlanItem::getPlanId,
@@ -125,18 +125,35 @@ public class TrpgSceneLifecycleService {
                 .map(item -> TrpgSceneProgressStore.actorKey(
                         item.getSubjectCharacterId()))
                 .collect(Collectors.toSet());
-        Set<String> readyActors = progressStore.readyActors(
-                conversationId, execution.plan().getId());
-        if (!participantActors.isEmpty()
-                && readyActors.containsAll(participantActors)) {
-            progressStore.requestFinish(
-                    conversationId, execution.plan().getId());
+        Set<String> readyActors = new HashSet<>(progressStore.readyActors(
+                conversationId, execution.plan().getId()));
+        readyActors.add(TrpgSceneProgressStore.actorKey(
+                execution.step().getSubjectCharacterId()));
+        boolean allReady = !participantActors.isEmpty()
+                && readyActors.containsAll(participantActors);
+        if (allReady) {
             recoveryService.cancelPendingInvestigatorSteps(
                     execution.turn().getId(),
                     "所有调查员已结束当前场景探索");
-            return true;
         }
-        return false;
+        Runnable publish = () -> {
+            progressStore.markReady(conversationId, execution.plan().getId(),
+                    execution.step().getSubjectCharacterId());
+            if (allReady) {
+                progressStore.requestFinish(conversationId, execution.plan().getId());
+            }
+        };
+        // The user action and cancelled tail must commit before Redis advertises readiness.
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() { publish.run(); }
+            });
+        } else {
+            publish.run();
+        }
+        return allReady;
     }
 
     public void requestKpFinish(

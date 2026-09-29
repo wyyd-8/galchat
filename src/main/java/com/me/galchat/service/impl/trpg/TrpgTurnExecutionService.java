@@ -110,7 +110,7 @@ public class TrpgTurnExecutionService {
             validateContinueRequest(request);
             conversationService.requireAuthorized(conversationId);
             GroupConversationLockService.OwnedLock lock =
-                    lockService.tryLock(conversationId);
+                    lockService.tryLockWithOwner(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException(
                         "当前群聊正在执行行动轮，请稍后再试"));
@@ -251,7 +251,7 @@ public class TrpgTurnExecutionService {
         return Flux.defer(() -> {
             conversationService.requireAuthorized(conversationId);
             GroupConversationLockService.OwnedLock lock =
-                    lockService.tryLock(conversationId);
+                    lockService.tryLockWithOwner(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException(
                         "当前群聊正在执行行动轮，请稍后再试"));
@@ -592,19 +592,24 @@ public class TrpgTurnExecutionService {
                 new LambdaQueryWrapper<GroupChatTurn>()
                         .eq(GroupChatTurn::getConversationId,
                                 conversationId)
-                        .in(GroupChatTurn::getStatus,
+                        .in(!GroupChatConstant.MODE_CHAT.equals(conversation.getMode()), GroupChatTurn::getStatus,
                                 GroupChatConstant.STATUS_RUNNING,
                                 GroupChatConstant.STATUS_WAITING_INPUT,
                                 GroupChatConstant.STATUS_PAUSED,
                                 GroupChatConstant.STATUS_WAITING_DICE,
                                 GroupChatConstant.STATUS_FAILED,
                                 GroupChatConstant.STATUS_BLOCKED)
+                        .ne(GroupChatConstant.MODE_CHAT.equals(conversation.getMode()),
+                                GroupChatTurn::getStatus, GroupChatConstant.STATUS_WITHDRAWN)
                         .orderByDesc(GroupChatTurn::getId)
                         .last("limit 1"));
         if (turns == null || turns.isEmpty()) {
             return null;
         }
         GroupChatTurn turn = turns.getFirst();
+        if (GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
+                && (GroupChatConstant.STATUS_COMPLETED.equals(turn.getStatus())
+                || GroupChatConstant.STATUS_CANCELLED.equals(turn.getStatus()))) return null;
         List<GroupChatReplyStep> steps = stepMapper.selectList(
                 new LambdaQueryWrapper<GroupChatReplyStep>()
                         .eq(GroupChatReplyStep::getTurnId, turn.getId())
@@ -768,7 +773,7 @@ public class TrpgTurnExecutionService {
             validateMessageRequest(request);
             conversationService.requireAuthorized(conversationId);
             GroupConversationLockService.OwnedLock lock =
-                    lockService.tryLock(conversationId);
+                    lockService.tryLockWithOwner(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException(
                         "当前群聊正在执行行动轮，请稍后再试"));
@@ -814,7 +819,7 @@ public class TrpgTurnExecutionService {
             validateInquiryRequest(request);
             conversationService.requireAuthorized(conversationId);
             GroupConversationLockService.OwnedLock lock =
-                    lockService.tryLock(conversationId);
+                    lockService.tryLockWithOwner(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException(
                         "当前群聊正在执行行动轮，请稍后再试"));
@@ -959,7 +964,7 @@ public class TrpgTurnExecutionService {
             validateClientRequestId(request.getClientRequestId());
             conversationService.requireAuthorized(conversationId);
             GroupConversationLockService.OwnedLock lock =
-                    lockService.tryLock(conversationId);
+                    lockService.tryLockWithOwner(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException(
                         "当前群聊正在执行行动轮，请稍后再试"));
@@ -1021,7 +1026,7 @@ public class TrpgTurnExecutionService {
             validateClientRequestId(request.getClientRequestId());
             conversationService.requireAuthorized(conversationId);
             GroupConversationLockService.OwnedLock lock =
-                    lockService.tryLock(conversationId);
+                    lockService.tryLockWithOwner(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException(
                         "当前群聊正在执行行动轮，请稍后再试"));
@@ -1044,19 +1049,21 @@ public class TrpgTurnExecutionService {
                     throw new UserRequestException(
                             "当前用户步骤不属于场景探索");
                 }
-                sceneLifecycleService.requestInvestigatorFinish(
-                        conversationId, stepId,
-                        userStep.getSpeakerType(),
-                        userStep.getSpeakerId());
-                GroupChatMessage message = transactionTemplate.execute(
-                        status -> completeStructuredUserStep(
-                                conversation, turn, userStep,
-                                (GroupChatConstant.ACTOR_USER.equals(
-                                        userStep.getSpeakerType())
-                                        ? "用户调查员"
-                                        : "调查员")
-                                        + "已结束当前场景探索。",
-                                request.getClientRequestId()));
+                GroupChatMessage message = transactionTemplate.execute(status -> {
+                    GroupChatMessage saved = completeStructuredUserStep(
+                            conversation, turn, userStep,
+                            (GroupChatConstant.ACTOR_USER.equals(
+                                    userStep.getSpeakerType())
+                                    ? "用户调查员"
+                                    : "调查员")
+                                    + "已结束当前场景探索。",
+                            request.getClientRequestId());
+                    sceneLifecycleService.requestInvestigatorFinish(
+                            conversationId, stepId,
+                            userStep.getSpeakerType(),
+                            userStep.getSpeakerId());
+                    return saved;
+                });
                 if (message == null) {
                     throw new UserRequestException(
                             "保存结束探索操作失败");

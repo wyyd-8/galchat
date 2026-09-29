@@ -46,6 +46,7 @@ const props = defineProps<{
   loadingOlderMessages: boolean
   requestedTool?: 'status' | 'card' | 'save' | 'dice'
   requestedCardId?: number | null
+  requestedRollback?: 'turn' | null
 }>()
 const emit = defineEmits<{
   turnSettings: []
@@ -556,11 +557,22 @@ watch(open, (visible) => {
     expandedRuntimeKey.value = null
     return
   }
-  mobileToolOpen.value = props.requestedCardId != null || props.requestedTool != null
-  mobileCardOpen.value = props.requestedCardId != null
-  if (props.requestedCardId != null) selectedToolTab.value = 'card'
+  const requestedRollback = props.requestedRollback
+  const conversationId = props.conversation.id
+  mobileToolOpen.value = requestedRollback != null || props.requestedCardId != null || props.requestedTool != null
+  mobileCardOpen.value = !requestedRollback && props.requestedCardId != null
+  if (requestedRollback) selectedToolTab.value = 'save'
+  else if (props.requestedCardId != null) selectedToolTab.value = 'card'
   else if (props.requestedTool) selectedToolTab.value = props.requestedTool
-  void execute(() => refreshOverview(props.requestedCardId ?? null))
+  void execute(async () => {
+    await refreshOverview(props.requestedCardId ?? null)
+    if (!requestedRollback || !open.value || props.conversation.id !== conversationId) return
+    if (!rollbackActions.value.find(item => item.key === requestedRollback)?.point.available) {
+      notify('无法回退至上一轮', '尚未形成可用的上一轮回退点。', 'danger')
+      return
+    }
+    requestRollback(requestedRollback)
+  })
 })
 watch(() => props.conversation.id, () => {
   selectedKey.value = 'player'

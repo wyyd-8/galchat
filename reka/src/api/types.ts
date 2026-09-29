@@ -127,7 +127,7 @@ export interface ChatMessagePayload {
   worldId: number; userWorldId: number; characterId: number; message: string
   clientRequestId?: string
 }
-export interface ChatFlux { type: string; content?: string; sequence?: number }
+export interface ChatFlux { type: string; content?: string; sequence?: number; errorDetail?: GenerationErrorDetail }
 export interface DirectMessage {
   id: string; historyId?: number; userMessageId?: number; role: 'user' | 'assistant' | 'thinking' | 'tool'; content: string; time?: string; complete?: boolean
 }

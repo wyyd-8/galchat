@@ -10,9 +10,11 @@ import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
+import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.exception.GroupCheckpointUnavailableException;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.domain.vo.KpDiceToolResult;
-import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.exception.TurnCheckpointUnavailableException;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
@@ -49,6 +51,7 @@ public class GroupTurnCheckpointService {
             diceMessageCodec;
     private final ICharacterCardService characterCardService;
     private final ObjectMapper objectMapper;
+    private final GroupChatFavorRollbackService chatFavorRollbackService;
     private com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -129,8 +132,7 @@ public class GroupTurnCheckpointService {
                 || !Objects.equals(turn.getId(), checkpoint.getTurnId())
                 || !Objects.equals(step.getId(),
                 checkpoint.getReplyStepId())) {
-            throw new UserRequestException(
-                    "未找到匹配的可恢复检查点，无法重试。请打开「跑团工具 → 存档」，使用「回退至上一轮」恢复后继续。");
+            throw new TurnCheckpointUnavailableException();
         }
         String checkpointType = checkpoint.getCheckpointType();
         boolean diceBoundary = TOOL_COMMITTED.equals(checkpointType)
@@ -138,8 +140,7 @@ public class GroupTurnCheckpointService {
         if (!diceBoundary
                 && !PAUSED.equals(checkpointType)
                 && !STEP_START.equals(checkpointType)) {
-            throw new UserRequestException(
-                    "未找到匹配的可恢复检查点，无法重试。请打开「跑团工具 → 存档」，使用「回退至上一轮」恢复后继续。");
+            throw new TurnCheckpointUnavailableException();
         }
         GroupChatToolCall diceCall = diceBoundary
                 ? latestDiceCall(step.getId(), checkpoint.getToolCallId())
@@ -183,6 +184,71 @@ public class GroupTurnCheckpointService {
                         : GroupChatConstant.STATUS_RUNNING)
                 .setUpdatedAt(now);
         turnMapper.updateById(turn);
+    }
+
+    /** Restores the unfinished suffix after the last fully completed chat reply. */
+    @Transactional(rollbackFor = Exception.class)
+    public List<GroupChatReplyStep> restoreChat(GroupConversation conversation, GroupChatTurn turn) {
+        GroupTurnCheckpoint checkpoint = checkpointMapper.selectById(conversation.getId());
+        List<GroupChatReplyStep> steps = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, turn.getId())
+                        .orderByAsc(GroupChatReplyStep::getStepNo));
+        if (!GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
+                || !Objects.equals(conversation.getId(), turn.getConversationId())
+                || checkpoint == null || !Objects.equals(checkpoint.getTurnId(), turn.getId())
+                || steps == null || steps.isEmpty()) {
+            throw new GroupCheckpointUnavailableException();
+        }
+        int boundary = -1;
+        for (int i = 0; i < steps.size(); i++) {
+            if (Objects.equals(steps.get(i).getId(), checkpoint.getReplyStepId())) {
+                boundary = i;
+                break;
+            }
+        }
+        int next;
+        if (STEP_START.equals(checkpoint.getCheckpointType()) && boundary == 0) {
+            next = 0;
+        } else if (COMPLETED.equals(checkpoint.getCheckpointType()) && boundary >= 0) {
+            next = boundary + 1;
+        } else {
+            throw new GroupCheckpointUnavailableException();
+        }
+        for (int i = 0; i < steps.size(); i++) {
+            GroupChatReplyStep step = steps.get(i);
+            if (step.getParentStepId() != null
+                    || !Objects.equals(step.getTurnId(), turn.getId())
+                    || (i < next) != GroupChatConstant.STATUS_COMPLETED.equals(step.getStatus())) {
+                throw new GroupCheckpointUnavailableException();
+            }
+        }
+        List<GroupChatReplyStep> remaining = steps.subList(next, steps.size());
+        if (!remaining.isEmpty()) {
+            List<Long> stepIds = remaining.stream().map(GroupChatReplyStep::getId).toList();
+            chatFavorRollbackService.rollback(conversation.getUserWorldId(), stepIds);
+            messageMapper.delete(new LambdaQueryWrapper<GroupChatMessage>()
+                    .in(GroupChatMessage::getReplyStepId, stepIds));
+            toolCallMapper.delete(new LambdaQueryWrapper<GroupChatToolCall>()
+                    .in(GroupChatToolCall::getReplyStepId, stepIds));
+            for (GroupChatReplyStep step : remaining) {
+                // A new attempt uses the actor's current model selection.
+                step.setStatus(GroupChatConstant.STATUS_PENDING).setOutputMessageId(null)
+                        .setExecutionMode(null).setModelApiId(null)
+                        .setErrorMessage(null).setUpdatedAt(LocalDateTime.now());
+                stepMapper.update(null, new LambdaUpdateWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getId, step.getId())
+                        .set(GroupChatReplyStep::getStatus, step.getStatus())
+                        .set(GroupChatReplyStep::getOutputMessageId, null)
+                        .set(GroupChatReplyStep::getExecutionMode, null)
+                        .set(GroupChatReplyStep::getModelApiId, null)
+                        .set(GroupChatReplyStep::getErrorMessage, null)
+                        .set(GroupChatReplyStep::getUpdatedAt, step.getUpdatedAt()));
+            }
+        }
+        turn.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
+        turnMapper.updateById(turn);
+        return List.copyOf(remaining);
     }
 
     private void reconcileFinishRequest(GroupChatTurn turn) {

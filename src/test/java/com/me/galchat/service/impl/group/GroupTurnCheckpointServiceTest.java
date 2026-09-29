@@ -9,7 +9,7 @@ import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
-import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.exception.TurnCheckpointUnavailableException;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
@@ -94,7 +94,7 @@ class GroupTurnCheckpointServiceTest {
 
         assertThatThrownBy(() -> fixture.service().restore(
                 fixture.turn(), fixture.step()))
-                .isInstanceOf(UserRequestException.class)
+                .isInstanceOf(TurnCheckpointUnavailableException.class)
                 .hasMessage("未找到匹配的可恢复检查点，无法重试。请打开「跑团工具 → 存档」，使用「回退至上一轮」恢复后继续。");
 
         assertThat(fixture.step().getStatus())
@@ -134,7 +134,7 @@ class GroupTurnCheckpointServiceTest {
                         mock(com.me.galchat.groupchat.dice
                                 .DiceRollMessageCodec.class),
                         mock(ICharacterCardService.class),
-                        JsonMapper.builder().build());
+                        JsonMapper.builder().build(), mock(GroupChatFavorRollbackService.class));
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(101L)
                 .setConversationId(7L)
@@ -450,7 +450,7 @@ class GroupTurnCheckpointServiceTest {
                         diceRollSummaryMapper,
                         codec,
                         characterCardService,
-                        JsonMapper.builder().build());
+                        JsonMapper.builder().build(), mock(GroupChatFavorRollbackService.class));
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(101L)
                 .setConversationId(7L)

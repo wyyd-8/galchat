@@ -311,7 +311,7 @@ npm run dev
 ### 5. 可选：启动 Python 辅助服务
 
 ```bash
-python -m pip install fastapi uvicorn torch "transformers>=4.36.0" pydantic
+python -m pip install -r python/requirements-reranker.txt
 ```
 
 检索重排服务默认加载 `Alibaba-NLP/gte-multilingual-reranker-base`，首次启动可能需要下载模型：
@@ -328,14 +328,20 @@ RERANKER_MODEL_PATH=/path/to/gte-multilingual-reranker-base python python/rerank
 
 reranker 还支持 `RERANKER_DEVICE`、`RERANKER_MAX_LENGTH`、`RERANKER_BATCH_SIZE` 和 `RERANKER_TORCH_DTYPE`。Java 当前直接调用本机 `8082`；异机部署需要调整 Java 侧地址。
 
-重排服务调用失败时会保留原始向量召回顺序，可先不启动它来验证主流程。
+重排服务调用失败或返回无效结果时，按各来源候选的向量检索分数降序取前 5 条；无分数或分数非有限数的候选（包括未做向量检索的最近记忆）不参与回退。可先不启动它来验证主流程。正常重排仍可处理无向量分数的最近记忆。
+
+依赖版本固定在 `python/requirements-reranker.txt`；模块会恢复 GTE 在 Transformers 5 加载时未正确初始化的位置索引和 RoPE 缓存。升级依赖或模型后，使用真实模型回归检查排序及跨批次推理（离线运行需先缓存模型）：
+
+```bash
+HF_HUB_OFFLINE=1 RUN_RERANKER_MODEL_TESTS=1 python -m unittest discover -s python -p 'test_*.py' -v
+```
 
 ### 可选：生成角色卡 PDF
 
 在「跑团工具 → 人物卡」右上角导出 PDF。前端直接调用可选 Python 服务，服务不可用时隐藏按钮。全部代码位于 `python/character_card_pdf.py`，所需字体和模板位于同级 `character_card/` 文件夹。
 
 ```bash
-python -m pip install Pillow reportlab fastapi uvicorn
+python -m pip install -r python/requirements-pdf.txt
 python python/character_card_pdf.py
 ```
 

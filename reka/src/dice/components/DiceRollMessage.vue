@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Dices } from '@lucide/vue'
 import type { DiceRollAggregate } from '@/api/types'
+import { insanityRoundPresentation } from '@/dice/domain/insanityPresentation'
 import { createDiceMessagePresentation, splitDiceAggregateByRound } from '@/dice/domain/dicePlayback'
 
 const props = withDefaults(defineProps<{ aggregate: DiceRollAggregate; showIcon?: boolean }>(), {
@@ -11,6 +12,7 @@ const emit = defineEmits<{ open: [aggregate: DiceRollAggregate] }>()
 const cards = computed(() => splitDiceAggregateByRound(props.aggregate).map((aggregate) => ({
   aggregate,
   presentation: createDiceMessagePresentation(aggregate),
+  insanity: Boolean(insanityRoundPresentation(aggregate.results)),
 })))
 </script>
 
@@ -21,7 +23,7 @@ const cards = computed(() => splitDiceAggregateByRound(props.aggregate).map((agg
       :key="`${card.aggregate.summary.id}:${card.aggregate.results[0]?.roundNo || 1}`"
       type="button"
       class="dice-message-card dice-tone"
-      :class="`is-${card.presentation.tone}`"
+      :class="[`is-${card.presentation.tone}`, { 'is-insanity': card.insanity }]"
       @click="emit('open', card.aggregate)"
     >
       <span class="dice-message-title">

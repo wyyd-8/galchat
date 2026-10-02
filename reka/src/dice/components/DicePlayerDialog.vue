@@ -758,6 +758,7 @@ onBeforeUnmount(() => {
                     : 'is-concealed',
                   {
                     'is-stun': request.presentation.groups[index]?.effectTone === 'stun',
+                    'is-insanity': request.presentation.valueType === 'insanity',
                     'is-winner': isWinnerHighlighted && request.presentation.groups[index]?.winner,
                     'is-loser': isWinnerHighlighted && hasOpposedWinner && !request.presentation.groups[index]?.winner,
                   },
@@ -775,7 +776,7 @@ onBeforeUnmount(() => {
                     <span>{{ group.expression }}</span>
                   </small>
                 </span>
-                <b v-if="isDiceGroupResultRevealed(index)" class="dice-group-outcome">
+                <b v-if="isDiceGroupResultRevealed(index)" class="dice-group-outcome" :title="request.presentation.groups[index]?.outcomeDescription">
                   <strong>{{ diceGroupResultDisplay(index, group.result)?.value }}</strong>
                   <small v-if="diceGroupResultDisplay(index, group.result)?.label">
                     {{ diceGroupResultDisplay(index, group.result)?.label }}

@@ -1108,7 +1108,7 @@ watch(selectedSheetTab, (tab) => {
                   v-for="entry in group.entries"
                   :key="`${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`"
                   class="dice-history-item dice-history-record dice-tone"
-                  :class="`is-${entry.tone}`"
+                  :class="[`is-${entry.tone}`, { 'is-insanity': entry.category === '临时疯狂' }]"
                 >
                   <button type="button" class="dice-history-record-open" @click="emit('openDice', entry.aggregate)">
                     <span class="dice-history-record-main">

@@ -37,7 +37,7 @@ const groups = computed(() => {
           <header><strong>{{ mobileHistoryTitle(entry) }}</strong><span class="history-tag">{{ entry.statusLabel }}</span></header>
           <div v-for="value in mobileHistoryValues(entry)" :key="value.key" class="history-value">
             <span v-if="mobileHistoryValues(entry).length > 1" class="history-value-name">{{ value.name || '掷骰结果' }}</span>
-            <div class="history-value-result"><strong>{{ value.value ?? '—' }} <small v-if="value.target != null">/ {{ value.target }}</small></strong><span v-if="mobileHistoryValues(entry).length > 1 && value.outcome" class="history-tag dice-tone" :class="`is-${value.outcome.tone}`">{{ value.outcome.label }}</span></div>
+            <div class="history-value-result"><strong :class="{ 'is-semantic-value': typeof value.value === 'string' }" :title="value.description">{{ value.value ?? '—' }} <small v-if="value.target != null">/ {{ value.target }}</small></strong><span v-if="mobileHistoryValues(entry).length > 1 && value.outcome" class="history-tag dice-tone" :class="`is-${value.outcome.tone}`">{{ value.outcome.label }}</span></div>
           </div>
           <p v-if="!entry.aggregate.results.length" class="history-no-value">尚无可展示的骰点</p>
           <p class="history-meta">{{ entry.category }}<template v-if="formatDiceHistoryTime(entry.occurredAt)"> · {{ formatDiceHistoryTime(entry.occurredAt) }}</template><template v-if="(entry.aggregate.results[0]?.roundNo || 1) > 1"> · 第 {{ entry.aggregate.results[0]?.roundNo }} 次掷骰</template></p>
@@ -60,6 +60,7 @@ const groups = computed(() => {
 .history-card { background:var(--dice-message-background);border:1px solid var(--dice-message-accent);border-radius:13px;padding:17px;margin:12px 0; }.history-card>header { display:flex;justify-content:space-between;align-items:center;gap:12px; }.history-card>header>strong { font-size:14px;line-height:1.6;font-weight:550;overflow-wrap:anywhere; }
 .history-tag { display:inline-block;flex:none;max-width:50%;font-size:11px;color:var(--dice-message-accent);background:color-mix(in srgb, var(--dice-message-accent) 12%, #faf8f2);padding:4px 8px;border-radius:6px;line-height:1.6;overflow-wrap:anywhere; }
 .history-value { margin:15px 0; }.history-value-result>strong { display:block;font:36px Georgia;color:var(--dice-message-accent);overflow-wrap:anywhere; }.history-value small { font-size:18px;color:#777970; }.history-value-name { display:block;font-size:12px;color:#777970;line-height:1.6;margin-bottom:5px; }
+.history-value-result>strong.is-semantic-value { font-family:inherit;font-size:18px;line-height:1.6; }
 .history-value-result { display:flex;align-items:center;justify-content:space-between;gap:12px; }
 .history-reason { color:#777970;font-size:12px;line-height:1.8;margin:8px 0; }.history-reason summary { cursor:pointer;min-height:24px; }.history-reason p { margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere; }
 .history-meta,.history-no-value { font-size:13px;line-height:1.8;color:#777970;margin:8px 0 12px; }

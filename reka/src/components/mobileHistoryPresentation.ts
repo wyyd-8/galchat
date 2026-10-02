@@ -1,3 +1,4 @@
+import { insanityDetailPresentation, insanityRoundPresentation } from '../dice/domain/insanityPresentation.ts'
 import type { DiceHistoryEntry } from '@/dice/domain/dicePlayback'
 import { checkOutcomeTone } from '../dice/domain/dicePlayback.ts'
 
@@ -18,13 +19,17 @@ function participantOutcome(outcome?: Record<string, unknown>) {
 
 export function mobileHistoryValues(entry: DiceHistoryEntry) {
   const latestRound = Math.max(1, ...entry.aggregate.results.map(detail => detail.roundNo || 1))
-  return entry.aggregate.results.filter(detail => (detail.roundNo || 1) === latestRound).map(detail => ({
-    key: detail.id,
-    name: [detail.resolution?.characterName, detail.resolution?.checkName].filter(Boolean).join(' · '),
-    value: typeof detail.resultData?.result === 'number' && Number.isFinite(detail.resultData.result) ? detail.resultData.result : null,
-    outcome: participantOutcome(detail.resolution?.outcome),
-    target: typeof detail.resolution?.targetValue === 'number' && Number.isFinite(detail.resolution.targetValue) ? detail.resolution.targetValue : null,
-  }))
+  return entry.aggregate.results.filter(detail => (detail.roundNo || 1) === latestRound).map(detail => {
+    const insanity = insanityDetailPresentation(detail)
+    if (insanity) return { key: detail.id, name: [insanity.name, insanity.label].filter(Boolean).join(' · '), value: insanity.value, description: insanity.description, target: null, outcome: null }
+    return {
+      key: detail.id,
+      name: [detail.resolution?.characterName, detail.resolution?.checkName].filter(Boolean).join(' · '),
+      value: typeof detail.resultData?.result === 'number' && Number.isFinite(detail.resultData.result) ? detail.resultData.result : null,
+      outcome: participantOutcome(detail.resolution?.outcome),
+      target: typeof detail.resolution?.targetValue === 'number' && Number.isFinite(detail.resolution.targetValue) ? detail.resolution.targetValue : null,
+    }
+  })
 }
 
 export function matchesMobileHistoryQuery(entry: DiceHistoryEntry, query: string) {
@@ -41,6 +46,9 @@ export function mobileHistoryDay(value?: string, now = new Date()) {
 }
 
 export function mobileHistoryTitle(entry: DiceHistoryEntry) {
+  const latestRound = Math.max(1, ...entry.aggregate.results.map(detail => detail.roundNo || 1))
+  const insanity = insanityRoundPresentation(entry.aggregate.results.filter(detail => (detail.roundNo || 1) === latestRound))
+  if (insanity) return insanity.title
   const values = mobileHistoryValues(entry)
   return values.length === 1 && values[0]?.name ? values[0].name : entry.title
 }

@@ -1,3 +1,4 @@
+import { insanityDetailPresentation, insanityRoundPresentation } from './insanityPresentation.ts'
 import type {
   DiceModifierFactor, DiceResult, DiceRollAggregate, DiceRollDetail, GroupMessage,
 } from '../../api/types'
@@ -33,6 +34,8 @@ export interface DicePlaybackGroupPresentation {
   difficultyLabel?: string
   targetValue?: number
   outcomeLabel: string
+  outcomeDescription?: string
+  pendingLabel?: string
   outcomeTone: DiceOutcomeTone
   effectTone?: 'stun'
   success: boolean
@@ -56,6 +59,8 @@ export interface DiceGroupResultDisplay {
 }
 export interface DicePlaybackPresentation {
   kind: 'multiplayer-check' | 'opposed-check' | 'value-roll'
+  modifierLabel?: string
+  valueType?: 'insanity'
   resultLabel: string
   resultValue: string
   resultHeadline?: string
@@ -203,7 +208,7 @@ const VALUE_ROLL_TYPES = new Set([
 
 export const DICE_HISTORY_CATEGORY_OPTIONS = [
   '普通检定', '群体检定', '对抗检定', '孤注一掷', '理智检定',
-  '理智损失', '伤害结算', '治疗恢复', '其他',
+  '理智损失', '临时疯狂', '伤害结算', '治疗恢复', '其他',
 ] as const
 export type DiceHistoryCategory = typeof DICE_HISTORY_CATEGORY_OPTIONS[number]
 export type DiceHistoryResultKind = 'numeric' | 'success' | 'failure' | 'other'
@@ -349,7 +354,8 @@ export function createDiceMessagePresentation(
   aggregate: DiceRollAggregate,
 ): DiceMessagePresentation {
   const pending = isDiceAggregatePending(aggregate)
-  const title = latestDiceDetails(aggregate)[0]?.reason
+  const insanity = insanityRoundPresentation(latestDiceDetails(aggregate))
+  const title = insanity?.title || latestDiceDetails(aggregate)[0]?.reason
     || aggregate.summary.reason
     || '掷骰判定'
   if (pending) {
@@ -359,6 +365,8 @@ export function createDiceMessagePresentation(
       tone: 'pending',
     }
   }
+
+  if (insanity) return { title, statusLabel: insanity.summary, tone: 'sanity' }
 
   const personalizedTone = aggregate.summary.toolName
     ? PERSONALIZED_MESSAGE_TONES[aggregate.summary.toolName]
@@ -659,6 +667,7 @@ function diceHistoryResolutionTypes(aggregate: DiceRollAggregate): string[] {
 
 function diceHistoryCategory(aggregate: DiceRollAggregate): DiceHistoryCategory {
   const types = diceHistoryResolutionTypes(aggregate)
+  if (insanityRoundPresentation(latestDiceDetails(aggregate))) return '临时疯狂'
   if (types.length && types.every((type) => type === 'DAMAGE' || type === 'STUN_DURATION')) {
     return '伤害结算'
   }
@@ -871,6 +880,7 @@ export function createDiceGroupResultDisplay(
       value: value.slice(0, separatorIndex),
     }
   }
+  if (group?.pendingLabel) return { value: group.pendingLabel }
   if (typeof group?.targetValue !== 'number') return undefined
   return { label: '目标', value: String(group.targetValue) }
 }
@@ -1118,6 +1128,48 @@ export function createDiceAggregatePlaybackRequest(
   }
 }
 
+function createInsanityPlaybackRequest(
+  previousId: number,
+  aggregate: DiceRollAggregate,
+  details: Array<DiceRollDetail & { resultData: DiceResult }>,
+  skin: unknown,
+  insanity: { title: string; summary: string },
+): DicePlaybackRequest {
+  const modules: DiceResult['modules'] = []
+  const groups = details.map(detail => {
+    const display = insanityDetailPresentation(detail)!
+    const moduleStart = modules.length
+    const detailModules = detail.resultData.modules.length ? detail.resultData.modules : [valuePlaceholder(detail)]
+    modules.push(...detailModules.map(module => ({ ...module, expression: `${module.expression}（${display.label}）` })))
+    return {
+      label: display.name || '临时疯狂',
+      checkName: `${detail.resultData.formula}（${display.label}）`,
+      outcomeLabel: display.value,
+      outcomeDescription: display.description || undefined,
+      pendingLabel: '待确定',
+      outcomeTone: 'none' as const,
+      success: false,
+      moduleStart,
+      moduleCount: detailModules.length,
+      rollResult: detail.resultData.result,
+    }
+  })
+  return {
+    id: previousId + 1,
+    result: JSON.parse(JSON.stringify({ formula: details.map(detail => detail.resultData.formula).join(' / '), modules })) as DiceResult,
+    skin: resolveDiceSkin(skin),
+    reason: insanity.title,
+    toolName: aggregate.summary.toolName,
+    windowTone: 'sanity',
+    presentation: {
+      kind: 'value-roll', valueType: 'insanity', modifierLabel: '临时疯狂',
+      resultLabel: '临时疯狂', resultValue: insanity.summary,
+      formulaLabel: '参与者', formulaValue: `${countDiceParticipants(details)} 人参与`,
+      groups, participantCount: countDiceParticipants(details), groupRule: 'SEPARATE',
+    },
+  }
+}
+
 export function createDiceMessagePlaybackRequest(
   previousId: number,
   aggregate: DiceRollAggregate,
@@ -1130,6 +1182,9 @@ export function createDiceMessagePlaybackRequest(
     ))
     .sort((left, right) => (left.displayOrder || 0) - (right.displayOrder || 0) || left.id - right.id)
   if (!details.length) throw new Error('这条骰子消息没有可显示的骰子')
+
+  const insanity = insanityRoundPresentation(details)
+  if (insanity) return createInsanityPlaybackRequest(previousId, aggregate, details, skin, insanity)
 
   const participantCheck = details.every((detail) => PARTICIPANT_CHECK_TYPES.has(
     detail.resolution?.type || detail.displayType || '',
@@ -1198,7 +1253,7 @@ export function createDicePlayerSummary(
   const modifiers = new Set(result.modules.map((module) => module.modifier || 'NORMAL'))
   const participantCount = presentation?.participantCount
     ?? new Set(presentation?.groups.map(group => group.label)).size
-  const modifierLabel = presentation?.kind === 'opposed-check'
+  const modifierLabel = presentation?.modifierLabel || (presentation?.kind === 'opposed-check'
     ? '对抗检定'
     : presentation?.kind === 'value-roll'
       ? participantCount === 1 ? '单人掷骰' : '多人掷骰'
@@ -1212,7 +1267,7 @@ export function createDicePlayerSummary(
         DISADVANTAGE: '惩罚骰',
         DOUBLE_DISADVANTAGE: '双惩罚骰',
       } as Record<string, string>)[modifiers.values().next().value as string] || '特殊判定'
-    : '组合判定'
+    : '组合判定')
   const settledResult = typeof result.result === 'number' && Number.isFinite(result.result)
     ? result.result
     : '—'

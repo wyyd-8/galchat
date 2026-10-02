@@ -241,6 +241,8 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-message-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dice-message-title svg { flex: 0 0 auto; color: var(--dice-message-accent); }
 .dice-message-status { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; color: var(--dice-message-accent); font-size: 10px; font-weight: 700; }
+.dice-message-card.is-insanity .dice-message-status { max-width: 55%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.dice-message-card.is-insanity .dice-message-status i { flex-shrink: 0; }
 .dice-message-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent); }
 .dice-message-card.is-critical-success { box-shadow: 0 7px 24px rgba(154,111,34,.13), inset 0 0 0 1px rgba(255,245,202,.76); }
 .dice-message-card.is-fumble { box-shadow: 0 7px 24px rgba(102,31,43,.14), inset 0 0 0 1px rgba(116,32,47,.08); }
@@ -1505,6 +1507,9 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-history-record-main time { padding-left: 7px; border-left: 1px solid #d5d5ce; font-variant-numeric: tabular-nums; }
 .dice-history-category { padding: 3px 6px; border-radius: 999px; color: #546a63; background: #e4ece8; font-style: normal; font-weight: 700; }
 .dice-history-outcome { min-width: 75px; display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; color: var(--dice-message-accent); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.dice-history-record.is-insanity .dice-history-record-open { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.dice-history-record.is-insanity .dice-history-outcome { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.dice-history-record.is-insanity .dice-history-outcome i { flex-shrink: 0; }
 .dice-history-outcome i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .dice-history-locate { width: 29px; height: 29px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; color: #64716a; background: rgba(255,255,255,.75); cursor: pointer; transition: color 150ms ease, background 150ms ease, transform 150ms ease; }
 .dice-history-locate:hover { color: var(--pine); background: #fff; transform: scale(1.06); }
@@ -1681,6 +1686,9 @@ button.sidebar-recent-item:hover { background: #efede6; }
 .dice-group-result-box > b { max-width: 76px; color: var(--pine); font-size: 10px; line-height: 1.4; text-align: right; }
 .dice-group-result-box > .dice-group-outcome { display: grid; justify-items: end; text-align: right; }
 .dice-group-result-box > .dice-group-outcome strong { color: inherit; font-family: var(--font-display); font-size: 15px; line-height: 1; }
+.dice-group-result-box.is-insanity { max-width: 220px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.dice-group-result-box.is-insanity > .dice-group-outcome { min-width: 0; max-width: none; overflow-wrap: anywhere; }
+.dice-group-result-box.is-insanity > .dice-group-outcome strong { font-size: 13px; line-height: 1.5; }
 .dice-group-result-box > .dice-group-outcome small { max-width: 54px; margin-top: 3px; overflow: hidden; color: inherit; font-size: 8px; font-weight: 700; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; opacity: .76; }
 .dice-group-result-box > .dice-group-target { display: grid; justify-items: end; text-align: right; }
 .dice-group-result-box > .dice-group-target small { margin: 0; color: #7f857f; font-size: 8px; font-weight: 700; letter-spacing: .08em; }

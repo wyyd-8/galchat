@@ -6,6 +6,36 @@ import { createServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath } from 'node:url'
 
+test('mobile history uses semantic tones instead of the result filter for card coloring', async context => {
+  const vite = await createServer({ appType: 'custom', configFile: false,
+    root: fileURLToPath(new URL('../..', import.meta.url)), plugins: [vue()],
+    resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  })
+  context.after(() => vite.close())
+  const { default: History } = await vite.ssrLoadModule('/src/components/MobileDiceHistory.vue')
+  const cases = [
+    ['critical-success', 'success'], ['fumble', 'failure'], ['sanity', 'numeric'],
+    ['sanity', 'other'], ['default', 'other'], ['pending', 'numeric'],
+    ['damage', 'numeric'], ['healing', 'numeric'], ['opposed', 'other'],
+    ['pushed-check', 'other'], ['success', 'success'], ['failure', 'failure'],
+  ]
+  const entries = cases.map(([tone, resultKind], index) => ({
+    messageId: index + 1, title: `记录${index + 1}`, statusLabel: '结果', tone, resultKind,
+    category: '普通检定', aggregate: { summary: { id: index + 1, conversationId: 1 }, results: [] },
+  }))
+  const html = await renderToString(createSSRApp({ render: () => h(History, {
+    query: '', category: '', result: '', allCount: entries.length, matchCopy: '', filtersActive: false,
+    loadingOlder: false, hasOlder: false, loadLabel: '', loadHint: '', entries,
+  }) }))
+  const cards = Array.from(html.matchAll(/<article\b[^>]*class="([^"]*)"/g), match => match[1]!.split(/\s+/))
+  assert.equal(cards.length, cases.length)
+  cases.forEach(([tone], index) => {
+    assert.ok(cards[index]!.includes(`is-${tone}`), `card ${index} should retain ${tone}`)
+    assert.ok(cards[index]!.includes('dice-tone'), 'history should consume the shared palette')
+  })
+})
+
 test('mobile restore follows warning, retained boundary, deleted range and investigator snapshot order', async context => {
   const vite = await createServer({ appType: 'custom', configFile: false,
     root: fileURLToPath(new URL('../..', import.meta.url)), plugins: [vue()],
@@ -65,7 +95,7 @@ test('mobile history promotes a concise single-person title and renders individu
   assert.match(html, /<header[^>]*><strong[^>]*>周寻 · 侦查<\/strong>/)
   assert.match(html, new RegExp('<details[^>]*class="history-reason"[^>]*>.*查看行动说明.*' + reason + '.*<\/details>'))
   assert.match(html, /林遥 · 侦查[^]*?31[^]*?history-tag[^>]*>成功/)
-  assert.match(html, /陈默 · 侦查[^]*?80[^]*?(?:history-tag danger|danger history-tag)[^>]*>失败/)
+  assert.match(html, /陈默 · 侦查[^]*?80[^]*?<span(?=[^>]*\bhistory-tag\b)(?=[^>]*\bis-failure\b)[^>]*>失败/)
 })
 
 test('long restore boundary is collapsed to three lines with a full-text toggle and no nested scroll viewport', async context => {
@@ -86,4 +116,37 @@ test('long restore boundary is collapsed to three lines with a full-text toggle 
   assert.match(html, /aria-expanded="false"[^>]*>展开完整消息/)
   assert.ok(html.indexOf(content) < html.indexOf('调查员快照'))
   assert.doesNotMatch(html, /rollback-preview-viewport/)
+})
+
+test('mobile dice history outlines loaded same-group rounds without joining records across day headings', async context => {
+  const vite = await createServer({ appType: 'custom', configFile: false,
+    root: fileURLToPath(new URL('../..', import.meta.url)), plugins: [vue()],
+    resolve: { alias: { '@': fileURLToPath(new URL('..', import.meta.url)) } },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  })
+  context.after(() => vite.close())
+  const { default: History } = await vite.ssrLoadModule('/src/components/MobileDiceHistory.vue')
+  const entries = [
+    [3, 12, '2026-09-10T14:32:00'], [1, 12, '2026-09-10T14:30:00'],
+    [1, 13, '2026-09-10T14:20:00'], [1, 13, '2026-09-09T14:20:00'],
+  ].map(([roundNo, summaryId, occurredAt], index) => ({
+    messageId: index + 1, title: `记录${index + 1}`, statusLabel: '成功', tone: 'success',
+    category: '普通检定', resultKind: 'success', occurredAt,
+    aggregate: { summary: { id: summaryId, conversationId: 1 }, results: [
+      { id: index + 1, summaryId, roundNo, resultData: { formula: '1D100', modules: [], result: 24 } },
+    ] },
+  }))
+  const html = await renderToString(createSSRApp({ render: () => h(History, {
+    query: '', category: '', result: '', allCount: 4, matchCopy: '', filtersActive: false,
+    loadingOlder: false, hasOlder: true, loadLabel: '', loadHint: '', entries,
+  }) }))
+  const classLists = Array.from(html.matchAll(/class="([^"]*)"/g), match => match[1]!.split(/\s+/))
+  assert.equal(classLists.filter(classes => classes.includes('history-roll-group') && classes.includes('is-grouped')).length, 1)
+  assert.equal((html.match(/aria-label="同组掷骰"/g) || []).length, 1)
+  assert.equal(classLists.filter(classes => classes.includes('history-card')).length, 4)
+  assert.ok(html.indexOf('记录1') < html.indexOf('记录2'))
+  assert.ok(html.indexOf('记录2') < html.indexOf('记录3'))
+  assert.ok(html.indexOf('记录3') < html.indexOf('记录4'))
+  assert.match(html, /第 3 次掷骰/)
+  assert.doesNotMatch(html, /第 2 次掷骰/)
 })

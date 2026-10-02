@@ -647,3 +647,22 @@ test('uses the semantic accent for the dice card border, icon, underline, and st
   assert.match(icon, /color:\s*var\(--dice-message-accent\)/)
   assert.match(status, /color:\s*var\(--dice-message-accent\)/)
 })
+
+test('stun tint is scoped to its group before and after result reveal on both layouts', async () => {
+  for (const mobile of [false, true]) {
+    const source = await readFile(new URL(mobile ? './MobileDicePlayer.vue' : './DicePlayerDialog.vue', import.meta.url), 'utf8')
+    const template = source.match(/<template>([\s\S]*)<\/template>/)![1]!
+    const element = findElementByClass(baseParse(template), mobile ? 'mobile-inline-result' : 'dice-group-result-box')!
+    const binding = element.props.find(prop => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind'
+      && prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION && prop.arg.content === 'class')
+    assert.ok(binding?.type === NodeTypes.DIRECTIVE && binding.exp?.type === NodeTypes.SIMPLE_EXPRESSION)
+    const evaluate = new Function('g', 'request', 'index', 'isRevealed', 'isDiceGroupResultRevealed', 'isValueRoll', 'isWinnerHighlighted', 'hasOpposedWinner', `return (${binding.exp.content})`)
+    for (const revealed of [false, true]) {
+      for (const stun of [false, true]) {
+        const group = { effectTone: stun ? 'stun' : undefined, outcomeTone: 'none' }
+        const classes = evaluate(group, { presentation: { groups: [group] } }, 0, () => revealed, () => revealed, true, false, false)
+        assert.equal(classes.some((entry: unknown) => typeof entry === 'object' && entry !== null && Reflect.get(entry, 'is-stun') === true), stun)
+      }
+    }
+  }
+})

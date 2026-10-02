@@ -14,6 +14,7 @@ public class DiceResolutionVO {
     private String groupRule;
     private String characterName;
     private String checkName;
+    private String targetCharacterName;
     private String difficulty;
     private Integer targetValue;
     private List<Map<String, Object>> modifierFactors;

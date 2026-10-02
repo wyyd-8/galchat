@@ -30,9 +30,6 @@ public interface ICocDiceOrchestrationService {
     KpDiceToolResult requestSanCheck(
             Long conversationId, Long runId, KpDiceRequestDTOs.SanCheck request);
 
-    KpDiceToolResult rollSanLoss(
-            Long conversationId, Long runId, KpDiceRequestDTOs.SanLoss request);
-
     KpDiceToolResult rollDamage(
             Long conversationId, Long runId, KpDiceRequestDTOs.Damage request);
 

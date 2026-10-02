@@ -174,19 +174,46 @@ export function useWorkspace() {
   }
 
   async function refreshDiceRoll(summaryId: number): Promise<DiceRollAggregate> {
-    const aggregate = await loadDiceAggregate(summaryId, true)
-    messages.value = messages.value.map((message) => {
-      if (message.diceRoll?.summary.id !== summaryId) return message
-      // Each stream message owns its rounds; follow-up rounds have separate messages.
-      const diceRoundNos = message.diceRoundNos?.length
-        ? message.diceRoundNos
-        : [...new Set(message.diceRoll.results.map((detail) => detail.roundNo || 1))]
-      const rounds = new Set(diceRoundNos)
-      return {
-        ...message,
-        diceRoll: { ...aggregate, results: aggregate.results.filter((detail) => rounds.has(detail.roundNo || 1)) },
-        diceRoundNos,
+    const revision = conversationRevision
+    const selectedId = selectedConversationId.value
+    const currentMessages = messages.value.filter(message => message.diceRoll?.summary.id === summaryId)
+    const conversationId = currentMessages[0]?.conversationId
+    const isCurrent = () => revision === conversationRevision && selectedId === selectedConversationId.value
+    const loadSavedMessages = async () => {
+      const remaining = new Set(currentMessages.map(message => message.id))
+      const saved = new Map<number, GroupMessage>()
+      let beforeId: number | undefined
+      while (conversationId != null && remaining.size && isCurrent()) {
+        const page = await api.groupMessages(conversationId, beforeId)
+        for (const message of page) {
+          if (remaining.delete(message.id)) saved.set(message.id, message)
+        }
+        if (!remaining.size || page.length < 50) break
+        const next = Math.min(...page.map(message => message.id))
+        if (beforeId != null && next >= beforeId) break
+        beforeId = next
       }
+      if (isCurrent() && remaining.size) throw new Error('找不到对应的掷骰消息，请重新加载会话')
+      return saved
+    }
+    const [aggregate, saved] = await Promise.all([
+      loadDiceAggregate(summaryId, true),
+      loadSavedMessages(),
+    ])
+    const hydrated = new Map(await Promise.all([...saved.values()].map(async message => {
+      const refreshed = await hydrateDiceMessage(message, async id => {
+        if (id !== summaryId) throw new Error('掷骰消息所属骰组已变更，请重新加载会话')
+        return aggregate
+      })
+      return [message.id, refreshed] as const
+    })))
+    if (!isCurrent()) return aggregate
+    // Only refresh existing dice cards. History reads must not replay stream events
+    // or replace unrelated messages that are still being generated.
+    messages.value = messages.value.map(message => {
+      const refreshed = hydrated.get(message.id)
+      if (!refreshed || message.diceRoll?.summary.id !== summaryId) return message
+      return { ...message, diceRoll: refreshed.diceRoll, diceRoundNos: refreshed.diceRoundNos }
     })
     latestDiceRoll.value = aggregate
     if (selectedConversation.value?.mode === 'trpg') {
@@ -194,8 +221,10 @@ export function useWorkspace() {
         loadCombatOverview(selectedConversation.value.id),
         loadInvestigatorCards(selectedConversation.value.id),
       ])
-      combatOverview.value = overview
-      investigatorCards.value = cards
+      if (isCurrent()) {
+        combatOverview.value = overview
+        investigatorCards.value = cards
+      }
     }
     return aggregate
   }
@@ -1003,7 +1032,7 @@ export function useWorkspace() {
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
     conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, actorRuntimes, modelApis, combatOverview, investigatorCards, replyTurnState,
-    latestDiceRoll, incomingDiceRolls, hasOlderGroupMessages, generationFailure, generationFailureOpen,
+    latestDiceRoll, incomingDiceRolls, hasOlderGroupMessages, generationFailure, generationFailureOpen, loadDiceAggregate,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
     reloadCharacters, addCharacter, removeCharacter, updateCharacterFavor, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation, deleteConversation,

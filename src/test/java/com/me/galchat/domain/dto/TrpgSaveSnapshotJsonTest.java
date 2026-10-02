@@ -34,6 +34,7 @@ class TrpgSaveSnapshotJsonTest {
         assertThat(snapshot.getConversationId()).isEqualTo(7L);
         assertThat(snapshot.getRedisState().getShownMaterialIds()).containsExactly(9L);
         assertThat(snapshot.getCompletion()).isNull();
+        assertThat(snapshot.getAutoSaves()).isNull();
     }
 
     @Test

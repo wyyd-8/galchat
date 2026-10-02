@@ -43,7 +43,7 @@ public final class DiceRollConstant {
             TOOL_REQUEST_FIREARM_ATTACK,
             TOOL_REQUEST_MELEE_ATTACK,
             TOOL_REQUEST_INQUIRY_LUCK,
-            "rollSanLoss",
+            "rollSanLoss", // 保留旧工具调用的历史识别；不再向KP暴露此工具。
             "rollDamage",
             "rollHealing");
 

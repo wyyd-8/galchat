@@ -34,6 +34,7 @@ export interface DicePlaybackGroupPresentation {
   targetValue?: number
   outcomeLabel: string
   outcomeTone: DiceOutcomeTone
+  effectTone?: 'stun'
   success: boolean
   winner?: boolean
   moduleStart: number
@@ -63,6 +64,7 @@ export interface DicePlaybackPresentation {
   formulaLabel: string
   formulaValue: string
   groups: DicePlaybackGroupPresentation[]
+  participantCount?: number
   groupRule?: DiceGroupRule
 }
 export interface DiceAnimationGroupTiming {
@@ -186,6 +188,7 @@ const PARTICIPANT_CHECK_TYPES = new Set([
   'UNCONSCIOUS_RECOVERY_CON',
 ])
 const CHECK_TYPE_NAMES: Record<string, string> = {
+  FIREARM_ATTACK: '射击',
   MAJOR_WOUND_CON: 'CON',
   UNCONSCIOUS_RECOVERY_CON: 'CON',
 }
@@ -214,7 +217,7 @@ function checkOutcomeLabel(outcome: Record<string, unknown>): string {
   return CHECK_OUTCOME_LABELS[category] || category
 }
 
-function checkOutcomeTone(outcome: Record<string, unknown>): DiceOutcomeTone {
+export function checkOutcomeTone(outcome: Record<string, unknown>): DiceOutcomeTone {
   const category = typeof outcome.category === 'string' ? outcome.category : undefined
   const rank = typeof outcome.rank === 'string' ? outcome.rank : undefined
   if (category === 'CRITICAL_SUCCESS' || (category === 'SUCCESS' && rank === 'CRITICAL')) {
@@ -364,13 +367,17 @@ export function createDiceMessagePresentation(
   const aggregateResult = aggregate.semanticResult || aggregate.summary.totalResult || '已完成'
   const opposed = details.length > 0
     && details.every((detail) => detail.resolution?.type === 'OPPOSED_CHECK')
+  const opposedTone = details.length > 0 && details.every((detail) => {
+    const type = detail.resolution?.type || detail.displayType
+    return type === 'OPPOSED_CHECK' || type === 'MELEE_ATTACK'
+  })
   const groupRule = details.map((detail) => detail.resolution?.groupRule)
     .find((rule): rule is DiceGroupRule => Boolean(rule))
   const categories = details.map((detail) => detail.resolution?.outcome?.category)
     .filter((category): category is string => typeof category === 'string')
   let tone: DiceMessageTone = personalizedTone || 'default'
   if (!personalizedTone) {
-    if (opposed) {
+    if (opposedTone) {
       tone = 'opposed'
     } else if (details.length === 1 && categories.length === 1) {
       const singleTone = checkOutcomeTone(details[0]!.resolution?.outcome || {})
@@ -615,6 +622,29 @@ export interface DiceHistoryEntry {
   occurredAt?: string
 }
 
+export function groupAdjacentDiceHistoryEntries(entries: DiceHistoryEntry[]): Array<{
+  key: string
+  entries: DiceHistoryEntry[]
+}> {
+  const groups: Array<{ key: string; entries: DiceHistoryEntry[] }> = []
+  for (const entry of entries) {
+    const previous = groups.at(-1)
+    const summary = entry.aggregate.summary
+    const previousSummary = previous?.entries[0]?.aggregate.summary
+    // Preserve history order: an intervening group starts a separate visual block.
+    if (previous && previousSummary?.id === summary.id
+      && previousSummary.conversationId === summary.conversationId) {
+      previous.entries.push(entry)
+    } else {
+      groups.push({
+        key: `${summary.conversationId}:${summary.id}:${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`,
+        entries: [entry],
+      })
+    }
+  }
+  return groups
+}
+
 export interface DiceHistoryFilters {
   query?: string
   category?: DiceHistoryCategory | ''
@@ -744,14 +774,14 @@ function aggregateGroup(
   const outcome = detail.resolution?.outcome || {}
   const rule = detail.resolution?.rule || {}
   const resolutionType = detail.resolution?.type || detail.displayType
-  const ruleCheckName = typeof rule.checkName === 'string'
+  const ruleCheckName = detail.resolution?.checkName || (typeof rule.checkName === 'string'
     ? rule.checkName
     : typeof rule.skillName === 'string'
       ? rule.skillName
-      : resolutionType ? CHECK_TYPE_NAMES[resolutionType] : undefined
-  const targetName = typeof outcome.targetCharacterName === 'string'
+      : resolutionType ? CHECK_TYPE_NAMES[resolutionType] : undefined)
+  const targetName = detail.resolution?.targetCharacterName || (typeof outcome.targetCharacterName === 'string'
     ? outcome.targetCharacterName
-    : typeof rule.targetCharacterName === 'string' ? rule.targetCharacterName : undefined
+    : typeof rule.targetCharacterName === 'string' ? rule.targetCharacterName : undefined)
   const combatCheckName = resolutionType === 'FIREARM_ATTACK' && targetName
     ? `${ruleCheckName || '射击'} → ${targetName}`
     : ruleCheckName
@@ -769,7 +799,7 @@ function aggregateGroup(
       : detail.reason || `参与者 ${index + 1}`,
     checkName: typeof outcome.checkName === 'string'
       ? outcome.checkName
-      : detail.resolution?.checkName || combatCheckName || detail.displayType || '检定',
+      : combatCheckName || detail.displayType || '检定',
     difficulty,
     difficultyLabel: difficulty ? CHECK_DIFFICULTY_LABELS[difficulty] : undefined,
     targetValue: typeof targetValue === 'number' && Number.isFinite(targetValue)
@@ -866,6 +896,14 @@ function valuePlaceholder(
   }
 }
 
+function countDiceParticipants(details: DiceRollDetail[]): number {
+  return new Set(details.map((detail) => {
+    const name = detail.resolution?.outcome?.characterName ?? detail.resolution?.characterName
+    if (typeof name === 'string' && name.trim()) return `name:${name.trim()}`
+    return detail.characterId != null ? `character:${detail.characterId}` : `result:${detail.id}`
+  })).size
+}
+
 function createDiceValuePlaybackRequest(
   previousId: number,
   aggregate: DiceRollAggregate,
@@ -875,16 +913,20 @@ function createDiceValuePlaybackRequest(
   const modules: DiceResult['modules'] = []
   const groups = details.map((detail, index) => {
     const moduleStart = modules.length
+    const stun = (detail.resolution?.type || detail.displayType) === 'STUN_DURATION'
     const detailModules = detail.resultData.modules.length
       ? detail.resultData.modules
       : [valuePlaceholder(detail)]
-    modules.push(...detailModules)
+    modules.push(...detailModules.map(module => stun
+      ? { ...module, expression: `${module.expression}（眩晕）` }
+      : module))
     const outcome = detail.resolution?.outcome || {}
     return {
       label: typeof outcome.characterName === 'string'
         ? outcome.characterName
-        : detail.reason || `参与者 ${index + 1}`,
-      checkName: detail.resultData.formula,
+        : detail.resolution?.characterName || detail.reason || `参与者 ${index + 1}`,
+      checkName: `${detail.resultData.formula}${stun ? '（眩晕）' : ''}`,
+      ...(stun ? { effectTone: 'stun' as const } : {}),
       outcomeLabel: signedValue(detail.resolution?.type || detail.displayType, detail.resultData.result),
       outcomeTone: 'none' as const,
       success: false,
@@ -901,15 +943,16 @@ function createDiceValuePlaybackRequest(
     id: previousId + 1,
     result: JSON.parse(JSON.stringify(result)) as DiceResult,
     skin: resolveDiceSkin(skin),
-    reason: aggregate.summary.reason,
+    reason: details[0]?.reason || aggregate.summary.reason,
     toolName: aggregate.summary.toolName,
     presentation: {
       kind: 'value-roll',
       resultLabel: '分别结果',
       resultValue: aggregate.semanticResult || aggregate.summary.totalResult || '已完成',
       formulaLabel: '参与者',
-      formulaValue: `${groups.length} 人参与`,
+      formulaValue: `${countDiceParticipants(details)} 人参与`,
       groups,
+      participantCount: countDiceParticipants(details),
       groupRule: 'SEPARATE',
     },
   }
@@ -954,6 +997,19 @@ export function createDiceModuleOutcomeToneMap(
     if (group.outcomeTone !== 'critical-success' && group.outcomeTone !== 'fumble') return
     for (let offset = 0; offset < group.moduleCount; offset += 1) {
       tones[group.moduleStart + offset] = group.outcomeTone
+    }
+  })
+  return tones
+}
+
+export function createDiceModuleEffectToneMap(
+  presentation?: DicePlaybackPresentation,
+): Record<number, 'stun'> {
+  const tones: Record<number, 'stun'> = {}
+  presentation?.groups.forEach(group => {
+    if (group.effectTone !== 'stun') return
+    for (let offset = 0; offset < group.moduleCount; offset++) {
+      tones[group.moduleStart + offset] = 'stun'
     }
   })
   return tones
@@ -1031,7 +1087,7 @@ export function createDiceAggregatePlaybackRequest(
         : undefined
   const formulaValue = opposed
     ? groups.map((group) => `${group.label}（${group.checkName}）`).join(' vs ')
-    : `${groups.length} 人参与 · ${checkNames.join(' / ')} · ${effectiveGroupRule === 'ALL_SUCCESS'
+    : `${countDiceParticipants(details)} 人参与 · ${checkNames.join(' / ')} · ${effectiveGroupRule === 'ALL_SUCCESS'
       ? '全部成功才通过'
       : effectiveGroupRule === 'ANY_SUCCESS' ? '任一成功即通过' : '分别展示'}`
   const result: DiceResult = {
@@ -1042,7 +1098,7 @@ export function createDiceAggregatePlaybackRequest(
     id: previousId + 1,
     result: JSON.parse(JSON.stringify(result)) as DiceResult,
     skin: resolveDiceSkin(skin),
-    reason: aggregate.summary.reason,
+    reason: details[0]?.reason || aggregate.summary.reason,
     toolName: toolName ?? aggregate.summary.toolName,
     presentation: {
       kind: opposed ? 'opposed-check' : 'multiplayer-check',
@@ -1056,6 +1112,7 @@ export function createDiceAggregatePlaybackRequest(
       formulaLabel: opposed ? '对抗双方' : '检定项目',
       formulaValue,
       groups,
+      participantCount: countDiceParticipants(details),
       groupRule: opposed ? undefined : effectiveGroupRule,
     },
   }
@@ -1088,7 +1145,7 @@ export function createDiceMessagePlaybackRequest(
           previousId,
           details[0]!.resultData,
           skin,
-          aggregate.summary.reason || details[0]!.reason,
+          details[0]!.reason || aggregate.summary.reason,
           aggregate.summary.toolName,
         )
   const resolutionTypes = details.map((detail) => (
@@ -1139,12 +1196,14 @@ export function createDicePlayerSummary(
   )
   const discardedCount = diceCount - selectedCount
   const modifiers = new Set(result.modules.map((module) => module.modifier || 'NORMAL'))
+  const participantCount = presentation?.participantCount
+    ?? new Set(presentation?.groups.map(group => group.label)).size
   const modifierLabel = presentation?.kind === 'opposed-check'
     ? '对抗检定'
     : presentation?.kind === 'value-roll'
-      ? presentation.groups.length === 1 ? '单人掷骰' : '多人掷骰'
+      ? participantCount === 1 ? '单人掷骰' : '多人掷骰'
     : presentation?.kind === 'multiplayer-check'
-      ? presentation.groups.length === 1 ? '单人检定' : '多人检定'
+      ? participantCount === 1 ? '单人检定' : '多人检定'
       : modifiers.size === 1
     ? ({
         NORMAL: '常规判定',

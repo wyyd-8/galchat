@@ -475,7 +475,13 @@ test('refreshes only each dice message’s own rounds while returning the full g
   })
   const originalSummary = api.diceSummary
   const originalResults = api.diceResults
+  const originalMessages = api.groupMessages
+  let savedRounds = [[1]]
   try {
+    api.groupMessages = async () => savedRounds.map((roundNos, index) => ({
+      id: 312 + index, conversationId: 4, speakerType: 'kp', messageKind: 'dice_roll',
+      sequenceNo: 24 + index, status: 'completed', content: JSON.stringify({ summaryId: 25, roundNos }),
+    }))
     api.diceSummary = async () => ({
       id: 25,
       conversationId: 4,
@@ -553,7 +559,8 @@ test('refreshes only each dice message’s own rounds while returning the full g
     )
     assert.deepEqual(workspace.latestDiceRoll.value, refreshed)
 
-    // The follow-up round gets its own message when the stream resumes.
+    // Legacy conversations can have a separate message for the follow-up round.
+    savedRounds = [[1], [2]]
     workspace.messages.value.push({
       id: 313,
       conversationId: 4,
@@ -586,9 +593,24 @@ test('refreshes only each dice message’s own rounds while returning the full g
       workspace.messages.value.map((message) => message.diceRoll?.results.map((detail) => detail.id)),
       [[33], [35]],
     )
+
+    // A new automatic follow-up belongs only to the latest of those messages.
+    api.diceSummary = async () => ({ ...refreshed.summary, roundCount: 3 })
+    api.diceResults = async () => [...refreshed.results, {
+      id: 37, summaryId: 25, roundNo: 3, displayType: 'MAJOR_WOUND_CON',
+    }]
+    savedRounds = [[1], [2, 3]]
+    await workspace.refreshDiceRoll(25)
+    await workspace.refreshDiceRoll(25)
+    assert.deepEqual(workspace.messages.value.map((message) => message.diceRoundNos), [[1], [2, 3]])
+    assert.deepEqual(
+      workspace.messages.value.map((message) => message.diceRoll?.results.map((detail) => detail.id)),
+      [[33], [35, 37]],
+    )
   } finally {
     api.diceSummary = originalSummary
     api.diceResults = originalResults
+    api.groupMessages = originalMessages
     Object.assign(globalThis, {
       window: previousWindow,
       localStorage: previousLocalStorage,

@@ -19,7 +19,7 @@ import type {
 } from '@/api/types'
 import { errorMessage, notify } from '@/composables/useNotice'
 import {
-  DICE_HISTORY_CATEGORY_OPTIONS, filterDiceHistoryEntries, formatDiceHistoryTime,
+  DICE_HISTORY_CATEGORY_OPTIONS, filterDiceHistoryEntries, formatDiceHistoryTime, groupAdjacentDiceHistoryEntries,
   hydrateDiceMessage, listDiceHistoryEntriesNewestFirst,
 } from '@/dice/domain/dicePlayback'
 import type { DiceHistoryCategory, DiceHistoryResultKind } from '@/dice/domain/dicePlayback'
@@ -205,6 +205,7 @@ const diceHistoryEntries = computed(() => filterDiceHistoryEntries(allDiceHistor
   category: diceCategoryFilter.value,
   resultKind: diceResultFilter.value,
 }).filter(entry => !isMobile.value || matchesMobileHistoryQuery(entry, diceSearchQuery.value)))
+const diceHistoryGroups = computed(() => groupAdjacentDiceHistoryEntries(diceHistoryEntries.value))
 const diceFiltersActive = computed(() => Boolean(
   diceSearchQuery.value.trim() || diceCategoryFilter.value || diceResultFilter.value,
 ))
@@ -1099,32 +1100,37 @@ watch(selectedSheetTab, (tab) => {
 
           <div class="dice-history-scroll">
             <div v-if="diceHistoryEntries.length" class="dice-history-list">
-              <article
-                v-for="entry in diceHistoryEntries"
-                :key="`${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`"
-                class="dice-history-item dice-history-record"
-                :class="[`is-${entry.tone}`, `is-result-${entry.resultKind}`]"
-              >
-                <button type="button" class="dice-history-record-open" @click="emit('openDice', entry.aggregate)">
-                  <span class="dice-history-record-main">
-                    <strong>{{ entry.title }}</strong>
-                    <small>
-                      <em class="dice-history-category">{{ entry.category }}</em>
-                      <time v-if="formatDiceHistoryTime(entry.occurredAt)">{{ formatDiceHistoryTime(entry.occurredAt) }}</time>
-                    </small>
-                  </span>
-                  <span class="dice-history-outcome"><i />{{ entry.statusLabel }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="dice-history-locate"
-                  aria-label="定位到聊天记录"
-                  title="定位到聊天记录"
-                  @click="emit('locateDice', entry.messageId)"
+              <div v-for="group in diceHistoryGroups" :key="group.key" class="dice-history-group"
+                :class="{ 'is-grouped': group.entries.length > 1 }"
+                :role="group.entries.length > 1 ? 'group' : undefined"
+                :aria-label="group.entries.length > 1 ? '同组掷骰' : undefined">
+                <article
+                  v-for="entry in group.entries"
+                  :key="`${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`"
+                  class="dice-history-item dice-history-record dice-tone"
+                  :class="`is-${entry.tone}`"
                 >
-                  <LocateFixed :size="15" />
-                </button>
-              </article>
+                  <button type="button" class="dice-history-record-open" @click="emit('openDice', entry.aggregate)">
+                    <span class="dice-history-record-main">
+                      <strong>{{ entry.title }}</strong>
+                      <small>
+                        <em class="dice-history-category">{{ entry.category }}</em>
+                        <time v-if="formatDiceHistoryTime(entry.occurredAt)">{{ formatDiceHistoryTime(entry.occurredAt) }}</time>
+                      </small>
+                    </span>
+                    <span class="dice-history-outcome"><i />{{ entry.statusLabel }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="dice-history-locate"
+                    aria-label="定位到聊天记录"
+                    title="定位到聊天记录"
+                    @click="emit('locateDice', entry.messageId)"
+                  >
+                    <LocateFixed :size="15" />
+                  </button>
+                </article>
+              </div>
             </div>
             <div v-else class="dice-history-empty">
               <Dices :size="26" />

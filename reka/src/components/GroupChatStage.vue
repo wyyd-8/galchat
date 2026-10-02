@@ -39,7 +39,7 @@ const props = withDefaults(defineProps<{ conversation: Conversation; username: s
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; openCompletion: []; generateCompletion: []; skipCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; retryGroupTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; openCompletion: []; generateCompletion: []; skipCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: [tool?: 'dice']; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; retryGroupTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const { isMobile } = useMobileViewport()
 const panelOpen = ref(false)
 const modelActor = ref<TrpgExecutionActor | null>(null)
@@ -432,7 +432,7 @@ function handleReasoningScroll(event: Event) {
           </span>
           <span class="clarification-prompt-status"><i />等待回复</span>
         </div>
-        <div v-if="isMobile && conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'dice'" class="mobile-pending-dice" role="status"><span>等待掷骰检定</span><button class="button secondary" @click="emit('openTools')">前往掷骰</button></div>
+        <div v-if="isMobile && conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'dice'" class="mobile-pending-dice" role="status"><span>等待掷骰检定</span><button class="button secondary" @click="emit('openTools', 'dice')">前往掷骰</button></div>
         <div v-if="!isMobile || conversation.status === 'active' || completionPending" class="composer" :class="{ disabled: conversation.status !== 'active', 'has-intent-toggle': canAskKp, 'has-withdraw': conversation.mode === 'chat', 'has-turn-experiments': betweenTrpgTurns }">
           <div v-if="betweenTrpgTurns && autoAdvance" class="turn-auto-advance-actions">
             <button class="button secondary turn-auto-advance-start" :disabled="sending" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ autoStartLabel }}</button>
@@ -488,7 +488,7 @@ function handleReasoningScroll(event: Event) {
             <TooltipProvider><TooltipRoot><TooltipTrigger as-child><button class="send-button" :aria-label="effectiveComposerIntent === 'inquiry' ? '询问 KP' : '发送消息'" :disabled="!composerValue.trim() || sending || conversation.status !== 'active' || !waitingForMessage" @click="submitComposer"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">{{ isMobile ? '点击发送 · 回车换行' : effectiveComposerIntent === 'inquiry' ? 'Enter 询问 KP · Shift+Enter 换行' : 'Enter 发送 · Shift+Enter 换行' }}</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider>
           </div>
         </div>
-        <div v-if="isMobile && conversation.status !== 'active' && !completionPending" class="mobile-closed-chat-footer"><button v-if="completionAvailable" class="button secondary" @click="emit('openCompletion')">翻阅完成记录</button><button class="button primary" @click="emit('back')">返回当前世界</button></div>
+        <div v-if="isMobile && conversation.status !== 'active' && !completionPending" class="mobile-closed-chat-footer"><button class="button secondary" @click="moreOpen = true">会话操作</button><button v-if="completionAvailable" class="button secondary" @click="emit('openCompletion')">翻阅完成记录</button><button class="button primary" @click="emit('back')">返回当前世界</button></div>
         <p v-if="completionPending && completionError" class="turn-completion-error" role="alert">{{ completionError }}</p>
       </section>
       <component v-if="!isMobile" :is="'div'" v-model="panelOpen" :title="conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序'" mobile-presentation="page" content-class="mobile-chat-panel" :class="{ 'chat-side-host': !isMobile }"><ChatReplyPanel v-if="conversation.mode === 'chat'" :key="conversation.id"
@@ -513,7 +513,7 @@ function handleReasoningScroll(event: Event) {
         </section>
         <div class="reply-panel-title"><span><UsersRound :size="18" /><strong>{{ planTitle }}</strong></span><button class="icon-button subtle" @click="planOpen = !planOpen"><ChevronDown :size="17" :class="{ rotated: !planOpen }" /></button></div>
         <p>{{ planDescription }}</p>
-        <div v-show="planOpen" class="reply-plan-list">
+        <div v-if="planOpen" class="reply-plan-list">
           <template v-if="conversation.mode === 'trpg'">
             <section v-for="scene in trpgExecution.scenes" :key="scene.plan.id" class="trpg-execution-scene" :class="[scene.kind, scene.status]">
               <header class="trpg-scene-header">

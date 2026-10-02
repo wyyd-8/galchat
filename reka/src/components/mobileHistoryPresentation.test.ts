@@ -41,7 +41,7 @@ test('single participant title uses the character and check while retaining the 
 test('each participant receives only their actual resolved outcome, including ranks and fumbles', () => {
   const group = { ...entry, aggregate: { ...entry.aggregate, results: ['SUCCESS', 'FAILURE', 'FUMBLE', 'CRITICAL_SUCCESS', 'UNKNOWN'].map((category, index) => ({ id: index, summaryId: 3, resolution: { outcome: { category, rank: 'HARD' } } })) } }
   assert.deepEqual(mobileHistoryValues(group).map(value => value.outcome), [
-    { label: '困难成功', failure: false }, { label: '失败', failure: true },
-    { label: '大失败', failure: true }, { label: '大成功', failure: false }, null,
+    { label: '困难成功', failure: false, tone: 'success' }, { label: '失败', failure: true, tone: 'failure' },
+    { label: '大失败', failure: true, tone: 'fumble' }, { label: '大成功', failure: false, tone: 'critical-success' }, null,
   ])
 })

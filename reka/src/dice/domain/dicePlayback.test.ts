@@ -9,6 +9,7 @@ import {
   createDicePlayerSummary,
   createDicePlayerStatus,
   createGroupOutcomeVisibility,
+  groupAdjacentDiceHistoryEntries,
   planIncomingDicePlayback,
   type DiceHistoryEntry,
   type DiceHistoryFilters,
@@ -19,11 +20,76 @@ import {
   createDiceResultFixture as createDiceDebugPreset,
 } from '../../../test/fixtures/dice.ts'
 
+test('groups loaded rounds by summary while preserving missing rounds and each message locator', () => {
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  const entries: DiceHistoryEntry[] = [3, 1].map(roundNo => ({
+    messageId: 100 + roundNo, title: `第${roundNo}轮`, statusLabel: '成功', tone: 'success',
+    category: '对抗检定', resultKind: 'success',
+    aggregate: { ...aggregate, results: [{ ...aggregate.results[0]!, roundNo }] },
+  }))
+  const before = structuredClone(entries)
+  const groups = groupAdjacentDiceHistoryEntries(entries)
+  assert.equal(groups.length, 1)
+  assert.deepEqual(groups[0]!.entries.map(entry => [entry.messageId, entry.aggregate.results[0]!.roundNo]), [
+    [103, 3], [101, 1],
+  ])
+  assert.equal(groups[0]!.entries[0], entries[0])
+  assert.equal(groups[0]!.entries[1], entries[1])
+  assert.deepEqual(entries, before)
+  const filtered = diceState.filterDiceHistoryEntries(entries, { query: '第1轮' })
+  assert.deepEqual(groupAdjacentDiceHistoryEntries(filtered).map(group => group.entries.length), [1])
+  assert.deepEqual(groupAdjacentDiceHistoryEntries([]), [])
+})
+
+test('does not combine unrelated or interrupted dice groups with identical titles', () => {
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  const entries: DiceHistoryEntry[] = [[1, 20], [1, 21], [1, 20], [2, 20]].map(([conversationId, id], index) => ({
+    messageId: 200 + index, title: '同名检定', statusLabel: '成功', tone: 'success',
+    category: '对抗检定', resultKind: 'success',
+    aggregate: { ...aggregate, summary: { ...aggregate.summary, id: id!, conversationId: conversationId! } },
+  }))
+  const groups = groupAdjacentDiceHistoryEntries(entries)
+  assert.deepEqual(groups.map(group => group.entries.map(entry => entry.messageId)), [[200], [201], [202], [203]])
+  assert.equal(new Set(groups.map(group => group.key)).size, 4)
+})
+
 type DiceMessagePresentation = {
   title: string
   statusLabel: string
   tone: string
 }
+
+test('chat and tool history keep melee and opposed checks gold, including display-type fallback', () => {
+  for (const type of ['MELEE_ATTACK', 'OPPOSED_CHECK']) {
+    for (const publicResolution of [true, false]) {
+      const aggregate = createDiceDebugAggregatePreset('opposed-check')
+      aggregate.summary.toolName = type === 'MELEE_ATTACK' ? 'requestMeleeAttack' : 'requestOpposedCheck'
+      aggregate.results = aggregate.results.map(detail => ({
+        ...detail, displayType: type,
+        resolution: publicResolution ? { ...detail.resolution, type } : undefined,
+      }))
+      assert.equal(diceState.createDiceMessagePresentation(aggregate).tone, 'opposed', `${type}, resolution=${publicResolution}`)
+      const history = diceState.listDiceHistoryEntriesNewestFirst([{
+        id: 10, conversationId: 1, speakerType: 'kp', messageKind: 'dice_roll',
+        content: '', sequenceNo: 10, status: 'completed', diceRoll: aggregate,
+      }])
+      assert.equal(history[0]!.tone, 'opposed')
+      assert.equal(history[0]!.category, '对抗检定')
+    }
+  }
+})
+
+test('melee follow-up damage does not inherit the opposed tint and pending checks remain pending', () => {
+  const aggregate = createDiceDebugAggregatePreset('opposed-check')
+  aggregate.summary.toolName = 'requestMeleeAttack'
+  aggregate.results = aggregate.results.map(detail => ({ ...detail, displayType: 'MELEE_ATTACK', resolution: { type: 'MELEE_ATTACK' } }))
+  const damage = {
+    ...aggregate, results: [{ ...aggregate.results[0]!, roundNo: 2, displayType: 'DAMAGE', resolution: { type: 'DAMAGE' } }],
+  }
+  assert.equal(diceState.createDiceMessagePresentation(damage).tone, 'default')
+  const pending = { ...aggregate, results: aggregate.results.map(detail => ({ ...detail, resolvedAt: undefined })) }
+  assert.equal(diceState.createDiceMessagePresentation(pending).tone, 'pending')
+})
 
 function diceMessagePresentation(
   aggregate: ReturnType<typeof createDiceDebugAggregatePreset>,
@@ -1049,6 +1115,63 @@ test('finds the chat element that owns a tool dice message id', () => {
   assert.equal(findElement?.([first, target], 99), undefined)
 })
 
+for (const type of ['CHECK', 'DAMAGE', undefined]) {
+  test(`uses the current round title for ${type ?? 'ordinary'} playback before and after rolling`, () => {
+    const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+    aggregate.summary.reason = '首次掷骰原因'
+    const first = aggregate.results[0]!
+
+    for (const [roundNo, reason] of [[2, '第二轮原因'], [3, '第三轮原因']] as const) {
+      for (const pending of [true, false]) {
+        const resultData = createDiceDebugPreset(type === 'DAMAGE' ? 'standard' : 'normal-percentile')
+        if (pending) {
+          resultData.result = undefined
+          resultData.modules.forEach(module => {
+            module.result = undefined
+            module.dice.forEach(die => { die.value = undefined })
+          })
+        }
+        aggregate.summary.roundCount = roundNo
+        aggregate.summary.status = pending ? 'PENDING' : 'COMPLETED'
+        aggregate.results = [first, {
+          ...first,
+          id: first.id + roundNo,
+          roundNo,
+          reason,
+          displayType: type,
+          resolution: type ? { type, characterName: '林恩', checkName: '侦查' } : undefined,
+          resultData,
+          resolvedAt: pending ? undefined : first.resolvedAt,
+        }]
+
+        const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+        assert.equal(request.reason, reason)
+        assert.equal(diceState.createDiceMessagePresentation(aggregate).title, reason)
+        const round = diceState.splitDiceAggregateByRound(aggregate)[1]!
+        assert.equal(diceState.createDiceMessagePlaybackRequest(0, round, 'classic').reason, reason)
+        if (type === 'CHECK') {
+          assert.equal(createDiceAggregatePlaybackRequest(0, aggregate, 'classic').reason, reason)
+        }
+        assert.equal(aggregate.summary.reason, '首次掷骰原因')
+      }
+    }
+  })
+
+  test(`falls back to the group reason when the ${type ?? 'ordinary'} round reason is missing`, () => {
+    const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+    aggregate.summary.reason = '整组原因'
+    aggregate.results = [{
+      ...aggregate.results[0]!,
+      roundNo: 2,
+      reason: '',
+      displayType: type,
+      resolution: type ? { type, characterName: '林恩' } : undefined,
+    }]
+
+    assert.equal(diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic').reason, '整组原因')
+  })
+}
+
 test('creates a multiplayer check playback from backend-shaped roll details', () => {
   const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
   aggregate.summary.toolName = 'requestCheck'
@@ -1343,7 +1466,7 @@ test('keeps damage and stun duration in one value-roll presentation', () => {
   assert.equal(request.presentation?.kind, 'value-roll')
   assert.deepEqual(summary.groups, [
     { label: '林恩', expression: '1D3', result: '-2', diceCount: 0 },
-    { label: '林恩', expression: '1D6', result: '4回合', diceCount: 1 },
+    { label: '林恩', expression: '1D6（眩晕）', result: '4回合', diceCount: 1 },
   ])
 })
 
@@ -1997,4 +2120,123 @@ test('locks the roll control only while dice are loading or rolling', () => {
       ['重放动画', false],
     ],
   )
+})
+
+for (const type of ['DAMAGE', 'STUN_DURATION', 'SAN_LOSS', 'HEALING'] as const) {
+  test(`${type} keeps the footer participant and formula unchanged from pending to resolved`, () => {
+    const aggregate: DiceRollAggregate = {
+      summary: { id: 501, conversationId: 7, roundCount: 1, status: 'PENDING', reason: '这次掷骰的原因' },
+      results: [{
+        id: 601, summaryId: 501, roundNo: 1, reason: '这次掷骰的原因', displayType: type,
+        resultData: { ...createDiceDebugPreset('standard'), result: undefined },
+        resolution: { type, characterName: '林恩' },
+      }],
+    }
+    const before = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+    const beforeSummary = createDicePlayerSummary(before.result, before.skin, before.presentation)
+    assert.equal(beforeSummary.groups[0]?.label, '林恩')
+    aggregate.summary.status = 'COMPLETED'
+    aggregate.results[0]!.resolvedAt = '2026-09-30T10:00:00'
+    aggregate.results[0]!.resultData!.result = 3
+    aggregate.results[0]!.resolution!.outcome = { characterName: '林恩' }
+    const after = diceState.createDiceMessagePlaybackRequest(1, aggregate, 'classic')
+    const afterSummary = createDicePlayerSummary(after.result, after.skin, after.presentation)
+    const context = (summary: typeof beforeSummary) => ({
+      formulaLabel: summary.formulaLabel, formulaValue: summary.formulaValue,
+      groups: summary.groups.map(({ label, expression, diceCount }) => ({ label, expression, diceCount })),
+    })
+    assert.deepEqual(context(beforeSummary), context(afterSummary))
+    assert.notEqual(beforeSummary.groups[0]?.result, afterSummary.groups[0]?.result)
+  })
+}
+
+for (const target of ['邪教徒甲', '邪教徒乙']) {
+  test(`firearm footer uses public skill and target fields before rolling against ${target}`, () => {
+    const aggregate: DiceRollAggregate = {
+      summary: { id: 501, conversationId: 7, roundCount: 1, status: 'PENDING', toolName: 'requestFirearmAttack' },
+      results: [{
+        id: 601, summaryId: 501, roundNo: 1, displayType: 'FIREARM_ATTACK',
+        resultData: { ...combatCheckResult(30), result: undefined },
+        resolution: { type: 'FIREARM_ATTACK', characterName: '林恩',
+          checkName: '射击:步枪/霰弹枪', targetCharacterName: target, targetValue: 60 },
+      }],
+    }
+    const footer = () => {
+      const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+      const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+      return { formulaValue: summary.formulaValue, groups: summary.groups.map(({ label, expression }) => ({ label, expression })) }
+    }
+    const before = footer()
+    assert.deepEqual(before.groups, [{ label: '林恩', expression: `射击:步枪/霰弹枪 → ${target}` }])
+    aggregate.results[0]!.resolvedAt = '2026-09-30T10:00:00'
+    aggregate.results[0]!.resolution!.outcome = { characterName: '林恩', targetCharacterName: target, category: 'SUCCESS' }
+    aggregate.results[0]!.resultData!.result = 30
+    aggregate.summary.status = 'COMPLETED'
+    assert.deepEqual(footer(), before)
+  })
+}
+
+test('a legacy pending firearm response uses a readable check name without internal type codes', () => {
+  const aggregate: DiceRollAggregate = {
+    summary: { id: 501, conversationId: 7, roundCount: 1, status: 'PENDING' },
+    results: [{ id: 601, summaryId: 501, roundNo: 1, displayType: 'FIREARM_ATTACK',
+      resultData: combatCheckResult(30), resolution: { type: 'FIREARM_ATTACK', characterName: '林恩' } }],
+  }
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  assert.equal(request.presentation?.groups[0]?.checkName, '射击')
+})
+
+for (const pending of [true, false]) {
+  test(`damage and stun retain one participant and only stun is tinted (${pending ? 'pending' : 'resolved'})`, () => {
+    const aggregate = valueRollAggregate('rollDamage', 'DAMAGE', [
+      { name: '林恩', result: createDiceDebugPreset('standard') },
+      { name: '林恩', result: createDiceDebugPreset('standard') },
+    ])
+    aggregate.results.forEach((detail, index) => {
+      detail.resultData!.formula = '1D6'
+      detail.resultData!.modules = [{ expression: '1D6', diceCount: 1, diceSides: 6,
+        dice: [{ sides: 6, selected: true, value: pending ? undefined : 3 }], result: pending ? undefined : 3 }]
+      detail.resultData!.result = pending ? undefined : 3
+      detail.resolvedAt = pending ? undefined : detail.resolvedAt
+      detail.displayType = index ? 'STUN_DURATION' : 'DAMAGE'
+      detail.resolution = { type: detail.displayType, characterName: '林恩',
+        outcome: pending ? undefined : { characterName: '林恩' } }
+    })
+    const original = structuredClone(aggregate)
+    const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+    const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+    assert.equal(summary.formulaValue, '1 人参与')
+    assert.equal(summary.modifierLabel, '单人掷骰')
+    assert.deepEqual(summary.groups.map(group => group.expression), ['1D6', '1D6（眩晕）'])
+    assert.deepEqual(request.result.modules.map(module => module.expression), ['1D6', '1D6（眩晕）'])
+    assert.deepEqual(request.presentation!.groups.map(group => group.effectTone), [undefined, 'stun'])
+    assert.deepEqual(diceState.createDiceModuleEffectToneMap(request.presentation), { 1: 'stun' })
+    assert.deepEqual(diceState.createDiceOutcomeVfxPlan(request.presentation), [])
+    assert.deepEqual(diceState.createDiceModuleOutcomeToneMap(request.presentation), {})
+    assert.deepEqual(aggregate, original, 'display annotations must not alter saved dice formulas')
+  })
+}
+
+test('repeated firearm volleys count people while keeping every shot and target', () => {
+  const aggregate = createDiceDebugAggregatePreset('multiplayer-check')
+  const base = aggregate.results[0]!
+  aggregate.results = ['邪教徒甲', '邪教徒乙', '邪教徒乙'].map((target, index) => ({
+    ...base, id: 601 + index, roundNo: 1, displayOrder: index + 1, characterId: undefined,
+    resolution: { type: 'FIREARM_ATTACK', characterName: '林恩', checkName: '射击:步枪', targetCharacterName: target },
+  }))
+  const request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  const summary = createDicePlayerSummary(request.result, request.skin, request.presentation)
+  assert.match(summary.formulaValue, /^1 人参与/)
+  assert.equal(summary.modifierLabel, '单人检定')
+  assert.equal(summary.groups.length, 3)
+  assert.deepEqual(summary.groups.map(group => group.expression), ['射击:步枪 → 邪教徒甲', '射击:步枪 → 邪教徒乙', '射击:步枪 → 邪教徒乙'])
+})
+
+test('participant counting distinguishes different manual players and unnamed legacy results', () => {
+  const aggregate = valueRollAggregate('rollDamage', 'DAMAGE', ['林恩', '林恩', '周晴'].map(name => ({ name, result: createDiceDebugPreset('standard') })))
+  let request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  assert.equal(request.presentation?.formulaValue, '2 人参与')
+  aggregate.results.forEach(detail => { detail.resolution = { type: 'DAMAGE' } })
+  request = diceState.createDiceMessagePlaybackRequest(0, aggregate, 'classic')
+  assert.equal(request.presentation?.formulaValue, '3 人参与', 'shared reasons do not identify unnamed people')
 })

@@ -20,7 +20,7 @@ const cards = computed(() => splitDiceAggregateByRound(props.aggregate).map((agg
       v-for="card in cards"
       :key="`${card.aggregate.summary.id}:${card.aggregate.results[0]?.roundNo || 1}`"
       type="button"
-      class="dice-message-card"
+      class="dice-message-card dice-tone"
       :class="`is-${card.presentation.tone}`"
       @click="emit('open', card.aggregate)"
     >

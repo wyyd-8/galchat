@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { Search, LoaderCircle } from '@lucide/vue'
 import type { DiceRollAggregate } from '@/api/types'
-import { DICE_HISTORY_CATEGORY_OPTIONS, formatDiceHistoryTime } from '@/dice/domain/dicePlayback'
+import { DICE_HISTORY_CATEGORY_OPTIONS, formatDiceHistoryTime, groupAdjacentDiceHistoryEntries } from '@/dice/domain/dicePlayback'
 import type { DiceHistoryCategory, DiceHistoryEntry, DiceHistoryResultKind } from '@/dice/domain/dicePlayback'
 import { mobileHistoryDay, mobileHistoryValues, mobileHistoryTitle, mobileHistoryReasons } from '@/components/mobileHistoryPresentation'
 const query = defineModel<string>('query', { required: true })
@@ -18,7 +18,7 @@ const groups = computed(() => {
     if (last?.day === day) last.entries.push(entry)
     else grouped.push({ day, entries: [entry] })
   }
-  return grouped
+  return grouped.map(group => ({ day: group.day, rolls: groupAdjacentDiceHistoryEntries(group.entries) }))
 })
 </script>
 <template>
@@ -29,17 +29,22 @@ const groups = computed(() => {
     <div v-if="filtersActive" class="history-filter-summary"><span>{{ matchCopy }}</span><button type="button" @click="emit('clear')">清除筛选</button></div>
     <section v-for="(group, index) in groups" :key="`${group.day}-${index}`" class="history-day">
       <h3>{{ group.day }}</h3>
-      <article v-for="entry in group.entries" :key="`${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`" class="history-card">
-        <header><strong>{{ mobileHistoryTitle(entry) }}</strong><span class="history-tag" :class="{ danger: entry.resultKind === 'failure' }">{{ entry.statusLabel }}</span></header>
-        <div v-for="value in mobileHistoryValues(entry)" :key="value.key" class="history-value">
-          <span v-if="mobileHistoryValues(entry).length > 1" class="history-value-name">{{ value.name || '掷骰结果' }}</span>
-          <div class="history-value-result"><strong>{{ value.value ?? '—' }} <small v-if="value.target != null">/ {{ value.target }}</small></strong><span v-if="mobileHistoryValues(entry).length > 1 && value.outcome" class="history-tag" :class="{ danger: value.outcome.failure }">{{ value.outcome.label }}</span></div>
-        </div>
-        <p v-if="!entry.aggregate.results.length" class="history-no-value">尚无可展示的骰点</p>
-        <p class="history-meta">{{ entry.category }}<template v-if="formatDiceHistoryTime(entry.occurredAt)"> · {{ formatDiceHistoryTime(entry.occurredAt) }}</template><template v-if="(entry.aggregate.results[0]?.roundNo || 1) > 1"> · 第 {{ entry.aggregate.results[0]?.roundNo }} 次掷骰</template></p>
-        <details v-if="mobileHistoryReasons(entry).length" class="history-reason"><summary>查看行动说明</summary><p v-for="reason in mobileHistoryReasons(entry)" :key="reason">{{ reason }}</p></details>
-        <div class="history-actions"><button class="button secondary" type="button" @click="emit('replay', entry.aggregate)">查看 / 回放</button><button class="button secondary" type="button" @click="emit('locate', entry.messageId)">定位消息</button></div>
-      </article>
+      <div v-for="roll in group.rolls" :key="roll.key" class="history-roll-group"
+        :class="{ 'is-grouped': roll.entries.length > 1 }"
+        :role="roll.entries.length > 1 ? 'group' : undefined"
+        :aria-label="roll.entries.length > 1 ? '同组掷骰' : undefined">
+        <article v-for="entry in roll.entries" :key="`${entry.messageId}:${entry.aggregate.results[0]?.roundNo || 1}`" class="history-card dice-tone" :class="`is-${entry.tone}`">
+          <header><strong>{{ mobileHistoryTitle(entry) }}</strong><span class="history-tag">{{ entry.statusLabel }}</span></header>
+          <div v-for="value in mobileHistoryValues(entry)" :key="value.key" class="history-value">
+            <span v-if="mobileHistoryValues(entry).length > 1" class="history-value-name">{{ value.name || '掷骰结果' }}</span>
+            <div class="history-value-result"><strong>{{ value.value ?? '—' }} <small v-if="value.target != null">/ {{ value.target }}</small></strong><span v-if="mobileHistoryValues(entry).length > 1 && value.outcome" class="history-tag dice-tone" :class="`is-${value.outcome.tone}`">{{ value.outcome.label }}</span></div>
+          </div>
+          <p v-if="!entry.aggregate.results.length" class="history-no-value">尚无可展示的骰点</p>
+          <p class="history-meta">{{ entry.category }}<template v-if="formatDiceHistoryTime(entry.occurredAt)"> · {{ formatDiceHistoryTime(entry.occurredAt) }}</template><template v-if="(entry.aggregate.results[0]?.roundNo || 1) > 1"> · 第 {{ entry.aggregate.results[0]?.roundNo }} 次掷骰</template></p>
+          <details v-if="mobileHistoryReasons(entry).length" class="history-reason"><summary>查看行动说明</summary><p v-for="reason in mobileHistoryReasons(entry)" :key="reason">{{ reason }}</p></details>
+          <div class="history-actions"><button class="button secondary" type="button" @click="emit('replay', entry.aggregate)">查看 / 回放</button><button class="button secondary" type="button" @click="emit('locate', entry.messageId)">定位消息</button></div>
+        </article>
+      </div>
     </section>
     <div v-if="!entries.length" class="history-empty"><h3>{{ allCount ? '没有符合条件的掷骰记录' : '当前聊天还没有掷骰记录' }}</h3><p>{{ allCount ? '可以调整筛选，或继续查找更早的掷骰记录。' : '跑团中产生的掷骰会自动出现在这里。' }}</p></div>
     <footer class="history-load"><button class="button secondary" type="button" :disabled="loadingOlder || !hasOlder" @click="emit('earlier')"><LoaderCircle v-if="loadingOlder" class="spin" :size="15" />{{ loadLabel }}</button><p v-if="loadHint">{{ loadHint }}</p></footer>
@@ -49,9 +54,12 @@ const groups = computed(() => {
 .mobile-history { min-width:0;color:#252724; }
 .history-search { display:flex;align-items:center;background:#fffefa;border:1px solid #dedbd2;border-radius:10px;margin:0 0 15px;padding:0 10px;gap:7px;color:#7f887b; }.history-search input { width:100%;min-width:0;border:0;background:transparent;padding:12px 0;min-height:48px;font-size:16px;line-height:1.6; }
 .history-day>h3 { display:flex;align-items:center;min-height:30px;margin:23px 0 12px;font-size:16px;font-weight:600;line-height:1.5; }
-.history-card { background:#fbfaf6;border:1px solid #dedbd2;border-radius:13px;padding:17px;margin:12px 0; }.history-card>header { display:flex;justify-content:space-between;align-items:center;gap:12px; }.history-card>header>strong { font-size:14px;line-height:1.6;font-weight:550;overflow-wrap:anywhere; }
-.history-tag { display:inline-block;flex:none;max-width:50%;font-size:11px;color:#294f49;background:#e4ece8;padding:4px 8px;border-radius:6px;line-height:1.6;overflow-wrap:anywhere; }.history-tag.danger { color:#8a3f48;background:#f0e0e2; }
-.history-value { margin:15px 0; }.history-value-result>strong { display:block;font:36px Georgia;color:#294f49;overflow-wrap:anywhere; }.history-value small { font-size:18px;color:#777970; }.history-value-name { display:block;font-size:12px;color:#777970;line-height:1.6;margin-bottom:5px; }
+.history-roll-group { min-width:0;display:grid;gap:12px;margin:12px 0; }
+.history-roll-group.is-grouped { padding:6px;border:1px dashed #a4ad99;border-radius:17px; }
+.history-roll-group>.history-card { margin:0; }
+.history-card { background:var(--dice-message-background);border:1px solid var(--dice-message-accent);border-radius:13px;padding:17px;margin:12px 0; }.history-card>header { display:flex;justify-content:space-between;align-items:center;gap:12px; }.history-card>header>strong { font-size:14px;line-height:1.6;font-weight:550;overflow-wrap:anywhere; }
+.history-tag { display:inline-block;flex:none;max-width:50%;font-size:11px;color:var(--dice-message-accent);background:color-mix(in srgb, var(--dice-message-accent) 12%, #faf8f2);padding:4px 8px;border-radius:6px;line-height:1.6;overflow-wrap:anywhere; }
+.history-value { margin:15px 0; }.history-value-result>strong { display:block;font:36px Georgia;color:var(--dice-message-accent);overflow-wrap:anywhere; }.history-value small { font-size:18px;color:#777970; }.history-value-name { display:block;font-size:12px;color:#777970;line-height:1.6;margin-bottom:5px; }
 .history-value-result { display:flex;align-items:center;justify-content:space-between;gap:12px; }
 .history-reason { color:#777970;font-size:12px;line-height:1.8;margin:8px 0; }.history-reason summary { cursor:pointer;min-height:24px; }.history-reason p { margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere; }
 .history-meta,.history-no-value { font-size:13px;line-height:1.8;color:#777970;margin:8px 0 12px; }

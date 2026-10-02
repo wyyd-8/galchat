@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
 import org.springframework.transaction.support.*;
 import java.util.List;
-import java.util.function.Consumer;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -39,11 +38,9 @@ class TrpgSummaryTurnExecutionTest {
     @BeforeEach
     void setup() {
         com.me.galchat.support.MybatisPlusTestSupport.initialize(GroupChatReplyStep.class, GroupChatTurn.class);
-        var transactions = mock(TransactionTemplate.class);
-        when(transactions.execute(any())).thenAnswer(call -> call.<TransactionCallback<?>>getArgument(0)
-                .doInTransaction(new SimpleTransactionStatus()));
-        doAnswer(call -> { call.<Consumer<org.springframework.transaction.TransactionStatus>>getArgument(0)
-                .accept(new SimpleTransactionStatus()); return null; }).when(transactions).executeWithoutResult(any());
+        var manager = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(manager.getTransaction(any())).thenAnswer(ignored -> new SimpleTransactionStatus());
+        var transactions = new TransactionTemplate(manager);
         service = new TrpgTurnExecutionService(conversations, locks, resolver, runtimes, turns, steps, messages,
                 recovery, chat, transactions, mock(TrpgSceneSelectionService.class), scenes,
                 mock(TrpgSceneSelectionStore.class), mock(TrpgParticipantService.class), mock(GroupAgentDecisionStore.class),

@@ -31,8 +31,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.redisson.api.RLock;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import reactor.core.publisher.Flux;
 import java.util.ArrayList;
@@ -1857,13 +1855,25 @@ class TrpgTurnExecutionServiceTest {
                     invocation.<GroupChatTurn>getArgument(0).setId(102L);
                     return 1;
                 });
+        var transactionManager = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(transactionManager.getTransaction(any())).thenReturn(
+                new org.springframework.transaction.support.SimpleTransactionStatus());
+        TransactionTemplate transactions = new TransactionTemplate(transactionManager);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            var definitions = org.mockito.ArgumentCaptor.forClass(
+                    org.springframework.transaction.TransactionDefinition.class);
+            verify(transactionManager).getTransaction(definitions.capture());
+            assertThat(definitions.getValue().getIsolationLevel()).isEqualTo(
+                    org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+            return null;
+        }).when(saveService).saveBeforeTurn(conversation);
         TrpgTurnExecutionService service = new TrpgTurnExecutionService(
                 conversationService, lockService, planResolver,
                 runtimeRegistry, turnMapper, stepMapper,
                 mock(GroupChatMessageMapper.class),
                 mock(GroupTurnRecoveryService.class),
                 mock(GroupChatService.class),
-                immediateTransactionTemplate(),
+                transactions,
                 mock(TrpgSceneSelectionService.class),
                 mock(TrpgSceneLifecycleService.class),
                 mock(TrpgSceneSelectionStore.class),
@@ -2319,17 +2329,10 @@ class TrpgTurnExecutionServiceTest {
     }
 
     private TransactionTemplate immediateTransactionTemplate() {
-        TransactionTemplate template = mock(TransactionTemplate.class);
-        when(template.execute(any())).thenAnswer(invocation -> {
-            TransactionCallback<?> callback = invocation.getArgument(0);
-            return callback.doInTransaction(mock(TransactionStatus.class));
-        });
-        org.mockito.Mockito.doAnswer(invocation -> {
-            java.util.function.Consumer<TransactionStatus> callback =
-                    invocation.getArgument(0);
-            callback.accept(mock(TransactionStatus.class));
-            return null;
-        }).when(template).executeWithoutResult(any());
+        var manager = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(manager.getTransaction(any())).thenAnswer(ignored ->
+                new org.springframework.transaction.support.SimpleTransactionStatus());
+        TransactionTemplate template = new TransactionTemplate(manager);
         return template;
     }
 }

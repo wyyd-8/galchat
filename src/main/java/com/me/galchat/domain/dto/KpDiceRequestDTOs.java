@@ -104,7 +104,7 @@ public final class KpDiceRequestDTOs {
 
     public record Pushed(
             @ToolParam(description = SELF_CONTAINED_REASON
-                    + "孤注一掷写明本轮实际执行者及其新增努力；不要复述完整行动过程、规则或预期结果")
+                    + "孤注一掷写明本次实际执行者及其新增努力；不要复述完整行动过程、规则或预期结果")
             String reason,
             @ToolParam(description = "原检定的掷骰概要ID，即历史<dice-roll>中的summary-id")
             Long diceRollSummaryId,
@@ -124,18 +124,10 @@ public final class KpDiceRequestDTOs {
             @ToolParam(description = SELF_CONTAINED_REASON
                     + "理智检定写明谁目睹或经历了什么；不要复述完整场景、规则或预期结果。会作为掷骰概要和前端展示文本")
             String reason,
-            @ToolParam(description = "需要按当前SAN值进行理智检定的角色名列表")
-            List<String> characterNames) {
-    }
-
-    public record SanLoss(
-            @ToolParam(description = SELF_CONTAINED_REASON
-                    + "理智损失写明谁因何种恐怖经历承受损失；不要复述完整场景、规则或结果。会作为新增掷骰轮的展示文本")
-            String reason,
-            @ToolParam(description = "上一轮理智检定成功时使用的SAN损失表达式，例如0或1")
-            String successFormula,
-            @ToolParam(description = "上一轮理智检定失败时使用的SAN损失表达式，例如1D6")
-            String failureFormula) {
+            @ToolParam(description = "需要处理理智检定或SAN损失的角色名列表")
+            List<String> characterNames,
+            @ToolParam(description = "SAN损失：单一公式如1、1D6表示直接损失；成功/失败如1/1D3、1D3/1D6表示先检定。各分支支持非负整数、NdM和相加；大成功取成功分支最小值，大失败取失败分支最大值")
+            String lossFormula) {
     }
 
     public record Damage(
@@ -155,7 +147,7 @@ public final class KpDiceRequestDTOs {
 
     public record Healing(
             @ToolParam(description = SELF_CONTAINED_REASON
-                    + "治疗写明谁以何种方式为谁恢复生命；不要复述完整行动过程、规则或结果。会作为掷骰概要或新增掷骰轮的展示文本")
+                    + "治疗写明谁以何种方式为谁恢复生命；不要复述完整行动过程、规则或结果")
             String reason,
             @ToolParam(description = "回血来源模式：STANDALONE无来源回血，FOLLOW_UP单次检定成功后的回血")
             HealingSourceMode sourceMode,

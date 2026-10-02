@@ -104,6 +104,7 @@ public class DiceRollInternalServiceImpl implements IDiceRollInternalService {
         if (!conversationId.equals(summary.getConversationId())) {
             throw new UserAuthException("掷骰概要不属于当前群聊");
         }
+        assertLatestSummary(summary);
         if (!DiceRollConstant.STATUS_COMPLETED.equals(summary.getStatus())) {
             throw new UserRequestException("当前轮玩家尚未完成掷骰");
         }
@@ -136,6 +137,16 @@ public class DiceRollInternalServiceImpl implements IDiceRollInternalService {
         }
         if (summaryMapper.updateById(summary) == 0) {
             throw new UserRequestException("掷骰概要不存在");
+        }
+    }
+
+    @Override
+    public void assertLatestSummary(DiceRollSummary summary) {
+        DiceRollSummary latest = summaryMapper.selectOne(new LambdaQueryWrapper<DiceRollSummary>()
+                .eq(DiceRollSummary::getConversationId, summary.getConversationId())
+                .orderByDesc(DiceRollSummary::getId).last("LIMIT 1"));
+        if (latest == null || !latest.getId().equals(summary.getId())) {
+            throw new UserRequestException("只能继续本跑团最后一组掷骰");
         }
     }
 

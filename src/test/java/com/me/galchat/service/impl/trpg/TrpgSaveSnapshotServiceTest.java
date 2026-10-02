@@ -42,6 +42,8 @@ import com.me.galchat.mapper.VectorStoreCleanupMapper;
 import com.me.galchat.service.ITrpgRedisStateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -149,6 +151,72 @@ class TrpgSaveSnapshotServiceTest {
     }
 
     @Test
+    void captureKeepsLastDiceEvenWhenItsTurnIsCompleted() {
+        var conversation = conversation().setActiveReplyPlanId(null);
+        when(restoreMapper.selectCursors(51L)).thenReturn(cursors());
+        var summary = new DiceRollSummary().setId(8L).setConversationId(51L)
+                .setRoundCount(1).setStatus("COMPLETED");
+        when(diceSummaryMapper.selectById(8L)).thenReturn(summary);
+        when(diceResultMapper.selectList(any())).thenReturn(List.of(
+                new DiceRollResult().setId(9L).setSummaryId(8L).setRoundNo(1)));
+        when(messageMapper.selectList(any())).thenReturn(List.of(new GroupChatMessage()
+                .setId(1L).setConversationId(51L).setContent("{\"summaryId\":8,\"roundNos\":[1]}")));
+        var saved = service.capture(conversation);
+        var json = tools.jackson.databind.json.JsonMapper.builder().build().valueToTree(saved);
+        assertThat(json.hasNonNull("lastDice")).isTrue();
+        assertThat(json.at("/lastDice/summary/id").asLong()).isEqualTo(8L);
+        assertThat(json.at("/lastDice/results/0/id").asLong()).isEqualTo(9L);
+        assertThat(json.at("/lastDice/messages/0/id").asLong()).isEqualTo(1L);
+    }
+
+    @Test
+    void restoreLastDiceRestoresPendingDetailsAndOriginalMessageRoundList() {
+        var snapshot = baseSnapshot().setConversationState(
+                new TrpgSaveSnapshotDTO.ConversationStateSnapshot().setStatus("active"));
+        var savedSummary = new DiceRollSummary().setId(8L).setConversationId(51L)
+                .setRoundCount(1).setStatus("PENDING").setTotalResult(null);
+        var savedResult = new DiceRollResult().setId(9L).setSummaryId(8L).setRoundNo(1)
+                .setResultData(com.me.galchat.utils.DiceUtils.prepare("1D100"));
+        var savedMessage = new GroupChatMessage().setId(1L).setConversationId(51L)
+                .setMessageKind("dice_roll").setContent("{\"summaryId\":8,\"roundNos\":[1]}");
+        snapshot.setLastDice(new TrpgSaveSnapshotDTO.DiceSnapshot().setSummary(savedSummary)
+                .setResults(List.of(savedResult)).setMessages(List.of(savedMessage)));
+        var json = tools.jackson.databind.json.JsonMapper.builder().build();
+        snapshot = json.readValue(json.writeValueAsString(snapshot), TrpgSaveSnapshotDTO.class);
+        var restored = org.mockito.ArgumentCaptor.forClass(DiceRollSummary.class);
+        var details = org.mockito.ArgumentCaptor.forClass(DiceRollResult.class);
+        var messages = org.mockito.ArgumentCaptor.forClass(GroupChatMessage.class);
+
+        service.restoreDatabase(conversation(), snapshot);
+
+        verify(diceSummaryMapper).deleteById(8L);
+        verify(diceSummaryMapper).insert(restored.capture());
+        assertThat(restored.getValue().getRoundCount()).isEqualTo(1);
+        assertThat(restored.getValue().getStatus()).isEqualTo("PENDING");
+        assertThat(restored.getValue().getTotalResult()).isNull();
+        verify(diceResultMapper).insert(details.capture());
+        assertThat(details.getValue().getId()).isEqualTo(9L);
+        assertThat(details.getValue().getResolvedAt()).isNull();
+        assertThat(details.getValue().getResultData().getResult()).isNull();
+        verify(messageMapper).insert(messages.capture());
+        assertThat(messages.getValue().getContent()).isEqualTo("{\"summaryId\":8,\"roundNos\":[1]}");
+        verify(restoreMapper).deleteDiceResultsAfter(51L, 8L, 9L);
+        verify(restoreMapper).deleteDiceSummariesAfter(51L, 8L);
+    }
+
+    @Test
+    void invalidLastDiceCannotOverwriteAnotherRunsSummary() {
+        var snapshot = baseSnapshot().setConversationState(
+                new TrpgSaveSnapshotDTO.ConversationStateSnapshot().setStatus("active"))
+                .setLastDice(new TrpgSaveSnapshotDTO.DiceSnapshot().setSummary(
+                        new DiceRollSummary().setId(8L).setConversationId(99L)));
+        assertThatThrownBy(() -> service.restoreDatabase(conversation(), snapshot))
+                .hasMessageContaining("最后一组掷骰存档不合法");
+        verify(restoreMapper, never()).deleteMessagesAfter(anyLong(), anyLong());
+        verify(diceSummaryMapper, never()).deleteById(anyLong());
+    }
+
+    @Test
     void captureBuildsACompleteSnapshotForTheRequestedRun() {
         GroupConversation conversation = conversation();
         TrpgSaveSnapshotDTO.CursorSnapshot cursors = cursors();
@@ -249,7 +317,7 @@ class TrpgSaveSnapshotServiceTest {
         when(messageMapper.selectList(any())).thenReturn(List.of(message));
         when(toolCallMapper.selectList(any())).thenReturn(List.of(toolCall));
         when(decisionMapper.selectList(any())).thenReturn(List.of(decision));
-        when(diceSummaryMapper.selectList(any())).thenReturn(List.of(diceSummary));
+        when(diceSummaryMapper.selectById(8L)).thenReturn(diceSummary);
         when(diceResultMapper.selectList(any())).thenReturn(List.of(diceResult));
         when(redisStateService.capture(
                 51L, List.of(100L, 101L))).thenReturn(redis);
@@ -290,8 +358,10 @@ class TrpgSaveSnapshotServiceTest {
                     assertThat(turnSnapshot.getMessages()).containsExactly(message);
                     assertThat(turnSnapshot.getToolCalls()).containsExactly(toolCall);
                     assertThat(turnSnapshot.getAgentDecisions()).containsExactly(decision);
-                    assertThat(turnSnapshot.getDiceSummaries()).containsExactly(diceSummary);
-                    assertThat(turnSnapshot.getDiceResults()).containsExactly(diceResult);
+                    assertThat(snapshot.getLastDice().getSummary()).isEqualTo(diceSummary);
+                    assertThat(turnSnapshot.getDiceSummaries()).isNull();
+                    assertThat(snapshot.getLastDice().getResults()).containsExactly(diceResult);
+                    assertThat(turnSnapshot.getDiceResults()).isNull();
                 });
         assertThat(snapshot.getRedisState()).isSameAs(redis);
         verify(completionMapper).selectById(51L);
@@ -584,6 +654,71 @@ class TrpgSaveSnapshotServiceTest {
         verify(decisionMapper).insert(decision);
         verify(diceSummaryMapper).insert(summary);
         verify(diceResultMapper).insert(result);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"waiting_input", "waiting_dice", "paused", "failed", "blocked"})
+    void restoreAcceptsCombatChildrenWithoutInquiryMetadata(String status) {
+        TrpgSaveSnapshotDTO snapshot = snapshotWithChild(status,
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+
+        service.restoreDatabase(conversation(), snapshot);
+
+        verify(stepMapper).insert(snapshot.getRestorableTurns().getFirst().getReplySteps().get(1));
+        verify(turnMapper).insert(snapshot.getRestorableTurns().getFirst().getTurn());
+    }
+
+    @Test
+    void restoreStillRejectsInquiryChildrenWithoutMetadata() {
+        TrpgSaveSnapshotDTO snapshot = snapshotWithChild("waiting_input",
+                GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE);
+
+        assertThatThrownBy(() -> service.restoreDatabase(conversation(), snapshot))
+                .isInstanceOf(UserRequestException.class).hasMessageContaining("交互步骤");
+        verify(turnMapper, never()).deleteById(any());
+    }
+
+    @Test
+    void restoreStillRejectsCombatChildReferencingMissingParent() {
+        TrpgSaveSnapshotDTO snapshot = snapshotWithChild("waiting_dice",
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE);
+        snapshot.getRestorableTurns().getFirst().getReplySteps().get(1).setParentStepId(99L);
+
+        assertThatThrownBy(() -> service.restoreDatabase(conversation(), snapshot))
+                .isInstanceOf(UserRequestException.class);
+        verify(turnMapper, never()).deleteById(any());
+    }
+
+    @Test
+    void restorePreservesInquiryTreeAndPromptMessage() {
+        TrpgSaveSnapshotDTO snapshot = snapshotWithChild("waiting_input",
+                GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE);
+        var turn = snapshot.getRestorableTurns().getFirst();
+        var child = turn.getReplySteps().get(1).setInteractionSeq(1)
+                .setInteractionType("KP_CLARIFICATION").setPromptMessageId(1L);
+        var message = new GroupChatMessage().setId(1L).setConversationId(51L)
+                .setTurnId(2L).setReplyStepId(2L);
+        turn.setMessages(List.of(message));
+
+        service.restoreDatabase(conversation(), snapshot);
+
+        verify(stepMapper).insert(child);
+        verify(messageMapper).insert(message);
+    }
+
+    private TrpgSaveSnapshotDTO snapshotWithChild(String status, String action) {
+        return baseSnapshot().setConversationState(
+                new TrpgSaveSnapshotDTO.ConversationStateSnapshot()
+                        .setStatus(GroupChatConstant.STATUS_ACTIVE))
+                .setRestorableTurns(List.of(
+                new TrpgSaveSnapshotDTO.RestorableTurnSnapshot()
+                        .setTurn(new GroupChatTurn().setId(2L).setConversationId(51L).setStatus(status))
+                        .setReplySteps(List.of(
+                                new GroupChatReplyStep().setId(2L).setTurnId(2L)
+                                        .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION),
+                                new GroupChatReplyStep().setId(3L).setTurnId(2L)
+                                        .setParentStepId(2L).setRootStepId(2L)
+                                        .setActionType(action).setStatus(status)))));
     }
 
     private GroupConversation conversation() {

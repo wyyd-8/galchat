@@ -12,6 +12,7 @@ import { prioritizeNonBaseSkills } from './cocModuleCharacterSkills'
 import { cloneCocModuleData } from './cocModuleData'
 import { cocModulePayloadFingerprint, createCocModuleSaveQueue, saveCocModuleIfNeeded } from './cocModuleAutosave'
 import { useMobileViewport } from '@/composables/useMobileViewport'
+import { useMobileDialogHistory } from '@/composables/useMobileDialogHistory'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 
 type Tab = 'overview' | 'context' | 'locations' | 'clues' | 'materials' | 'characters'
@@ -22,6 +23,7 @@ type CharacterEditorTab = 'basics' | 'skills' | 'weapons' | 'background'
 const emit = defineEmits<{ changed: []; detailOpenChange: [open: boolean] }>()
 const { isMobile } = useMobileViewport()
 const mobileView = ref<'list' | 'directory' | 'section'>('list')
+useMobileDialogHistory(computed(() => mobileView.value !== 'list'), isMobile, mobileBack)
 const showModuleManagementActions = computed(() => !isMobile.value || mobileView.value !== 'section')
 const mobileEntry = ref<number | null>(null)
 const moduleScroller = ref<HTMLElement | null>(null)
@@ -70,6 +72,7 @@ const sectionLabels = { overview: '基本资料', context: '主持人设定', lo
 watch([isMobile, mobileView], () => emit('detailOpenChange', isMobile.value && mobileView.value !== 'list'), { immediate: true })
 onUnmounted(() => emit('detailOpenChange', false))
 async function mobileBack() {
+  if (busy.value || isSaving.value) return
   if (mobileEntry.value !== null) { mobileEntry.value = null; await nextTick(); if (moduleScroller.value) moduleScroller.value.scrollTop = mobileListScrollTop; return }
   const destination = mobileView.value === 'section' && !creating.value ? 'directory' : 'list'
   if (hasUnsavedChanges.value && (canFullEdit.value || canRestrictedEdit.value)) {
@@ -1210,7 +1213,7 @@ button.material-image-action { font-family: inherit; }
   .module-library-page { height: 100%; min-height: 0; overflow: hidden; }
   .module-workspace { height: 100%; min-height: 0; overflow: hidden; }
   .v1-module-library { height: 100%; min-height: 0; display: flex; flex-direction: column; }
-  .v1-module-library-header { min-height: 64px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px 10px; border-bottom: 1px solid var(--line); }
+  .v1-module-library-header { min-height: 64px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: max(6px, env(safe-area-inset-top)) 12px 10px; border-bottom: 1px solid var(--line); }
   .v1-module-library-header > div { flex: 1; min-width: 0; }
   .v1-module-library-header strong { display: block; font-size: 17px; line-height: 1.5; font-weight: 600; }
   .v1-module-library-header small { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
@@ -1236,7 +1239,7 @@ button.material-image-action { font-family: inherit; }
   .v1-module-row > svg { color: var(--muted); flex-shrink: 0; }
   .v1-module-avatar { width: 46px; height: 46px; border-radius: 14px; background: var(--pine-soft) center/cover; display: grid; place-items: center; color: var(--pine); flex-shrink: 0; }
   .v1-module-empty { color: var(--muted); font-size: 13px; line-height: 1.8; padding: 24px 0; }
-  .mobile-module-header { min-height: 64px; padding: 6px 12px 10px; }
+  .mobile-module-header { min-height: 64px; padding: max(6px, env(safe-area-inset-top)) 12px 10px; }
   .mobile-module-heading { font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mobile-module-directory-list { padding: 18px 18px 24px; min-height: 0; }
   .mobile-module-directory-list > button { min-height: 76px; padding: 15px 0; gap: 12px; color: var(--ink); }

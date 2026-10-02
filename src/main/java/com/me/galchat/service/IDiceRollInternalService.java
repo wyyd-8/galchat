@@ -18,4 +18,5 @@ public interface IDiceRollInternalService {
             Long conversationId, Long summaryId, List<DiceRollResultCreateDTO> results);
     void saveResult(DiceRollResult result);
     void saveSummary(DiceRollSummary summary);
+    void assertLatestSummary(DiceRollSummary summary);
 }

@@ -20,14 +20,14 @@
   .mobile-profile-identity strong, .mobile-profile-menu button { font-size: 14px; }
   .world-card-copy strong { font-size: 14px; }
   body { min-width: 320px; min-height: 100dvh; }
-  .app-shell { display: block; min-height: var(--app-viewport-height, 100dvh); }
+  .app-shell { position: fixed; top: var(--app-viewport-top, 0px); left: 0; width: 100%; height: var(--app-viewport-height, 100dvh); min-height: 0; display: block; overflow: hidden; }
   .app-shell > .sidebar { display: none; }
   .app-content { min-height: var(--app-viewport-height, 100dvh); }
   .mobile-chat-view > .app-content { height: var(--app-viewport-height, 100dvh); min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .mobile-chat-view > .app-content > .connection-banner { flex: 0 0 auto; }
   .mobile-chat-view > .app-content > .chat-page, .mobile-chat-view > .app-content > .completion-stage { flex: 1; min-height: 0; height: auto; }
   .mobile-root-view > .app-content { padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
-  .mobile-navigation { position: fixed; inset: auto 0 0; z-index: 15; display: grid; grid-template-columns: repeat(3, 1fr); padding: 6px 16px max(6px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
+  .mobile-navigation { position: absolute; inset: auto 0 0; z-index: 15; display: grid; grid-template-columns: repeat(3, 1fr); padding: 6px 16px max(6px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
   .mobile-navigation button { min-height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; color: var(--muted); background: none; font-size: 12px; }
   .mobile-navigation button[aria-current] { color: var(--pine); font-weight: 600; }
   .mobile-world-header { display: flex; align-items: center; gap: 10px; min-height: 58px; position: sticky; top: 0; z-index: 10; padding: env(safe-area-inset-top) 12px 0; border-bottom: 1px solid var(--line); background: var(--paper); }
@@ -50,6 +50,7 @@
   .dialog-content[data-mobile-presentation] .dialog-title { font-size: 17px; overflow-wrap: anywhere; }
   .dialog-content[data-mobile-presentation] .dialog-description { font-size: 12px; line-height: 1.7; }
   .dialog-content[data-mobile-presentation] > .dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 18px 18px 24px; overscroll-behavior: contain; }
+  .dialog-content[data-mobile-presentation] > .dialog-body:last-child { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
   .dialog-content[data-mobile-presentation] > .dialog-footer { flex-shrink: 0; padding: 12px 18px max(12px, env(safe-area-inset-bottom)); gap: 10px; flex-wrap: wrap; background: var(--surface); }
   .dialog-content[data-mobile-presentation] > .dialog-footer > .button { flex: 1 1 0; }
   .dialog-content[data-state=open], .dialog-content[data-state=closed] { animation: none; }

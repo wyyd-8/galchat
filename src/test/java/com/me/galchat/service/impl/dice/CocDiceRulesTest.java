@@ -50,11 +50,11 @@ class CocDiceRulesTest {
     }
 
     @Test
-    void sanLossFormulaUsesOnlyCollapsedSuccessOrFailureBranch() {
+    void sanCriticalOutcomesUseBranchExtrema() {
         assertThat(CocDiceRules.selectSanLossFormula(
                 CocCheckOutcome.CRITICAL_SUCCESS, "0", "1D6")).isEqualTo("0");
         assertThat(CocDiceRules.selectSanLossFormula(
-                CocCheckOutcome.FUMBLE, "0", "1D6")).isEqualTo("1D6");
+                CocCheckOutcome.FUMBLE, "0", "1D6")).isEqualTo("6");
     }
 
     @Test

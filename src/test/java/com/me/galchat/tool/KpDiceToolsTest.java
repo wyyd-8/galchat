@@ -35,7 +35,6 @@ class KpDiceToolsTest {
                         "requestGroupCheck",
                         DiceRollConstant.TOOL_REQUEST_OPPOSED_CHECK,
                         DiceRollConstant.TOOL_REQUEST_SAN_CHECK,
-                        "rollSanLoss",
                         "rollDamage",
                         "rollHealing");
         assertThat(toolMethods)
@@ -46,7 +45,7 @@ class KpDiceToolsTest {
                 .contains("单人")
                 .doesNotContain("群体");
         assertThat(tool("requestGroupCheck").description())
-                .contains("群体", "任一", "全部", "分离", "仅供前端展示")
+                .contains("群体", "任一", "全部", "分离", "不改变各角色自身的检定结果")
                 .contains("聆听", "潜行", "不确定");
     }
 
@@ -56,9 +55,8 @@ class KpDiceToolsTest {
         Tool healing = tool("rollHealing");
 
         assertThat(damage.description())
-                .contains("KP手动")
-                .contains("护甲")
-                .contains("不会自动扣除");
+                .contains("KP须判断护甲是否适用")
+                .contains("仅对HP伤害部分减甲");
         assertThat(healing.description())
                 .contains("急救", "解除昏迷", "解除重伤")
                 .contains("医学", "解除重伤")
@@ -94,7 +92,7 @@ class KpDiceToolsTest {
                 .filter(schema -> schema.contains("\"reason\""))
                 .toList();
 
-        assertThat(schemas).hasSize(10).allSatisfy(schema ->
+        assertThat(schemas).hasSize(9).allSatisfy(schema ->
                 assertThat(schema)
                         .contains("不得省略主语")
                         .contains("谁做了什么或经历了什么")
@@ -116,7 +114,7 @@ class KpDiceToolsTest {
                 41L));
 
         assertThatThrownBy(() -> tools.requestSanCheck(
-                new KpDiceRequestDTOs.SanCheck("目睹尸体", List.of("林恩")),
+                new KpDiceRequestDTOs.SanCheck("目睹尸体", List.of("林恩"), "0/1D6"),
                 context))
                 .hasMessageContaining("KP");
     }
@@ -136,7 +134,7 @@ class KpDiceToolsTest {
                 ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY,
                 41L));
         KpDiceRequestDTOs.SanCheck request =
-                new KpDiceRequestDTOs.SanCheck("目睹尸体", List.of("林恩"));
+                new KpDiceRequestDTOs.SanCheck("目睹尸体", List.of("林恩"), "0/1D6");
 
         tools.requestSanCheck(request, context);
 

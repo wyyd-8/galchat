@@ -3,6 +3,7 @@ import { computed, watch } from 'vue'
 import type { StyleValue } from 'vue'
 import { useMobileViewport } from '@/composables/useMobileViewport'
 import { useMobileDialogHistory } from '@/composables/useMobileDialogHistory'
+import { useDialogPresence } from '@/composables/useDialogPresence'
 import { ArrowLeft, X } from '@lucide/vue'
 import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 
@@ -19,8 +20,9 @@ const props = withDefaults(defineProps<{
   embedded?: boolean
 }>(), { description: '', size: 'md', layer: 'default', contentClass: '', contentStyle: undefined, mobilePresentation: 'sheet' })
 const { isMobile } = useMobileViewport()
-useMobileDialogHistory(open, computed(() => isMobile.value && !props.embedded), () => {
-  if (props.mobileBack) props.mobileBack()
+useDialogPresence(computed(() => open.value && !props.embedded))
+useMobileDialogHistory(open, computed(() => isMobile.value && !props.embedded), async () => {
+  if (props.mobileBack) await props.mobileBack()
   else open.value = false
 })
 const layerClass = computed(() => `dialog-layer-${props.layer}`)
@@ -33,6 +35,14 @@ function restoreFocus(event: Event) {
   event.preventDefault()
   returnFocus.focus({ preventScroll: true })
 }
+function initialFocus(event: Event) {
+  // Focusing a text field on entry opens the phone keyboard before the page is read.
+  // Keep focus inside the dialog without starting text input.
+  if (!isMobile.value) return
+  event.preventDefault()
+  const content = event.target as HTMLElement | null
+  content?.focus({ preventScroll: true })
+}
 </script>
 
 <template>
@@ -43,7 +53,7 @@ function restoreFocus(event: Event) {
   <DialogRoot v-else v-model:open="open">
     <DialogPortal>
       <DialogOverlay class="dialog-overlay" :class="layerClass" />
-      <DialogContent class="dialog-content" :class="[`dialog-${size}`, layerClass, contentClass]" :style="contentStyle" v-bind="description ? {} : { 'aria-describedby': undefined }" :data-mobile-presentation="mobilePresentation" @close-auto-focus="restoreFocus">
+      <DialogContent class="dialog-content" :class="[`dialog-${size}`, layerClass, contentClass]" :style="contentStyle" v-bind="description ? {} : { 'aria-describedby': undefined }" :data-mobile-presentation="mobilePresentation" @open-auto-focus="initialFocus" @close-auto-focus="restoreFocus">
         <header class="dialog-header">
           <button v-if="isMobile && mobilePresentation === 'page' && mobileBack" class="icon-button mobile-dialog-back" aria-label="返回" @click="mobileBack"><ArrowLeft :size="22" /></button>
           <DialogClose v-else-if="isMobile && mobilePresentation === 'page'" class="icon-button mobile-dialog-back" aria-label="返回"><ArrowLeft :size="22" /></DialogClose>

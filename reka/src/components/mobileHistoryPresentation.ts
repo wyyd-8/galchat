@@ -1,4 +1,5 @@
 import type { DiceHistoryEntry } from '@/dice/domain/dicePlayback'
+import { checkOutcomeTone } from '../dice/domain/dicePlayback.ts'
 
 const outcomeLabels: Record<string, string> = {
   CRITICAL_SUCCESS: '大成功', EXTREME_SUCCESS: '极难成功', HARD_SUCCESS: '困难成功',
@@ -11,6 +12,7 @@ function participantOutcome(outcome?: Record<string, unknown>) {
   return {
     label: category === 'SUCCESS' && typeof outcome?.rank === 'string' ? rankLabels[outcome.rank] || outcomeLabels[category] : outcomeLabels[category],
     failure: category === 'FAILURE' || category === 'FUMBLE',
+    tone: checkOutcomeTone(outcome || {}),
   }
 }
 

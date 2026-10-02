@@ -1,6 +1,7 @@
 package com.me.galchat.domain.vo;
 
 import com.me.galchat.constant.CocCheckDifficulty;
+import com.me.galchat.constant.DiceRollConstant;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -31,6 +32,11 @@ public class DiceResolutionDataVO {
         Object savedGroupRule = rule == null ? null : rule.get("groupRule");
         Object savedCharacterName = rule == null ? null : rule.get("characterName");
         Object savedCheckName = rule == null ? null : rule.get("checkName");
+        if (!(savedCheckName instanceof String)
+                && DiceRollConstant.TYPE_FIREARM_ATTACK.equals(type) && rule != null) {
+            savedCheckName = rule.get("skillName");
+        }
+        Object savedTargetName = rule == null ? null : rule.get("targetCharacterName");
         Object savedDifficulty = rule == null ? null : rule.get("difficulty");
         Object savedTargetValue = rule == null ? null : rule.get("targetValue");
         List<Map<String, Object>> savedModifierFactors = publicModifierFactors(
@@ -41,6 +47,7 @@ public class DiceResolutionDataVO {
                 savedGroupRule instanceof String value ? value : null,
                 savedCharacterName instanceof String value ? value : null,
                 savedCheckName instanceof String value ? value : null,
+                savedTargetName instanceof String value ? value : null,
                 savedDifficulty instanceof String value ? value : null,
                 effectiveTargetValue(
                         savedTargetValue,

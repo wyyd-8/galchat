@@ -40,6 +40,7 @@ import com.me.galchat.vector.TrpgTurnVectorIndexQueue;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import java.time.LocalDateTime;
@@ -141,32 +142,40 @@ public class TrpgTurnExecutionService {
                         || GroupChatConstant.STATUS_COMPLETED.equals(
                         turn.getStatus())) {
                     GroupChatTurn previousTurn = turn;
+                    // Auto-save and new-turn creation must share one consistent database snapshot.
+                    TransactionTemplate startTurnTransaction = new TransactionTemplate(
+                            transactionTemplate.getTransactionManager(), transactionTemplate);
+                    startTurnTransaction.setIsolationLevel(
+                            TransactionDefinition.ISOLATION_REPEATABLE_READ);
                     PreparedTurn prepared =
-                            transactionTemplate.execute(status -> {
-                                trpgSaveService.saveBeforeTurn(conversation);
+                            startTurnTransaction.execute(status -> {
+                                GroupConversation currentConversation =
+                                        conversationService.requireActive(conversationId);
+                                trpgSaveService.saveBeforeTurn(currentConversation);
                                 if (moduleRuntimeService != null) {
                                     moduleRuntimeService.lockForStartedRun(
-                                            conversation);
+                                            currentConversation);
                                 }
                                 if (previousTurn != null
                                         && GroupChatConstant
                                         .PLAN_SOURCE_COMBAT.equals(
-                                        activePlanSource(conversation))
+                                        activePlanSource(currentConversation))
                                         && GroupChatConstant
                                         .PLAN_SOURCE_COMBAT.equals(
                                         previousTurn.getPlanSource())) {
                                     combatLifecycleService
                                             .startNextRoundUnderLock(
-                                                    conversation);
+                                                    currentConversation);
                                 }
                                 PreparedTurn created = createTurn(
-                                        conversation, request);
+                                        currentConversation, request);
                                 bindTurnDirection(
-                                        conversation.getId(),
+                                        currentConversation.getId(),
                                         created.turn().getId(),
                                         request.getInvestigatorDirection());
                                 return created;
                             });
+                    conversation = prepared.conversation();
                     turn = prepared.turn();
                 } else if (!GroupChatConstant.STATUS_RUNNING.equals(
                         turn.getStatus())) {
@@ -1295,7 +1304,7 @@ public class TrpgTurnExecutionService {
             stepMapper.insert(step);
             steps.add(step);
         }
-        return new PreparedTurn(turn, List.copyOf(steps));
+        return new PreparedTurn(conversation, turn, List.copyOf(steps));
     }
 
     private List<GroupActionSpec> withSceneIntro(
@@ -1967,6 +1976,7 @@ public class TrpgTurnExecutionService {
     }
 
     private record PreparedTurn(
+            GroupConversation conversation,
             GroupChatTurn turn,
             List<GroupChatReplyStep> steps) {
     }

@@ -167,7 +167,7 @@ function selectPerson(event: Event) {
   .completion-error{margin-top:24px!important}
 }
 @media (max-width:767px) {
-  .completion-top { min-height:64px;padding:6px 12px 10px;gap:8px;background:#f4f1ea; }
+  .completion-top { min-height:64px;padding:max(6px,env(safe-area-inset-top)) 12px 10px;gap:8px;background:#f4f1ea; }
   .completion-top>.text-button { font-size:12px;padding:0 8px; }.completion-top>.text-button svg { width:22px;height:22px; }
   .completion-content { padding:18px 18px 24px;scrollbar-gutter:auto; }
   .completion-mobile-progress { display:flex;gap:6px;margin:0 0 22px; }.completion-mobile-progress i { height:3px;background:#dedbd2;flex:1;border-radius:3px; }.completion-mobile-progress i.active { background:#294f49; }

@@ -4,6 +4,10 @@ import com.me.galchat.service.impl.group.GroupConversationService;
 import com.me.galchat.service.impl.group.GroupTurnRecoveryService;
 import com.me.galchat.service.impl.group.GroupReplyPlanService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.me.galchat.domain.dto.KpSceneFinishDTOs;
+import com.me.galchat.domain.dto.InvestigatorSceneFinishResult;
+import com.me.galchat.utils.RedisAfterCommitCleanup;
+import org.springframework.transaction.annotation.Transactional;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
@@ -81,14 +85,16 @@ public class TrpgSceneLifecycleService {
                 conversationId, scenePlanId);
     }
 
-    public boolean requestInvestigatorFinish(
+    @Transactional(rollbackFor = Exception.class)
+    public InvestigatorSceneFinishResult requestInvestigatorFinish(
             Long conversationId, Long replyStepId, Long characterId) {
         return requestInvestigatorFinish(
                 conversationId, replyStepId,
                 GroupChatConstant.ACTOR_CHARACTER, characterId);
     }
 
-    public boolean requestInvestigatorFinish(
+    @Transactional(rollbackFor = Exception.class)
+    public InvestigatorSceneFinishResult requestInvestigatorFinish(
             Long conversationId,
             Long replyStepId,
             String actorType,
@@ -127,10 +133,21 @@ public class TrpgSceneLifecycleService {
                 .collect(Collectors.toSet());
         Set<String> readyActors = new HashSet<>(progressStore.readyActors(
                 conversationId, execution.plan().getId()));
+        boolean readyBefore = readyActors.contains(TrpgSceneProgressStore.actorKey(
+                execution.step().getSubjectCharacterId()));
+        boolean finishBefore = progressStore.isFinishRequested(conversationId, execution.plan().getId());
         readyActors.add(TrpgSceneProgressStore.actorKey(
                 execution.step().getSubjectCharacterId()));
         boolean allReady = !participantActors.isEmpty()
                 && readyActors.containsAll(participantActors);
+        List<KpSceneFinishDTOs.StepUndo> cancelled = allReady ? stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, execution.turn().getId())
+                        .eq(GroupChatReplyStep::getStatus, GroupChatConstant.STATUS_PENDING)
+                        .in(GroupChatReplyStep::getSpeakerType,
+                                GroupChatConstant.ACTOR_USER, GroupChatConstant.ACTOR_CHARACTER))
+                .stream().map(step -> new KpSceneFinishDTOs.StepUndo(
+                        step.getId(), step.getErrorMessage(), step.getUpdatedAt())).toList() : List.of();
         if (allReady) {
             recoveryService.cancelPendingInvestigatorSteps(
                     execution.turn().getId(),
@@ -153,10 +170,15 @@ public class TrpgSceneLifecycleService {
         } else {
             publish.run();
         }
-        return allReady;
+        return new InvestigatorSceneFinishResult(allReady
+                ? "所有调查员均已结束探索，当前场景将进入结算。请用公开消息确认你的行动结束。"
+                : "你的结束探索意向已记录。请用公开消息说明你已完成当前场景的行动。",
+                execution.plan().getId(), execution.turn().getId(), execution.step().getSubjectCharacterId(),
+                readyBefore, finishBefore, allReady, cancelled);
     }
 
-    public void requestKpFinish(
+    @Transactional(rollbackFor = Exception.class)
+    public KpSceneFinishDTOs.FinishResult requestKpFinish(
             Long conversationId, Long replyStepId) {
         SceneExecution execution = requireSceneExecution(
                 conversationId, replyStepId);
@@ -164,10 +186,19 @@ public class TrpgSceneLifecycleService {
                 execution.step().getSpeakerType())) {
             throw new UserAuthException("只有KP可以直接结束场景探索");
         }
-        progressStore.requestFinish(
-                conversationId, execution.plan().getId());
-        recoveryService.cancelPendingSteps(
-                execution.turn().getId(), "KP已结束当前场景探索");
+        boolean finishBefore = progressStore.isFinishRequested(conversationId, execution.plan().getId());
+        List<KpSceneFinishDTOs.StepUndo> cancelled = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getTurnId, execution.turn().getId())
+                        .eq(GroupChatReplyStep::getStatus, GroupChatConstant.STATUS_PENDING))
+                .stream().map(step -> new KpSceneFinishDTOs.StepUndo(
+                        step.getId(), step.getErrorMessage(), step.getUpdatedAt())).toList();
+        recoveryService.cancelPendingSteps(execution.turn().getId(), "KP已结束当前场景探索");
+        RedisAfterCommitCleanup.run("提交KP结束场景标记", () ->
+                progressStore.requestFinish(conversationId, execution.plan().getId()));
+        return new KpSceneFinishDTOs.FinishResult(
+                "当前场景已请求结算；结束子场景不会影响父场景。公开消息只能说明‘XXX决定离开了XX’，不得加入后续前往场景的任何内容。",
+                execution.plan().getId(), execution.turn().getId(), finishBefore, cancelled);
     }
 
     public boolean finalizeAfterTurn(
@@ -192,6 +223,7 @@ public class TrpgSceneLifecycleService {
         }
         summaryService.summarize(
                 conversation.getId(), sceneId, plan.getId());
+        if (suspensionService != null) suspensionService.completeReentriesForScene(conversation.getId(), plan.getId());
         if (plan.getParentPlanId() != null) {
             childScenePlanService.finishChildUnderLock(
                     conversation, plan);
@@ -232,7 +264,9 @@ public class TrpgSceneLifecycleService {
         if (!mainClosed) throw new UserRequestException("结束跑团的主场景不存在");
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public void finishRunSceneUnderLock(GroupConversation conversation) {
+        if (suspensionService != null) suspensionService.completeReentriesForRun(conversation.getId());
         replyPlanService.clearConversationPlans(conversation);
         temporaryInsanityService.advanceAfterLargeScene(conversation.getId());
     }

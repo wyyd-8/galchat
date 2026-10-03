@@ -45,7 +45,7 @@ class TrpgSceneSelectionServiceTest {
         var items = mock(GroupReplyPlanItemMapper.class);
         var service = new TrpgSceneSelectionService(conversations, locations,
                 mock(GroupConversationMapper.class), plans, items, store,
-                new TrpgParticipantService(conversations, characters), mock(TrpgSelectionRandomizer.class));
+                new TrpgParticipantService(conversations, characters), mock(TrpgSelectionRandomizer.class), mock(com.me.galchat.mapper.GroupChatReplyStepMapper.class));
         when(store.getSelections(7L)).thenReturn(java.util.Map.of("character:11", 21L));
         when(locations.selectList(any())).thenReturn(List.of(location(21L, "旅店")));
 
@@ -345,7 +345,7 @@ class TrpgSceneSelectionServiceTest {
                 mock(GroupReplyPlanItemMapper.class),
                 mock(TrpgSceneSelectionStore.class),
                 participantService,
-                mock(TrpgSelectionRandomizer.class));
+                mock(TrpgSelectionRandomizer.class), mock(com.me.galchat.mapper.GroupChatReplyStepMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setModuleId(3L)
@@ -395,7 +395,7 @@ class TrpgSceneSelectionServiceTest {
                 mock(GroupReplyPlanItemMapper.class),
                 mock(TrpgSceneSelectionStore.class),
                 participantService,
-                mock(TrpgSelectionRandomizer.class));
+                mock(TrpgSelectionRandomizer.class), mock(com.me.galchat.mapper.GroupChatReplyStepMapper.class));
         service.setSuspensionService(suspensionService);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setModuleId(3L)
@@ -431,7 +431,7 @@ class TrpgSceneSelectionServiceTest {
                 mock(GroupReplyPlanItemMapper.class),
                 store,
                 mock(TrpgParticipantService.class),
-                mock(TrpgSelectionRandomizer.class));
+                mock(TrpgSelectionRandomizer.class), mock(com.me.galchat.mapper.GroupChatReplyStepMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setModuleId(3L)
@@ -469,7 +469,7 @@ class TrpgSceneSelectionServiceTest {
                 conversationService, locationMapper, conversationMapper,
                 planMapper, itemMapper, store,
                 participantService,
-                mock(TrpgSelectionRandomizer.class));
+                mock(TrpgSelectionRandomizer.class), mock(com.me.galchat.mapper.GroupChatReplyStepMapper.class));
         GroupConversation conversation = new GroupConversation()
                 .setId(7L)
                 .setModuleId(3L)
@@ -563,7 +563,7 @@ class TrpgSceneSelectionServiceTest {
                 mock(GroupReplyPlanMapper.class),
                 mock(GroupReplyPlanItemMapper.class),
                 store, participantService,
-                mock(TrpgSelectionRandomizer.class));
+                mock(TrpgSelectionRandomizer.class), mock(com.me.galchat.mapper.GroupChatReplyStepMapper.class));
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
         when(locationMapper.selectList(any())).thenReturn(List.of(
@@ -629,7 +629,7 @@ class TrpgSceneSelectionServiceTest {
                 mock(GroupConversationMapper.class),
                 mock(GroupReplyPlanMapper.class),
                 mock(GroupReplyPlanItemMapper.class),
-                store, participantService, randomizer);
+                store, participantService, randomizer, mock(com.me.galchat.mapper.GroupChatReplyStepMapper.class));
 
         var result = service.selectOption(
                 7L, agent.actor(), "99");
@@ -660,7 +660,7 @@ class TrpgSceneSelectionServiceTest {
                 mock(GroupReplyPlanItemMapper.class),
                 store,
                 mock(TrpgParticipantService.class),
-                mock(TrpgSelectionRandomizer.class));
+                mock(TrpgSelectionRandomizer.class), mock(com.me.galchat.mapper.GroupChatReplyStepMapper.class));
     }
 
     private GroupConversation activeTrpgConversation() {

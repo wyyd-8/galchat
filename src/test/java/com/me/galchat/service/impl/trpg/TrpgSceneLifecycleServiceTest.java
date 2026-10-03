@@ -153,7 +153,7 @@ class TrpgSceneLifecycleServiceTest {
                         "character-card:108", "character-card:109"));
 
         assertThat(service.requestInvestigatorFinish(
-                7L, 41L, 9L)).isTrue();
+                7L, 41L, 9L).allReady()).isTrue();
 
         verify(progressStore).markReady(7L, 10L, 109L);
         verify(progressStore).requestFinish(7L, 10L);
@@ -210,7 +210,7 @@ class TrpgSceneLifecycleServiceTest {
                 .thenReturn(Set.of("character-card:109"));
 
         assertThat(service.requestInvestigatorFinish(
-                7L, 41L, 9L)).isTrue();
+                7L, 41L, 9L).allReady()).isTrue();
 
         verify(progressStore).requestFinish(7L, 10L);
     }

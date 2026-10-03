@@ -68,6 +68,10 @@ public class TrpgSceneProgressStore {
         redisTemplate.opsForValue().set(key, "1");
     }
 
+    public void clearFinish(Long conversationId, Long sceneId) {
+        redisTemplate.delete(finishKey(conversationId, sceneId));
+    }
+
     public boolean isFinishRequested(Long conversationId, Long sceneId) {
         return Boolean.TRUE.equals(redisTemplate.hasKey(
                 finishKey(conversationId, sceneId)));

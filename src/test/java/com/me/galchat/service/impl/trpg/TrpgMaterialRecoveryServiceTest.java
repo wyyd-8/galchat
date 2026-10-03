@@ -53,7 +53,7 @@ class TrpgMaterialRecoveryServiceTest {
                 mock(DiceRollMessageCodec.class), mock(ICharacterCardService.class), JsonMapper.builder().build(),
                 mock(GroupChatFavorRollbackService.class), mock(TrpgEquipmentService.class),
                 new TrpgMaterialRecoveryService(messages, new TrpgMaterialStateStore(redis), JsonMapper.builder().build()),
-                mock(TrpgInvestigatorSuspensionService.class));
+                mock(TrpgInvestigatorSuspensionService.class), mock(com.me.galchat.service.impl.trpg.TrpgSceneFinishRecoveryService.class), mock(com.me.galchat.service.impl.trpg.TrpgChildSceneCommandService.class), mock(com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService.class), mock(com.me.galchat.service.impl.trpg.TrpgSelectionRecoveryService.class));
         var tx = new TransactionTemplate(new AbstractPlatformTransactionManager() {
             @Override protected Object doGetTransaction() { return new Object(); }
             @Override protected void doBegin(Object t, TransactionDefinition d) { }

@@ -1,5 +1,8 @@
 package com.me.galchat.service.impl.group;
 
+import com.me.galchat.domain.dto.KpSceneFinishDTOs;
+import com.me.galchat.domain.dto.InvestigatorSceneFinishResult;
+import com.me.galchat.service.impl.trpg.TrpgSceneFinishRecoveryService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.DiceRollConstant;
@@ -60,6 +63,10 @@ public class GroupTurnCheckpointService {
     private final TrpgEquipmentService equipmentService;
     private final TrpgMaterialRecoveryService materialRecoveryService;
     private final TrpgInvestigatorSuspensionService suspensionService;
+    private final TrpgSceneFinishRecoveryService sceneFinishRecoveryService;
+    private final com.me.galchat.service.impl.trpg.TrpgChildSceneCommandService childSceneCommandService;
+    private final com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService toolStateRecoveryService;
+    private final com.me.galchat.service.impl.trpg.TrpgSelectionRecoveryService selectionRecoveryService;
     private com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -158,7 +165,7 @@ public class GroupTurnCheckpointService {
                     "骰点检查点缺少已提交的工具调用");
         }
         rollbackToolEffects(
-                turn.getConversationId(),
+                turn.getConversationId(), turn.getId(),
                 toolCallMapper.selectList(
                         new LambdaQueryWrapper<GroupChatToolCall>()
                                 .eq(GroupChatToolCall::getReplyStepId,
@@ -166,7 +173,8 @@ public class GroupTurnCheckpointService {
                                 .gt(GroupChatToolCall::getId,
                                         zero(checkpoint.getToolCallId()))
                                 .in(GroupChatToolCall::getToolName,
-                                        "adjustBasicAttributes", "purchaseEquipment", "suspendInvestigators")
+                                        "adjustBasicAttributes", "purchaseEquipment", "suspendInvestigators",
+                                        "resumeSuspendedInvestigators", "finishSceneExploration", "endSceneExploration", "resumeWaitingInvestigators", "updateQuickNotes", "updateWeaponState", "stashWeapon", "equipWeaponFromStash", "updateCombatStates", "publishExplorationScenes")
                                 .isNotNull(GroupChatToolCall::getToolResult)
                                 .orderByDesc(GroupChatToolCall::getId)));
         materialRecoveryService.restoreAfterCheckpoint(turn.getConversationId(),
@@ -287,12 +295,20 @@ public class GroupTurnCheckpointService {
     }
 
     private void rollbackToolEffects(
-            Long runId, List<GroupChatToolCall> calls) {
+            Long runId, Long turnId, List<GroupChatToolCall> calls) {
         if (calls == null || calls.isEmpty()) {
             return;
         }
         for (GroupChatToolCall call : calls) {
             String toolResult = call.getToolResult();
+            if ("publishExplorationScenes".equals(call.getToolName())) {
+                selectionRecoveryService.rollback(runId, turnId, toolResult);
+                continue;
+            }
+            if (com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService.TOOLS.contains(call.getToolName())) {
+                toolStateRecoveryService.rollback(runId, call.getToolName(), toolResult);
+                continue;
+            }
             if ("suspendInvestigators".equals(call.getToolName()) && toolResult != null) {
                 String trimmed = toolResult.stripLeading();
                 if (trimmed.startsWith("已悬置调查员") || trimmed.startsWith("\"已悬置调查员")) {
@@ -305,6 +321,36 @@ public class GroupTurnCheckpointService {
                     } catch (JacksonException exception) {
                         throw new IllegalStateException("悬置记录无法解析，已中止重试", exception);
                     }
+                }
+                continue;
+            }
+            if ("resumeSuspendedInvestigators".equals(call.getToolName())
+                    || "finishSceneExploration".equals(call.getToolName())
+                    || "endSceneExploration".equals(call.getToolName())
+                    || "resumeWaitingInvestigators".equals(call.getToolName())) {
+                String trimmed = toolResult == null ? "" : toolResult.stripLeading();
+                if (trimmed.startsWith("{")) {
+                    try {
+                        if ("resumeSuspendedInvestigators".equals(call.getToolName())) {
+                            suspensionService.rollbackResume(runId, objectMapper.readValue(toolResult,
+                                    KpInvestigatorSuspensionDTOs.ResumeResult.class));
+                        } else if ("resumeWaitingInvestigators".equals(call.getToolName())) {
+                            childSceneCommandService.rollbackWaitingResume(runId, objectMapper.readValue(toolResult,
+                                    com.me.galchat.domain.dto.KpWaitingInvestigatorDTOs.Result.class));
+                        } else if ("endSceneExploration".equals(call.getToolName())) {
+                            sceneFinishRecoveryService.rollbackInvestigatorFinish(runId, objectMapper.readValue(toolResult,
+                                    InvestigatorSceneFinishResult.class));
+                        } else {
+                            sceneFinishRecoveryService.rollbackKpFinish(runId, objectMapper.readValue(toolResult,
+                                    KpSceneFinishDTOs.FinishResult.class));
+                        }
+                    } catch (JacksonException exception) {
+                        throw new IllegalStateException("场景工具记录无法解析，已中止重试", exception);
+                    }
+                } else if (trimmed.contains("已并入当前场景") || trimmed.contains("排入后续主场景队列")
+                        || trimmed.contains("当前场景已请求结算") || trimmed.contains("你的结束探索意向已记录")
+                        || trimmed.contains("所有调查员均已结束探索") || trimmed.contains("已结束等待，将从下一轮开始正常参与行动")) {
+                    throw new IllegalStateException("场景工具记录缺少撤销数据，无法安全回滚");
                 }
                 continue;
             }

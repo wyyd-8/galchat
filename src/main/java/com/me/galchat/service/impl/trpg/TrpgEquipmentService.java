@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.KpEquipmentDTOs;
+import com.me.galchat.domain.dto.KpToolStateUndo;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterWeapon;
@@ -88,7 +89,8 @@ public class TrpgEquipmentService {
         }
         return new KpEquipmentDTOs.StashResult(
                 weapon.getId(), weapon.getName(), owner.getName(),
-                locationName, reason);
+                locationName, reason, new KpToolStateUndo(runId, List.of(),
+                        new KpToolStateUndo.WeaponChange(KpToolStateUndo.copy(weapon), null, null, stash)));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -119,7 +121,8 @@ public class TrpgEquipmentService {
             throw new UserRequestException("暂存武器状态已变化，请重试");
         }
         return new KpEquipmentDTOs.EquipResult(
-                weaponId, weaponName, target.getName());
+                weaponId, weaponName, target.getName(), new KpToolStateUndo(runId, List.of(),
+                        new KpToolStateUndo.WeaponChange(null, KpToolStateUndo.copy(weapon), stash, null)));
     }
 
     @Transactional(rollbackFor = Exception.class)

@@ -28,6 +28,40 @@ import static org.mockito.Mockito.when;
 
 class RecordingGroupToolCallingManagerTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void rejectsConflictingChildSceneBatchBeforeExecutingAnyTool(boolean sameDestination) {
+        ToolCallingManager delegate = mock(ToolCallingManager.class);
+        var manager = new RecordingGroupToolCallingManager(delegate, mock(GroupToolCallStore.class),
+                mock(TransactionTemplate.class));
+        var response = childBatch(sameDestination ? " 钟楼 " : "地下室", sameDestination ? "艾琳" : " 亨利 ");
+        assertThatThrownBy(() -> manager.executeToolCalls(prompt(Map.of()), response))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class);
+        verifyNoInteractions(delegate);
+    }
+
+    @Test
+    void permitsDisjointChildScenesInOneResponse() {
+        ToolCallingManager delegate = mock(ToolCallingManager.class);
+        var manager = new RecordingGroupToolCallingManager(delegate, mock(GroupToolCallStore.class),
+                mock(TransactionTemplate.class));
+        var response = childBatch("地下室", "艾琳");
+        var prompt = prompt(Map.of());
+        var result = mock(ToolExecutionResult.class);
+        when(delegate.executeToolCalls(prompt, response)).thenReturn(result);
+        assertThat(manager.executeToolCalls(prompt, response)).isSameAs(result);
+    }
+
+    private ChatResponse childBatch(String secondScene, String secondInvestigator) {
+        return new ChatResponse(List.of(new Generation(AssistantMessage.builder().content("")
+                .toolCalls(List.of(
+                        new AssistantMessage.ToolCall("first", "function", "startChildScene",
+                                "{\"childSceneName\":\"钟楼\",\"investigatorNames\":[\"亨利\"]}"),
+                        new AssistantMessage.ToolCall("second", "function", "startChildScene",
+                                "{\"childSceneName\":\"" + secondScene + "\",\"investigatorNames\":[\"" + secondInvestigator + "\"]}")))
+                .build())));
+    }
+
     @Test
     void exposesAuthenticatedUserOnlyWhileExecutingGroupTool() {
         ToolCallingManager delegate = mock(ToolCallingManager.class);
@@ -100,7 +134,7 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"requestCheck", "showMaterial", "purchaseEquipment", "suspendInvestigators"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"requestCheck", "showMaterial", "purchaseEquipment", "suspendInvestigators", "resumeSuspendedInvestigators", "finishSceneExploration", "endSceneExploration", "resumeWaitingInvestigators", "updateQuickNotes", "updateWeaponState", "stashWeapon", "equipWeaponFromStash", "updateCombatStates", "publishExplorationScenes"})
     void recoverableToolExecutionAndRecordingUseOneTransaction(String toolName) {
         ToolCallingManager delegate = mock(ToolCallingManager.class);
         GroupToolCallStore store = mock(GroupToolCallStore.class);
@@ -126,7 +160,7 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.CsvSource({"purchaseEquipment,false", "purchaseEquipment,true", "showMaterial,false", "showMaterial,true", "suspendInvestigators,false", "suspendInvestigators,true"})
+    @org.junit.jupiter.params.provider.CsvSource({"purchaseEquipment,false", "purchaseEquipment,true", "showMaterial,false", "showMaterial,true", "suspendInvestigators,false", "suspendInvestigators,true", "resumeSuspendedInvestigators,false", "resumeSuspendedInvestigators,true", "finishSceneExploration,false", "finishSceneExploration,true", "endSceneExploration,false", "endSceneExploration,true", "resumeWaitingInvestigators,false", "resumeWaitingInvestigators,true", "updateQuickNotes,false", "updateQuickNotes,true", "updateWeaponState,false", "updateWeaponState,true", "stashWeapon,false", "stashWeapon,true", "equipWeaponFromStash,false", "equipWeaponFromStash,true", "updateCombatStates,false", "updateCombatStates,true", "publishExplorationScenes,false", "publishExplorationScenes,true"})
     void toolEffectAndRecordShareCommitWithoutAdvancingCheckpoint(String toolName, boolean recordFails) {
         var mapper = mock(com.me.galchat.mapper.GroupChatToolCallMapper.class);
         var checkpoints = mock(GroupTurnCheckpointService.class);

@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -647,8 +648,10 @@ class TrpgTurnExecutionServiceTest {
                         .setStatus(GroupChatConstant.STATUS_BLOCKED);
         when(conversationService.requireAuthorized(7L))
                 .thenReturn(conversation);
-        when(conversationService.requireActive(7L))
-                .thenReturn(conversation);
+        var restoredConversation = new GroupConversation();
+        org.springframework.beans.BeanUtils.copyProperties(conversation, restoredConversation);
+        restoredConversation.setActiveReplyPlanId(null).setGameDayNo(2);
+        when(conversationService.requireActive(7L)).thenReturn(conversation, restoredConversation);
         when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
@@ -664,10 +667,10 @@ class TrpgTurnExecutionServiceTest {
             return null;
         }).when(checkpointService).restore(turn, failed);
         when(groupChatService.streamPersistedStep(
-                conversation, turn, failed))
+                any(GroupConversation.class), eq(turn), eq(failed)))
                 .thenReturn(Flux.empty());
         when(groupChatService.streamPersistedStep(
-                conversation, turn, blocked))
+                any(GroupConversation.class), eq(turn), eq(blocked)))
                 .thenReturn(Flux.empty());
 
         Flux<GroupChatEvent> source;
@@ -691,9 +694,9 @@ class TrpgTurnExecutionServiceTest {
         verify(directionStore, org.mockito.Mockito.atLeastOnce())
                 .clear(7L);
         verify(groupChatService).streamPersistedStep(
-                conversation, turn, failed);
+                restoredConversation, turn, failed);
         verify(groupChatService).streamPersistedStep(
-                conversation, turn, blocked);
+                restoredConversation, turn, blocked);
         verify(groupChatService, never()).streamPersistedStep(
                 conversation, turn, completed);
         assertThat(failed.getStatus())

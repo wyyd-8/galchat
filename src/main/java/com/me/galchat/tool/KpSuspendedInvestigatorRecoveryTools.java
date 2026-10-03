@@ -1,5 +1,6 @@
 package com.me.galchat.tool;
 
+import com.me.galchat.domain.dto.KpInvestigatorSuspensionDTOs;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService;
 import com.me.galchat.utils.TypeConvertUtils;
@@ -21,7 +22,7 @@ public class KpSuspendedInvestigatorRecoveryTools {
             当被停镜的调查员剧情现在适合重新主持时调用。恢复说明必须能够跨越历史压缩：结合工具保存的停镜前状态，用reentryContext明确写出停镜期间实际经历、当前状态以及重新入场的位置；没有发生其他事情时也要明确说明。不得补写未实际发生的个人行动。
             CURRENT_SCENE表示在本次回复中叙述其重新入场，并从下一轮加入当前场景；INDEPENDENT_SCENE表示为其排入独立恢复场景，必须提供sceneName。
             """)
-    public String resumeSuspendedInvestigators(
+    public KpInvestigatorSuspensionDTOs.ResumeResult resumeSuspendedInvestigators(
             @ToolParam(description = "要恢复剧情线的准确调查员名称列表")
             List<String> investigatorNames,
             @ToolParam(description = "CURRENT_SCENE或INDEPENDENT_SCENE")

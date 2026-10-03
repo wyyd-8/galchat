@@ -180,6 +180,7 @@ public class TrpgTurnExecutionService {
                 } else if (!GroupChatConstant.STATUS_RUNNING.equals(
                         turn.getStatus())) {
                     resumeTurn(turn);
+                    conversation = conversationService.requireActive(conversationId);
                 }
                 GroupChatTurn selected = turn;
                 Flux<GroupChatEvent> accepted = Flux.just(
@@ -278,6 +279,7 @@ public class TrpgTurnExecutionService {
                     restoreFailedStep(turn, failedStep);
                     return null;
                 });
+                conversation = conversationService.requireActive(conversationId);
                 clearTurnDirection(conversationId);
                 List<GroupChatReplyStep> remaining =
                         stepMapper.selectList(

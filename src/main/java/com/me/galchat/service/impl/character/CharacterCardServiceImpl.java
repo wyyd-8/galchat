@@ -7,6 +7,7 @@ import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.CharacterCardCreateDTO;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.domain.dto.KpWeaponStateDTOs;
+import com.me.galchat.domain.dto.KpToolStateUndo;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.CocCharacterProfile;
 import com.me.galchat.domain.po.CocCharacterSkill;
@@ -178,10 +179,12 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void updateQuickNotes(
+    public KpToolStateUndo.NotesResult updateQuickNotes(
             Long runId, String characterName, String quickNotes) {
         CocCharacter character =
                 requireCharacterByName(runId, characterName);
+        var before = KpToolStateUndo.CardState.of(character);
+        var updatedAt = java.time.LocalDateTime.now();
         String normalizedNotes = quickNotes == null
                 || quickNotes.isBlank() ? null : quickNotes.trim();
         int updated = characterMapper.update(null,
@@ -189,10 +192,14 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
                         .eq(CocCharacter::getId, character.getId())
                         .set(CocCharacter::getQuickNotes, normalizedNotes)
                         .set(CocCharacter::getUpdatedAt,
-                                java.time.LocalDateTime.now()));
+                                updatedAt));
         if (updated == 0) {
             throw new UserRequestException("人物卡不存在");
         }
+        var after = new KpToolStateUndo.CardState(character.getId(), normalizedNotes, before.inCover(),
+                before.coverActionForfeitPending(), before.restrainedByCharacterId(), updatedAt);
+        return new KpToolStateUndo.NotesResult("快速笔记已更新。", new KpToolStateUndo(runId,
+                List.of(new KpToolStateUndo.CardChange(before, after)), null));
     }
 
     @Override
@@ -231,6 +238,7 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
                         "剩余弹药必须在0到弹药容量之间");
             }
         }
+        var weaponBefore = KpToolStateUndo.copy(weapon);
         boolean brokenBefore = Boolean.TRUE.equals(
                 weapon.getIsBroken());
         Integer ammoAfter = update.remainingAmmo() == null
@@ -250,7 +258,8 @@ public class CharacterCardServiceImpl implements ICharacterCardService {
         return new KpWeaponStateDTOs.Result(
                 character.getName(), weapon.getName(),
                 ammoAfter, weapon.getAmmoCapacity(),
-                brokenAfter, changed);
+                brokenAfter, changed, new KpToolStateUndo(runId, List.of(),
+                        new KpToolStateUndo.WeaponChange(weaponBefore, KpToolStateUndo.copy(weapon), null, null)));
     }
 
     @Override

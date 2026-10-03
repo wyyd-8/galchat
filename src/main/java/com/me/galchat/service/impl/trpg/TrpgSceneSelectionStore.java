@@ -135,6 +135,25 @@ public class TrpgSceneSelectionStore {
         RedisAfterCommitCleanup.run(activeTurnKey(conversationId), () -> redisTemplate.delete(keys));
     }
 
+    public record Snapshot(Long turnId, Long activeTurnId, Map<String, LocationOption> options,
+                           Map<String, Long> selections) {}
+
+    public Snapshot snapshot(Long conversationId, Long turnId) {
+        return new Snapshot(turnId, currentTurnId(conversationId), getOptions(conversationId, turnId),
+                getSelections(conversationId, turnId));
+    }
+
+    public void restore(Long conversationId, Snapshot snapshot) {
+        String optionsKey = optionsKey(conversationId, snapshot.turnId());
+        String choicesKey = choicesKey(conversationId, snapshot.turnId());
+        redisTemplate.delete(java.util.List.of(optionsKey, choicesKey));
+        snapshot.options().forEach((number, option) -> redisTemplate.opsForHash().put(optionsKey, number,
+                option.locationId() + "\t" + option.name()));
+        snapshot.selections().forEach((actor, location) -> redisTemplate.opsForHash().put(choicesKey, actor, location.toString()));
+        if (snapshot.activeTurnId() == null) redisTemplate.delete(activeTurnKey(conversationId));
+        else redisTemplate.opsForValue().set(activeTurnKey(conversationId), snapshot.activeTurnId().toString());
+    }
+
     public Long currentTurnId(Long conversationId) {
         String value = redisTemplate.opsForValue().get(
                 activeTurnKey(conversationId));

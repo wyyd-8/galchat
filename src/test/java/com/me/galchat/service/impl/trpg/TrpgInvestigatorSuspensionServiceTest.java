@@ -60,11 +60,11 @@ class TrpgInvestigatorSuspensionServiceTest {
                 .setSuspensionContext("艾琳在林中被带走。")
                 .setOriginContextId(21L));
 
-        String result = fixture.service().resumeSuspendedInvestigators(
+        var result = fixture.service().resumeSuspendedInvestigators(
                 7L, 51L, List.of("艾琳"), "CURRENT_SCENE",
                 "艾琳在废弃小屋醒来并自行返回营地。", null);
 
-        assertThat(result).contains("艾琳").contains("下一轮");
+        assertThat(result.message()).contains("艾琳").contains("下一轮");
         assertThat(fixture.existingSuspensions().getFirst().getState())
                 .isEqualTo(TrpgInvestigatorSuspension.STATE_REENTRY_PENDING);
         assertThat(fixture.service().isUnavailable(7L, 109L, 31L))
@@ -97,11 +97,11 @@ class TrpgInvestigatorSuspensionServiceTest {
                     return 1;
                 });
 
-        String result = fixture.service().resumeSuspendedInvestigators(
+        var result = fixture.service().resumeSuspendedInvestigators(
                 7L, 51L, List.of("艾琳"), "INDEPENDENT_SCENE",
                 "艾琳在陌生地窖中醒来。", "陌生地窖");
 
-        assertThat(result).contains("陌生地窖").contains("排入");
+        assertThat(result.message()).contains("陌生地窖").contains("排入");
         assertThat(next.getNextPlanId()).isEqualTo(51L);
         TrpgInvestigatorSuspension suspension =
                 fixture.existingSuspensions().getFirst();
@@ -189,6 +189,7 @@ class TrpgInvestigatorSuspensionServiceTest {
         when(stepMapper.selectById(51L)).thenReturn(step);
         when(turnMapper.selectById(61L)).thenReturn(turn);
         when(planMapper.selectById(31L)).thenReturn(scene);
+        when(itemMapper.updateById(any(GroupReplyPlanItem.class))).thenReturn(1);
         when(itemMapper.selectList(any())).thenReturn(
                 List.of(henry, elaine));
         when(suspensionMapper.insert(any(TrpgInvestigatorSuspension.class))).thenAnswer(invocation -> {

@@ -36,7 +36,7 @@ class GroupChatCheckpointServiceTest {
             mock(ICharacterCardService.class), JsonMapper.builder().build(), favor,
             mock(com.me.galchat.service.impl.trpg.TrpgEquipmentService.class),
             mock(com.me.galchat.service.impl.trpg.TrpgMaterialRecoveryService.class),
-                        mock(com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService.class));
+                        mock(com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService.class), mock(com.me.galchat.service.impl.trpg.TrpgSceneFinishRecoveryService.class), mock(com.me.galchat.service.impl.trpg.TrpgChildSceneCommandService.class), mock(com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService.class), mock(com.me.galchat.service.impl.trpg.TrpgSelectionRecoveryService.class));
     final GroupConversation conversation = new GroupConversation().setId(7L).setUserWorldId(5L).setMode("chat");
     final GroupChatTurn turn = new GroupChatTurn().setId(101L).setConversationId(7L).setStatus("failed");
     final GroupChatReplyStep completed = step(102L, 1, "completed");

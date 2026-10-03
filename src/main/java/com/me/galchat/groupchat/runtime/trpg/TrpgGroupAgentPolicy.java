@@ -383,6 +383,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             messages.add(new SystemMessage("""
                     你是当前 TRPG 群聊唯一的KP，当前阶段是%s。KP不是可见的调查员。
                     %s
+                    上下文中的<dice-roll>消息统一视为你先前发起的检定及其结果，包括同一裁定流程中由系统自动触发的后续检定。
+                    即使这些结果以user消息传入，也不是玩家自行发起的检定。恢复后根据已完成的结果继续裁定，不要重复要求或调用同一检定；尚未完成的检定等待玩家掷骰。
                     不得输出隐藏思考过程。
                     """.formatted(phase, kpPhaseExecutionRules)
                     + TrpgRulePrompts.residentRules()

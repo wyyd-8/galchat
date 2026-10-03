@@ -151,6 +151,56 @@ class TrpgSaveSnapshotServiceTest {
     }
 
     @Test
+    void finishingRunWithUnplayedReentriesStillAllowsSavingForSummary() {
+        var conversation = conversation();
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(GroupConversation.class);
+        var plans = new java.util.ArrayList<>(List.of(
+                new GroupReplyPlan().setId(101L).setConversationId(51L).setSource("SCENE")
+                        .setExecutionKey("scene:101").setDisplayName("当前场景").setNextPlanId(102L),
+                new GroupReplyPlan().setId(102L).setConversationId(51L).setSource("SCENE")
+                        .setExecutionKey("scene:102").setDisplayName("归队场景")));
+        var rows = new java.util.ArrayList<>(List.of(
+                new TrpgInvestigatorSuspension().setId(201L).setConversationId(51L).setSubjectCharacterId(1L)
+                        .setState("REENTRY_PENDING").setRecoveryPlanId(101L).setOriginContextId(301L).setSuspensionContext("留院"),
+                new TrpgInvestigatorSuspension().setId(202L).setConversationId(51L).setSubjectCharacterId(2L)
+                        .setState("RECOVERY_QUEUED").setRecoveryPlanId(102L).setOriginContextId(301L).setSuspensionContext("失联"),
+                new TrpgInvestigatorSuspension().setId(203L).setConversationId(51L).setSubjectCharacterId(3L)
+                        .setState("SUSPENDED").setOriginContextId(301L).setSuspensionContext("静养")));
+        when(planMapper.selectList(any())).thenAnswer(i -> List.copyOf(plans));
+        when(planMapper.delete(any())).thenAnswer(i -> { int n=plans.size(); plans.clear(); return n; });
+        when(suspensionMapper.selectList(any())).thenAnswer(i -> List.copyOf(rows));
+        when(suspensionMapper.deleteById(anyLong())).thenAnswer(i ->
+                rows.removeIf(row -> row.getId().equals(i.getArgument(0))) ? 1 : 0);
+        when(characterMapper.selectList(any())).thenReturn(List.of(
+                new CocCharacter().setId(1L).setRunId(51L), new CocCharacter().setId(2L).setRunId(51L),
+                new CocCharacter().setId(3L).setRunId(51L)));
+        when(completionMapper.selectById(51L)).thenReturn(new com.me.galchat.domain.po.TrpgCompletion()
+                .setConversationId(51L).setTurnId(61L));
+        var conversations = org.mockito.Mockito.mock(com.me.galchat.service.impl.group.GroupConversationService.class);
+        var participants = org.mockito.Mockito.mock(TrpgParticipantService.class);
+        var progress = org.mockito.Mockito.mock(TrpgSceneProgressStore.class);
+        var recovery = org.mockito.Mockito.mock(com.me.galchat.service.impl.group.GroupTurnRecoveryService.class);
+        var suspension = new TrpgInvestigatorSuspensionService(conversations, participants, stepMapper, turnMapper,
+                planMapper, planItemMapper, conversationMapper, suspensionMapper, progress);
+        var replyPlans = new com.me.galchat.service.impl.group.GroupReplyPlanService(conversations, null,
+                conversationMapper, planMapper, planItemMapper, runtimeChildSceneMapper, recovery, null, participants);
+        var lifecycle = new TrpgSceneLifecycleService(conversations,stepMapper,turnMapper,planMapper,planItemMapper,
+                recovery,progress,org.mockito.Mockito.mock(TrpgSceneSummaryService.class),replyPlans,
+                org.mockito.Mockito.mock(TrpgChildScenePlanService.class),org.mockito.Mockito.mock(TrpgTemporaryInsanityService.class));
+        lifecycle.setSuspensionService(suspension);
+        assertThat(service.capture(conversation).getInvestigatorSuspensions()).hasSize(3);
+
+        lifecycle.finishRunSceneUnderLock(conversation);
+
+        var saved = service.capture(conversation);
+        assertThat(saved.getReplyPlans()).isEmpty();
+        assertThat(saved.getConversationState().getActiveReplyPlanId()).isNull();
+        assertThat(saved.getInvestigatorSuspensions()).extracting(TrpgInvestigatorSuspension::getState)
+                .containsExactly("SUSPENDED");
+        assertThat(saved.getCompletion().getConversationId()).isEqualTo(51L);
+    }
+
+    @Test
     void captureKeepsLastDiceEvenWhenItsTurnIsCompleted() {
         var conversation = conversation().setActiveReplyPlanId(null);
         when(restoreMapper.selectCursors(51L)).thenReturn(cursors());

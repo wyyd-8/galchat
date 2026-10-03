@@ -11,6 +11,11 @@ import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.domain.vo.TrpgGameTimeVO;
+import com.me.galchat.domain.dto.KpSceneSelectionUndo;
+import com.me.galchat.domain.dto.KpSceneFinishDTOs;
+import com.me.galchat.domain.po.GroupChatReplyStep;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronization;
 import com.me.galchat.mapper.CocModuleLocationMapper;
 import com.me.galchat.mapper.GroupConversationMapper;
 import com.me.galchat.mapper.GroupReplyPlanItemMapper;
@@ -41,6 +46,7 @@ public class TrpgSceneSelectionService {
     private final TrpgParticipantService participantService;
     private final TrpgSelectionRandomizer randomizer;
     private TrpgInvestigatorSuspensionService suspensionService;
+    private final com.me.galchat.mapper.GroupChatReplyStepMapper stepMapper;
 
     @Autowired(required = false)
     void setSuspensionService(
@@ -128,6 +134,8 @@ public class TrpgSceneSelectionService {
             String targetPeriod) {
         GroupConversation conversation =
                 requireSelectionConversation(conversationId);
+        var beforeTime = KpSceneSelectionUndo.TimeState.of(conversation);
+        var redisBefore = store.snapshot(conversationId, turnId);
         TimeChange timeChange = validateTimeChange(
                 conversation, replyStepId,
                 targetDay, targetPeriod);
@@ -167,7 +175,8 @@ public class TrpgSceneSelectionService {
                     java.util.Collections.unmodifiableMap(names),
                     existing.size() == 1,
                     false,
-                    TrpgGameTimeVO.from(conversation));
+                    TrpgGameTimeVO.from(conversation), new KpSceneSelectionUndo(conversationId, turnId,
+                            beforeTime, beforeTime, null, redisBefore, List.of()));
         }
         List<CocModuleLocation> locations = locationMapper.selectList(
                 new LambdaQueryWrapper<CocModuleLocation>()
@@ -185,6 +194,17 @@ public class TrpgSceneSelectionService {
         if (!byName.keySet().containsAll(normalized)) {
             throw new UserRequestException(
                     "KP提供的可选地点包含模组中不存在的名称");
+        }
+        List<KpSceneFinishDTOs.StepUndo> pendingSteps = stepMapper.selectList(
+                new LambdaQueryWrapper<GroupChatReplyStep>().eq(GroupChatReplyStep::getTurnId, turnId)
+                        .eq(GroupChatReplyStep::getStatus, GroupChatConstant.STATUS_PENDING))
+                .stream().map(step -> new KpSceneFinishDTOs.StepUndo(step.getId(), step.getErrorMessage(), step.getUpdatedAt())).toList();
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCompletion(int status) {
+                    if (status == STATUS_ROLLED_BACK) store.restore(conversationId, redisBefore);
+                }
+            });
         }
         boolean timeChanged = applyTimeChange(
                 conversation, replyStepId, timeChange);
@@ -216,7 +236,9 @@ public class TrpgSceneSelectionService {
                 java.util.Collections.unmodifiableMap(names),
                 autoAssigned,
                 timeChanged,
-                TrpgGameTimeVO.from(conversation));
+                TrpgGameTimeVO.from(conversation), new KpSceneSelectionUndo(conversationId, turnId,
+                        beforeTime, KpSceneSelectionUndo.TimeState.of(conversation), conversation.getActiveReplyPlanId(),
+                        redisBefore, autoAssigned ? pendingSteps : List.of()));
     }
 
     private TimeChange validateTimeChange(
@@ -509,7 +531,10 @@ public class TrpgSceneSelectionService {
             Map<String, String> options,
             boolean autoAssigned,
             boolean timeChanged,
-            TrpgGameTimeVO gameTime) {
+            TrpgGameTimeVO gameTime, KpSceneSelectionUndo undo) {
+        public SceneOptionsResult(Map<String, String> options, boolean autoAssigned, boolean timeChanged, TrpgGameTimeVO gameTime) {
+            this(options, autoAssigned, timeChanged, gameTime, null);
+        }
     }
 
     private record TimeChange(

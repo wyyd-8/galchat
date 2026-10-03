@@ -137,7 +137,7 @@ class GroupTurnCheckpointServiceTest {
                         JsonMapper.builder().build(), mock(GroupChatFavorRollbackService.class),
                         mock(com.me.galchat.service.impl.trpg.TrpgEquipmentService.class),
                         mock(com.me.galchat.service.impl.trpg.TrpgMaterialRecoveryService.class),
-                        mock(com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService.class));
+                        mock(com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService.class), mock(com.me.galchat.service.impl.trpg.TrpgSceneFinishRecoveryService.class), mock(com.me.galchat.service.impl.trpg.TrpgChildSceneCommandService.class), mock(com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService.class), mock(com.me.galchat.service.impl.trpg.TrpgSelectionRecoveryService.class));
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(101L)
                 .setConversationId(7L)
@@ -456,7 +456,7 @@ class GroupTurnCheckpointServiceTest {
                         JsonMapper.builder().build(), mock(GroupChatFavorRollbackService.class),
                         mock(com.me.galchat.service.impl.trpg.TrpgEquipmentService.class),
                         mock(com.me.galchat.service.impl.trpg.TrpgMaterialRecoveryService.class),
-                        mock(com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService.class));
+                        mock(com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService.class), mock(com.me.galchat.service.impl.trpg.TrpgSceneFinishRecoveryService.class), mock(com.me.galchat.service.impl.trpg.TrpgChildSceneCommandService.class), mock(com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService.class), mock(com.me.galchat.service.impl.trpg.TrpgSelectionRecoveryService.class));
         GroupChatTurn turn = new GroupChatTurn()
                 .setId(101L)
                 .setConversationId(7L)

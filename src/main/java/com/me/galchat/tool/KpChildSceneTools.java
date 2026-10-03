@@ -28,7 +28,7 @@ public class KpChildSceneTools {
                     当前回复中对这些调查员行为的描述只能出现“调查员甲、调查员乙前往某地”这类内容，不能涉及新场景具体内容。
                     当调查员分别前往不同场景时，针对每个不同场景分别调用一次；同一回复允许且推荐根据不同场景多次调用本工具。
                     """)
-    public String startChildScene(
+    public TrpgChildSceneCommandService.StartResult startChildScene(
             @ToolParam(description = "简洁、明确的动态子场景名称，不超过200个字符")
             String childSceneName,
             @ToolParam(description = "进入子场景的准确调查员名称列表，允许选择全部活动调查员")

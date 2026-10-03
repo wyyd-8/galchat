@@ -2,6 +2,7 @@ package com.me.galchat.tool;
 
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.InvestigatorSceneFinishResult;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.impl.trpg.TrpgSceneLifecycleService;
@@ -24,7 +25,7 @@ public class InvestigatorSceneTools {
                     当前调查员确认不再执行场景内行动并结束自己的探索。调用后仍需回复公开消息。
                     调查员处于子场景时，也可以调用此工具结束当前子场景的探索，不会影响父场景。
                     """)
-    public String endSceneExploration(ToolContext context) {
+    public InvestigatorSceneFinishResult endSceneExploration(ToolContext context) {
         Map<String, Object> values = requireContext(context);
         if (!GroupChatConstant.ACTOR_CHARACTER.equals(
                 TypeConvertUtils.asString(values.get(
@@ -41,11 +42,8 @@ public class InvestigatorSceneTools {
                 || actorId == null) {
             throw new UserRequestException("结束探索工具缺少群聊、回复步骤或调查员上下文");
         }
-        boolean allReady = lifecycleService.requestInvestigatorFinish(
+        return lifecycleService.requestInvestigatorFinish(
                 conversationId, replyStepId, actorId);
-        return allReady
-                ? "所有调查员均已结束探索，当前场景将进入结算。请用公开消息确认你的行动结束。"
-                : "你的结束探索意向已记录。请用公开消息说明你已完成当前场景的行动。";
     }
 
     private Map<String, Object> requireContext(ToolContext context) {

@@ -242,6 +242,32 @@ class CocDiceOrchestrationServiceTest {
                         "reason", "全自动射击进入后续弹组")));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {1, 6})
+    void singleShotRejectsMultipleBulletsBeforeDeductingAmmo(int remainingAmmo) {
+        when(cards.requireDiceCharacter(5L, "猎人")).thenReturn(
+                card(11L, 88L, "猎人", Map.of("射击:步枪/霰弹枪", 60)));
+        when(cards.requireDiceCharacter(5L, "目标")).thenReturn(
+                card(21L, 91L, "目标", Map.of()));
+        CocCharacterWeapon weapon = shotgun("1D6", remainingAmmo);
+        when(cards.requireWeaponForUpdate(5L, "猎人", "泵动霰弹枪"))
+                .thenReturn(weapon);
+        stubCreate(7L);
+
+        assertThatThrownBy(() -> service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "射击目标", "猎人", "泵动霰弹枪",
+                        FirearmFiringMode.SINGLE, true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "目标", 6, CocPercentileModifier.NORMAL)))))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessageContaining("单发模式每个目标的子弹数必须为1");
+
+        assertThat(weapon.getRemainingAmmo()).isEqualTo(remainingAmmo);
+        verify(cards, never()).updateWeapon(any());
+        verify(internal, never()).createDiceRoll(any(), any(), any());
+    }
+
     @Test
     void shotgunSelectsNearMediumAndFarDamageForEachTarget() {
         CocDiceCharacterVO attacker = card(
@@ -584,6 +610,79 @@ class CocDiceOrchestrationServiceTest {
                                     "code", "SMALL_TARGET",
                                     "reason", "目标“快速移动的小型目标”体型过小")));
         });
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "1D1+3,6,0,30,false,false,false",
+            "1D1+5,6,2,30,false,false,false",
+            "6,4,0,30,true,true,false",
+            "11,2,0,30,true,false,true",
+            "1D1+3,30,3,1,true,true,false"
+    })
+    void firearmInjuriesDependOnEachHitRatherThanCombinedDamage(
+            String formula, int bullets, int armor, int attackRoll,
+            boolean majorWound, boolean dying, boolean dead) {
+        when(cards.requireDiceCharacter(5L, "枪手"))
+                .thenReturn(card(11L, 88L, "枪手", Map.of("射击:冲锋枪", 60)));
+        when(cards.requireDiceCharacter(5L, "目标"))
+                .thenReturn(cardWithArmor(21L, 91L, "目标", Map.of(), armor));
+        CocCharacter target = damageCard(21L, "目标").setDying(false);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(target);
+        when(cards.requireWeaponForUpdate(5L, "枪手", "冲锋枪"))
+                .thenReturn(new CocCharacterWeapon().setId(81L).setCharacterId(11L)
+                        .setName("冲锋枪").setSkillName("射击:冲锋枪").setDamage(formula)
+                        .setRemainingAmmo(30).setCanImpale(true).setMalfunction("96"));
+        when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
+            List<DiceRollResult> rows = materialize(101L, 1, invocation.getArgument(2));
+            rows.forEach(row -> row.setResultData(new DiceRollResultVO("1D100", List.of(), attackRoll)));
+            return new DiceRollAggregate(new DiceRollSummary().setId(101L)
+                    .setConversationId(7L).setRoundCount(1).setStatus(DiceRollConstant.STATUS_COMPLETED), rows);
+        });
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any())).thenAnswer(invocation -> {
+            List<DiceRollResult> rows = materialize(101L, 2, invocation.getArgument(2));
+            rows.forEach(row -> row.setResultData(DiceUtils.roll(row.getResultData().getFormula())));
+            return rows;
+        });
+
+        service.requestFirearmAttack(7L, 5L, new KpFirearmRequestDTOs.Attack(
+                "扫射", "枪手", "冲锋枪", FirearmFiringMode.FULL_AUTO, true,
+                List.of(new KpFirearmRequestDTOs.Target("目标", bullets, CocPercentileModifier.NORMAL))));
+
+        assertThat(target.getHpCurrent()).isZero();
+        assertThat(target.getUnconscious()).isTrue();
+        assertThat(target.getMajorWound()).isEqualTo(majorWound);
+        assertThat(target.getDying()).isEqualTo(dying);
+        assertThat(target.getDead()).isEqualTo(dead);
+    }
+
+    @Test
+    void playerFirearmDamageKeepsEachHitSeparateAndRetryDoesNotReapplyDamage() {
+        var summary = new DiceRollSummary().setId(101L).setConversationId(7L)
+                .setRoundCount(2).setStatus(DiceRollConstant.STATUS_PENDING);
+        var pending = new DiceRollResult().setId(301L).setSummaryId(101L).setRoundNo(2)
+                .setDisplayOrder(1).setResultData(DiceUtils.prepare("(1D1+3)+(1D1+3)+(1D1+3)"))
+                .setResolutionData(com.me.galchat.domain.vo.DiceResolutionDataVO.pending(
+                        DiceRollConstant.TYPE_DAMAGE, 201L, Map.of(
+                                "firearm", true, "hitCount", 3, "runId", 5L,
+                                "cardId", 21L, "characterName", "目标", "conValue", 50)));
+        var target = damageCard(21L, "目标").setDying(false);
+        when(internal.requireResult(301L)).thenReturn(pending);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(pending));
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(target);
+
+        var first = service.rollPlayerResult(301L);
+        var retry = service.rollPlayerResult(301L);
+
+        assertThat(first.rolledResult().getResultData().getResult()).isEqualTo(12);
+        assertThat(retry.rolledResult().getResultData()).isEqualTo(first.rolledResult().getResultData());
+        assertThat(target.getHpCurrent()).isZero();
+        assertThat(target.getMajorWound()).isFalse();
+        assertThat(target.getDying()).isFalse();
+        assertThat(target.getDead()).isFalse();
+        assertThat(target.getUnconscious()).isTrue();
+        verify(cards, times(1)).updateDiceCharacter(target);
     }
 
     @Test

@@ -100,7 +100,7 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"requestCheck", "showMaterial", "purchaseEquipment"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"requestCheck", "showMaterial", "purchaseEquipment", "suspendInvestigators"})
     void recoverableToolExecutionAndRecordingUseOneTransaction(String toolName) {
         ToolCallingManager delegate = mock(ToolCallingManager.class);
         GroupToolCallStore store = mock(GroupToolCallStore.class);
@@ -126,7 +126,7 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.CsvSource({"purchaseEquipment,false", "purchaseEquipment,true", "showMaterial,false", "showMaterial,true"})
+    @org.junit.jupiter.params.provider.CsvSource({"purchaseEquipment,false", "purchaseEquipment,true", "showMaterial,false", "showMaterial,true", "suspendInvestigators,false", "suspendInvestigators,true"})
     void toolEffectAndRecordShareCommitWithoutAdvancingCheckpoint(String toolName, boolean recordFails) {
         var mapper = mock(com.me.galchat.mapper.GroupChatToolCallMapper.class);
         var checkpoints = mock(GroupTurnCheckpointService.class);

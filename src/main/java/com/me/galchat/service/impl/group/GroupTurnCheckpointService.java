@@ -14,6 +14,8 @@ import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.exception.GroupCheckpointUnavailableException;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
 import com.me.galchat.domain.dto.KpEquipmentDTOs;
+import com.me.galchat.domain.dto.KpInvestigatorSuspensionDTOs;
+import com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService;
 import com.me.galchat.service.impl.trpg.TrpgEquipmentService;
 import com.me.galchat.service.impl.trpg.TrpgMaterialRecoveryService;
 import com.me.galchat.domain.vo.KpDiceToolResult;
@@ -57,6 +59,7 @@ public class GroupTurnCheckpointService {
     private final GroupChatFavorRollbackService chatFavorRollbackService;
     private final TrpgEquipmentService equipmentService;
     private final TrpgMaterialRecoveryService materialRecoveryService;
+    private final TrpgInvestigatorSuspensionService suspensionService;
     private com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -163,7 +166,7 @@ public class GroupTurnCheckpointService {
                                 .gt(GroupChatToolCall::getId,
                                         zero(checkpoint.getToolCallId()))
                                 .in(GroupChatToolCall::getToolName,
-                                        "adjustBasicAttributes", "purchaseEquipment")
+                                        "adjustBasicAttributes", "purchaseEquipment", "suspendInvestigators")
                                 .isNotNull(GroupChatToolCall::getToolResult)
                                 .orderByDesc(GroupChatToolCall::getId)));
         materialRecoveryService.restoreAfterCheckpoint(turn.getConversationId(),
@@ -290,6 +293,21 @@ public class GroupTurnCheckpointService {
         }
         for (GroupChatToolCall call : calls) {
             String toolResult = call.getToolResult();
+            if ("suspendInvestigators".equals(call.getToolName()) && toolResult != null) {
+                String trimmed = toolResult.stripLeading();
+                if (trimmed.startsWith("已悬置调查员") || trimmed.startsWith("\"已悬置调查员")) {
+                    throw new IllegalStateException("悬置记录缺少撤销数据，无法回滚");
+                }
+                if (trimmed.startsWith("{")) {
+                    try {
+                        suspensionService.rollbackSuspension(runId,
+                                objectMapper.readValue(toolResult, KpInvestigatorSuspensionDTOs.SuspendResult.class));
+                    } catch (JacksonException exception) {
+                        throw new IllegalStateException("悬置记录无法解析，已中止重试", exception);
+                    }
+                }
+                continue;
+            }
             // Successful tool effects are JSON objects; tool failures are text.
             if (toolResult == null
                     || !toolResult.stripLeading().startsWith("{")) {

@@ -13,6 +13,42 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DiceUtilsTest {
 
     @Test
+    void acceptsGeneratedFormulasUpTo4096CharactersButRejectsLongerInput() {
+        String barrage = String.join("+", java.util.Collections.nCopies(180, "max(0,(1D1+3)-2)"));
+        assertEquals(360, DiceUtils.roll(barrage).getResult());
+        assertNull(DiceUtils.prepare(barrage).getResult());
+        String boundary = "1" + " ".repeat(4095);
+        assertEquals(1, DiceUtils.roll(boundary).getResult());
+        assertNull(DiceUtils.prepare(boundary).getResult());
+        assertThrows(IllegalArgumentException.class, () -> DiceUtils.prepare(boundary + " "));
+        assertThrows(IllegalArgumentException.class, () -> DiceUtils.roll(boundary + " "));
+    }
+
+    @Test
+    void replaysIndependentHitDamageFromSavedDiceIncludingArmorAndImpaling() {
+        var rolled = DiceUtils.roll("max(0,(1D6+2)-3)+max(0,(8+1D6+2)-3)",
+                new SequenceRandom(0, 5));
+        assertEquals(java.util.List.of(0, 13), DiceUtils.additiveResults(rolled));
+        assertEquals(13, rolled.getResult());
+        assertEquals(java.util.List.of(0, 13), DiceUtils.additiveResults(rolled));
+        assertEquals(java.util.List.of(4, 4, 4), DiceUtils.additiveResults(DiceUtils.roll("(4)+(4)+(4)")));
+        assertEquals(java.util.List.of(12, -2), DiceUtils.additiveResults(DiceUtils.roll("(4+2)*2-2")));
+    }
+
+    @Test
+    void rejectsIncompleteOrInconsistentSavedDiceInsteadOfRerolling() {
+        var rolled = DiceUtils.roll("(1D6)+(1D6)", new SequenceRandom(0, 5));
+        assertThrows(IllegalArgumentException.class, () -> DiceUtils.additiveResults(
+                new DiceRollResultVO(rolled.getFormula(), java.util.List.of(), 7)));
+        assertThrows(IllegalArgumentException.class, () -> DiceUtils.additiveResults(
+                new DiceRollResultVO(rolled.getFormula(), rolled.getModules(), 8)));
+        assertThrows(IllegalArgumentException.class, () -> DiceUtils.additiveResults(
+                new DiceRollResultVO("(1D6)", rolled.getModules(), 1)));
+        assertThrows(IllegalArgumentException.class, () -> DiceUtils.additiveResults(
+                new DiceRollResultVO("(1D8)+(1D6)", rolled.getModules(), 7)));
+    }
+
+    @Test
     void preparesEveryPhysicalDieWithoutGeneratingResults() {
         DiceRollResultVO result = DiceUtils.prepare("2D6 + 1D100##");
 

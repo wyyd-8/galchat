@@ -7,6 +7,7 @@ import com.me.galchat.constant.CocCheckOutcome;
 import com.me.galchat.constant.CocPercentileModifier;
 import com.me.galchat.constant.CocWeaponCatalogConstant;
 import com.me.galchat.constant.DiceRollConstant;
+import com.me.galchat.constant.FirearmFiringMode;
 import com.me.galchat.constant.HealingSourceMode;
 import com.me.galchat.constant.HealingMode;
 import com.me.galchat.constant.MeleeDefenseMode;
@@ -148,6 +149,10 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
                     target.targetCharacterName())
                     || target.bulletCount() < 1) {
                 throw new UserRequestException("射击目标和子弹数无效");
+            }
+            if (request.firingMode() == FirearmFiringMode.SINGLE
+                    && target.bulletCount() != 1) {
+                throw new UserRequestException("单发模式每个目标的子弹数必须为1");
             }
             String targetName = target.targetCharacterName().trim();
             if (!targetNames.add(targetName)) {
@@ -1287,12 +1292,20 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         }
         CocDiceRules.DamageResolution damage = CocDiceRules.resolveDamage(
                 rawDamage, card.getHpCurrent(), card.getHpMax());
+        // Firearm results aggregate HP loss for display, but each bullet is a separate injury.
+        int largestHit = rawDamage;
+        if (Boolean.TRUE.equals(rule.get("firearm")) && intValue(rule, "hitCount") > 1) {
+            largestHit = DiceUtils.additiveResults(result.getResultData()).stream()
+                    .mapToInt(Integer::intValue).max().orElseThrow();
+        }
+        boolean majorHit = CocDiceRules.resolveDamage(
+                largestHit, card.getHpCurrent(), card.getHpMax()).majorWound();
         boolean majorBefore = Boolean.TRUE.equals(card.getMajorWound());
         boolean unconsciousBefore = Boolean.TRUE.equals(card.getUnconscious());
         boolean dyingBefore = Boolean.TRUE.equals(card.getDying());
         boolean deadBefore = Boolean.TRUE.equals(card.getDead());
-        boolean majorAfter = majorBefore || damage.majorWound();
-        boolean deadAfter = deadBefore || rawDamage > card.getHpMax();
+        boolean majorAfter = majorBefore || majorHit;
+        boolean deadAfter = deadBefore || largestHit > card.getHpMax();
         boolean dyingAfter = !deadAfter && (dyingBefore
                 || damage.hpAfter() == 0 && majorAfter);
         boolean unconsciousAfter = unconsciousBefore

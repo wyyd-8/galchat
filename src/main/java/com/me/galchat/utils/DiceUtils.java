@@ -11,7 +11,7 @@ import java.util.random.RandomGenerator;
 
 public final class DiceUtils {
 
-    private static final int MAX_FORMULA_LENGTH = 500;
+    private static final int MAX_FORMULA_LENGTH = 4096;
     private static final int MAX_DICE_COUNT = 1_000;
     private static final int MAX_DIE_SIDES = 1_000_000;
 
@@ -42,6 +42,23 @@ public final class DiceUtils {
         return new DiceRollResultVO(formula, parser.modules(), result);
     }
 
+    /** Re-evaluates top-level additive terms using saved module results, never new dice. */
+    public static List<Integer> additiveResults(DiceRollResultVO rolled) {
+        if (rolled == null || rolled.getResult() == null || rolled.getModules() == null) {
+            throw new IllegalArgumentException("缺少已结算骰点");
+        }
+        validateFormula(rolled.getFormula());
+        var saved = rolled.getModules().iterator();
+        Parser parser = new Parser(rolled.getFormula(), null, true);
+        parser.savedModules = saved;
+        List<Integer> terms = parser.parseAddends();
+        long total = terms.stream().mapToLong(Integer::longValue).sum();
+        if (saved.hasNext() || total != rolled.getResult()) {
+            throw new IllegalArgumentException("骰点明细与总结果不一致");
+        }
+        return List.copyOf(terms);
+    }
+
     private static void validateFormula(String formula) {
         if (formula == null || formula.isBlank()) {
             throw new IllegalArgumentException("骰子公式不能为空");
@@ -56,6 +73,7 @@ public final class DiceUtils {
         private final RandomGenerator random;
         private final boolean generateResults;
         private final List<DiceRollModuleVO> modules = new ArrayList<>();
+        private java.util.Iterator<DiceRollModuleVO> savedModules;
         private int position;
 
         private Parser(String input, RandomGenerator random, boolean generateResults) {
@@ -75,6 +93,23 @@ public final class DiceUtils {
 
         private List<DiceRollModuleVO> modules() {
             return modules;
+        }
+
+        private List<Integer> parseAddends() {
+            List<Integer> terms = new ArrayList<>();
+            terms.add(Math.toIntExact(parseMultiplication()));
+            while (true) {
+                if (match("+")) {
+                    terms.add(Math.toIntExact(parseMultiplication()));
+                } else if (match("-")) {
+                    terms.add(Math.toIntExact(Math.negateExact(parseMultiplication())));
+                } else {
+                    if (position != input.length()) {
+                        throw error("无法识别的内容");
+                    }
+                    return terms;
+                }
+            }
         }
 
         private long parseAddition() {
@@ -164,6 +199,21 @@ public final class DiceUtils {
 
             if (!generateResults) {
                 return prepareDice(start, countValue, sidesValue, modifier);
+            }
+
+            if (savedModules != null) {
+                if (!savedModules.hasNext()) {
+                    throw error("缺少骰点明细");
+                }
+                DiceRollModuleVO saved = savedModules.next();
+                String expression = input.substring(start, position).replaceAll("\\s+", "");
+                if (saved == null || saved.getResult() == null
+                        || !expression.equalsIgnoreCase(saved.getExpression())
+                        || saved.getDiceCount() != countValue || saved.getDiceSides() != sidesValue
+                        || !modifierName(modifier).equals(saved.getModifier())) {
+                    throw error("骰点明细与公式不一致");
+                }
+                return saved.getResult();
             }
 
             List<DiceRollValueVO> dice = new ArrayList<>();

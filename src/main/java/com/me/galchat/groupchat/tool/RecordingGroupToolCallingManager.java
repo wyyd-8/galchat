@@ -91,6 +91,7 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
         }
         if (diceToolCount == 1 || clarification
                 || toolNames.contains("purchaseEquipment")
+                || toolNames.contains("suspendInvestigators")
                 || toolNames.contains("showMaterial")) {
             return transactionTemplate.execute(status ->
                     executeAndRecord(prompt, response, replyStepId));

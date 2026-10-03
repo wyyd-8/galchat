@@ -30,11 +30,11 @@ class TrpgInvestigatorSuspensionServiceTest {
     void suspendsAStorylineWithoutChangingSceneParticipantStatus() {
         Fixture fixture = fixture();
 
-        String result = fixture.service().suspendInvestigators(
+        var result = fixture.service().suspendInvestigators(
                 7L, 51L, List.of("艾琳"),
                 "艾琳被林中的陌生人带走，镜头停在她失去意识时。");
 
-        assertThat(result).contains("艾琳").contains("切换镜头");
+        assertThat(result.message()).contains("艾琳").contains("切换镜头");
         assertThat(fixture.elaineItem().getParticipantStatus())
                 .isEqualTo(GroupChatConstant.PARTICIPANT_ACTIVE);
         verify(fixture.suspensionMapper()).insert(any(
@@ -191,6 +191,10 @@ class TrpgInvestigatorSuspensionServiceTest {
         when(planMapper.selectById(31L)).thenReturn(scene);
         when(itemMapper.selectList(any())).thenReturn(
                 List.of(henry, elaine));
+        when(suspensionMapper.insert(any(TrpgInvestigatorSuspension.class))).thenAnswer(invocation -> {
+            invocation.<TrpgInvestigatorSuspension>getArgument(0).setId(81L);
+            return 1;
+        });
         when(suspensionMapper.selectList(any())).thenAnswer(
                 ignored -> suspensions);
         when(suspensionMapper.selectOne(any())).thenAnswer(ignored ->

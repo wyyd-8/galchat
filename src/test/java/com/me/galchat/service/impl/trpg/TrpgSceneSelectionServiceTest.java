@@ -26,6 +26,42 @@ import static org.mockito.Mockito.times;
 class TrpgSceneSelectionServiceTest {
 
     @Test
+    void deadInvestigatorsCannotChooseAndDoNotBlockLivingInvestigatorsScene() {
+        var conversations = mock(GroupConversationService.class);
+        var characters = mock(com.me.galchat.mapper.CocCharacterMapper.class);
+        var conversation = activeTrpgConversation().setUserWorldId(1L);
+        when(conversations.requireActive(7L)).thenReturn(conversation);
+        when(conversations.listMembers(7L)).thenReturn(List.of(member(11L, true), member(12L, true)));
+        when(characters.selectList(any())).thenReturn(List.of(
+                new com.me.galchat.domain.po.CocCharacter().setId(101L).setActorType("PLAYER")
+                        .setName("死亡玩家").setLuckCurrent(50).setDead(true),
+                new com.me.galchat.domain.po.CocCharacter().setId(102L).setActorType("BOT")
+                        .setParticipantId(11L).setName("生还者").setLuckCurrent(50),
+                new com.me.galchat.domain.po.CocCharacter().setId(103L).setActorType("BOT")
+                        .setParticipantId(12L).setName("死亡同伴").setLuckCurrent(50).setDead(true)));
+        var store = mock(TrpgSceneSelectionStore.class);
+        var locations = mock(CocModuleLocationMapper.class);
+        var plans = mock(GroupReplyPlanMapper.class);
+        var items = mock(GroupReplyPlanItemMapper.class);
+        var service = new TrpgSceneSelectionService(conversations, locations,
+                mock(GroupConversationMapper.class), plans, items, store,
+                new TrpgParticipantService(conversations, characters), mock(TrpgSelectionRandomizer.class));
+        when(store.getSelections(7L)).thenReturn(java.util.Map.of("character:11", 21L));
+        when(locations.selectList(any())).thenReturn(List.of(location(21L, "旅店")));
+
+        assertThat(service.selectionActions(conversation)).extracting(GroupActionSpec::subjectCharacterId)
+                .containsExactly(null, 102L);
+        assertThatThrownBy(() -> service.selectOption(7L, 1L,
+                new com.me.galchat.groupchat.runtime.GroupActorRef("user", 101L), "1"))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class);
+        assertThat(service.finalizeSelections(conversation)).isTrue();
+        var captured = org.mockito.ArgumentCaptor.forClass(GroupReplyPlanItem.class);
+        verify(items, times(2)).insert(captured.capture());
+        assertThat(captured.getAllValues()).extracting(GroupReplyPlanItem::getSubjectCharacterId)
+                .containsExactly(102L, null);
+    }
+
+    @Test
     void firstSelectionRequiresKpToInitializeGameTime() {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);

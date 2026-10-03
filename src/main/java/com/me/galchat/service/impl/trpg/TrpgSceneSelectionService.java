@@ -440,6 +440,7 @@ public class TrpgSceneSelectionService {
     private List<TrpgParticipantService.Participant> activeInvestigators(
             GroupConversation conversation) {
         return participantService.listInvestigators(conversation).stream()
+                .filter(participant -> !participant.dead())
                 .filter(participant -> suspensionService == null
                         || !suspensionService.isUnavailable(
                                 conversation.getId(),

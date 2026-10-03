@@ -3,6 +3,8 @@ package com.me.galchat.service.impl.trpg;
 import com.me.galchat.service.impl.group.GroupConversationService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.KpInvestigatorSuspensionDTOs;
+import com.me.galchat.utils.RedisAfterCommitCleanup;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
@@ -49,7 +51,7 @@ public class TrpgInvestigatorSuspensionService {
     private final TrpgSceneProgressStore progressStore;
 
     @Transactional(rollbackFor = Exception.class)
-    public String suspendInvestigators(
+    public KpInvestigatorSuspensionDTOs.SuspendResult suspendInvestigators(
             Long conversationId,
             Long replyStepId,
             List<String> investigatorNames,
@@ -80,22 +82,70 @@ public class TrpgInvestigatorSuspensionService {
             throw new UserRequestException(
                     "切换镜头后至少保留一名未悬置调查员");
         }
+        Set<Long> readyBefore = progressStore.readyCharacterIds(
+                conversationId, execution.scene().getId());
+        List<KpInvestigatorSuspensionDTOs.SuspensionUndo> undo = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         for (TrpgParticipantService.Participant participant : selected) {
-            suspensionMapper.insert(new TrpgInvestigatorSuspension()
+            TrpgInvestigatorSuspension suspension = new TrpgInvestigatorSuspension()
                     .setConversationId(conversationId)
                     .setSubjectCharacterId(participant.cardId())
                     .setState(TrpgInvestigatorSuspension.STATE_SUSPENDED)
                     .setSuspensionContext(context)
                     .setOriginContextId(execution.scene().getContextId())
-                    .setCreatedAt(now).setUpdatedAt(now));
+                    .setCreatedAt(now).setUpdatedAt(now);
+            if (suspensionMapper.insert(suspension) != 1 || suspension.getId() == null) {
+                throw new IllegalStateException("调查员悬置状态保存失败");
+            }
+            undo.add(new KpInvestigatorSuspensionDTOs.SuspensionUndo(
+                    suspension.getId(), participant.cardId(), readyBefore.contains(participant.cardId())));
             progressStore.clearReady(conversationId,
                     execution.scene().getId(), participant.cardId());
         }
-        return "已悬置调查员"
+        String message = "已悬置调查员"
                 + String.join("、", names(selected))
                 + "的剧情线。请在本次公开回复中自然交代停镜位置，"
                 + "然后切换镜头至其他调查员。";
+        return new KpInvestigatorSuspensionDTOs.SuspendResult(
+                message, execution.scene().getId(), List.copyOf(undo));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void rollbackSuspension(Long conversationId,
+            KpInvestigatorSuspensionDTOs.SuspendResult result) {
+        if (result == null || result.scenePlanId() == null
+                || result.undo() == null || result.undo().isEmpty()) {
+            throw new IllegalStateException("悬置记录缺少撤销数据，无法回滚");
+        }
+        GroupReplyPlan scene = planMapper.selectById(result.scenePlanId());
+        if (scene == null || !Objects.equals(conversationId, scene.getConversationId())) {
+            throw new IllegalStateException("悬置记录的场景已变化，无法回滚");
+        }
+        for (var undo : result.undo()) {
+            if (undo == null || undo.suspensionId() == null || undo.characterId() == null) {
+                throw new IllegalStateException("悬置记录缺少撤销数据，无法回滚");
+            }
+            TrpgInvestigatorSuspension current = suspensionMapper.selectById(undo.suspensionId());
+            if (current == null || !Objects.equals(conversationId, current.getConversationId())
+                    || !Objects.equals(undo.characterId(), current.getSubjectCharacterId())
+                    || !TrpgInvestigatorSuspension.STATE_SUSPENDED.equals(current.getState())) {
+                throw new IllegalStateException("调查员悬置状态已发生后续变化，无法安全回滚");
+            }
+        }
+        for (var undo : result.undo()) {
+            int deleted = suspensionMapper.delete(new LambdaQueryWrapper<TrpgInvestigatorSuspension>()
+                    .eq(TrpgInvestigatorSuspension::getId, undo.suspensionId())
+                    .eq(TrpgInvestigatorSuspension::getConversationId, conversationId)
+                    .eq(TrpgInvestigatorSuspension::getSubjectCharacterId, undo.characterId())
+                    .eq(TrpgInvestigatorSuspension::getState, TrpgInvestigatorSuspension.STATE_SUSPENDED));
+            if (deleted != 1) {
+                throw new IllegalStateException("调查员悬置状态回滚失败");
+            }
+            if (undo.readyBefore()) {
+                RedisAfterCommitCleanup.run("恢复调查员结束探索标记", () ->
+                        progressStore.markReady(conversationId, result.scenePlanId(), undo.characterId()));
+            }
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)

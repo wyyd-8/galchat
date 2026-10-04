@@ -1298,6 +1298,32 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
+    void candidateChecksIgnoreZeroValues() {
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(
+                card(11L, null, "林恩", Map.of("克苏鲁神话", 0, "神秘学", 50)));
+        stubCreate(7L);
+        service.requestCheck(7L, 5L, new KpDiceRequestDTOs.Check("辨认符号",
+                CocCheckDifficulty.REGULAR, new KpDiceRequestDTOs.CheckTarget(
+                "林恩", List.of("克苏鲁神话", "神秘学"), CocPercentileModifier.NORMAL)));
+        assertThat(createdDrafts()).singleElement().satisfies(draft ->
+                assertThat(draft.getResolutionData().getRule())
+                        .containsEntry("checkName", "神秘学").containsEntry("targetValue", 50));
+    }
+
+    @Test
+    void candidateChecksRejectOnlyZeroValuesWithoutCreatingDice() {
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(
+                card(11L, null, "林恩", Map.of("克苏鲁神话", 0, "神秘学", 0)));
+        for (List<String> names : List.of(List.of("克苏鲁神话"), List.of("克苏鲁神话", "神秘学"))) {
+            assertThatThrownBy(() -> service.requestCheck(7L, 5L, new KpDiceRequestDTOs.Check(
+                    "辨认符号", CocCheckDifficulty.REGULAR, new KpDiceRequestDTOs.CheckTarget(
+                    "林恩", names, CocPercentileModifier.NORMAL))))
+                    .isInstanceOf(com.me.galchat.exception.UserRequestException.class);
+        }
+        verify(internal, never()).createDiceRoll(any(), any(), any());
+    }
+
+    @Test
     void groupCheckUsesEachCharactersHighestCandidateCheckValue() {
         when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(
                 card(11L, null, "林恩", Map.of("追踪", 40, "侦查", 70)));

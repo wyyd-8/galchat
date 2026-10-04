@@ -1,6 +1,6 @@
 import { computed, nextTick, onUnmounted, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import { api, streamChat, resumeChat, currentSession } from '@/api/client'
-import type { Character, ChatFlux, ChatHistory, ChatMessagePayload, DirectMessage, GenerationErrorDetail, ModelApi, UserWorld } from '@/api/types'
+import type { Character, ChatFlux, ChatHistory, ChatMessagePayload, DirectMessage, GenerationErrorDetail, ModelApi, SingleChatRuntime, UserWorld } from '@/api/types'
 import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/components/reasoningScroll'
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
 import { useScopedChatDraft } from '@/components/chatInputState'
@@ -11,7 +11,9 @@ import { createCarePolling } from './carePolling'
 interface DirectChatContext {
   world: ComputedRef<UserWorld | null>
   characters: Ref<Character[]>
+  settingsSaving?: Ref<boolean>
   reloadCharacters: () => Promise<void>
+  saveCharacterModel: (worldId: number, characterId: number, modelApiId: number | undefined, valid: () => boolean) => Promise<SingleChatRuntime | undefined>
 }
 
 function formatTime(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '' }
@@ -25,6 +27,10 @@ function insertCareMessage(messages: DirectMessage[], message: DirectMessage) {
 function hasOlderHistory(history: ChatHistory[]) {
   return history.filter(item => item.type == null || item.type.toLowerCase() === 'user'
     || (item.type.toLowerCase() === 'assistant' && item.userMessageId == null)).length === 30
+}
+function historyConfirmsWithdrawal(history: ChatHistory[], messageId: number) {
+  return !history.some(message => message.id === messageId)
+    && (!hasOlderHistory(history) || history.some(message => message.id != null && message.id < messageId))
 }
 
 export function useDirectChat(context: DirectChatContext) {
@@ -41,7 +47,7 @@ export function useDirectChat(context: DirectChatContext) {
     retryErrorIds: string[]
   }
   function freshState(world?: UserWorld, characterId = 0) {
-    return reactive({ world, characterId, messages: [] as DirectMessage[], modelApis: [] as ModelApi[],
+    return reactive({ world, characterId, invalidated: false, messages: [] as DirectMessage[], modelApis: [] as ModelApi[],
       loading: { history: false, sending: false, withdrawing: false, model: false },
       hasOlder: false, historyReady: false, generation: null as Generation | null,
       failure: null as Failure | null, failureOpen: false,
@@ -82,7 +88,7 @@ export function useDirectChat(context: DirectChatContext) {
   }
   function isActive(state: State) { return active.value === state && context.world.value?.id === state.world?.id && selectedCharacterId.value === state.characterId }
   function notifyFor(state: State, title: string, detail: string) { if (isActive(state)) notify(title, detail, 'danger') }
-  const selectedCharacter = computed(() => context.characters.value.find((item) => item.characterId === selectedCharacterId.value) || null)
+  const selectedCharacter = computed(() => context.characters.value.find((item) => item.characterId === selectedCharacterId.value && item.userWorldId === context.world.value?.id) || null)
   const withdrawalTarget = computed(() => [...messages.value].reverse().find(item => item.historyId != null
     && item.complete !== false && (item.role === 'user'
       || (item.role === 'assistant' && item.userMessageId == null))))
@@ -93,7 +99,7 @@ export function useDirectChat(context: DirectChatContext) {
   const canRetryGenerationFailure = computed(() => {
     const state = active.value; const failure = state.failure
     return Boolean(isActive(state) && failure?.retry && state.historyReady && !state.generation
-      && !loading.history && !loading.sending && !loading.withdrawing && !loading.model
+      && !loading.history && !loading.sending && !loading.withdrawing && !loading.model && !context.settingsSaving?.value
       && (failure.retry === 'send' || (canWithdraw.value && failure.userMessageId === withdrawalTarget.value?.historyId)))
   })
 
@@ -223,9 +229,7 @@ export function useDirectChat(context: DirectChatContext) {
       const present = history.some(message => roleOf(message) === 'user' && message.id === failure.userMessageId)
       // An absent row proves withdrawal only if this page reaches its ID (or is the
       // entire history). A full page of newer messages cannot confirm deletion.
-      const coversTarget = !hasOlderHistory(history)
-        || history.some(message => message.id != null && message.id < failure.userMessageId!)
-      if (!present && coversTarget && failure.recovery.withdrawalRequested) {
+      if (historyConfirmsWithdrawal(history, failure.userMessageId) && failure.recovery.withdrawalRequested) {
         prepareFailureResend(state, failure)
         return
       }
@@ -295,7 +299,7 @@ export function useDirectChat(context: DirectChatContext) {
   function invalidateWorld(worldId: number, characterId?: number) {
     for (const [key, state] of states) {
       if (state.world?.id !== worldId || (characterId != null && state.characterId !== characterId)) continue
-      state.controller?.abort(); state.generation = null; state.historyRevision++; state.modelListRevision++
+      state.invalidated = true; state.controller?.abort(); state.generation = null; state.historyRevision++; state.modelListRevision++
       remember(state, null); states.delete(key)
       if (active.value === state) close()
     }
@@ -421,7 +425,8 @@ export function useDirectChat(context: DirectChatContext) {
         : { method: 'GET', path: `/ai/chat/${state.world!.id}/${state.characterId}/generations/${encodeURIComponent(generation.requestId)}`, after: generation.sequence },
       response, stack: error instanceof Error ? error.stack || error.message : '服务端未返回堆栈信息。',
     } }
-    state.failureOpen = true
+    // Only a server-reported failure opens actions; transport errors keep recovery state.
+    state.failureOpen = response.event != null || error instanceof GenerationStartRejected
   }
 
   async function consumeGeneration(state: State, requestId: string, payload?: ChatMessagePayload, retryErrorIds: string[] = []) {
@@ -464,12 +469,10 @@ export function useDirectChat(context: DirectChatContext) {
         if (disposed || ownEpoch !== epoch || controller.signal.aborted) return
         const userMessage = generation.live.find(message => message.role === 'user')
         if ((failed || expired) && userMessage && userMessage.historyId == null) {
-          // The user row can be saved before generation.user reaches the browser.
-          // An older message with identical text must not prevent draft recovery.
-          const previousIds = new Set(generation.base.map(message => message.historyId))
-          const saved = history?.some(message => roleOf(message) === 'user' && message.id != null
-            && !previousIds.has(message.id) && message.content === userMessage.content)
-          if (!saved) chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: userMessage.content })
+          // A missing anchor or failed history read does not prove the send failed.
+          const unsent = history && (history.length === 0 || (generation.historyIds != null
+            && history.every(message => message.id == null || generation.historyIds!.includes(message.id))))
+          if (unsent) chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: userMessage.content })
         }
         if (expired) {
           showGenerationFailure(state, generation, '回复续接已失效，请核对聊天记录后重新发送。', { type: 'generation.expired' })
@@ -477,18 +480,19 @@ export function useDirectChat(context: DirectChatContext) {
             ? '已重新加载历史；未保存的消息已尝试恢复到草稿，请核对后重试。'
             : '历史加载失败，请重新进入此单聊核对记录后重试。')
         }
-        if (isActive(state)) await context.reloadCharacters()
+        if (context.world.value?.id === state.world?.id) await context.reloadCharacters()
       }
     } catch (error) {
       if (valid()) {
         if (payload && error instanceof GenerationStartRejected) {
+          chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: payload.message })
           remember(state, null); state.generation = null
           state.messages = [...generation.base, ...generation.following]
-          chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: payload.message })
           showGenerationFailure(state, generation, errorMessage(error), { message: errorMessage(error) }, error)
           state.failure!.retry = 'send'; state.failure!.detail.retryable = true
         } else {
           showGenerationFailure(state, generation, `${errorMessage(error)}。重新进入此单聊可继续恢复。`, { message: errorMessage(error) }, error)
+          notifyFor(state, '回复连接中断', '重新进入此单聊可继续恢复。')
         }
       }
     } finally {
@@ -502,7 +506,7 @@ export function useDirectChat(context: DirectChatContext) {
   async function send() {
     const state = active.value
     const content = input.value.trim(); const data = payload()
-    if (!content || !data || state.loading.sending || state.loading.history || state.loading.withdrawing) return
+    if (!content || !data || state.loading.sending || state.loading.history || state.loading.withdrawing || state.loading.model || context.settingsSaving?.value) return
     const requestId = state.generation?.requestId || pending(state)
     if (requestId) { await consumeGeneration(state, requestId); return }
     input.value = ''
@@ -516,7 +520,9 @@ export function useDirectChat(context: DirectChatContext) {
   }
   async function withdrawTarget(state: State, expectedMessageId: number, forRetry = false) {
     const ownEpoch = epoch
+    const withdrawnText = state.messages.find(message => message.historyId === expectedMessageId && message.role === 'user')?.content
     const failure = state.failure
+    state.failureOpen = false
     if (forRetry && failure?.userMessageId === expectedMessageId && failure.recovery) {
       failure.recovery.withdrawalRequested = true
     }
@@ -526,6 +532,7 @@ export function useDirectChat(context: DirectChatContext) {
       state.historyReady = false
       await api.withdrawMessage(state.world!.id, state.characterId, expectedMessageId)
       if (disposed || ownEpoch !== epoch) return
+      if (!forRetry && withdrawnText) chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: withdrawnText })
       if (state.failure?.userMessageId === expectedMessageId) {
         if (forRetry) {
           prepareFailureResend(state, state.failure)
@@ -534,7 +541,11 @@ export function useDirectChat(context: DirectChatContext) {
       state.messages = state.messages.filter(message => (message.complete !== false
         || (forRetry && !failure?.errorIds.includes(message.id)))
         && message.historyId !== expectedMessageId && message.userMessageId !== expectedMessageId)
+      const characterRefresh = context.world.value?.id === state.world?.id
+        ? context.reloadCharacters().catch(error => notifyFor(state, '消息已撤回，角色数据刷新失败', errorMessage(error)))
+        : Promise.resolve()
       const history = await loadHistory(state)
+      await characterRefresh
       if (disposed || ownEpoch !== epoch) return
       if (!history) {
         notifyFor(state, '消息已撤回，历史刷新失败', forRetry
@@ -542,7 +553,6 @@ export function useDirectChat(context: DirectChatContext) {
           : '请重新进入此单聊加载记录，再继续撤回。')
         return
       }
-      if (isActive(state)) { await context.reloadCharacters(); if (!forRetry) notify('已撤回上一轮消息', '', 'success') }
       return true
     } catch (error) {
       if (ownEpoch === epoch && !disposed) {
@@ -550,6 +560,16 @@ export function useDirectChat(context: DirectChatContext) {
         const history = await loadHistory(state)
         if (history && ownEpoch === epoch && !disposed && forRetry
           && state.failure === failure && failure?.retry === 'send') return true
+        if ((error instanceof TypeError || error instanceof SyntaxError)
+          && history && ownEpoch === epoch && !disposed && !forRetry
+          && historyConfirmsWithdrawal(history, expectedMessageId)) {
+          if (withdrawnText) chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: withdrawnText })
+          if (state.failure?.userMessageId === expectedMessageId) state.failure = null
+          if (context.world.value?.id === state.world?.id) {
+            await context.reloadCharacters().catch(error => notifyFor(state, '角色数据刷新失败', errorMessage(error)))
+          }
+          return true
+        }
         if (ownEpoch === epoch && !disposed) notifyFor(state, '撤回失败', errorMessage(error))
       }
     }
@@ -560,7 +580,7 @@ export function useDirectChat(context: DirectChatContext) {
     const state = active.value; const failure = state.failure; const ownEpoch = epoch
     if (!failure || !canRetryGenerationFailure.value) return
     if (failure.retry === 'withdraw' && !await withdrawTarget(state, failure.userMessageId!, true)) return
-    if (disposed || ownEpoch !== epoch || !isActive(state) || state.failure !== failure) return
+    if (disposed || ownEpoch !== epoch || !isActive(state) || state.failure !== failure || context.settingsSaving?.value || state.loading.model) return
     if (input.value === failure.payload.message) input.value = ''
     await consumeGeneration(state, newRequestId(), { ...failure.payload }, failure.errorIds)
   }
@@ -571,11 +591,9 @@ export function useDirectChat(context: DirectChatContext) {
     const ownEpoch = epoch
     state.loading.model = true
     try {
-      const runtime = await api.updateCharacterModel(state.world.id, state.characterId, modelApiId)
-      if (disposed || ownEpoch !== epoch) return
-      const currentCharacter = context.characters.value.find(item => item.userWorldId === state.world!.id
-        && item.characterId === state.characterId)
-      if (currentCharacter) currentCharacter.modelApiId = runtime.modelApiId
+      const valid = () => !disposed && ownEpoch === epoch && !state.invalidated
+      const runtime = await context.saveCharacterModel(state.world.id, state.characterId, modelApiId, valid)
+      if (!valid() || !runtime) return
       if (isActive(state)) notify('回复模型已更新', runtime.modelApiName || '已恢复默认模型', 'success')
     } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '回复模型更新失败', errorMessage(error)) }
     finally { state.loading.model = false }

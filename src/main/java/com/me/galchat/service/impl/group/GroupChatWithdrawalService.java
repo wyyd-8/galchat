@@ -59,11 +59,10 @@ public class GroupChatWithdrawalService {
         this.transactionTemplate = transactionTemplate;
     }
 
-    public void withdrawLatestTurn(Long conversationId) {
-        withdrawLatestTurn(conversationId, null);
-    }
-
-    public void withdrawLatestTurn(Long conversationId, Long expectedTurnId) {
+    public GroupChatMessage withdrawLatestTurn(Long conversationId, Long expectedTurnId) {
+        if (expectedTurnId == null || expectedTurnId <= 0) {
+            throw new UserRequestException("撤回轮次id必须为正数");
+        }
         GroupConversation conversation = conversationService.requireActive(conversationId);
         if (!GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
             throw new UserRequestException("跑团群聊不支持撤回");
@@ -78,13 +77,13 @@ public class GroupChatWithdrawalService {
                 throw new UserRequestException("跑团群聊不支持撤回");
             }
             recoveryService.assertConversationHasNoNonTerminalTurns(conversationId);
-            transactionTemplate.executeWithoutResult(status -> withdrawLocked(lockedConversation, expectedTurnId));
+            return transactionTemplate.execute(status -> withdrawLocked(lockedConversation, expectedTurnId));
         } finally {
             lockService.unlock(lock);
         }
     }
 
-    private void withdrawLocked(GroupConversation conversation, Long expectedTurnId) {
+    private GroupChatMessage withdrawLocked(GroupConversation conversation, Long expectedTurnId) {
         List<GroupChatTurn> recentTurns = turnMapper.selectList(new LambdaQueryWrapper<GroupChatTurn>()
                 .eq(GroupChatTurn::getConversationId, conversation.getId())
                 .orderByDesc(GroupChatTurn::getId)
@@ -98,7 +97,7 @@ public class GroupChatWithdrawalService {
         }
 
         GroupChatTurn turn = candidate.turn();
-        if (expectedTurnId != null && !expectedTurnId.equals(turn.getId())) {
+        if (!expectedTurnId.equals(turn.getId())) {
             throw new UserRequestException("群聊记录已变化，请刷新后再撤回");
         }
         GroupChatMessage trigger = turn.getTriggerMessageId() == null
@@ -132,6 +131,7 @@ public class GroupChatWithdrawalService {
                 .set(GroupChatTurn::getStatus, turn.getStatus())
                 .set(GroupChatTurn::getRevision, turn.getRevision())
                 .set(GroupChatTurn::getUpdatedAt, turn.getUpdatedAt()));
+        return trigger;
     }
 
     static WithdrawCandidate selectWithdrawCandidate(List<GroupChatTurn> recentTurns) {

@@ -58,7 +58,8 @@ import {
 interface FavorabilityRow { id: string; threshold?: number; prompt: string }
 
 const workspace = useWorkspace()
-const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters })
+const directSettingsSaving = ref(false)
+const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters, saveCharacterModel: workspace.saveCharacterModel, settingsSaving: directSettingsSaving })
 const authOpen = ref(!workspace.isLoggedIn.value)
 const view = ref<'library' | 'modules' | 'world' | 'group' | 'direct' | 'profile'>('library')
 const { isMobile } = useMobileViewport()
@@ -74,7 +75,6 @@ useMobileDialogHistory(computed(() => ['world', 'direct', 'group'].includes(view
 const moduleDetailOpen = ref(false)
 const groupStage = ref<{ openTurnSettings: () => void; openScene: () => void } | null>(null)
 const directStage = ref<{ closeProfile: () => void } | null>(null)
-const directSettingsSaving = ref(false)
 const directCharacterRemoving = ref(false)
 const directSettingsError = ref('')
 const mobileTemplateMenu = ref(false)
@@ -95,9 +95,7 @@ async function saveDirectSettings(payload: { userInfoPrompt: string; modelApiId?
   if (!world || !character || directSettingsSaving.value || direct.loading.sending) return
   directSettingsSaving.value = true; directSettingsError.value = ''
   try {
-    await api.updatePrompt(world.id, character.characterId, payload.userInfoPrompt.trim())
-    if (character.modelApiId !== payload.modelApiId) await api.updateCharacterModel(world.id, character.characterId, payload.modelApiId)
-    await workspace.reloadCharacters()
+    if (!await workspace.updateCharacterSettings(world.id, character.characterId, payload)) return
     if (workspace.selectedWorld.value?.id === world.id && direct.selectedCharacter.value?.characterId === character.characterId) directStage.value?.closeProfile()
     notify('角色设置已保存', '', 'success')
   } catch (error) { if (workspace.selectedWorld.value?.id === world.id && direct.selectedCharacter.value?.characterId === character.characterId) directSettingsError.value = errorMessage(error) }
@@ -753,7 +751,7 @@ async function toggleCharacterChoice(template: CharacterTemplate) {
   characterPreviewLoading.value = true
   try {
     const detail = await workspace.loadEditableCharacterTemplate(template.id)
-    if (characterChoice.value === id) characterChoicePreview.value = { ...template, ...detail }
+    if (detail && characterChoice.value === id) characterChoicePreview.value = { ...template, ...detail }
   } catch (error) {
     if (characterChoice.value === id) notify('角色资料加载失败', errorMessage(error), 'danger')
   } finally {
@@ -786,7 +784,12 @@ function fillCharacterTemplateForm(template: CharacterTemplate) {
 }
 function openCreateCharacterTemplate() { characterTemplateMode.value = 'create'; editingCharacterTemplateId.value = null; resetCharacterTemplateForm(); dialogs.character = false; dialogs.characterTemplate = true }
 async function openEditCharacterTemplate(id: number) {
-  await run(async () => { characterTemplateMode.value = 'edit'; editingCharacterTemplateId.value = id; fillCharacterTemplateForm(await workspace.loadEditableCharacterTemplate(id)); dialogs.characterTemplate = true; dialogs.characterEdit = false })
+  await run(async () => {
+    const template = await workspace.loadEditableCharacterTemplate(id)
+    if (!template) return
+    characterTemplateMode.value = 'edit'; editingCharacterTemplateId.value = id
+    fillCharacterTemplateForm(template); dialogs.characterTemplate = true; dialogs.characterEdit = false
+  })
 }
 function addFavorabilityRow() { favorabilityRows.value.push({ id: crypto.randomUUID?.() || String(Date.now() + Math.random()), threshold: undefined, prompt: '' }) }
 function removeFavorabilityRow(id: string) { favorabilityRows.value = favorabilityRows.value.filter((item) => item.id !== id) }
@@ -947,7 +950,7 @@ async function changePassword() {
       <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @back="home" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
       <DirectChatStage ref="directStage" :removing="directCharacterRemoving" @remove="removeDirectCharacter" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" />
       <TrpgCompletionStage v-else-if="view === 'group' && completionAvailable && !completionTranscript" :key="workspace.selectedConversationId.value || 0" :report="completionReport" :loading="completionLoading" :busy="completionBusy || workspace.loading.sending" :error="completionError" @reload="loadCompletion" @archive="archiveCompletion" @back="completionTranscript = true" />
-      <GroupChatStage ref="groupStage" v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" :persist-actor-runtime="workspace.saveActorRuntime" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @retry-group-turn="workspace.retryGroupTurn" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
+      <GroupChatStage ref="groupStage" v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :withdrawing="workspace.loading.withdrawing" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" :persist-actor-runtime="workspace.saveActorRuntime" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @retry-group-turn="workspace.retryGroupTurn" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
     <MobileNavigation v-if="rootNavigationVisible" :current="view === 'modules' ? 'modules' : view === 'profile' ? 'profile' : 'library'" @navigate="navigateMobile" />
   </div>
@@ -1299,6 +1302,7 @@ async function changePassword() {
     :detail="direct.generationFailure.value.detail"
   >
     <template #actions>
+      <button v-if="direct.generationFailure.value.retry === 'withdraw'" class="button secondary" :disabled="!direct.canRetryGenerationFailure.value" @click="direct.withdraw">撤回本轮对话</button>
       <button v-if="direct.generationFailure.value.detail.retryable" class="button primary" :disabled="!direct.canRetryGenerationFailure.value" @click="direct.retryGenerationFailure">重试本轮回复</button>
     </template>
   </GenerationErrorDialog>

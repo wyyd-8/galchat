@@ -930,6 +930,7 @@ test(`ordinary group retry ${missingCheckpoint ? 'offers withdrawal when checkpo
       assert.equal(id, 7)
       assert.equal(expectedTurnId, 42)
       withdrawn = true
+      return userMessage
     }
     globalThis.fetch = async (url, init) => {
       requests.push(String(url))
@@ -1062,12 +1063,13 @@ async function groupMutationFixture(t: import('node:test').TestContext) {
   t.mock.method(api, 'conversation', async (id: number) => conversations.find(item => item.id === id)!)
   t.mock.method(api, 'conversations', async () => conversations.filter(item => item.id !== 7))
   t.mock.method(api, 'groupMessages', async (id: number): Promise<GroupMessage[]> => [{ id: id * 10,
-    conversationId: id, speakerType: 'user', messageKind: 'dialogue', content: `history-${id}`, sequenceNo: 1, status: 'completed' }])
+    conversationId: id, turnId: 42, speakerType: 'user', messageKind: 'dialogue', content: `history-${id}`, sequenceNo: 1, status: 'completed' }])
   t.mock.method(api, 'replyPlan', async () => [{ source: 'USER', displayName: '群聊',
     items: [{ order: 1, actorType: 'character', actorId: 101 }] }])
   t.mock.method(api, 'currentTurn', async () => null)
   t.mock.method(api, 'actorRuntimes', async () => [])
   t.mock.method(api, 'modelApis', async () => [])
+  t.mock.method(api, 'characters', async () => [])
   workspace.selectedWorldId.value = 3
   workspace.conversations.value = conversations
   await workspace.selectConversation(7)
@@ -1180,6 +1182,53 @@ for (const phase of ['world', 'details', 'reenter'] as const) {
   })
 }
 
+for (const navigation of ['stay', 'world', 'reenter', 'logout'] as const) {
+  test(`character refresh preserves the current world after ${navigation}`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    let release!: () => void
+    let first = true
+    t.mock.method(api, 'characters', async (id: number) => {
+      if (first) {
+        first = false
+        await new Promise<void>(resolve => { release = resolve })
+        return [{ userWorldId: id, characterId: 7, characterName: '旧请求' }]
+      }
+      return [{ userWorldId: id, characterId: 8, characterName: '当前角色' }]
+    })
+    t.mock.method(api, 'userWorld', async (id: number) => ({ id }))
+    t.mock.method(api, 'conversations', async () => [])
+    t.mock.method(api, 'worldSave', async () => null)
+    const refreshing = workspace.reloadCharacters()
+    if (navigation === 'world' || navigation === 'reenter') await workspace.selectWorld(4)
+    if (navigation === 'reenter') await workspace.selectWorld(3)
+    if (navigation === 'logout') workspace.logout()
+    release(); await refreshing
+    assert.deepEqual(workspace.characters.value.map(item => [item.userWorldId, item.characterId]),
+      navigation === 'stay' ? [[3, 7]] : navigation === 'world' ? [[4, 8]] : navigation === 'reenter' ? [[3, 8]] : [])
+  })
+}
+
+for (const newestFails of [false, true]) test(`only the newest same-world character refresh can replace the list (fails=${newestFails})`, async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  workspace.characters.value = [{ userWorldId: 3, characterId: 7, characterName: '当前角色', modelApiId: 9, favorValue: 50 }]
+  let release!: () => void
+  let calls = 0
+  t.mock.method(api, 'characters', async () => {
+    if (++calls === 1) {
+      await new Promise<void>(resolve => { release = resolve })
+      return [{ userWorldId: 3, characterId: 7, characterName: '旧数据', modelApiId: 4, favorValue: 10 }]
+    }
+    if (newestFails) throw new Error('刷新失败')
+    return [{ userWorldId: 3, characterId: 7, characterName: '新数据', modelApiId: 99, favorValue: 75 }]
+  })
+  const old = workspace.reloadCharacters()
+  if (newestFails) await assert.rejects(workspace.reloadCharacters(), /刷新失败/)
+  else await workspace.reloadCharacters()
+  release(); await old
+  assert.deepEqual(workspace.characters.value.map(character => [character.modelApiId, character.favorValue]),
+    newestFails ? [[9, 50]] : [[99, 75]])
+})
+
 test('an obsolete world failure cannot clear the new loading indicator', async t => {
   const { workspace, api } = await groupMutationFixture(t)
   let rejectOld!: (error: Error) => void
@@ -1200,4 +1249,175 @@ test('an obsolete world failure cannot clear the new loading indicator', async t
   finishNew()
   assert.equal(await current, true)
   assert.equal(workspace.loading.workspace, false)
+})
+
+for (const mode of ['chat', 'trpg'] as const) {
+  for (const failure of ['rejected', 'generation'] as const) for (const draft of ['', '检查窗户']) {
+    test(`${mode} restores only rejected input after ${failure} failure (draft=${Boolean(draft)})`, async t => {
+      const { workspace, api } = await groupMutationFixture(t)
+      const { notice } = await import('../composables/useNotice.ts')
+      t.after(() => clearTimeout(notice.timer))
+      workspace.conversations.value[0]!.mode = mode
+      const turn = { turnId: 42, stepId: 99, status: 'waiting_input', inputType: 'message' as const, waitingForUser: true,
+        sceneOptions: {}, steps: [{ stepId: 99, itemOrder: 1, actorType: 'user', status: 'waiting_input' }] }
+      workspace.currentTurn.value = turn
+      t.mock.method(api, 'groupMessages', async () => [])
+      t.mock.method(api, 'combatOverview', async () => [])
+      t.mock.method(api, 'investigatorCards', async () => [])
+      let respond!: (response: Response) => void
+      globalThis.fetch = async () => new Promise<Response>(resolve => { respond = resolve })
+      workspace.messageInput.value = '打开门'
+      const sending = workspace.sendMessage()
+      await waitFor(() => Boolean(respond))
+      workspace.messageInput.value = draft
+      respond(failure === 'rejected' ? Response.json({ code: 0, msg: '会话忙碌' })
+        : new Response('data: {"eventType":"generation.failed","turnId":42,"error":"模型失败"}\n\n'))
+      await sending
+      assert.equal(workspace.messageInput.value, draft || (failure === 'rejected' ? '打开门' : ''))
+    })
+  }
+}
+
+for (const refreshFails of [false, true]) for (const draft of ['', '新草稿']) test(`group withdrawal restores the actual trigger only if empty (refresh fails=${refreshFails}, draft=${Boolean(draft)})`, async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  workspace.messageInput.value = draft
+  t.mock.method(api, 'withdrawGroupTurn', async () => ({ id: 10, conversationId: 7, turnId: 42,
+    speakerType: 'user', messageKind: 'dialogue', content: '真正撤回的消息', sequenceNo: 1, status: 'completed' }))
+  t.mock.method(api, 'groupMessages', async () => { if (refreshFails) throw new Error('历史刷新失败'); return [] })
+  await workspace.withdrawGroupTurn().catch(() => undefined)
+  assert.equal(workspace.messageInput.value, draft || '真正撤回的消息')
+})
+
+test('a rejected group withdrawal does not restore any message', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  t.mock.method(api, 'withdrawGroupTurn', async () => { throw new Error('撤回失败') })
+  workspace.messageInput.value = '原草稿'
+  await assert.rejects(workspace.withdrawGroupTurn())
+  assert.equal(workspace.messageInput.value, '原草稿')
+})
+
+test('failed KP inquiry keeps its question and inquiry composer selected', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { streamTrpgTurn } = await import('../api/client.ts')
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  workspace.conversations.value[0]!.mode = 'trpg'
+  workspace.currentTurn.value = { turnId: 42, stepId: 99, status: 'waiting_input', inputType: 'message',
+    waitingForUser: true, canAskKp: true, sceneOptions: {}, steps: [] }
+  t.mock.method(api, 'combatOverview', async () => [])
+  t.mock.method(api, 'investigatorCards', async () => [])
+  t.mock.method(streamTrpgTurn, 'inquiry', async (...args: Parameters<typeof streamTrpgTurn.inquiry>) => {
+    args[4]({ eventType: 'generation.failed', turnId: 42, error: '模型失败' })
+  })
+  workspace.inquiryInput.value = '门是什么材质？'
+  workspace.composerIntent.value = 'inquiry'
+  await workspace.askKp()
+  assert.equal(workspace.inquiryInput.value, '门是什么材质？')
+  assert.equal(workspace.composerIntent.value, 'inquiry')
+})
+
+test('group withdrawal restores only the original conversation draft after navigation', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  let finish!: (message: GroupMessage) => void
+  t.mock.method(api, 'withdrawGroupTurn', async () => new Promise<GroupMessage>(resolve => { finish = resolve }))
+  const withdrawing = workspace.withdrawGroupTurn()
+  await workspace.selectConversation(8)
+  workspace.messageInput.value = '另一会话的草稿'
+  finish({ id: 10, conversationId: 7, turnId: 42, speakerType: 'user', messageKind: 'dialogue',
+    content: '原会话消息', sequenceNo: 1, status: 'completed' })
+  await withdrawing
+  assert.equal(workspace.messageInput.value, '另一会话的草稿')
+  await workspace.selectConversation(7)
+  assert.equal(workspace.messageInput.value, '原会话消息')
+})
+
+test('TRPG withdrawal does not put history into the composer', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  workspace.conversations.value[0]!.mode = 'trpg'
+  t.mock.method(api, 'withdrawGroupTurn', async () => { throw new Error('TRPG cannot withdraw') })
+  workspace.messageInput.value = '当前行动'
+  await workspace.withdrawGroupTurn()
+  assert.equal(workspace.messageInput.value, '当前行动')
+})
+
+test('a group send transport failure retains the existing draft recovery', async t => {
+  const { workspace } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch') }
+  workspace.messageInput.value = '发送失败时保留的原文'
+  await workspace.sendMessage()
+  assert.equal(workspace.messageInput.value, '发送失败时保留的原文')
+})
+
+for (const failure of ['response', 'refresh']) test(`group retry after ${failure} failure must not withdraw an older round`, async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  let turns = [41, 42]
+  let historyFail = false
+  const removed: number[] = []
+  const targets: Array<number | undefined> = []
+  const row = (turnId: number): GroupMessage => ({ id: turnId * 10, conversationId: 7, turnId,
+    speakerType: 'user', content: `round-${turnId}`, messageKind: 'dialogue', sequenceNo: turnId, status: 'completed' })
+  workspace.messages.value = turns.map(row)
+  t.mock.method(api, 'groupMessages', async () => {
+    if (historyFail) throw new TypeError('Failed to fetch')
+    return turns.map(row)
+  })
+  t.mock.method(api, 'withdrawGroupTurn', async (_id: number, expected: number) => {
+    targets.push(expected)
+    const latest = turns.at(-1)!
+    if (expected != null && expected !== latest) throw new Error('群聊记录已变化')
+    turns.pop(); removed.push(latest)
+    if (removed.length === 1) {
+      if (failure === 'response') throw new TypeError('Failed to fetch')
+      historyFail = true
+    }
+    return row(latest)
+  })
+  await workspace.withdrawGroupTurn().catch(() => undefined)
+  assert.deepEqual(workspace.messages.value.map(row => row.turnId), [41, 42])
+  historyFail = false
+  await workspace.withdrawGroupTurn().catch(() => undefined)
+  assert.deepEqual(removed, [42], `second click unexpectedly removed older turn; request targets=${JSON.stringify(targets)}`)
+})
+
+test('group withdrawal refreshes favor and the conversation preview', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  workspace.characters.value = [{ userWorldId: 3, characterId: 101, characterName: '角色', favorValue: 70 }]
+  workspace.conversations.value[0]!.lastChatContent = '将被撤回的回复'
+  t.mock.method(api, 'withdrawGroupTurn', async () => ({ id: 420, conversationId: 7, turnId: 42,
+    speakerType: 'user', content: '本轮原文', messageKind: 'dialogue', sequenceNo: 42, status: 'completed' }))
+  t.mock.method(api, 'characters', async () => [{ userWorldId: 3, characterId: 101, characterName: '角色', favorValue: 60 }])
+  t.mock.method(api, 'conversation', async () => ({ ...workspace.conversations.value[0], lastChatContent: '上一轮回复' }))
+  t.mock.method(api, 'groupMessages', async () => [])
+  await workspace.withdrawGroupTurn()
+  assert.deepEqual({ favor: workspace.characters.value[0]!.favorValue, preview: workspace.conversations.value[0]!.lastChatContent },
+    { favor: 60, preview: '上一轮回复' })
+})
+
+test('group send must wait for an outstanding withdrawal', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  let finish!: () => void
+  t.mock.method(api, 'withdrawGroupTurn', async () => { await new Promise<void>(resolve => { finish = resolve }); return null })
+  const posts: string[] = []
+  t.mock.method(globalThis, 'fetch', async (url: string | URL | Request) => {
+    posts.push(String(url))
+    return Response.json({ code: 0, msg: '当前群聊正在处理中' })
+  })
+  const withdrawal = workspace.withdrawGroupTurn()
+  assert.equal(workspace.loading.withdrawing, true)
+  workspace.messageInput.value = '新一轮问题'
+  await workspace.sendMessage()
+  assert.equal(workspace.messageInput.value, '新一轮问题')
+  finish(); await withdrawal
+  assert.equal(workspace.loading.withdrawing, false)
+  assert.deepEqual(posts, [], 'send request was issued while withdrawal was still pending')
 })

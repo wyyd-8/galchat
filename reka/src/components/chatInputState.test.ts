@@ -4,6 +4,29 @@ import { effectScope, ref } from 'vue'
 import { shouldSubmitChatKey, useScopedChatDraft } from './chatInputState.ts'
 
 const enter = { key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13 }
+test('restores text only into an empty draft in the originating scope', () => {
+  const effect = effectScope()
+  effect.run(() => {
+    const scope = ref<string | null>('a'), input = ref('')
+    const drafts = useScopedChatDraft(scope, { input })
+    input.value = '新草稿'
+    drafts.restoreIfEmpty('a', { input: '原消息' })
+    assert.equal(input.value, '新草稿')
+    scope.value = 'b'
+    input.value = '另一会话'
+    drafts.restoreIfEmpty('a', { input: '撤回内容' })
+    assert.equal(input.value, '另一会话')
+    scope.value = 'a'
+    assert.equal(input.value, '新草稿')
+    input.value = ''
+    scope.value = 'b'
+    drafts.restoreIfEmpty('a', { input: '原消息' })
+    assert.equal(input.value, '另一会话')
+    scope.value = 'a'
+    assert.equal(input.value, '原消息')
+  })
+  effect.stop()
+})
 test('mobile return inserts a line; desktop return sends except Shift or IME confirmation', () => {
   assert.equal(shouldSubmitChatKey(enter, true), false)
   assert.equal(shouldSubmitChatKey(enter, false), true)

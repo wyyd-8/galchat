@@ -150,7 +150,7 @@ export const api = {
   updateGameTime: (id: number, payload: { dayNo: number; period: TrpgGameTimePeriod; revision: number }) =>
     request<TrpgGameTime>(`/group-chat/conversations/${id}/game-time`, { method: 'PUT', body: body(payload) }),
   groupMessages: (id: number, beforeId?: number, size = 50) => request<GroupMessage[]>(`/group-chat/conversations/${id}/messages?size=${size}${beforeId ? `&beforeId=${beforeId}` : ''}`),
-  withdrawGroupTurn: (id: number, expectedTurnId?: number) => request<void>(`/group-chat/conversations/${id}/withdraw${expectedTurnId == null ? '' : `?expectedTurnId=${expectedTurnId}`}`, { method: 'POST' }),
+  withdrawGroupTurn: (id: number, expectedTurnId: number) => request<GroupMessage | null>(`/group-chat/conversations/${id}/withdraw?expectedTurnId=${expectedTurnId}`, { method: 'POST' }),
   replyPlan: (id: number) => request<ReplyPlan[]>(`/group-chat/conversations/${id}/reply-plan`),
   saveReplyPlan: (id: number, plan: ReplyPlanRequest) => request<ReplyPlan>(`/group-chat/conversations/${id}/reply-plan`, { method: 'PUT', body: body(plan) }),
   finishReplyPlan: (id: number) => request<ReplyPlan | null>(`/group-chat/conversations/${id}/reply-plan`, { method: 'DELETE' }),

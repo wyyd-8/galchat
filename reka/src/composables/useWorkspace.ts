@@ -14,6 +14,7 @@ import { hydrateDiceMessage } from '@/dice/domain/dicePlayback'
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
 import { useScopedChatDraft } from '@/components/chatInputState'
 import { errorMessage, notify } from './useNotice'
+import { createCharacterData } from './characterData'
 import { followGeneration, isGenerationAbort, GenerationStartRejected } from '@/streaming/generationConnection'
 
 let tempMessageId = -1
@@ -21,7 +22,9 @@ const freshPlan = (): ReplyPlan => ({ source: 'USER', displayName: '群聊', ite
 
 export function useWorkspace() {
   const session = reactive(currentSession())
-  const loading = reactive({ boot: false, worlds: false, workspace: false, chat: false, sending: false })
+  const withdrawingConversations = reactive(new Set<number>())
+  const loading = reactive({ boot: false, worlds: false, workspace: false, chat: false, sending: false,
+    get withdrawing() { return selectedConversationId.value != null && withdrawingConversations.has(selectedConversationId.value) } })
   const userInfo = ref<UserInfo | null>(null)
   const worlds = ref<UserWorld[]>([])
   const templates = ref<WorldTemplate[]>([])
@@ -59,6 +62,10 @@ export function useWorkspace() {
   let generationConnection: { conversationId: number; requestId: string; controller: AbortController } | null = null
   let conversationRevision = 0
   let worldRevision = 0
+  const characterData = createCharacterData({ worldId: selectedWorldId, characters, templates: characterTemplates,
+    sessionKey: () => `${session.id ?? ''}:${session.token ?? ''}` })
+  const reloadCharacters = characterData.refresh
+  const saveCharacterModel = characterData.saveModel
   function disconnectGeneration() {
     generationConnection?.controller.abort()
     generationConnection = null
@@ -105,6 +112,7 @@ export function useWorkspace() {
     if (sessionStorage.getItem(key) === clientRequestId) sessionStorage.removeItem(key)
   }
   function resetWorkspace() {
+    characterData.clearSession()
     worldRevision++
     conversationRevision++; disconnectGeneration()
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
@@ -252,21 +260,23 @@ export function useWorkspace() {
     try { worlds.value = await api.userWorlds(session.id) } finally { loading.worlds = false }
   }
   async function selectWorld(id: number) {
+    characterData.reset()
     const revision = ++worldRevision
     const chatRevision = ++conversationRevision
     const isCurrentWorld = () => revision === worldRevision && selectedWorldId.value === id
     const isCurrentLoad = () => isCurrentWorld() && conversationRevision === chatRevision
     disconnectGeneration()
     selectedWorldId.value = id; selectedConversationId.value = null; messages.value = []; loading.workspace = true
+    const characterScope = characterData.capture()!
     try {
-      const [world, characterResult, conversationResult, saveResult] = await Promise.all([api.userWorld(id), api.characters(id), api.conversations(id), api.worldSave(id)])
+      const [world, , conversationResult, saveResult] = await Promise.all([api.userWorld(id), reloadCharacters(characterScope), api.conversations(id), api.worldSave(id)])
       if (!isCurrentLoad()) return false
       worlds.value = worlds.value.map((item) => item.id === id ? { ...item, ...world } : item)
-      characters.value = characterResult; conversations.value = conversationResult; worldSave.value = saveResult
+      conversations.value = conversationResult; worldSave.value = saveResult
       if (world?.worldId) {
-        const [templateResult, detailResult] = await Promise.all([api.characterTemplates(world.worldId), api.worldDetails(world.worldId)])
+        const [, detailResult] = await Promise.all([characterData.refreshTemplates(characterScope, world.worldId), api.worldDetails(world.worldId)])
         if (!isCurrentLoad()) return false
-        characterTemplates.value = templateResult; details.value = detailResult
+        details.value = detailResult
       }
       const active = conversations.value.find((item) => item.status === 'active') || conversations.value[0]
       if (active) {
@@ -306,37 +316,54 @@ export function useWorkspace() {
   async function saveSnapshot(remark: string) { if (!selectedWorldId.value) return; worldSave.value = await api.saveWorld(selectedWorldId.value, remark); notify('存档已保存', '', 'success') }
   async function loadSnapshot() { if (!selectedWorldId.value) return; await api.loadWorld(selectedWorldId.value); await selectWorld(selectedWorldId.value); notify('已回到存档时刻', '', 'success') }
 
-  async function reloadCharacters() { if (selectedWorldId.value) characters.value = await api.characters(selectedWorldId.value) }
   async function addCharacter(id: number, prompt = '') {
-    if (!selectedWorldId.value) return
-    await api.addCharacter(selectedWorldId.value, id)
-    await api.updatePrompt(selectedWorldId.value, id, prompt.trim())
-    await reloadCharacters()
+    const scope = characterData.capture()
+    if (!scope) return
+    await characterData.change(scope, id, async () => {
+      await api.addCharacter(scope.worldId, id)
+      if (scope.sameSession()) await api.updatePrompt(scope.worldId, id, prompt.trim())
+    })
   }
-  async function removeCharacter(id: number) { if (!selectedWorldId.value) return; await api.deleteCharacter(selectedWorldId.value, id); characters.value = await api.characters(selectedWorldId.value) }
+  async function removeCharacter(id: number) {
+    const scope = characterData.capture()
+    if (scope) await characterData.change(scope, id, () => api.deleteCharacter(scope.worldId, id))
+  }
   async function updateCharacterFavor(id: number, favor: number) {
-    const worldId = selectedWorldId.value
-    if (!worldId || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以手动调整好感度')
+    const scope = characterData.capture()
+    if (!scope || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以手动调整好感度')
     if (!Number.isInteger(favor) || favor < 0 || favor > 100) throw new Error('好感度必须是 0–100 之间的整数')
-    await api.updateFavor(worldId, id, favor)
-    const updated = await api.characters(worldId)
-    if (selectedWorldId.value === worldId) characters.value = updated
-    notify('好感度已保存', '', 'success')
+    await characterData.change(scope, id, () => api.updateFavor(scope.worldId, id, favor))
+    if (scope.current()) notify('好感度已保存', '', 'success')
+  }
+  async function updateCharacterSettings(worldId: number, id: number, settings: { userInfoPrompt: string; modelApiId?: number }) {
+    const scope = characterData.capture(worldId)
+    if (!scope) return false
+    const modelChanged = characters.value.find(item => item.userWorldId === worldId && item.characterId === id)?.modelApiId !== settings.modelApiId
+    await characterData.change(scope, id, async () => {
+      await api.updatePrompt(worldId, id, settings.userInfoPrompt.trim())
+      if (modelChanged && scope.sameSession()) await api.updateCharacterModel(worldId, id, settings.modelApiId)
+    })
+    return scope.current()
   }
   async function createCharacterTemplate(payload: CharacterTemplate) {
-    if (!selectedWorld.value?.worldId) return
-    await api.createCharacterTemplate(selectedWorld.value.worldId, payload)
-    characterTemplates.value = await api.characterTemplates(selectedWorld.value.worldId); notify('角色模板已创建', '', 'success')
+    const scope = characterData.capture(); const templateWorldId = selectedWorld.value?.worldId
+    if (!scope || !templateWorldId) return
+    await api.createCharacterTemplate(templateWorldId, payload)
+    await characterData.refreshTemplates(scope, templateWorldId)
+    if (scope.current()) notify('角色模板已创建', '', 'success')
   }
   async function loadEditableCharacterTemplate(id: number) {
-    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改角色模板')
-    return api.myCharacterTemplate(selectedWorldId.value, id)
+    const scope = characterData.capture()
+    if (!scope || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改角色模板')
+    const template = await api.myCharacterTemplate(scope.worldId, id)
+    return scope.current() ? template : undefined
   }
   async function updateCharacterTemplate(id: number, payload: CharacterTemplate) {
-    if (!selectedWorldId.value || !selectedWorld.value?.worldId || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改角色模板')
-    await api.updateCharacterTemplate(selectedWorldId.value, id, payload)
-    characterTemplates.value = await api.characterTemplates(selectedWorld.value.worldId); await reloadCharacters()
-    notify('角色模板已保存', '', 'success')
+    const scope = characterData.capture(); const templateWorldId = selectedWorld.value?.worldId
+    if (!scope || !templateWorldId || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改角色模板')
+    await api.updateCharacterTemplate(scope.worldId, id, payload)
+    await Promise.all([characterData.refreshTemplates(scope, templateWorldId), reloadCharacters(scope)])
+    if (scope.current()) notify('角色模板已保存', '', 'success')
   }
 
   async function createConversation(payload: { mode: 'chat' | 'trpg'; title: string; moduleId?: number; characterIds: number[] }) {
@@ -472,20 +499,47 @@ export function useWorkspace() {
     } finally { if (isCurrent()) loading.chat = false }
   }
   async function withdrawGroupTurn(expectedTurnId?: number) {
-    const conversationId = selectedConversationId.value
-    if (!conversationId) return
+    const conversation = selectedConversation.value
+    if (!conversation || conversation.mode !== 'chat' || loading.sending || loading.withdrawing) return
+    const target = expectedTurnId ?? currentTurn.value?.turnId
+      ?? [...messages.value].reverse().find(message => message.id > 0 && message.turnId != null)?.turnId
+    if (target == null || target <= 0) throw new Error('暂无可撤回的轮次，请重新加载会话记录')
+    const conversationId = conversation.id
+    const userId = session.id
     const revision = conversationRevision
-    await api.withdrawGroupTurn(conversationId, expectedTurnId)
-    const [history, turn] = await Promise.all([api.groupMessages(conversationId), api.currentTurn(conversationId)])
-    const hydrated = await hydrateGroupMessages(history)
-    if (selectedConversationId.value !== conversationId || conversationRevision !== revision) return
-    messages.value = hydrated.sort((a, b) => a.sequenceNo - b.sequenceNo)
-    hasOlderGroupMessages.value = history.length === 50
-    replyTurnState.value = null
-    currentTurn.value = turn
-    generationFailureOpen.value = false
-    generationFailure.value = null
-    notify('已撤回最近一轮群聊', '', 'success')
+    const characterScope = characterData.capture(conversation.userWorldId)
+    const isCurrent = () => selectedConversationId.value === conversationId && conversationRevision === revision
+      && session.id === userId
+    withdrawingConversations.add(conversationId)
+    try {
+      const withdrawn = await api.withdrawGroupTurn(conversationId, target)
+      if (session.id === userId && withdrawn?.speakerType === 'user') {
+        chatDrafts.restoreIfEmpty(`world:${conversation.userWorldId}:group:${conversationId}`, { action: withdrawn.content })
+      }
+      const refreshes = await Promise.allSettled([
+        (async () => {
+          const [history, turn] = await Promise.all([api.groupMessages(conversationId), api.currentTurn(conversationId)])
+          const hydrated = await hydrateGroupMessages(history)
+          if (!isCurrent()) return
+          messages.value = hydrated.sort((a, b) => a.sequenceNo - b.sequenceNo)
+          hasOlderGroupMessages.value = history.length === 50
+          replyTurnState.value = null
+          currentTurn.value = turn
+          generationFailureOpen.value = false
+          generationFailure.value = null
+        })(),
+        (async () => {
+          const detail = await api.conversation(conversationId)
+          if (!characterScope?.current()) return
+          conversations.value = conversations.value.map(item => item.id === conversationId ? { ...item, ...detail } : item)
+        })(),
+        characterScope ? reloadCharacters(characterScope) : Promise.resolve(),
+      ])
+      if (!isCurrent()) return
+      const failure = refreshes.find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') notify('群聊已撤回，数据刷新失败', errorMessage(failure.reason), 'danger')
+      else notify('已撤回最近一轮群聊', '', 'success')
+    } finally { withdrawingConversations.delete(conversationId) }
   }
   async function savePlan() {
     const conversationId = selectedConversationId.value
@@ -784,7 +838,7 @@ export function useWorkspace() {
   async function retryGroupTurn() {
     const conversation = selectedConversation.value
     const turn = currentTurn.value
-    if (!conversation || conversation.mode !== 'chat' || turn?.status !== 'failed' || loading.sending) return
+    if (!conversation || conversation.mode !== 'chat' || turn?.status !== 'failed' || loading.sending || loading.withdrawing) return
     generationFailureOpen.value = false
     loading.sending = true
     try {
@@ -869,6 +923,7 @@ export function useWorkspace() {
 
   async function askKp() {
     const conversation = selectedConversation.value
+    const revision = conversationRevision
     const turn = currentTurn.value
     const question = inquiryInput.value.trim()
     if (!conversation || conversation.mode !== 'trpg'
@@ -880,7 +935,7 @@ export function useWorkspace() {
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
       const { turnId, stepId } = turn
-      await consumeGeneration(
+      const result = await consumeGeneration(
         conversation.id,
         clientRequestId,
         (onEvent, signal) => streamTrpgTurn.inquiry(
@@ -888,8 +943,10 @@ export function useWorkspace() {
           { clientRequestId, question }, onEvent, signal),
       )
       await syncConversationState(conversation)
-      if (inquiryInput.value.trim() === question) inquiryInput.value = ''
-      composerIntent.value = 'action'
+      if (!result.failed && selectedConversationId.value === conversation.id && conversationRevision === revision) {
+        if (inquiryInput.value.trim() === question) inquiryInput.value = ''
+        composerIntent.value = 'action'
+      }
     } catch (error) {
       if (isGenerationAbort(error)) return false
       await syncConversationState(conversation).catch(() => undefined)
@@ -922,7 +979,7 @@ export function useWorkspace() {
   }
   async function sendMessage() {
     const content = messageInput.value.trim(); const conversation = selectedConversation.value
-    if (!content || !conversation || conversation.status !== 'active' || loading.sending) return
+    if (!content || !conversation || conversation.status !== 'active' || loading.sending || loading.withdrawing) return
     const waitingStep = currentTurn.value?.steps.find((step) => step.stepId === currentTurn.value?.stepId)
     const manualCharacter = currentTurn.value?.waitingForUser === true
       && waitingStep?.actorType === 'character'
@@ -937,6 +994,10 @@ export function useWorkspace() {
       }
     }
     const originalInput = messageInput.value
+    const userId = session.id
+    const restoreInput = () => {
+      if (session.id === userId) chatDrafts.restoreIfEmpty(`world:${conversation.userWorldId}:group:${conversation.id}`, { action: originalInput })
+    }
     const revision = conversationRevision
     const optimisticId = tempMessageId--
     messageInput.value = ''; loading.sending = true
@@ -985,11 +1046,11 @@ export function useWorkspace() {
       }
     } catch (error) {
       if (isGenerationAbort(error)) return false
+      restoreInput()
       if (conversation.mode === 'trpg') {
         await syncConversationState(conversation).catch(() => undefined)
-      } else {
+      } else if (selectedConversationId.value === conversation.id && conversationRevision === revision) {
         messages.value = messages.value.filter((message) => message.id !== optimisticId)
-        if (!messageInput.value) messageInput.value = originalInput
         replyTurnState.value = updateReplyTurn(replyTurnState.value, {
           eventType: 'reply.failed', turnId: replyTurnState.value?.turnId, error: errorMessage(error),
         })
@@ -1035,7 +1096,7 @@ export function useWorkspace() {
     latestDiceRoll, incomingDiceRolls, hasOlderGroupMessages, generationFailure, generationFailureOpen, loadDiceAggregate,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,
-    reloadCharacters, addCharacter, removeCharacter, updateCharacterFavor, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation, deleteConversation,
+    reloadCharacters, saveCharacterModel, updateCharacterSettings, addCharacter, removeCharacter, updateCharacterFavor, createCharacterTemplate, loadEditableCharacterTemplate, updateCharacterTemplate, createConversation, selectConversation, closeConversation, deleteConversation,
     loadOlderGroupMessages, withdrawGroupTurn, savePlan, movePlanItem, deletePlanItem, addPlanItem, sendMessage, saveActorRuntime, askKp, startTrpgTurn, retryGroupTurn, retryGenerationFailure, withdrawGenerationFailure, selectSceneOption, endExploration, retryStep, correctGameTime, refreshDiceRoll,
   }
 }

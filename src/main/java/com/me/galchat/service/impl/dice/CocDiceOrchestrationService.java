@@ -2322,10 +2322,18 @@ public class CocDiceOrchestrationService implements ICocDiceOrchestrationService
         CheckSelection highest = null;
         for (String checkName : checkNames) {
             String normalizedName = checkName.trim();
+            Integer candidate = card == null || card.cardId() == null
+                    ? null : card.checkValues().get(normalizedName);
+            if (Integer.valueOf(0).equals(candidate)) {
+                continue;
+            }
             int value = requireCheckValue(card, normalizedName);
             if (highest == null || value > highest.value()) {
                 highest = new CheckSelection(normalizedName, value);
             }
+        }
+        if (highest == null) {
+            throw new UserRequestException("候选检定项均为0，无法进行检定");
         }
         return highest;
     }

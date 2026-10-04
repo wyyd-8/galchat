@@ -27,12 +27,14 @@ registerHooks({
   },
 })
 
-async function mountDirectChat(acitvePushStatus = false) {
+async function mountDirectChat(acitvePushStatus = false, reloadCharacters: () => Promise<void> = async () => undefined) {
   const { api } = await import('../api/client.ts')
   const { useDirectChat } = await import('../composables/useDirectChat.ts')
+  const { createCharacterData } = await import('../composables/characterData.ts')
   const { computed, createRenderer, defineComponent, h, ref } = await import('vue')
   const worldState = ref<UserWorld>({ id: 3, worldId: 2, name: '测试世界', acitvePushStatus })
   const world = computed(() => worldState.value)
+  const settingsSaving = ref(false)
   const characters = ref<Character[]>([{ userWorldId: 3, characterId: 7, characterName: '测试角色' }, { userWorldId: 3, characterId: 8, characterName: '角色B' }])
   let chat!: ReturnType<typeof useDirectChat>
   const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
@@ -53,12 +55,13 @@ async function mountDirectChat(acitvePushStatus = false) {
   })
   const app = renderer.createApp(defineComponent({
     setup() {
-      chat = useDirectChat({ world, characters, reloadCharacters: async () => undefined })
+      const data = createCharacterData({ worldId: computed(() => world.value?.id ?? null), sessionKey: () => '', characters, templates: ref([]) })
+      chat = useDirectChat({ world, characters, saveCharacterModel: data.saveModel, settingsSaving, reloadCharacters })
       return () => h('div')
     },
   }))
   app.mount({})
-  return { api, chat, app, characters, worldState }
+  return { api, chat, app, characters, worldState, settingsSaving }
 }
 
 
@@ -109,10 +112,11 @@ test('withdraws a standalone care message without requiring a user message in th
     assert.equal(withdrawn, true)
     assert.deepEqual(chat.messages.value, [])
     assert.equal(chat.canWithdraw.value, false)
+    assert.equal(chat.input.value, '')
   } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
 })
 
-test('withdraws the latest user anchor, excluding its replies and local errors', async (t) => {
+for (const draft of ['', '新草稿']) test(`withdraws the latest user anchor without overwriting drafts (draft=${Boolean(draft)})`, async (t) => {
   const originalWindow = globalThis.window
   Object.assign(globalThis, { window: { setTimeout, clearTimeout } })
   t.after(() => { globalThis.window = originalWindow })
@@ -132,8 +136,10 @@ test('withdraws the latest user anchor, excluding its replies and local errors',
   })
   await chat.selectCharacter(7)
   chat.messages.value.push({ id: 'error', role: 'assistant', content: '旧错误', complete: false })
+  chat.input.value = draft
   await chat.withdraw()
   assert.equal(withdrawn, true)
+  assert.equal(chat.input.value, draft || '问题')
 })
 
 test('failed history refresh after withdrawal blocks further withdrawals until a successful reload', async (t) => {
@@ -153,6 +159,7 @@ test('failed history refresh after withdrawal blocks further withdrawals until a
   })
   t.mock.method(api, 'withdrawMessage', async () => { withdrawals++ })
   await chat.selectCharacter(7); await chat.withdraw()
+  assert.equal(chat.input.value, '最后一轮')
   assert.equal(chat.canWithdraw.value, false)
   assert.ok(!chat.messages.value.some(message => message.historyId === 20 || message.userMessageId === 20))
   assert.match(notice.title + notice.message, /加载失败|刷新失败/)
@@ -331,7 +338,7 @@ test('a rejected background send restores its own draft without changing the act
   } finally { rejectSend?.(); app.unmount(); clearTimeout(notice.timer); Object.assign(api, old); Object.assign(globalThis, original) }
 })
 
-for (const persisted of ['none', 'anchor', 'history'] as const) test(`a failed generation restores only an unsaved message (persisted=${persisted})`, async () => {
+for (const persisted of ['none', 'anchor', 'history'] as const) test(`a failed generation restores only a confirmed unsent message (persisted=${persisted})`, async () => {
   const original = { fetch: globalThis.fetch, localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
   Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout },
     fetch: async () => new Response([
@@ -435,6 +442,7 @@ for (const saved of [true, false]) test(`history recovery restores failed genera
   })
   await chat.selectCharacter(7)
   chat.input.value = '需要重试的消息'; await chat.send()
+  assert.equal(chat.input.value, '', 'an unavailable history cannot prove the message was unsent')
   assert.equal(chat.canRetryGenerationFailure.value, false)
   await chat.selectCharacter(7)
   assert.equal(chat.canRetryGenerationFailure.value, true)
@@ -594,6 +602,106 @@ for (const scope of ['same-character', 'other-character', 'other-world', 'logout
       scope === 'other-world' || scope === 'logout' ? undefined : 9)
     assert.equal(characters.value.find(character => character.characterId === 8)?.modelApiId, undefined)
   } finally { clearTimeout(notice.timer); app.unmount(); Object.assign(api, old); Object.assign(globalThis, original) }
+})
+
+for (const outcome of ['saved', 'failed'] as const) test(`sending preserves the draft until model selection settles (${outcome})`, async t => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  t.after(() => Object.assign(globalThis, original))
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer) })
+  t.mock.method(api, 'history', async () => [])
+  t.mock.method(api, 'modelApis', async () => [])
+  let finish!: () => void
+  t.mock.method(api, 'updateCharacterModel', async () => {
+    await new Promise<void>(resolve => { finish = resolve })
+    if (outcome === 'failed') throw new Error('模型保存失败')
+    return { modelApiId: 9, modelApiName: '新模型', modelApiAvailable: true }
+  })
+  const sent: string[] = []
+  t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
+    sent.push(JSON.parse(String(init.body)).message)
+    return new Response('data: {"type":"generation.completed"}\n\n')
+  })
+  await chat.selectCharacter(7)
+  chat.input.value = '切换后发送'
+  const saving = chat.selectModel(9)
+  try {
+    await chat.send()
+    assert.deepEqual(sent, [])
+    assert.equal(chat.input.value, '切换后发送')
+    assert.equal(chat.loading.sending, false)
+  } finally { finish(); await saving }
+  await chat.send()
+  assert.deepEqual(sent, ['切换后发送'])
+  assert.equal(chat.input.value, '')
+})
+
+for (const action of ['send', 'retry'] as const) test(`settings saves block ${action} without clearing the draft`, async t => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  t.after(() => Object.assign(globalThis, original))
+  const { api, chat, app, settingsSaving } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer) })
+  t.mock.method(api, 'history', async () => [])
+  t.mock.method(api, 'modelApis', async () => [])
+  const sent: string[] = []
+  t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
+    sent.push(JSON.parse(String(init.body)).message)
+    return sent.length === 1 ? Response.json({ code: 0, msg: '暂时无法生成' })
+      : new Response('data: {"type":"generation.completed"}\n\n')
+  })
+  await chat.selectCharacter(7)
+  chat.input.value = '保存后发送'
+  await chat.send()
+  assert.equal(chat.canRetryGenerationFailure.value, true)
+  settingsSaving.value = true
+  if (action === 'send') await chat.send()
+  else await chat.retryGenerationFailure()
+  assert.deepEqual(sent, ['保存后发送'])
+  assert.equal(chat.canRetryGenerationFailure.value, false)
+  assert.equal(chat.input.value, '保存后发送')
+  settingsSaving.value = false
+  assert.equal(chat.canRetryGenerationFailure.value, true)
+  await chat.retryGenerationFailure()
+  assert.deepEqual(sent, ['保存后发送', '保存后发送'])
+  assert.equal(chat.input.value, '')
+})
+
+test('a retry rechecks settings saves after its withdrawal finishes', async t => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  t.after(() => Object.assign(globalThis, original))
+  const { api, chat, app, settingsSaving } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer) })
+  let history: ChatHistory[] = []
+  t.mock.method(api, 'history', async () => history)
+  t.mock.method(api, 'modelApis', async () => [])
+  let sends = 0
+  t.mock.method(globalThis, 'fetch', async () => {
+    if (++sends > 1) return new Response('data: {"type":"generation.completed"}\n\n')
+    history = [{ id: 20, type: 'user', content: '原问题' }]
+    return new Response('data: {"type":"generation.user","content":"20","sequence":1}\n\ndata: {"type":"generation.failed","content":"失败","sequence":2}\n\n')
+  })
+  let finish!: () => void
+  t.mock.method(api, 'withdrawMessage', async () => {
+    await new Promise<void>(resolve => { finish = resolve })
+    history = []
+  })
+  await chat.selectCharacter(7)
+  chat.input.value = '原问题'
+  await chat.send()
+  const retry = chat.retryGenerationFailure()
+  settingsSaving.value = true
+  finish(); await retry
+  assert.equal(sends, 1)
+  assert.equal(chat.input.value, '原问题')
+  settingsSaving.value = false
+  await chat.retryGenerationFailure()
+  assert.equal(sends, 2)
 })
 
 for (const modelState of ['failed', 'pending'] as const) test(`history loads independently when the model list is ${modelState}`, async () => {
@@ -1082,4 +1190,103 @@ for (const scenario of ['success', 'withdraw-fails', 'stale', 'switch', 'refresh
     assert.equal(chat.generationFailure.value, null)
     assert.deepEqual(chat.messages.value.map(m => m.content), ['原消息\n第二行', '成功回复'])
   }
+})
+
+for (const outcome of ['rejected', 'lost-response', 'saved-model-failure'] as const) test(`direct drafts wait for withdrawal after ${outcome}`, async t => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  t.after(() => Object.assign(globalThis, original))
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer) })
+  let saved = false
+  t.mock.method(api, 'history', async () => saved ? [{ id: 20, type: 'user', content: '已提交的消息' }] : [])
+  t.mock.method(api, 'modelApis', async () => [])
+  t.mock.method(globalThis, 'fetch', async () => {
+    if (outcome === 'rejected') return Response.json({ code: 0, msg: '请求被拒绝' })
+    saved = true
+    if (outcome === 'lost-response') throw new TypeError('Failed to fetch')
+    return new Response('data: {"type":"generation.user","content":"20","sequence":1}\n\ndata: {"type":"generation.failed","content":"模型失败","sequence":2}\n\n')
+  })
+  await chat.selectCharacter(7)
+  chat.input.value = '已提交的消息'; await chat.send()
+  assert.equal(chat.input.value, outcome === 'rejected' ? '已提交的消息' : '')
+  assert.equal(chat.generationFailureOpen.value, outcome !== 'lost-response')
+  if (outcome === 'saved-model-failure') {
+    t.mock.method(api, 'withdrawMessage', async () => { saved = false })
+    await chat.withdraw()
+    assert.equal(chat.input.value, '已提交的消息')
+  }
+})
+
+for (const outcome of ['success', 'rejected', 'lost-response'] as const) test(`direct withdrawal dismisses failure details after ${outcome}`, async t => {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  t.after(() => Object.assign(globalThis, original))
+  const { api, chat, app } = await mountDirectChat()
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => { app.unmount(); clearTimeout(notice.timer) })
+  let saved = true
+  t.mock.method(api, 'history', async () => saved ? [{ id: 20, type: 'user', content: '撤回的原文' }] : [])
+  t.mock.method(api, 'modelApis', async () => [])
+  t.mock.method(api, 'withdrawMessage', async () => {
+    if (outcome === 'rejected') throw new Error('无法撤回')
+    saved = false
+    if (outcome === 'lost-response') throw new TypeError('Failed to fetch')
+  })
+  await chat.selectCharacter(7)
+  chat.generationFailureOpen.value = true
+  Object.assign(notice, { open: false, title: '', message: '' })
+  await chat.withdraw()
+  assert.equal(chat.generationFailureOpen.value, false)
+  if (outcome !== 'rejected') {
+    assert.equal(chat.input.value, '撤回的原文')
+    assert.equal(notice.open, false, 'confirmed withdrawal stays silent even if the response was lost')
+  }
+})
+
+async function withdrawalRefreshFixture(t: import('node:test').TestContext, reloadCharacters?: () => Promise<void>) {
+  const original = { localStorage: globalThis.localStorage, sessionStorage: globalThis.sessionStorage, window: globalThis.window }
+  Object.assign(globalThis, { localStorage: storage(), sessionStorage: storage(), window: { setTimeout, clearTimeout } })
+  t.after(() => Object.assign(globalThis, original))
+  const fixture = await mountDirectChat(false, reloadCharacters)
+  const { notice } = await import('../composables/useNotice.ts')
+  Object.assign(notice, { open: false, title: '', message: '' })
+  t.after(() => { fixture.app.unmount(); clearTimeout(notice.timer) })
+  t.mock.method(fixture.api, 'modelApis', async () => [])
+  return { ...fixture, notice }
+}
+
+for (const refreshFails of [false, true]) test(`confirmed withdrawal with character refresh failure=${refreshFails}`, async t => {
+  const { api, chat, notice } = await withdrawalRefreshFixture(t, async () => {
+    if (refreshFails) throw new Error('角色信息读取失败')
+  })
+  const older = { id: 10, type: 'user', content: '更早一轮' }
+  let saved = true
+  const withdrawals: number[] = []
+  t.mock.method(api, 'history', async () => saved ? [older, { id: 20, type: 'user', content: '本轮原文' }] : [older])
+  t.mock.method(api, 'withdrawMessage', async (_w: number, _c: number, id: number) => { withdrawals.push(id); saved = false })
+  await chat.selectCharacter(7)
+  await chat.withdraw()
+  assert.deepEqual(withdrawals, [20])
+  assert.equal(chat.input.value, '本轮原文')
+  assert.equal(chat.canWithdraw.value, true)
+  assert.notEqual(notice.title, '撤回失败', 'a successful withdrawal must not be reported as failed')
+})
+
+test('successful withdrawal still refreshes characters when its history refresh fails', async t => {
+  let refreshes = 0
+  const { api, chat } = await withdrawalRefreshFixture(t, async () => { refreshes++ })
+  let withdrawn = false
+  let historyFails = true
+  t.mock.method(api, 'history', async () => {
+    if (withdrawn && historyFails) throw new Error('历史读取失败')
+    return withdrawn ? [] : [{ id: 20, type: 'user', content: '撤回文本' }]
+  })
+  t.mock.method(api, 'withdrawMessage', async () => { withdrawn = true })
+  await chat.selectCharacter(7)
+  await chat.withdraw()
+  historyFails = false
+  chat.close(); await chat.selectCharacter(7)
+  assert.ok(refreshes > 0, 'character favor/preview remains stale even after reopening the chat')
 })

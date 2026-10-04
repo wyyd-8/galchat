@@ -321,10 +321,10 @@ public class GroupChatController {
 
     @PostMapping("/conversations/{conversationId}/withdraw")
     public Result withdrawLatestTurn(@PathVariable Long conversationId,
-                                     @RequestParam(required = false) Long expectedTurnId) {
-        withdrawalService.withdrawLatestTurn(conversationId, expectedTurnId);
+                                     @RequestParam Long expectedTurnId) {
+        var withdrawn = withdrawalService.withdrawLatestTurn(conversationId, expectedTurnId);
         generationStreamRegistry.evict(conversationId);
-        return Result.success();
+        return Result.success(withdrawn);
     }
 
     @GetMapping("/conversations/{conversationId}/reply-plan")

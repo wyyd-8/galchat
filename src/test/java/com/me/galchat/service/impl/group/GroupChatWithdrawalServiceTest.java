@@ -2,6 +2,7 @@ package com.me.galchat.service.impl.group;
 
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatReplyStep;
+import com.me.galchat.domain.po.GroupChatMessage;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.groupchat.context.GroupTopicService;
@@ -22,6 +23,23 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GroupChatWithdrawalServiceTest {
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(longs = {0, -1})
+    void rejectsMissingOrInvalidTargetsBeforeMutation(Long target) {
+        var conversations = mock(GroupConversationService.class);
+        var locks = mock(GroupConversationLockService.class);
+        var turns = mock(GroupChatTurnMapper.class);
+        var service = new GroupChatWithdrawalService(conversations, locks, turns,
+                mock(GroupChatMessageMapper.class), mock(GroupChatReplyStepMapper.class),
+                mock(GroupChatToolCallMapper.class), mock(GroupTurnRecoveryService.class),
+                mock(GroupChatFavorRollbackService.class), mock(GroupTurnCheckpointService.class),
+                mock(GroupTopicService.class), mock(TransactionTemplate.class));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.withdrawLatestTurn(7L, target))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class);
+        org.mockito.Mockito.verifyNoInteractions(conversations, locks, turns);
+    }
 
     @org.junit.jupiter.api.BeforeAll
     static void initMybatisPlusTableInfo() {
@@ -70,10 +88,9 @@ class GroupChatWithdrawalServiceTest {
                 new GroupChatReplyStep().setId(11L).setTurnId(10L)));
         when(messageMapper.selectList(any())).thenReturn(List.of());
         doAnswer(invocation -> {
-            java.util.function.Consumer<TransactionStatus> callback = invocation.getArgument(0);
-            callback.accept(mock(TransactionStatus.class));
-            return null;
-        }).when(transactionTemplate).executeWithoutResult(any());
+            org.springframework.transaction.support.TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        }).when(transactionTemplate).execute(any());
 
         if (staleRequest) {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.withdrawLatestTurn(7L, 9L))
@@ -81,7 +98,9 @@ class GroupChatWithdrawalServiceTest {
             org.mockito.Mockito.verifyNoInteractions(favor, checkpoints, stepMapper, messageMapper);
             return;
         }
-        service.withdrawLatestTurn(7L, 10L);
+        GroupChatMessage trigger = new GroupChatMessage().setId(99L).setContent("原始问题").setSequenceNo(1L);
+        when(messageMapper.selectById(99L)).thenReturn(trigger);
+        assertThat(service.withdrawLatestTurn(7L, 10L)).isSameAs(trigger);
         verify(checkpoints).clear(7L);
         verify(favor).rollback(1L, List.of(11L));
         verify(recoveryService).assertConversationHasNoNonTerminalTurns(7L);

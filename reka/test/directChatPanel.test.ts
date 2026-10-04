@@ -54,4 +54,29 @@ test('desktop profile reports save failures and prevents model changes during a 
     assert.ok(idlePicker)
     assert.doesNotMatch(idlePicker, /disabled/)
   })
+  await context.test('sending waits for profile settings while keeping the draft editable', async () => {
+    for (const settingsSaving of [true, false]) {
+      const html = await render({ input: '你好', settingsSaving })
+      const send = html.match(/<button[^>]*aria-label="发送消息"[^>]*>/)?.[0]
+      assert.ok(send)
+      assert.equal(/disabled/.test(send), settingsSaving)
+      const input = html.match(/<textarea[^>]*aria-label="给角色的消息"[^>]*>/)?.[0]
+      assert.ok(input)
+      assert.doesNotMatch(input, /disabled/)
+    }
+  })
+  await context.test('sending is disabled while a withdrawal is pending', async () => {
+    const html = await render({ input: '新草稿', loading: { history: false, sending: false, withdrawing: true, model: false } })
+    const send = html.match(/<button[^>]*aria-label="发送消息"[^>]*>/)?.[0]
+    assert.ok(send)
+    assert.match(send, /disabled/)
+  })
+  await context.test('sending is disabled while the selected model is saving', async () => {
+    for (const model of [true, false]) {
+      const html = await render({ input: '你好', loading: { history: false, sending: false, withdrawing: false, model } })
+      const send = html.match(/<button[^>]*aria-label="发送消息"[^>]*>/)?.[0]
+      assert.ok(send, 'send button is present')
+      assert.equal(/disabled/.test(send), model)
+    }
+  })
 })

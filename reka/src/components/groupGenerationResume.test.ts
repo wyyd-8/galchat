@@ -1278,6 +1278,68 @@ for (const mode of ['chat', 'trpg'] as const) {
   }
 }
 
+for (const mode of ['chat', 'manual', 'trpg'] as const) {
+  for (const accepted of [false, true]) for (const draft of ['', '新草稿']) {
+    test(`${mode} SSE failure restores only unaccepted input (accepted=${accepted}, draft=${Boolean(draft)})`, async t => {
+      const { workspace, api } = await groupMutationFixture(t)
+      workspace.conversations.value[0]!.mode = mode === 'trpg' ? 'trpg' : 'chat'
+      if (mode !== 'chat') workspace.currentTurn.value = {
+        turnId: 42, stepId: 99, status: 'waiting_input', inputType: 'message', waitingForUser: true,
+        sceneOptions: {}, steps: [{ stepId: 99, itemOrder: 1, actorType: mode === 'manual' ? 'character' : 'user', actorId: mode === 'manual' ? 101 : undefined, status: 'waiting_input' }],
+      }
+      const persisted: GroupMessage = { id: 71, conversationId: 7, turnId: 43,
+        speakerType: mode === 'manual' ? 'character' : 'user', messageKind: 'dialogue',
+        content: '打开门', sequenceNo: 2, status: 'completed' }
+      t.mock.method(api, 'groupMessages', async () => accepted ? [persisted] : [])
+      t.mock.method(api, 'combatOverview', async () => [])
+      t.mock.method(api, 'investigatorCards', async () => [])
+      let respond!: (response: Response) => void
+      globalThis.fetch = async () => new Promise<Response>(resolve => { respond = resolve })
+      workspace.messageInput.value = '打开门'
+      const sending = workspace.sendMessage()
+      await waitFor(() => Boolean(respond))
+      workspace.messageInput.value = draft
+      const events = [
+        ...(accepted ? [{ eventType: 'turn.accepted', conversationId: 7, turnId: 43, messageId: 71 }] : []),
+        { eventType: 'generation.failed', conversationId: 7, error: accepted ? '模型失败' : '会话忙碌' },
+      ]
+      respond(new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('')))
+      await sending
+      assert.equal(workspace.messageInput.value, draft || (accepted ? '' : '打开门'))
+      assert.deepEqual(workspace.messages.value.map(message => message.id), accepted ? [71] : [])
+    })
+  }
+}
+
+test('a pre-acceptance SSE rejection restores the draft even when history synchronization fails', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  t.mock.method(api, 'groupMessages', async () => { throw new Error('history unavailable') })
+  globalThis.fetch = async () => new Response('data: {"eventType":"generation.failed","error":"会话忙碌"}\n\n')
+  workspace.messageInput.value = '未发送的消息'
+  await workspace.sendMessage()
+  assert.equal(workspace.messageInput.value, '未发送的消息')
+  assert.deepEqual(workspace.messages.value.map(message => message.id), [70])
+})
+
+test('a reconnect failure marker without turn metadata does not restore a persisted message', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { streamGroupGeneration } = await import('../api/client.ts')
+  globalThis.fetch = async () => { throw new TypeError('connection lost after submission') }
+  t.mock.method(streamGroupGeneration, 'resume', async (...[_id, _request, receive]: Parameters<typeof streamGroupGeneration.resume>) => {
+    receive({ eventType: 'generation.failed', conversationId: 7, error: '生成已中断' })
+  })
+  t.mock.method(api, 'groupMessages', async (): Promise<GroupMessage[]> => [{
+    id: 71, conversationId: 7, turnId: 43, speakerType: 'user', messageKind: 'dialogue',
+    content: '已经保存的消息', sequenceNo: 2, status: 'completed',
+  }])
+  workspace.messageInput.value = '已经保存的消息'
+  await workspace.sendMessage()
+  assert.equal(workspace.messageInput.value, '')
+  assert.equal(workspace.messages.value[0]?.content, '已经保存的消息')
+})
+
 for (const refreshFails of [false, true]) for (const draft of ['', '新草稿']) test(`group withdrawal restores the actual trigger only if empty (refresh fails=${refreshFails}, draft=${Boolean(draft)})`, async t => {
   const { workspace, api } = await groupMutationFixture(t)
   const { notice } = await import('../composables/useNotice.ts')
@@ -1420,4 +1482,74 @@ test('group send must wait for an outstanding withdrawal', async t => {
   finish(); await withdrawal
   assert.equal(workspace.loading.withdrawing, false)
   assert.deepEqual(posts, [], 'send request was issued while withdrawal was still pending')
+})
+
+for (const outcome of ['completed', 'failed', 'retry', 'resume', 'history-failed'] as const) {
+  test(`group character data refreshes after ${outcome} generation`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { streamGroupGeneration } = await import('../api/client.ts')
+    const { notice } = await import('../composables/useNotice.ts')
+    t.after(() => clearTimeout(notice.timer))
+    workspace.characters.value = [{ userWorldId: 3, characterId: 101, characterName: '角色', favorValue: 10, userInfoPrompt: '旧信息' }]
+    let savedPrompt = '旧信息\n用户喜欢红茶'
+    t.mock.method(api, 'characters', async (worldId: number) => {
+      assert.equal(worldId, 3)
+      return [{ userWorldId: 3, characterId: 101, characterName: '角色', favorValue: 15, userInfoPrompt: savedPrompt }]
+    })
+    t.mock.method(api, 'updatePrompt', async (_worldId: number, _characterId: number, prompt: string) => { savedPrompt = prompt })
+    if (outcome === 'history-failed') t.mock.method(api, 'groupMessages', async () => { throw new Error('history unavailable') })
+    globalThis.fetch = async () => new Response([
+      { eventType: 'turn.accepted', conversationId: 7, turnId: 43, messageId: 71, sequence: 2 },
+      { eventType: outcome === 'failed' ? 'generation.failed' : 'generation.completed', conversationId: 7, turnId: 43 },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''))
+    if (outcome === 'retry') {
+      workspace.currentTurn.value = { turnId: 43, status: 'failed', waitingForUser: false, sceneOptions: {}, steps: [] }
+      await workspace.retryGroupTurn()
+    } else if (outcome === 'resume') {
+      sessionStorage.setItem('galchat:generation:7', 'resume-profile')
+      t.mock.method(streamGroupGeneration, 'resume', async (...args: Parameters<typeof streamGroupGeneration.resume>) => {
+        args[2]({ eventType: 'generation.completed', conversationId: 7, turnId: 43 })
+      })
+      await workspace.selectConversation(7)
+      await waitFor(() => !workspace.loading.sending)
+    } else {
+      workspace.messageInput.value = '我喜欢红茶'
+      await workspace.sendMessage()
+    }
+    assert.equal(workspace.characters.value[0]!.favorValue, 15)
+    // The profile editor starts with the displayed data and saves the whole note.
+    await workspace.updateCharacterSettings(3, 101, {
+      userInfoPrompt: workspace.characters.value[0]!.userInfoPrompt + '\n称呼我小明',
+    })
+    assert.equal(savedPrompt, '旧信息\n用户喜欢红茶\n称呼我小明')
+  })
+}
+
+test('group character refresh failure does not restore an already sent message', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  t.mock.method(api, 'characters', async () => { throw new Error('profile unavailable') })
+  globalThis.fetch = async () => new Response('data: {"eventType":"generation.completed","conversationId":7,"turnId":43}\n\n')
+  workspace.messageInput.value = '已发送的消息'
+  await workspace.sendMessage()
+  assert.equal(workspace.messageInput.value, '')
+  assert.equal(workspace.loading.sending, false)
+  assert.equal(workspace.messages.value[0]?.content, 'history-7')
+  assert.equal(notice.title, '角色资料刷新失败')
+})
+
+test('late group character refresh cannot replace another world profile', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  let finish!: (rows: import('../api/types.ts').Character[]) => void
+  t.mock.method(api, 'characters', async () => new Promise(resolve => { finish = resolve }))
+  globalThis.fetch = async () => new Response('data: {"eventType":"generation.completed","conversationId":7,"turnId":43}\n\n')
+  workspace.messageInput.value = '你好'
+  const sending = workspace.sendMessage()
+  await waitFor(() => Boolean(finish))
+  workspace.selectedWorldId.value = 4
+  workspace.characters.value = [{ userWorldId: 4, characterId: 101, characterName: '另一个世界', favorValue: 90 }]
+  finish([{ userWorldId: 3, characterId: 101, characterName: '旧世界', favorValue: 15 }])
+  await sending
+  assert.equal(workspace.characters.value[0]!.favorValue, 90)
 })

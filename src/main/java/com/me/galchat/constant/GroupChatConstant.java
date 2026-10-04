@@ -111,6 +111,7 @@ public final class GroupChatConstant {
     public static final String COMBAT_ORDER_INVESTIGATORS_FIRST = "INVESTIGATORS_FIRST";
 
     public static final int DEFAULT_HISTORY_PAGE_SIZE = 50;
+    public static final int MAX_GROUP_CHARACTERS = 10;
     public static final int MAX_REPLY_STEPS = 12;
     public static final int MAX_GROUP_TOPIC_CHARS = 8000;
     public static final int MAX_CONSECUTIVE_WITHDRAW_COUNT = 3;

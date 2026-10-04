@@ -292,29 +292,100 @@ export function useWorkspace() {
     }
     finally { if (isCurrentWorld()) loading.workspace = false }
   }
+  // Mutations retain their original target and may update only the page that started them.
+  function captureWorldMutation() {
+    const scope = characterData.capture()
+    if (!scope) return null
+    const revision = conversationRevision
+    const conversationId = selectedConversationId.value
+    return { ...scope, templateWorldId: selectedWorld.value?.worldId,
+      current: () => scope.current() && conversationRevision === revision
+        && selectedConversationId.value === conversationId }
+  }
   async function createWorld(payload: Partial<UserWorld> & { worldId: number }) { await api.createWorld(payload); await loadWorlds(); notify('世界已创建', '', 'success') }
   async function updateWorld(payload: Partial<UserWorld>) {
-    if (!selectedWorldId.value) return
-    await api.updateWorld(selectedWorldId.value, payload)
-    const updated = await api.userWorld(selectedWorldId.value)
+    const scope = captureWorldMutation()
+    if (!scope) return false
+    await api.updateWorld(scope.worldId, payload)
+    if (!scope.current()) return false
+    const updated = await api.userWorld(scope.worldId)
+    if (!scope.current()) return false
     worlds.value = worlds.value.map((item) => item.id === updated.id ? { ...item, ...updated } : item)
     notify('世界设置已保存', '', 'success')
+    return true
   }
-  async function removeWorld() { if (!selectedWorldId.value) return; await api.deleteWorld(selectedWorldId.value); resetWorkspace(); await Promise.all([loadWorlds(), loadModules()]); notify('当前世界已删除', '', 'success') }
+  async function removeWorld() {
+    const scope = captureWorldMutation()
+    if (!scope) return false
+    await api.deleteWorld(scope.worldId)
+    if (!scope.sameSession()) return false
+    // The deletion is real even when its page is no longer selected.
+    worlds.value = worlds.value.filter(item => item.id !== scope.worldId)
+    const [remainingWorlds, remainingModules] = await Promise.all([
+      api.userWorlds(session.id!), api.cocModules(),
+    ])
+    if (!scope.sameSession()) return false
+    const current = scope.current()
+    if (current) resetWorkspace()
+    worlds.value = remainingWorlds
+    modules.value = remainingModules
+    if (current) notify('当前世界已删除', '', 'success')
+    return current
+  }
   async function createTemplate(payload: WorldTemplate) { await api.createWorldTemplate(payload); await loadTemplates(); notify('世界模板已创建', '', 'success') }
   async function loadEditableWorldTemplate() {
     if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
     return api.myWorldTemplate(selectedWorldId.value)
   }
   async function updateTemplate(payload: WorldTemplate) {
-    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
-    await api.updateWorldTemplate(selectedWorldId.value, payload); await Promise.all([loadTemplates(), selectWorld(selectedWorldId.value)])
+    const scope = captureWorldMutation()
+    if (!scope || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
+    await api.updateWorldTemplate(scope.worldId, payload)
+    if (!scope.current()) return false
+    const updatedTemplates = await api.worldTemplates()
+    if (!scope.current()) return false
+    templates.value = updatedTemplates
+    if (!await selectWorld(scope.worldId)) return false
     notify('世界模板已保存', '', 'success')
+    return true
   }
-  async function addDetail(payload: WorldDetail) { if (!selectedWorld.value?.worldId) return; await api.addWorldDetail(selectedWorld.value.worldId, payload); details.value = await api.worldDetails(selectedWorld.value.worldId) }
-  async function removeDetail(id: number) { if (!selectedWorld.value?.worldId) return; await api.deleteWorldDetail(selectedWorld.value.worldId, id); details.value = await api.worldDetails(selectedWorld.value.worldId) }
-  async function saveSnapshot(remark: string) { if (!selectedWorldId.value) return; worldSave.value = await api.saveWorld(selectedWorldId.value, remark); notify('存档已保存', '', 'success') }
-  async function loadSnapshot() { if (!selectedWorldId.value) return; await api.loadWorld(selectedWorldId.value); await selectWorld(selectedWorldId.value); notify('已回到存档时刻', '', 'success') }
+  async function addDetail(payload: WorldDetail) {
+    const scope = captureWorldMutation()
+    if (!scope?.templateWorldId) return false
+    await api.addWorldDetail(scope.templateWorldId, payload)
+    if (!scope.current()) return false
+    const updated = await api.worldDetails(scope.templateWorldId)
+    if (!scope.current()) return false
+    details.value = updated
+    return true
+  }
+  async function removeDetail(id: number) {
+    const scope = captureWorldMutation()
+    if (!scope?.templateWorldId) return false
+    await api.deleteWorldDetail(scope.templateWorldId, id)
+    if (!scope.current()) return false
+    const updated = await api.worldDetails(scope.templateWorldId)
+    if (!scope.current()) return false
+    details.value = updated
+    return true
+  }
+  async function saveSnapshot(remark: string) {
+    const scope = captureWorldMutation()
+    if (!scope) return false
+    const saved = await api.saveWorld(scope.worldId, remark)
+    if (!scope.current()) return false
+    worldSave.value = saved
+    notify('存档已保存', '', 'success')
+    return true
+  }
+  async function loadSnapshot() {
+    const scope = captureWorldMutation()
+    if (!scope) return false
+    await api.loadWorld(scope.worldId)
+    if (!scope.current() || !await selectWorld(scope.worldId)) return false
+    notify('已回到存档时刻', '', 'success')
+    return true
+  }
 
   async function addCharacter(id: number, prompt = '') {
     const scope = characterData.capture()
@@ -367,13 +438,25 @@ export function useWorkspace() {
   }
 
   async function createConversation(payload: { mode: 'chat' | 'trpg'; title: string; moduleId?: number; characterIds: number[] }) {
-    if (!selectedWorldId.value) return
-    const created = await api.createConversation({ ...payload, userWorldId: selectedWorldId.value })
+    const scope = captureWorldMutation()
+    if (!scope) return
+    const characterIds = [...payload.characterIds]
+    const created = await api.createConversation({ ...payload, characterIds, userWorldId: scope.worldId })
+    if (!scope.sameSession()) return
     if (payload.mode === 'trpg') {
-      localStorage.setItem(`galchat:trpg-participants:${created.id}`, encodeParticipantIds(payload.characterIds))
+      localStorage.setItem(`galchat:trpg-participants:${created.id}`, encodeParticipantIds(characterIds))
     }
-    conversations.value = await api.conversations(selectedWorldId.value); participantIds.value = [...payload.characterIds]
-    await selectConversation(created.id); notify(payload.mode === 'trpg' ? 'CoC 跑团已建立' : '普通群聊已建立', created.title, 'success')
+    if (!scope.current()) return
+    const updated = await api.conversations(scope.worldId)
+    if (!scope.current()) return
+    conversations.value = updated
+    participantIds.value = characterIds
+    const selecting = selectConversation(created.id)
+    const revision = conversationRevision
+    await selecting
+    if (!scope.sameSession() || selectedWorldId.value !== scope.worldId
+      || selectedConversationId.value !== created.id || conversationRevision !== revision) return
+    notify(payload.mode === 'trpg' ? 'CoC 跑团已建立' : '普通群聊已建立', created.title, 'success')
     return created
   }
   async function selectConversation(id: number) {
@@ -423,8 +506,16 @@ export function useWorkspace() {
     }
   }
   async function closeConversation() {
-    if (!selectedConversationId.value || !selectedWorldId.value) return
-    await api.closeConversation(selectedConversationId.value); conversations.value = await api.conversations(selectedWorldId.value); notify('会话已关闭', '', 'success')
+    const scope = captureWorldMutation()
+    const conversationId = selectedConversationId.value
+    if (!scope || !conversationId) return false
+    await api.closeConversation(conversationId)
+    if (!scope.current()) return false
+    const updated = await api.conversations(scope.worldId)
+    if (!scope.current()) return false
+    conversations.value = updated
+    notify('会话已关闭', '', 'success')
+    return true
   }
   async function deleteConversation() {
     if (!selectedConversationId.value || !selectedWorldId.value) return false
@@ -707,6 +798,9 @@ export function useWorkspace() {
     catchingUp = false,
   ) {
     if (selectedConversationId.value !== conversationId) throw new DOMException('会话已切换', 'AbortError')
+    const conversation = selectedConversation.value
+    const characterScope = conversation?.mode === 'chat' ? characterData.capture(conversation.userWorldId) : null
+    const revision = conversationRevision
     disconnectGeneration()
     const connection = { conversationId, requestId: clientRequestId, controller: new AbortController() }
     generationConnection = connection
@@ -720,6 +814,9 @@ export function useWorkspace() {
     let failed = false
     let terminal = false
     let completed = false
+    let accepted = false
+    let resumed = catchingUp
+    let rejectedBeforeAcceptance = false
     try {
       await followGeneration<GroupChatEvent>({
         signal: connection.controller.signal,
@@ -727,16 +824,23 @@ export function useWorkspace() {
         resume: (receive, after, signal) => streamGroupGeneration.resume(conversationId, clientRequestId, receive, after, signal),
         sequence: event => event.eventSequence,
         terminal: event => ['generation.failed', 'generation.completed', 'turn.completed', 'turn.waiting_input', 'turn.paused'].includes(event.eventType),
-        onResume: () => { catchingUpGenerationId = clientRequestId },
+        onResume: () => { catchingUpGenerationId = clientRequestId; resumed = true },
         receive: (event) => {
-          if (event.eventType === 'generation.failed') failed = true
+          // Failure traces carry the accepted turn ID even when a model fails.
+          accepted ||= event.eventType === 'turn.accepted' || event.turnId != null
+          if (event.eventType === 'generation.failed') {
+            failed = true
+            // A reconnect may only return a completion marker without turn metadata.
+            // Its absence is evidence of rejection only on the original stream.
+            rejectedBeforeAcceptance ||= !accepted && !resumed
+          }
           if (event.eventType === 'generation.completed') completed = true
           if (['generation.failed', 'generation.completed', 'turn.completed', 'turn.waiting_input', 'turn.paused'].includes(event.eventType)) terminal = true
           if (selectedConversationId.value === conversationId) applyEvent(event)
         },
       })
       if (terminal) forgetGeneration(conversationId, clientRequestId)
-      return { failed, terminal, completed }
+      return { failed, terminal, completed, rejectedBeforeAcceptance: rejectedBeforeAcceptance && !accepted }
     } catch (error) {
       if (error instanceof GenerationStartRejected) forgetGeneration(conversationId, clientRequestId)
       throw error
@@ -744,6 +848,16 @@ export function useWorkspace() {
       if (generationConnection === connection) {
         generationConnection = null
         catchingUpGenerationId = null
+      }
+      // Completed steps can update favor and user notes even if a later reply failed.
+      // Keep this independent of history synchronization and send error recovery.
+      if (terminal && characterScope?.current()) {
+        try { await reloadCharacters(characterScope) }
+        catch (error) {
+          if (characterScope.current() && selectedConversationId.value === conversationId && conversationRevision === revision) {
+            notify('角色资料刷新失败', errorMessage(error), 'danger')
+          }
+        }
       }
     }
   }
@@ -1007,11 +1121,12 @@ export function useWorkspace() {
     await scrollToBottom()
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
+      let result: Awaited<ReturnType<typeof consumeGeneration>>
       if (conversation.mode === 'trpg') {
         const turn = currentTurn.value
         if (!turn?.stepId) throw new Error('当前行动轮状态已变化，请重试')
         const { turnId, stepId } = turn
-        await consumeGeneration(
+        result = await consumeGeneration(
           conversation.id,
           clientRequestId,
           (onEvent, signal) => streamTrpgTurn.message(
@@ -1021,7 +1136,7 @@ export function useWorkspace() {
       } else if (manualChat) {
         const turn = currentTurn.value
         if (!turn?.stepId) throw new Error('当前人工接管步骤已变化，请重试')
-        await consumeGeneration(
+        result = await consumeGeneration(
           conversation.id,
           clientRequestId,
           (onEvent, signal) => streamManualGroupMessage(
@@ -1030,12 +1145,18 @@ export function useWorkspace() {
           ),
         )
       } else {
-        await consumeGeneration(
+        result = await consumeGeneration(
           conversation.id,
           clientRequestId,
           (onEvent, signal) => streamGroupMessage(
             conversation.id, { clientRequestId, content }, onEvent, signal),
         )
+      }
+      if (result.rejectedBeforeAcceptance) {
+        restoreInput()
+        if (selectedConversationId.value === conversation.id && conversationRevision === revision) {
+          messages.value = messages.value.filter(message => message.id !== optimisticId)
+        }
       }
       try {
         await syncConversationState(conversation)

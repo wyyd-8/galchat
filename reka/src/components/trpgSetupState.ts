@@ -1,5 +1,7 @@
 import type { InvestigatorCardSummary } from '../api/types.ts'
 
+export const MAX_GROUP_CHARACTERS = 10
+
 export interface ParticipantSelection {
   selectedIds: number[]
   previewId: number | null
@@ -96,6 +98,7 @@ export function toggleParticipantSelection(
       previewId,
     }
   }
+  if (selectedIds.length >= MAX_GROUP_CHARACTERS) return { selectedIds, previewId }
   return {
     selectedIds: [...selectedIds, clickedId],
     previewId,

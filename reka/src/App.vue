@@ -34,7 +34,7 @@ import type {
 import { useDirectChat } from '@/composables/useDirectChat'
 import { errorMessage, notify } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
-import { canCreateTrpgRun, hasMissingBindings } from '@/components/trpgSetupState'
+import { MAX_GROUP_CHARACTERS, canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
 import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
 import { mergeAutoAdvanceDiceSummaryIds } from '@/components/trpgTurnExperiments'
 import GenerationErrorDialog from '@/components/GenerationErrorDialog.vue'
@@ -62,6 +62,8 @@ const directSettingsSaving = ref(false)
 const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters, saveCharacterModel: workspace.saveCharacterModel, settingsSaving: directSettingsSaving })
 const authOpen = ref(!workspace.isLoggedIn.value)
 const view = ref<'library' | 'modules' | 'world' | 'group' | 'direct' | 'profile'>('library')
+let viewRevision = 0
+watch([view, () => direct.selectedCharacter.value?.characterId], () => { viewRevision++ }, { flush: 'sync' })
 const { isMobile } = useMobileViewport()
 const { online } = useVisualViewport()
 // Register before child dialogs so Back dismisses their top layer first.
@@ -165,7 +167,8 @@ function archiveCompletion() { view.value = 'world' }
 async function skipCompletion() {
   if (completionBusy.value || workspace.loading.sending) return
   completionBusy.value = true
-  try { await workspace.closeConversation(); view.value = 'world' }
+  const revision = viewRevision
+  try { if (await workspace.closeConversation() && revision === viewRevision) view.value = 'world' }
   catch (error) { completionError.value = errorMessage(error) }
   finally { completionBusy.value = false }
 }
@@ -591,7 +594,13 @@ watch(() => dialogs.template, async (open, wasOpen) => {
 async function run(action: () => Promise<unknown>, close?: keyof typeof dialogs) {
   if (busy.value) return false
   busy.value = true
-  try { await action(); if (close) dialogs[close] = false; return true }
+  const revision = viewRevision
+  try {
+    const result = await action()
+    if (result === false || revision !== viewRevision) return false
+    if (close) dialogs[close] = false
+    return true
+  }
   catch (error) { notify('操作失败', errorMessage(error), 'danger'); return false }
   finally { busy.value = false }
 }
@@ -600,9 +609,7 @@ function openConversationDelete() {
   dialogs.deleteConversation = true
 }
 async function permanentlyDeleteConversation() {
-  await run(async () => {
-    if (await workspace.deleteConversation()) view.value = 'world'
-  }, 'deleteConversation')
+  if (await run(workspace.deleteConversation, 'deleteConversation')) view.value = 'world'
 }
 async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) {
   const authenticated = await run(async () => { await workspace.authenticate(payload); authOpen.value = false })
@@ -641,8 +648,9 @@ async function openDirectChat(id: number) {
 function closeDirectChat() { direct.close(); view.value = 'world' }
 async function loadWorldSnapshot() {
   const worldId = workspace.selectedWorldId.value
-  await workspace.loadSnapshot()
+  const current = await workspace.loadSnapshot()
   if (worldId != null) direct.invalidateWorld(worldId)
+  return current
 }
 async function restoreTrpg() { const id = workspace.selectedConversationId.value; if (id) await workspace.selectConversation(id) }
 async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
@@ -676,22 +684,22 @@ function setConversationMode(mode: 'chat' | 'trpg') {
   conversationForm.characterIds = []
 }
 async function createNormalConversation() {
-  const success = await run(() => workspace.createConversation({
+  const success = await run(async () => Boolean(await workspace.createConversation({
     title: conversationForm.title,
     mode: 'chat',
     characterIds: conversationForm.characterIds,
-  }))
+  })))
   if (!success) return
   dialogs.conversation = false
   view.value = 'group'
 }
 async function createTrpgConversation() {
-  const success = await run(() => workspace.createConversation({
+  const success = await run(async () => Boolean(await workspace.createConversation({
     title: conversationForm.title,
     mode: 'trpg',
     moduleId: Number(conversationForm.moduleId),
     characterIds: conversationForm.characterIds,
-  }))
+  })))
   if (!success) return
   dialogs.conversation = false
   trpgBindingTargetKey.value = null
@@ -820,7 +828,7 @@ async function removeDirectCharacter() {
   } catch (error) { notify('移出角色失败', errorMessage(error), 'danger') }
   finally { directCharacterRemoving.value = false }
 }
-async function removeDetail(id?: number) { if (id) await workspace.removeDetail(id) }
+async function removeDetail(id?: number) { return id ? workspace.removeDetail(id) : false }
 function clearDetailForm() {
   detailForm.about = ''
   detailForm.details = ''
@@ -854,7 +862,8 @@ async function addWorldDetail() {
 async function saveTemplate() {
   if (uploading.world) return
   const payload = { ...templateForm, name: templateForm.name.trim(), background: templateForm.background?.trim() }
-  if (templateMode.value === 'edit') await workspace.updateTemplate(payload); else await workspace.createTemplate(payload)
+  if (templateMode.value === 'edit') return workspace.updateTemplate(payload)
+  return workspace.createTemplate(payload)
 }
 async function importWorld(file: File) { await run(async () => { const archive = JSON.parse(await file.text()) as WorldArchive; const result = await api.importWorld(archive); await workspace.loadTemplates(); notify('模板导入完成', `${result.name} · ${result.characterCount} 位角色`, 'success') }) }
 async function finishTemplateReplacement(result: WorldArchiveReplaceResult) {
@@ -1081,7 +1090,11 @@ async function changePassword() {
       <label class="field"><span>标题</span><input v-model.trim="conversationForm.title" placeholder="例如：深夜图书馆" /></label>
       <section v-if="isMobile && conversationForm.mode === 'trpg'" class="mobile-selected-module"><div class="mobile-v1-section"><h3>选择模组</h3></div><div class="mobile-v1-card"><span class="eyebrow">{{ selectedConversationFormModule ? '已选模组' : '跑团模组' }}</span><h2>{{ selectedConversationFormModule?.name || '选择一个故事' }}</h2><p v-if="selectedConversationFormModule" class="mobile-module-summary">{{ selectedConversationFormModule.introduction }}</p><button class="button secondary mobile-v1-wide" @click="mobileModulePicker = true">{{ selectedConversationFormModule ? '更换模组' : '选择模组' }}</button></div><p class="mobile-v1-notice">下一步选择参与角色。创建后，为调查员绑定人物卡。</p></section>
       <label v-else-if="conversationForm.mode === 'trpg'" class="field"><span>跑团模组</span><select v-model="conversationForm.moduleId"><option value="">请选择可用模组</option><option v-for="item in workspace.modules.value" :key="item.id" :value="String(item.id)">{{ item.name }}{{ item.era ? ` · ${item.era}` : '' }}</option></select><small v-if="selectedConversationFormModule">{{ selectedConversationFormModule.author || '作者未标注' }} · {{ selectedConversationFormModule.playerCount || '人数未标注' }} · {{ selectedConversationFormModule.estimatedDuration || '时长未标注' }}<br />{{ selectedConversationFormModule.introduction }}</small><small v-else-if="!workspace.modules.value.length">当前没有可选的公开模组。</small></label>
-      <div v-if="conversationForm.mode === 'chat'" class="field"><span>参与角色</span><div class="check-grid"><label v-for="item in workspace.characters.value" :key="item.characterId" class="check-card"><input v-model="conversationForm.characterIds" type="checkbox" :value="item.characterId" /><span class="reply-avatar" :style="item.characterImage ? { backgroundImage: `url(${item.characterImage})` } : {}">{{ item.characterImage ? '' : item.characterName.slice(0,1) }}</span><strong>{{ item.characterName }}</strong></label></div></div>
+      <div v-if="conversationForm.mode === 'chat'" class="field">
+        <span>参与角色 · 已选 {{ conversationForm.characterIds.length }} / {{ MAX_GROUP_CHARACTERS }} 位</span>
+        <small role="status">{{ conversationForm.characterIds.length >= MAX_GROUP_CHARACTERS ? '已达上限，请先取消一位角色再选择其他角色。' : `最多选择 ${MAX_GROUP_CHARACTERS} 位角色。` }}</small>
+        <div class="check-grid"><label v-for="item in workspace.characters.value" :key="item.characterId" class="check-card"><input type="checkbox" :checked="conversationForm.characterIds.includes(item.characterId)" :disabled="busy || (conversationForm.characterIds.length >= MAX_GROUP_CHARACTERS && !conversationForm.characterIds.includes(item.characterId))" @change="conversationForm.characterIds = toggleParticipantSelection(conversationForm.characterIds, null, item.characterId).selectedIds" /><span class="reply-avatar" :style="item.characterImage ? { backgroundImage: `url(${item.characterImage})` } : {}">{{ item.characterImage ? '' : item.characterName.slice(0,1) }}</span><strong>{{ item.characterName }}</strong></label></div>
+      </div>
     </div>
 
     <TrpgParticipantPicker

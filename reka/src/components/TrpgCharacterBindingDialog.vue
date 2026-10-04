@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onScopeDispose, ref, watch } from 'vue'
 import {
   ArrowDown, ArrowLeft, ArrowUp, BookOpenCheck, BookUser, Check, ChevronDown,
   ChevronUp, CircleCheck, ClipboardCheck, Dices, Fingerprint, LoaderCircle,
@@ -76,6 +76,21 @@ const selectedCreationMethod = ref<CharacterCardCreationMethod | null>(null)
 const diceOpen = ref(false)
 const diceRequest = ref<DicePlaybackRequest | null>(null)
 const diceRequestId = ref(0)
+// A dialog reopening is a new owner, even when the run and investigator are unchanged.
+let dialogRevision = 0
+let targetRevision = 0
+let disposed = false
+watch(selectedKey, () => { targetRevision++ }, { flush: 'sync' })
+onScopeDispose(() => { disposed = true })
+function captureBinding() {
+  const dialog = dialogRevision
+  const target = targetRevision
+  const runId = props.conversation?.id
+  return {
+    runId,
+    current: () => !disposed && open.value && dialog === dialogRevision && target === targetRevision,
+  }
+}
 const autoReviewSection = ref<'OVERVIEW' | 'SKILLS' | 'BACKGROUND'>('OVERVIEW')
 const selectedSheetTab = ref('skills')
 const selectedProfileTab = ref('background')
@@ -190,6 +205,8 @@ function characterName(participantId?: number) {
 }
 
 async function loadSelectedCard() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   importGuideOpen.value = false
   confirmDelete.value = false
   cardText.value = importDrafts.get(selectedKey.value) || ''
@@ -197,10 +214,11 @@ async function loadSelectedCard() {
   const content = await loadBindingTargetContent(
     selectedTarget.value,
     (cardId) => api.characterCardById(cardId),
-    (participantId) => props.conversation
-      ? api.activeCharacterCardDraft(props.conversation.id, participantId)
+    (participantId) => scope.runId != null
+      ? api.activeCharacterCardDraft(scope.runId, participantId)
       : Promise.resolve(null),
   )
+  if (!scope.current()) return
   card.value = content.card
   draft.value = content.draft
   selectedCreationMethod.value = content.draft?.creationMode === 'STEP_STANDARD'
@@ -214,12 +232,15 @@ function requestId() {
 }
 
 async function generateCard() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   if (!props.conversation || !selectedTarget.value?.participantId) return
   const generated = await api.createAutoCharacterCardDraft({
     runId: props.conversation.id,
     participantId: selectedTarget.value.participantId,
     requestId: requestId(),
   })
+  if (!scope.current()) return
   draft.value = generated
   autoReviewSection.value = 'OVERVIEW'
   playAutoDice(generated)
@@ -242,48 +263,64 @@ function playAutoDice(nextDraft: CharacterCardCreationDraft) {
 }
 
 async function regenerateCard() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   if (!draft.value) return
   const regenerated = await api.regenerateCharacterCardDraft(draft.value.draftId, {
     requestId: requestId(),
     expectedVersion: draft.value.version,
   })
+  if (!scope.current()) return
   draft.value = regenerated
   playAutoDice(regenerated)
 }
 
 async function rewriteBackground() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   if (!draft.value) return
   const rewritten = await api.rewriteCharacterCardBackground(draft.value.draftId, {
     requestId: requestId(),
     expectedVersion: draft.value.version,
   })
+  if (!scope.current()) return
   draft.value = rewritten
 }
 
 async function abandonAutoDraft() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   if (!draft.value) {
     selectedCreationMethod.value = null
     return
   }
   await api.abandonCharacterCardDraft(draft.value.draftId, draft.value.version)
+  if (!scope.current()) return
   draft.value = null
   selectedCreationMethod.value = null
 }
 
 async function confirmGeneratedCard() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   if (!draft.value) return
   await api.completeCharacterCardDraft(draft.value.draftId, {
     requestId: requestId(),
     expectedVersion: draft.value.version,
   })
+  if (!scope.current()) return
   draft.value = null
   await refreshCards()
+  if (!scope.current()) return
   notify('人物卡已生成并绑定', selectedName.value, 'success')
 }
 
 async function refreshCards(selectFirstMissing = false) {
-  if (!props.conversation) return
-  cards.value = await api.investigatorCards(props.conversation.id)
+  const scope = captureBinding()
+  if (!scope.current() || scope.runId == null) return
+  const loadedCards = await api.investigatorCards(scope.runId)
+  if (!scope.current()) return
+  cards.value = loadedCards
   if (selectFirstMissing) {
     const nextTargets = buildBindingTargets(props.participantIds, cards.value)
     const requestedTarget = nextTargets.find((target) => target.key === props.requestedTargetKey
@@ -292,7 +329,9 @@ async function refreshCards(selectFirstMissing = false) {
       || nextTargets.find((target) => target.boundCardId === undefined)?.key
       || 'player'
   }
+  const selectedScope = captureBinding()
   await loadSelectedCard()
+  if (!selectedScope.current()) return
   if (selectFirstMissing && !card.value && !draft.value && props.requestedCreationMethod) {
     const requestedMethod = creationMethods.value.find((method) => method.id === props.requestedCreationMethod)
     if (requestedMethod?.enabled) selectedCreationMethod.value = requestedMethod.id
@@ -300,14 +339,16 @@ async function refreshCards(selectFirstMissing = false) {
 }
 
 async function execute(action: () => Promise<void>) {
-  if (busy.value) return
+  if (busy.value || !open.value || disposed) return
+  const revision = dialogRevision
+  const current = () => !disposed && open.value && revision === dialogRevision
   busy.value = true
   try {
     await action()
   } catch (error) {
-    notify('人物卡绑定失败', errorMessage(error), 'danger')
+    if (current()) notify('人物卡绑定失败', errorMessage(error), 'danger')
   } finally {
-    busy.value = false
+    if (current()) busy.value = false
   }
 }
 
@@ -339,13 +380,17 @@ async function selectTarget(key: string) {
 }
 
 async function bindCard() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   if (!props.conversation || !selectedTarget.value || !cardText.value.trim()) return
   const importedCard = await api.createCharacterCard({
     runId: props.conversation.id,
     participantId: selectedTarget.value.participantId,
     characterText: cardText.value.trim(),
   })
+  // Finish initializing the card already created on the server, even if its dialog has closed.
   const luckResult = await api.rollCharacterLuck(importedCard.character.id)
+  if (!scope.current()) return
   const playback = buildImportedCharacterLuckDicePlayback(
     luckResult,
     importedCard.character.name,
@@ -356,25 +401,33 @@ async function bindCard() {
   diceRequest.value = playback
   diceOpen.value = true
   await refreshCards()
+  if (!scope.current()) return
   selectedCreationMethod.value = null
   notify('人物卡已绑定并生成幸运', selectedName.value, 'success')
 }
 
 async function completeStepwiseCard() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   draft.value = null
   selectedCreationMethod.value = null
   await refreshCards()
+  if (!scope.current()) return
   notify('人物卡已生成并绑定', selectedName.value, 'success')
 }
 
 async function removeCard() {
+  const scope = captureBinding()
+  if (!scope.current()) return
   if (!card.value) return
   if (!confirmDelete.value) {
     confirmDelete.value = true
     return
   }
   await api.deleteCharacterCard(card.value.character.id)
+  if (!scope.current()) return
   await refreshCards()
+  if (!scope.current()) return
   notify('人物卡已解除绑定', selectedName.value, 'success')
 }
 
@@ -384,32 +437,36 @@ function finish() {
   emit('complete')
 }
 
-watch(open, (visible) => {
-  if (visible) {
-    mobileDetailOpen.value = Boolean(props.requestedTargetKey || props.requestedCreationMethod)
-    mobileQueueTrigger = null
-    mobileQueueScroll = 0
-    void execute(() => refreshCards(true))
-  }
-  else {
-    rememberImportDraft()
-    importGuideOpen.value = false
-    selectedSkillGroup.value = null
-    skillPanelExpanded.value = false
-    skillSearchQuery.value = ''
-    skillSortMode.value = 'default'
-    skillSortDirection.value = 'asc'
-  }
-}, { immediate: true })
-watch(() => props.conversation?.id, () => {
-  importDrafts.clear()
-  mobileDetailOpen.value = false
-  selectedKey.value = 'player'
+watch([open, () => props.conversation?.id], ([visible, runId], previous) => {
+  dialogRevision++
+  busy.value = false
+  wizardBusy.value = false
+  if (runId !== previous?.[1]) {
+    importDrafts.clear()
+    selectedKey.value = 'player'
+  } else if (!visible) rememberImportDraft()
   cards.value = []
   card.value = null
   draft.value = null
   selectedCreationMethod.value = null
-})
+  cardText.value = ''
+  diceOpen.value = false
+  diceRequest.value = null
+  importGuideOpen.value = false
+  mobileDetailOpen.value = false
+  selectedSkillGroup.value = null
+  skillPanelExpanded.value = false
+  skillSearchQuery.value = ''
+  skillSortMode.value = 'default'
+  skillSortDirection.value = 'asc'
+}, { flush: 'sync' })
+watch([open, () => props.conversation?.id], ([visible]) => {
+  if (!visible) return
+  mobileDetailOpen.value = Boolean(props.requestedTargetKey || props.requestedCreationMethod)
+  mobileQueueTrigger = null
+  mobileQueueScroll = 0
+  void execute(() => refreshCards(true))
+}, { immediate: true })
 </script>
 
 <template>
@@ -476,6 +533,7 @@ watch(() => props.conversation?.id, () => {
           v-else-if="selectedCreationMethod === 'STEP' || draft?.creationMode === 'STEP_STANDARD'"
           :key="`${conversation?.id}:${selectedKey}`"
           v-model:draft="draft"
+          :active="open"
           :run-id="conversation!.id"
           :participant-id="selectedTarget?.participantId"
           :default-name="selectedCharacter?.characterName"

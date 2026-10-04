@@ -30,4 +30,12 @@ test('participant picker keeps selection available while history loads and rende
   const solo = await render([], [])
   assert.match(solo, /单人团/)
   assert.doesNotMatch(solo, /type="checkbox"/)
+  const full = await render(Array.from({ length: 11 }, (_, index) => ({
+    characterId: index + 1, characterName: `同伴${index + 1}`,
+  })), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  const choices = full.match(/<input[^>]*type="checkbox"[^>]*>/g) || []
+  assert.equal(choices.length, 11)
+  assert.ok(choices.slice(0, 10).every(choice => !choice.includes('disabled')))
+  assert.match(choices[10]!, /disabled/)
+  assert.match(full, /已达上限/)
 })

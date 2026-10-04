@@ -5,7 +5,7 @@ import { api } from '@/api/client'
 import { useMobileViewport } from '@/composables/useMobileViewport'
 import type { Character } from '@/api/types'
 import { createParticipantHistory, formatCompanionDate } from './trpgParticipantHistory'
-import { toggleParticipantSelection } from './trpgSetupState'
+import { MAX_GROUP_CHARACTERS, toggleParticipantSelection } from './trpgSetupState'
 
 const props = defineProps<{ worldId: number | null; characters: Character[]; busy: boolean }>()
 const emit = defineEmits<{ 'detail-open-change': [open: boolean] }>()
@@ -19,6 +19,10 @@ const detailHeading = ref<HTMLElement | null>(null)
 let listScroll: { element: HTMLElement; top: number }[] = []
 let inspectButton: HTMLElement | null = null
 const selectedIds = defineModel<number[]>({ required: true })
+const atLimit = computed(() => selectedIds.value.length >= MAX_GROUP_CHARACTERS)
+function selectionDisabled(id: number) {
+  return props.busy || (atLimit.value && !selectedIds.value.includes(id))
+}
 const previewId = ref<number | null>(props.characters[0]?.characterId ?? null)
 const preview = computed(() => props.characters.find(character => character.characterId === previewId.value) ?? null)
 const history = createParticipantHistory(api)
@@ -52,7 +56,7 @@ async function returnToList() {
   inspectButton?.focus({ preventScroll: true })
 }
 function toggleAndReturn() {
-  if (previewId.value == null || props.busy) return
+  if (previewId.value == null || selectionDisabled(previewId.value)) return
   toggleCharacter(previewId.value)
   void returnToList()
 }
@@ -86,7 +90,8 @@ onUnmounted(() => { history.dispose(); emit('detail-open-change', false) })
     <div ref="detailScroller" class="companion-columns">
       <section v-show="!showingDetail" class="companion-roster" aria-label="可选 AI 同伴">
         <div v-if="isMobile" class="companion-mobile-intro"><small>INVESTIGATORS</small><h1>这次，和谁同行？</h1><p>可以多选，也可以独自开始。</p></div>
-        <header class="companion-roster-heading"><h3>{{ isMobile ? 'AI 调查员' : '选择 AI 同伴' }}</h3><span aria-live="polite">已选 {{ selectedIds.length }} 位</span></header>
+        <header class="companion-roster-heading"><h3>{{ isMobile ? 'AI 调查员' : '选择 AI 同伴' }}</h3><span aria-live="polite">已选 {{ selectedIds.length }} / {{ MAX_GROUP_CHARACTERS }} 位</span></header>
+        <p class="companion-help" role="status">{{ atLimit ? '已达上限，请先取消一位角色再选择其他角色。' : `最多选择 ${MAX_GROUP_CHARACTERS} 位角色。` }}</p>
         <p v-if="!isMobile" class="companion-help">可多选，也可以独自开始。</p>
         <div v-if="characters.length" class="companion-choices">
           <div v-for="character in characters" :key="character.characterId" class="companion-choice" :class="{ viewed: previewId === character.characterId, selected: selectedIds.includes(character.characterId) }">
@@ -101,7 +106,7 @@ onUnmounted(() => { history.dispose(); emit('detail-open-change', false) })
                 <small v-if="isMobile">查看同行档案 ›</small>
               </span>
             </button>
-            <label class="companion-select"><input type="checkbox" :checked="selectedIds.includes(character.characterId)" :disabled="busy" :aria-label="`选择${character.characterName}加入本次跑团`" @change="toggleCharacter(character.characterId)" /></label>
+            <label class="companion-select"><input type="checkbox" :checked="selectedIds.includes(character.characterId)" :disabled="selectionDisabled(character.characterId)" :aria-label="`选择${character.characterName}加入本次跑团`" @change="toggleCharacter(character.characterId)" /></label>
           </div>
         </div>
         <p v-else class="companion-empty">当前世界还没有可选角色。你仍可以独自开始单人团。</p>
@@ -143,8 +148,8 @@ onUnmounted(() => { history.dispose(); emit('detail-open-change', false) })
       </section>
     </div>
     <footer v-if="showingDetail && preview" class="companion-mobile-actions">
-      <span>{{ selectedIds.includes(preview.characterId) ? '已加入本次同行' : '尚未加入本次同行' }}</span>
-      <button type="button" class="button primary" :disabled="busy" @click="toggleAndReturn">{{ selectedIds.includes(preview.characterId) ? '移出队伍并返回' : '加入同行并返回' }}</button>
+      <span>{{ selectedIds.includes(preview.characterId) ? '已加入本次同行' : atLimit ? '已达 10 位角色上限，请先移出一位同伴。' : '尚未加入本次同行' }}</span>
+      <button type="button" class="button primary" :disabled="selectionDisabled(preview.characterId)" @click="toggleAndReturn">{{ selectedIds.includes(preview.characterId) ? '移出队伍并返回' : '加入同行并返回' }}</button>
     </footer>
   </div>
 </template>

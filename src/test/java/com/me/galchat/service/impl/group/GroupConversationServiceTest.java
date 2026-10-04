@@ -37,6 +37,46 @@ import static org.mockito.Mockito.when;
 
 class GroupConversationServiceTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"chat", "trpg"})
+    void creationLimitsBothModesToTenDistinctCharacters(String mode) {
+        GroupConversationMapper conversations = mock(GroupConversationMapper.class);
+        GroupChatMemberMapper members = mock(GroupChatMemberMapper.class);
+        IUserWorldPrefixService worlds = mock(IUserWorldPrefixService.class);
+        IUserCharacterInfoService characters = mock(IUserCharacterInfoService.class);
+        GroupConversationLockService locks = mock(GroupConversationLockService.class);
+        CocModuleMapper modules = mock(CocModuleMapper.class);
+        CocModuleLockService moduleLocks = mock(CocModuleLockService.class);
+        GroupConversationService service = new GroupConversationService(
+                mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class),
+                mock(com.me.galchat.mapper.TrpgCompletionMapper.class), conversations, members,
+                mock(GroupChatMessageMapper.class), mock(GroupReplyPlanMapper.class),
+                mock(GroupReplyPlanItemMapper.class), worlds, characters, locks, modules, moduleLocks,
+                mock(CocModuleCharacterInstantiationService.class));
+        when(worlds.checkUserWorldAuth(1L, true)).thenReturn(new UserWorldPrefix().setId(1L).setWorldId(10L));
+        when(locks.tryWorldLock(1L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        when(moduleLocks.tryReadLock(3L)).thenReturn(new CocModuleLockService.OwnedLock(mock(RLock.class), 1L));
+        when(modules.selectById(3L)).thenReturn(new CocModule().setId(3L).setVisible(true));
+        List<Long> eleven = java.util.stream.LongStream.rangeClosed(1, 11).boxed().toList();
+        when(characters.listByUserWorldId(1L)).thenReturn(eleven.stream()
+                .map(id -> new UserCharacterInfo().setCharacterId(id)).toList());
+        GroupConversationCreateDTO request = new GroupConversationCreateDTO();
+        request.setUserWorldId(1L);
+        request.setMode(mode);
+        if ("trpg".equals(mode)) request.setModuleId(3L);
+        request.setCharacterIds(eleven);
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(UserRequestException.class).hasMessageContaining("10");
+        verify(conversations, never()).insert(any(GroupConversation.class));
+        verify(members, never()).insert(any(GroupChatMember.class));
+
+        // Duplicate IDs must not consume additional places.
+        request.setCharacterIds(List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 10L));
+        assertThat(service.create(request).getMode()).isEqualTo(mode);
+        verify(members, org.mockito.Mockito.times(10)).insert(any(GroupChatMember.class));
+    }
+
     @Test
     void createTrpgConversationRejectsPrivateModuleOwnedByAnotherUser() {
         GroupConversationMapper conversationMapper =

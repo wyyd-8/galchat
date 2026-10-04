@@ -42,6 +42,17 @@ test('deselecting an investigator preserves the viewed profile', () => {
   assert.deepEqual(result, { selectedIds: [22], previewId: 22 })
 })
 
+test('selection stops at ten characters and permits removing and replacing one', () => {
+  const nine = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  const ten = toggleParticipantSelection(nine, 11, 10)
+  assert.deepEqual(ten.selectedIds, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  assert.deepEqual(toggleParticipantSelection(ten.selectedIds, 11, 11), ten)
+  const removed = toggleParticipantSelection(ten.selectedIds, 11, 10)
+  assert.deepEqual(removed.selectedIds, nine)
+  assert.deepEqual(toggleParticipantSelection(removed.selectedIds, 11, 11).selectedIds,
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 11])
+})
+
 test('builds one player target followed by only the selected AI investigators', () => {
   const targets = buildBindingTargets([11, 22], [card(101, 'PLAYER'), card(102, 'BOT', 22)])
 

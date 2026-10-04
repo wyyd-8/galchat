@@ -155,6 +155,10 @@ public class GroupConversationService {
                 .filter(id -> id != null)
                 .distinct()
                 .toList();
+        if (distinctCharacterIds.size() > GroupChatConstant.MAX_GROUP_CHARACTERS) {
+            throw new UserRequestException("普通群聊和跑团最多选择"
+                    + GroupChatConstant.MAX_GROUP_CHARACTERS + "位角色");
+        }
         if (GroupChatConstant.MODE_CHAT.equals(mode)
                 && CollectionUtils.isEmpty(distinctCharacterIds)) {
             throw new UserRequestException("群聊参与角色不能为空");

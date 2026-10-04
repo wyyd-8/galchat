@@ -21,12 +21,41 @@ import static org.mockito.Mockito.when;
 
 class GroupTurnRecoveryServiceTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "trpg_scene_action,waiting_interaction", "combat_adjudicate,waiting_interaction",
+            "combat_reaction_route,completed", "combat_reaction_route,running"
+    })
+    void crashAfterCommittedQuestionKeepsAnswerRetryable(String action, String status) {
+        var checkpoints = mock(com.me.galchat.mapper.GroupTurnCheckpointMapper.class);
+        var turns = mock(GroupChatTurnMapper.class);
+        var steps = mock(GroupChatReplyStepMapper.class);
+        var messages = mock(GroupChatMessageMapper.class);
+        var service = new GroupTurnRecoveryService(checkpoints, turns, steps, messages);
+        when(turns.selectList(any())).thenReturn(List.of(new GroupChatTurn().setId(10L)
+                .setStatus(GroupChatConstant.STATUS_RUNNING)));
+        when(checkpoints.selectById(7L)).thenReturn(new com.me.galchat.domain.po.GroupTurnCheckpoint()
+                .setTurnId(10L).setReplyStepId(12L).setCheckpointType("INTERACTION_COMMITTED"));
+        var source = new GroupChatReplyStep().setId(12L).setTurnId(10L).setStepNo(2)
+                .setActionType(action).setStatus(status);
+        when(steps.selectById(12L)).thenReturn(source);
+
+        service.recoverInterrupted(7L);
+
+        assertThat(source.getStatus()).isEqualTo(GroupChatConstant.STATUS_FAILED);
+        verify(steps).updateById(source);
+        var writes = org.mockito.ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(steps, times(2)).update(writes.capture(), any(Wrapper.class));
+        assertThat(writes.getAllValues()).extracting(GroupChatReplyStep::getStatus)
+                .containsExactly(GroupChatConstant.STATUS_FAILED, GroupChatConstant.STATUS_BLOCKED);
+    }
+
     @Test
     void recoveryFailsRunningDataAndCancelsPendingSteps() {
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
         GroupChatReplyStepMapper stepMapper = mock(GroupChatReplyStepMapper.class);
         GroupChatMessageMapper messageMapper = mock(GroupChatMessageMapper.class);
-        GroupTurnRecoveryService service = new GroupTurnRecoveryService(
+        GroupTurnRecoveryService service = new GroupTurnRecoveryService(mock(com.me.galchat.mapper.GroupTurnCheckpointMapper.class),
                 turnMapper, stepMapper, messageMapper);
         when(turnMapper.selectList(any())).thenReturn(List.of(
                 new GroupChatTurn().setId(10L).setStatus(GroupChatConstant.STATUS_RUNNING)));
@@ -55,7 +84,7 @@ class GroupTurnRecoveryServiceTest {
         GroupChatReplyStepMapper stepMapper =
                 mock(GroupChatReplyStepMapper.class);
         GroupTurnRecoveryService service =
-                new GroupTurnRecoveryService(
+                new GroupTurnRecoveryService(mock(com.me.galchat.mapper.GroupTurnCheckpointMapper.class),
                         turnMapper,
                         stepMapper,
                         mock(GroupChatMessageMapper.class));
@@ -92,7 +121,7 @@ class GroupTurnRecoveryServiceTest {
     @Test
     void saveGuardRejectsAnyNonTerminalTurnInWorld() {
         GroupChatTurnMapper turnMapper = mock(GroupChatTurnMapper.class);
-        GroupTurnRecoveryService service = new GroupTurnRecoveryService(
+        GroupTurnRecoveryService service = new GroupTurnRecoveryService(mock(com.me.galchat.mapper.GroupTurnCheckpointMapper.class),
                 turnMapper, mock(GroupChatReplyStepMapper.class), mock(GroupChatMessageMapper.class));
         when(turnMapper.countNonTerminalByUserWorldId(1L)).thenReturn(1L);
 
@@ -106,7 +135,7 @@ class GroupTurnRecoveryServiceTest {
         GroupChatReplyStepMapper stepMapper =
                 mock(GroupChatReplyStepMapper.class);
         GroupTurnRecoveryService service =
-                new GroupTurnRecoveryService(
+                new GroupTurnRecoveryService(mock(com.me.galchat.mapper.GroupTurnCheckpointMapper.class),
                         mock(GroupChatTurnMapper.class),
                         stepMapper,
                         mock(GroupChatMessageMapper.class));

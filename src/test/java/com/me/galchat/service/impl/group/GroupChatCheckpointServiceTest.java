@@ -31,7 +31,7 @@ class GroupChatCheckpointServiceTest {
     final GroupChatReplyStepMapper steps = mock(GroupChatReplyStepMapper.class);
     final GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
     final GroupChatFavorRollbackService favor = mock(GroupChatFavorRollbackService.class);
-    final GroupTurnCheckpointService service = new GroupTurnCheckpointService(checkpoints, messages,
+    final GroupTurnCheckpointService service = new GroupTurnCheckpointService(mock(com.me.galchat.service.impl.group.GroupConversationService.class), checkpoints, messages,
             tools, steps, turns, mock(DiceRollSummaryMapper.class), mock(DiceRollMessageCodec.class),
             mock(ICharacterCardService.class), JsonMapper.builder().build(), favor,
             mock(com.me.galchat.service.impl.trpg.TrpgEquipmentService.class),

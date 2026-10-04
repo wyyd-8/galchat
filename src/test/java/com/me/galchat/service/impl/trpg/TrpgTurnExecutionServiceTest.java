@@ -716,6 +716,147 @@ class TrpgTurnExecutionServiceTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"retry", "continue"})
+    void interactionRetryResumesAnswerBeforeLaterRoot(String entry) {
+        GroupConversationService conversationService =
+                mock(GroupConversationService.class);
+        GroupConversationLockService lockService =
+                mock(GroupConversationLockService.class);
+        GroupTurnPlanResolver planResolver =
+                mock(GroupTurnPlanResolver.class);
+        GroupChatTurnMapper turnMapper =
+                mock(GroupChatTurnMapper.class);
+        GroupChatReplyStepMapper stepMapper =
+                mock(GroupChatReplyStepMapper.class);
+        GroupChatMessageMapper messageMapper =
+                mock(GroupChatMessageMapper.class);
+        GroupChatService groupChatService =
+                mock(GroupChatService.class);
+        GroupAgentDecisionStore decisionStore =
+                mock(GroupAgentDecisionStore.class);
+        GroupTurnCheckpointService checkpointService =
+                mock(GroupTurnCheckpointService.class);
+        TrpgTurnDirectionStore directionStore =
+                mock(TrpgTurnDirectionStore.class);
+        TrpgTurnExecutionService service =
+                new TrpgTurnExecutionService(
+                        conversationService,
+                        lockService,
+                        planResolver,
+                        mock(GroupRuntimeRegistry.class),
+                        turnMapper,
+                        stepMapper,
+                        messageMapper,
+                        mock(GroupTurnRecoveryService.class),
+                        groupChatService,
+                        immediateTransactionTemplate(),
+                        mock(TrpgSceneSelectionService.class),
+                        mock(TrpgSceneLifecycleService.class),
+                        mock(TrpgSceneSelectionStore.class),
+                        mock(TrpgParticipantService.class),
+                        decisionStore,
+                        mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                        mock(com.me.galchat.groupchat.dice
+                                .DiceRollMessageCodec.class),
+                        mock(TrpgCombatLifecycleService.class),
+                        mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                        checkpointService,
+                        mock(TrpgUnconsciousRecoveryService.class),
+                        mock(ITrpgSaveService.class));
+        service.setTurnDirectionStore(directionStore);
+        GroupConversation conversation =
+                new GroupConversation()
+                        .setId(7L)
+                        .setMode(GroupChatConstant.MODE_TRPG)
+                        .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        GroupChatTurn turn = new GroupChatTurn()
+                .setId(101L)
+                .setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE)
+                .setStatus(GroupChatConstant.STATUS_FAILED);
+        GroupChatReplyStep completed =
+                new GroupChatReplyStep()
+                        .setId(102L).setTurnId(101L)
+                        .setStepNo(1)
+                        .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        GroupChatReplyStep failed =
+                new GroupChatReplyStep()
+                        .setId(103L).setTurnId(101L)
+                        .setStepNo(2)
+                        .setActionType(
+                                GroupChatConstant.ACTION_TRPG_SCENE)
+                        .setSpeakerType(
+                                "continue".equals(entry) ? GroupChatConstant.ACTOR_KP
+                                        : GroupChatConstant.ACTOR_CHARACTER)
+                        .setSpeakerId("continue".equals(entry) ? null : 9L)
+                        .setExecutionMode(GroupChatConstant.CONTROL_MODEL)
+                        .setModelApiId(3L)
+                        .setOutputMessageId(203L)
+                        .setStatus(GroupChatConstant.STATUS_FAILED);
+        GroupChatReplyStep blocked =
+                new GroupChatReplyStep()
+                        .setId(104L).setTurnId(101L)
+                        .setStepNo(3)
+                        .setActionType(
+                                GroupChatConstant.ACTION_TRPG_SCENE)
+                        .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                        .setExecutionMode(GroupChatConstant.CONTROL_MODEL)
+                        .setModelApiId(3L)
+                        .setErrorMessage("前序步骤失败")
+                        .setStatus(GroupChatConstant.STATUS_BLOCKED);
+        when(conversationService.requireAuthorized(7L))
+                .thenReturn(conversation);
+        var restoredConversation = new GroupConversation();
+        org.springframework.beans.BeanUtils.copyProperties(conversation, restoredConversation);
+        restoredConversation.setActiveReplyPlanId(null).setGameDayNo(2);
+        when(conversationService.requireActive(7L)).thenReturn(conversation, restoredConversation);
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(
+                        mock(RLock.class), 1L));
+        when(turnMapper.selectById(101L)).thenReturn(turn);
+        when(stepMapper.selectById(103L)).thenReturn(failed);
+        var child = new GroupChatReplyStep().setId(105L).setTurnId(101L).setStepNo(4)
+                .setParentStepId(103L).setRootStepId(103L)
+                .setActionType(GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
+                .setSpeakerType(GroupChatConstant.ACTOR_USER).setSpeakerId(31L)
+                .setStatus(GroupChatConstant.STATUS_BLOCKED);
+        when(stepMapper.selectById(104L)).thenReturn(blocked);
+        when(stepMapper.selectById(105L)).thenReturn(child);
+        when(stepMapper.selectList(any())).thenAnswer(i -> {
+            var query = i.<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<GroupChatReplyStep>>getArgument(0);
+            String sql = query.getSqlSegment();
+            var values = query.getParamNameValuePairs().values();
+            if (values.contains(GroupChatConstant.STATUS_FAILED)) return List.of(failed);
+            if (values.contains(GroupChatConstant.STATUS_BLOCKED)) return List.of(blocked, child);
+            if (sql.contains("parent_step_id IS NULL")) return List.of(failed, blocked);
+            if (sql.contains("parent_step_id =")) return List.of(child);
+            return List.of(blocked, child); // Flat pending-step iteration incorrectly skips the waiting root.
+        });
+        org.mockito.Mockito.doAnswer(i -> {
+            failed.setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
+            turn.setStatus(GroupChatConstant.STATUS_RUNNING);
+            return null;
+        }).when(checkpointService).restore(turn, failed);
+        when(groupChatService.streamPersistedStep(any(), any(), any())).thenReturn(Flux.empty());
+
+        Flux<GroupChatEvent> source;
+        if ("continue".equals(entry)) {
+            when(turnMapper.selectList(any())).thenReturn(List.of(turn));
+            source = service.continueTurn(7L, new GroupTurnContinueDTO());
+        } else {
+            source = service.retry(7L, 101L, 103L);
+        }
+        List<GroupChatEvent> events = source.collectList().block();
+
+        assertThat(events).extracting(GroupChatEvent::getEventType)
+                .containsExactly(GroupChatConstant.EVENT_TURN_ACCEPTED, GroupChatConstant.EVENT_TURN_WAITING_INPUT);
+        verify(groupChatService, never()).streamPersistedStep(any(), any(), any());
+        assertThat(child.getStatus()).isEqualTo(GroupChatConstant.STATUS_WAITING_INPUT);
+        assertThat(failed.getStatus()).isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        assertThat(blocked.getStatus()).isEqualTo(GroupChatConstant.STATUS_PENDING);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"retry", "continue"})
     void retryWithoutCheckpointReportsRecoveryGuidanceWithoutRerunningSteps(String entry) {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
@@ -828,6 +969,74 @@ class TrpgTurnExecutionServiceTest {
         }
         org.mockito.Mockito.verifyNoMoreInteractions(stepMapper, turnMapper);
         verify(lockService).unlock(lock);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"failed", "blocked", "running"})
+    void interruptedCompletedAnswerOffersRollbackWithoutRepeatingTheAnswer(String turnStatus) {
+        var conversations = mock(GroupConversationService.class);
+        var locks = mock(GroupConversationLockService.class);
+        var turns = mock(GroupChatTurnMapper.class);
+        var steps = mock(GroupChatReplyStepMapper.class);
+        var messages = mock(GroupChatMessageMapper.class);
+        var chat = mock(GroupChatService.class);
+        var checkpoints = mock(com.me.galchat.mapper.GroupTurnCheckpointMapper.class);
+        var recovery = new GroupTurnRecoveryService(checkpoints, turns, steps, messages);
+        var service = new TrpgTurnExecutionService(conversations, locks, mock(GroupTurnPlanResolver.class),
+                mock(GroupRuntimeRegistry.class), turns, steps, messages, recovery, chat,
+                immediateTransactionTemplate(), mock(TrpgSceneSelectionService.class),
+                mock(TrpgSceneLifecycleService.class), mock(TrpgSceneSelectionStore.class),
+                mock(TrpgParticipantService.class), mock(GroupAgentDecisionStore.class),
+                mock(com.me.galchat.mapper.DiceRollSummaryMapper.class),
+                mock(com.me.galchat.groupchat.dice.DiceRollMessageCodec.class),
+                mock(TrpgCombatLifecycleService.class), mock(com.me.galchat.mapper.GroupReplyPlanMapper.class),
+                mock(GroupTurnCheckpointService.class), mock(TrpgUnconsciousRecoveryService.class),
+                mock(ITrpgSaveService.class));
+        var conversation = new GroupConversation().setId(7L).setMode(GroupChatConstant.MODE_TRPG)
+                .setStatus(GroupChatConstant.STATUS_ACTIVE);
+        var turn = new GroupChatTurn().setId(101L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE).setStatus(turnStatus);
+        var root = new GroupChatReplyStep().setId(103L).setTurnId(101L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_TRPG_SCENE).setSpeakerType(GroupChatConstant.ACTOR_KP)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        var answer = new GroupChatReplyStep().setId(301L).setTurnId(101L).setStepNo(4)
+                .setParentStepId(103L).setActionType(GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        when(conversations.requireAuthorized(7L)).thenReturn(conversation);
+        when(conversations.requireActive(7L)).thenReturn(conversation);
+        var lock = new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L);
+        when(locks.tryLockWithOwner(7L)).thenReturn(lock);
+        when(turns.selectList(any())).thenReturn(List.of(turn));
+        when(turns.selectById(101L)).thenReturn(turn);
+        when(steps.selectById(103L)).thenReturn(root);
+        when(steps.selectList(any())).thenAnswer(invocation -> {
+            var query = invocation.<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<GroupChatReplyStep>>getArgument(0);
+            String sql = query.getSqlSegment();
+            if (sql.contains("parent_step_id IS NULL")) return List.of(root);
+            if (sql.contains("parent_step_id =")) return List.of(answer);
+            return List.of(); // No running, paused or failed step remains after answer completion.
+        });
+        when(checkpoints.selectById(7L)).thenReturn(new com.me.galchat.domain.po.GroupTurnCheckpoint()
+                .setConversationId(7L).setTurnId(101L).setReplyStepId(301L).setCheckpointType("COMPLETED"));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            turn.setStatus(invocation.<GroupChatTurn>getArgument(0).getStatus());
+            return 1;
+        }).when(turns).update(any(GroupChatTurn.class), any(com.baomidou.mybatisplus.core.conditions.Wrapper.class));
+
+        var events = new com.me.galchat.service.impl.group.GroupGenerationStreamRegistry().start(
+                7L, "completed-answer-recovery", service.continueTurn(7L, new GroupTurnContinueDTO()))
+                .collectList().block();
+
+        var failure = events.stream()
+                .filter(event -> GroupChatConstant.EVENT_GENERATION_FAILED.equals(event.getEventType()))
+                .findFirst().orElseThrow();
+        assertThat(failure.getErrorDetail().getCode()).isEqualTo("TURN_CHECKPOINT_UNAVAILABLE");
+        assertThat(failure.getErrorDetail().getRetryable()).isFalse();
+        assertThat(failure.getError()).contains("回退至上一轮");
+        assertThat(turn.getStatus()).isIn(GroupChatConstant.STATUS_FAILED, GroupChatConstant.STATUS_BLOCKED);
+        assertThat(answer.getStatus()).isEqualTo(GroupChatConstant.STATUS_COMPLETED);
+        verifyNoInteractions(chat);
+        verify(locks).unlock(lock);
     }
 
     @Test

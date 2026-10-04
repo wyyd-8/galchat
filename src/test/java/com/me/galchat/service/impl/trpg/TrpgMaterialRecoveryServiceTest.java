@@ -48,7 +48,7 @@ class TrpgMaterialRecoveryServiceTest {
         var checkpoints = mock(GroupTurnCheckpointMapper.class);
         when(checkpoints.selectById(7L)).thenReturn(new GroupTurnCheckpoint().setTurnId(101L)
                 .setReplyStepId(103L).setCheckpointType("STEP_START").setMessageId(9L).setToolCallId(0L));
-        var service = new GroupTurnCheckpointService(checkpoints, messages, mock(GroupChatToolCallMapper.class),
+        var service = new GroupTurnCheckpointService(mock(com.me.galchat.service.impl.group.GroupConversationService.class), checkpoints, messages, mock(GroupChatToolCallMapper.class),
                 mock(GroupChatReplyStepMapper.class), mock(GroupChatTurnMapper.class), mock(DiceRollSummaryMapper.class),
                 mock(DiceRollMessageCodec.class), mock(ICharacterCardService.class), JsonMapper.builder().build(),
                 mock(GroupChatFavorRollbackService.class), mock(TrpgEquipmentService.class),

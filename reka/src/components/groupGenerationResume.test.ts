@@ -336,7 +336,9 @@ test(`keeps the generation error dialog open after ${scenario || 'normal turn'} 
       assert.equal(workspace.generationFailure.value?.detail.code, 'TURN_CHECKPOINT_UNAVAILABLE')
       assert.equal(workspace.generationFailure.value?.detail.retryable, false)
       assert.equal(workspace.generationFailure.value?.message, '请使用「回退至上一轮」恢复后继续。')
+      await workspace.retryGenerationFailure()
       assert.equal(requestIds.length, 1)
+      assert.equal(workspace.generationFailureOpen.value, true, 'rollback guidance must remain visible')
       return
     }
 

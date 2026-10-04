@@ -10,6 +10,7 @@ import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
 import com.me.galchat.mapper.GroupChatTurnMapper;
+import com.me.galchat.mapper.GroupTurnCheckpointMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +23,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class GroupTurnRecoveryService {
 
+    private final GroupTurnCheckpointMapper checkpointMapper;
     private final GroupChatTurnMapper turnMapper;
     private final GroupChatReplyStepMapper stepMapper;
     private final GroupChatMessageMapper messageMapper;
@@ -60,6 +62,20 @@ public class GroupTurnRecoveryService {
             }
         }
         LocalDateTime now = LocalDateTime.now();
+        var checkpoint = checkpointMapper.selectById(conversationId);
+        if (checkpoint != null
+                && GroupTurnCheckpointService.INTERACTION_COMMITTED.equals(checkpoint.getCheckpointType())
+                && turnIds.contains(checkpoint.getTurnId())) {
+            // The stream can finish before the answer starts. Keep that committed
+            // question recoverable even when its source is waiting or a completed route.
+            GroupChatReplyStep source = stepMapper.selectById(checkpoint.getReplyStepId());
+            if (source != null && checkpoint.getTurnId().equals(source.getTurnId())) {
+                retryableStepNosByTurn.merge(source.getTurnId(), source.getStepNo(), Math::min);
+                source.setStatus(GroupChatConstant.STATUS_FAILED).setErrorMessage("服务中断")
+                        .setUpdatedAt(now);
+                stepMapper.updateById(source);
+            }
+        }
         messageMapper.update(
                 new GroupChatMessage()
                         .setStatus(GroupChatConstant.STATUS_FAILED)

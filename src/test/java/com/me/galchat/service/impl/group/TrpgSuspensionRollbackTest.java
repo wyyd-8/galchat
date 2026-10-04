@@ -42,7 +42,7 @@ class TrpgSuspensionRollbackTest {
     final Map<Long, GroupReplyPlan> scenePlans = new LinkedHashMap<>();
     final Set<String> redisKeys = new HashSet<>();
     @Spy TrpgSceneLifecycleService lifecycle = new TrpgSceneLifecycleService(conversations, steps, turns, plans,
-            items, new GroupTurnRecoveryService(turns, steps, mock(GroupChatMessageMapper.class)), progress,
+            items, new GroupTurnRecoveryService(mock(com.me.galchat.mapper.GroupTurnCheckpointMapper.class), turns, steps, mock(GroupChatMessageMapper.class)), progress,
             mock(TrpgSceneSummaryService.class), mock(GroupReplyPlanService.class),
             mock(TrpgChildScenePlanService.class), mock(TrpgTemporaryInsanityService.class));
     @Spy TrpgInvestigatorSuspensionService suspension = new TrpgInvestigatorSuspensionService(

@@ -25,6 +25,7 @@ import com.me.galchat.domain.vo.GroupCurrentTurnVO;
 import com.me.galchat.domain.vo.GroupCurrentTurnStepVO;
 import com.me.galchat.domain.vo.GroupRouteContextVO;
 import com.me.galchat.exception.UserRequestException;
+import com.me.galchat.exception.TurnCheckpointUnavailableException;
 import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupActorRef;
 import com.me.galchat.groupchat.runtime.GroupModeRuntime;
@@ -281,20 +282,6 @@ public class TrpgTurnExecutionService {
                 });
                 conversation = conversationService.requireActive(conversationId);
                 clearTurnDirection(conversationId);
-                List<GroupChatReplyStep> remaining =
-                        stepMapper.selectList(
-                                new LambdaQueryWrapper<
-                                        GroupChatReplyStep>()
-                                        .eq(GroupChatReplyStep::getTurnId,
-                                                turnId)
-                                        .ge(GroupChatReplyStep::getStepNo,
-                                                failedStep.getStepNo())
-                                        .eq(GroupChatReplyStep::getStatus,
-                                                GroupChatConstant
-                                                        .STATUS_PENDING)
-                                        .orderByAsc(
-                                                GroupChatReplyStep
-                                                        ::getStepNo));
                 Flux<GroupChatEvent> accepted = Flux.just(
                         GroupChatEvent.builder()
                                 .eventType(GroupChatConstant
@@ -304,9 +291,7 @@ public class TrpgTurnExecutionService {
                                 .replyStepId(stepId)
                                 .build());
                 return Flux.concat(accepted,
-                                executeScheduledSteps(
-                                        conversation, turn,
-                                        remaining, 0))
+                                executePendingSteps(conversation, turn))
                         .doOnError(error ->
                                 recoveryService.recoverInterrupted(
                                         conversationId))
@@ -458,8 +443,8 @@ public class TrpgTurnExecutionService {
                         ? null : failed.getFirst();
             }
             if (step == null) {
-                throw new UserRequestException(
-                        "失败行动轮没有可恢复的步骤");
+                throw new TurnCheckpointUnavailableException(
+                        "当前行动轮没有可恢复的步骤，无法继续重试。");
             }
             restoreFailedStep(turn, step);
             clearTurnDirection(turn.getConversationId());
@@ -1571,8 +1556,8 @@ public class TrpgTurnExecutionService {
                 .findFirst()
                 .orElse(null);
         if (child == null) {
-            return Flux.error(new UserRequestException(
-                    "挂起的根步骤没有待处理子步骤"));
+            return Flux.error(new TurnCheckpointUnavailableException(
+                    "当前行动的回答步骤已结束或缺失，无法继续重试。"));
         }
         return executeOrderedChild(
                 conversation, turn, parent, child);

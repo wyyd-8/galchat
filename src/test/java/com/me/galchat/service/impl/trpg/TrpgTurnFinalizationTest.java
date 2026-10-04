@@ -65,7 +65,7 @@ class TrpgTurnFinalizationTest {
             call.<Consumer<TransactionStatus>>getArgument(0).accept(new SimpleTransactionStatus());
             return null;
         }).when(transactions).executeWithoutResult(any());
-        var recovery = new GroupTurnRecoveryService(turns, steps, messages);
+        var recovery = new GroupTurnRecoveryService(mock(com.me.galchat.mapper.GroupTurnCheckpointMapper.class), turns, steps, messages);
         var scenes = new TrpgSceneLifecycleService(conversations, steps, turns, plans,
                 mock(GroupReplyPlanItemMapper.class), recovery, progress, summaries, replyPlans,
                 childPlans, mock(TrpgTemporaryInsanityService.class));

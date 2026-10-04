@@ -196,6 +196,49 @@ class RecordingGroupToolCallingManagerTest {
         verifyNoInteractions(checkpoints);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "askKp,false", "askKp,true", "askForClarification,false", "askForClarification,true"
+    })
+    void questionEffectRecordAndCheckpointCommitTogether(String toolName, boolean checkpointFails) {
+        var mapper = mock(com.me.galchat.mapper.GroupChatToolCallMapper.class);
+        var checkpoints = mock(GroupTurnCheckpointService.class);
+        var store = new GroupToolCallStore(mapper, tools.jackson.databind.json.JsonMapper.builder().build(), checkpoints);
+        List<String> events = new java.util.ArrayList<>();
+        var tx = new TransactionTemplate(new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+            @Override protected Object doGetTransaction() { return new Object(); }
+            @Override protected void doBegin(Object t, org.springframework.transaction.TransactionDefinition d) { events.add("begin"); }
+            @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus s) { events.add("commit"); }
+            @Override protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus s) { events.add("rollback"); }
+        });
+        var delegate = mock(ToolCallingManager.class);
+        var prompt = prompt(Map.of(ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L));
+        var response = responseWithCalls(toolName);
+        var result = mock(ToolExecutionResult.class);
+        String callId = response.getResult().getOutput().getToolCalls().getFirst().id();
+        when(result.conversationHistory()).thenReturn(List.of(org.springframework.ai.chat.messages.ToolResponseMessage.builder()
+                .responses(List.of(new org.springframework.ai.chat.messages.ToolResponseMessage.ToolResponse(callId, toolName,
+                        "{\"childStepId\":301,\"rootStepId\":41,\"question\":\"检查哪里？\"}"))).build()));
+        when(delegate.executeToolCalls(prompt, response)).thenAnswer(i -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            events.add("child"); return result;
+        });
+        when(mapper.insert(any(com.me.galchat.domain.po.GroupChatToolCall.class))).thenAnswer(i -> {
+            events.add("record");
+            i.<com.me.galchat.domain.po.GroupChatToolCall>getArgument(0).setId(9L); return 1;
+        });
+        org.mockito.Mockito.doAnswer(i -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+            events.add("checkpoint");
+            if (checkpointFails) throw new IllegalStateException("checkpoint failed");
+            return null;
+        }).when(checkpoints).recordInteractionCommitted(any());
+        var manager = new RecordingGroupToolCallingManager(delegate, store, tx);
+        if (checkpointFails) assertThatThrownBy(() -> manager.executeToolCalls(prompt, response)).hasMessage("checkpoint failed");
+        else assertThat(manager.executeToolCalls(prompt, response)).isSameAs(result);
+        assertThat(events).containsExactly("begin", "child", "record", "checkpoint", checkpointFails ? "rollback" : "commit");
+    }
+
     @Test
     void investigatorInquiryExecutionAndRecordingUseOneTransaction() {
         ToolCallingManager delegate = mock(ToolCallingManager.class);

@@ -22,6 +22,8 @@ import java.util.Set;
 public class TrpgStepInteractionService {
 
     public static final String KP_CLARIFICATION = "KP_CLARIFICATION";
+    public static final String COMBAT_ADJUDICATION_CLARIFICATION =
+            "COMBAT_ADJUDICATION_CLARIFICATION";
     public static final String TEAM_RISK_CONFIRMATION =
             "TEAM_RISK_CONFIRMATION";
     public static final String INVESTIGATOR_KP_INQUIRY =
@@ -201,6 +203,8 @@ public class TrpgStepInteractionService {
         if (!GroupChatConstant.ACTOR_KP.equals(source.getSpeakerType())
                 || !(GroupChatConstant.ACTION_TRPG_SCENE.equals(
                 source.getActionType())
+                || GroupChatConstant.ACTION_COMBAT_ADJUDICATE.equals(
+                source.getActionType())
                 || GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE.equals(
                 source.getActionType()))) {
             throw new UserRequestException(
@@ -223,7 +227,10 @@ public class TrpgStepInteractionService {
                 .setTurnId(turnId)
                 .setParentStepId(root.getId())
                 .setRootStepId(root.getId())
-                .setInteractionType("TEAM".equals(scope)
+                .setInteractionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE.equals(
+                        source.getActionType())
+                        ? COMBAT_ADJUDICATION_CLARIFICATION
+                        : "TEAM".equals(scope)
                         ? TEAM_RISK_CONFIRMATION : KP_CLARIFICATION)
                 .setInteractionSeq(interactionSeq)
                 .setPromptMessageId(source.getOutputMessageId())

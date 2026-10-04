@@ -313,6 +313,40 @@ class TrpgStepInteractionServiceTest {
                 .isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"INDIVIDUAL", "TEAM"})
+    void adjudicationClarificationSuspendsRootForHumanAnswer(String scope) {
+        GroupChatReplyStepMapper steps = mock(GroupChatReplyStepMapper.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        TrpgParticipantService participants = mock(TrpgParticipantService.class);
+        TrpgStepInteractionService service = service(steps, turns, participants);
+        GroupChatReplyStep root = rootStep()
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE);
+        when(turns.selectById(101L)).thenReturn(runningTurn());
+        when(steps.selectById(201L)).thenReturn(root);
+        when(steps.selectList(any())).thenReturn(List.of(), List.of(root));
+        when(participants.listInvestigators(any())).thenReturn(List.of(
+                participant(GroupChatConstant.ACTOR_USER, 31L, 31L, "林恩")));
+        doAnswer(invocation -> {
+            invocation.<GroupChatReplyStep>getArgument(0).setId(301L);
+            return 1;
+        }).when(steps).insert(any(GroupChatReplyStep.class));
+
+        var result = service.askForClarification(conversation(), 101L, 201L,
+                scope, "INDIVIDUAL".equals(scope) ? "林恩" : null,
+                "请选择闪避还是用枪托反击？", "CHOICE");
+
+        ArgumentCaptor<GroupChatReplyStep> inserted =
+                ArgumentCaptor.forClass(GroupChatReplyStep.class);
+        verify(steps).insert(inserted.capture());
+        assertThat(inserted.getValue().getParentStepId()).isEqualTo(201L);
+        assertThat(inserted.getValue().getRootStepId()).isEqualTo(201L);
+        assertThat(inserted.getValue().getStatus()).isEqualTo(GroupChatConstant.STATUS_PENDING);
+        assertThat(result.interactionType()).isEqualTo("COMBAT_ADJUDICATION_CLARIFICATION");
+        assertThat(result.targetActor()).isEqualTo(new GroupActorRef(GroupChatConstant.ACTOR_USER, 31L));
+        assertThat(root.getStatus()).isEqualTo(GroupChatConstant.STATUS_WAITING_INTERACTION);
+    }
+
     @Test
     void seventhClarificationIsRejected() {
         GroupChatReplyStepMapper steps =

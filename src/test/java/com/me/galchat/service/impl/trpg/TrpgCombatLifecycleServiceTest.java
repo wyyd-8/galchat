@@ -461,6 +461,36 @@ class TrpgCombatLifecycleServiceTest {
     }
 
     @Test
+    void adjudicationClarificationResumesRootWithoutRepeatingRouteOrDefense() {
+        GroupChatReplyStepMapper steps = mock(GroupChatReplyStepMapper.class);
+        TrpgCombatLifecycleService service = serviceWithSteps(steps);
+        GroupChatTurn turn = new GroupChatTurn().setId(30L);
+        GroupChatReplyStep root = new GroupChatReplyStep()
+                .setId(42L).setTurnId(30L).setStepNo(2)
+                .setActionType(GroupChatConstant.ACTION_COMBAT_ADJUDICATE)
+                .setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION);
+        GroupChatReplyStep route = childStep(43L, 3, 42L,
+                GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE, 101L)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        GroupChatReplyStep defense = childStep(44L, 4, 42L,
+                GroupChatConstant.ACTION_COMBAT_DEFENSE, 102L)
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        GroupChatReplyStep clarification = childStep(45L, 5, 42L,
+                GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE, 103L)
+                .setInteractionType("COMBAT_ADJUDICATION_CLARIFICATION")
+                .setStatus(GroupChatConstant.STATUS_COMPLETED);
+        when(steps.selectById(42L)).thenReturn(root);
+        when(steps.selectList(any())).thenReturn(List.of(route, defense, clarification));
+
+        assertThat(service.advanceAdjudicationChild(turn, clarification)).isNull();
+
+        assertThat(root.getStatus()).isEqualTo(GroupChatConstant.STATUS_PENDING);
+        verify(steps).updateById(root);
+        verify(steps, never()).insert(any(GroupChatReplyStep.class));
+        assertThat(service.prepareAdjudicationRoot(turn, root)).isNull();
+    }
+
+    @Test
     void adjudicationPromptIncludesEveryOrderedChildUnderItsRoot() {
         GroupChatReplyStepMapper stepMapper =
                 mock(GroupChatReplyStepMapper.class);
@@ -912,8 +942,9 @@ class TrpgCombatLifecycleServiceTest {
                 .isEqualTo(GroupChatConstant.STATUS_CANCELLED);
     }
 
-    @Test
-    void firearmRouteCanAppendOrderedDefenseStepsForSeveralTargets() {
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "identical", "conflicting", "whitespace"})
+    void firearmRouteAppendsOneDefensePerTargetInFirstOccurrenceOrder(String duplicate) {
         GroupReplyPlanMapper planMapper = mock(GroupReplyPlanMapper.class);
         CocCharacterMapper characterMapper = mock(CocCharacterMapper.class);
         TrpgCombatMapper combatMapper = mock(TrpgCombatMapper.class);
@@ -976,13 +1007,20 @@ class TrpgCombatLifecycleServiceTest {
             return 1;
         }).when(stepMapper).insert(any(GroupChatReplyStep.class));
 
+        String repeatedTarget = "";
+        if (!"none".equals(duplicate)) {
+            repeatedTarget = ",{\"targetName\":\""
+                    + ("whitespace".equals(duplicate) ? " 林恩 " : "林恩")
+                    + "\",\"insertDefense\":" + !"conflicting".equals(duplicate)
+                    + ",\"defenseOptions\":[\"寻找掩护\"]}";
+        }
         service.completeReactionRoute(
                 conversation, turn, route,
                 "{\"actionKind\":\"TARGETED\",\"targets\":["
                         + "{\"targetName\":\"林恩\",\"insertDefense\":true,"
                         + "\"defenseOptions\":[\"寻找掩护\"]},"
                         + "{\"targetName\":\"陈默\",\"insertDefense\":true,"
-                        + "\"defenseOptions\":[\"寻找掩护\"]}]}"
+                        + "\"defenseOptions\":[\"寻找掩护\"]}" + repeatedTarget + "]}"
         );
 
         ArgumentCaptor<GroupChatReplyStep> inserted =

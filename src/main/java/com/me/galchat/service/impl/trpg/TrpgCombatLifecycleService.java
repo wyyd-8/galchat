@@ -34,6 +34,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -104,7 +105,9 @@ public class TrpgCombatLifecycleService {
         List<GroupChatReplyStep> children = childrenOf(
                 adjudication.getId());
         if (GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
-                completedChild.getActionType())) {
+                completedChild.getActionType())
+                && !TrpgStepInteractionService.COMBAT_ADJUDICATION_CLARIFICATION.equals(
+                completedChild.getInteractionType())) {
             GroupChatReplyStep retry = children.stream()
                     .filter(step -> step.getStepNo()
                             > completedChild.getStepNo())
@@ -265,8 +268,12 @@ public class TrpgCombatLifecycleService {
             if (targetNodes.isEmpty()) {
                 throw new UserRequestException("KP战斗路由缺少目标人物卡");
             }
-            RouteDecision first = null;
+            Map<String, JsonNode> uniqueTargets = new LinkedHashMap<>();
             for (tools.jackson.databind.JsonNode targetNode : targetNodes) {
+                uniqueTargets.putIfAbsent(routeTargetName(targetNode), targetNode);
+            }
+            RouteDecision first = null;
+            for (JsonNode targetNode : uniqueTargets.values()) {
                 RouteDecision decision = applyTargetRoute(
                         conversation, turn, routeStep, combat,
                         targetNode, root);
@@ -287,11 +294,7 @@ public class TrpgCombatLifecycleService {
             TrpgCombat combat,
             tools.jackson.databind.JsonNode targetNode,
             tools.jackson.databind.JsonNode root) {
-        String targetName = targetNode.get("targetName") == null
-                ? null : targetNode.get("targetName").asText();
-        if (!StringUtils.hasText(targetName)) {
-            throw new UserRequestException("KP战斗路由缺少目标人物卡");
-        }
+        String targetName = routeTargetName(targetNode);
         Long targetId = null;
         for (tools.jackson.databind.JsonNode participant :
                 combat.getParticipants()) {
@@ -347,6 +350,15 @@ public class TrpgCombatLifecycleService {
                 List.copyOf(options),
                 root.get("reason") == null
                         ? null : root.get("reason").asText());
+    }
+
+    private String routeTargetName(JsonNode targetNode) {
+        String name = targetNode == null || targetNode.get("targetName") == null
+                ? null : targetNode.get("targetName").asText();
+        if (!StringUtils.hasText(name)) {
+            throw new UserRequestException("KP战斗路由缺少目标人物卡");
+        }
+        return name.trim();
     }
 
     private GroupChatReplyStep defenseForRoute(
@@ -1104,11 +1116,18 @@ public class TrpgCombatLifecycleService {
                 "已标记；请继续输出完整裁定和战斗收束。");
     }
 
+    /** Reconcile markers after tool calls beyond the checkpoint have been removed. */
     @Transactional
     public void clearControlMarkersForRetry(Long replyStepId) {
         if (replyStepId == null) {
             return;
         }
+        List<GroupChatToolCall> retainedCalls = toolCallMapper.selectList(
+                new LambdaQueryWrapper<GroupChatToolCall>()
+                        .eq(GroupChatToolCall::getReplyStepId, replyStepId)
+                        .in(GroupChatToolCall::getToolName,
+                                "startCombat", "markCombatFinished")
+                        .isNotNull(GroupChatToolCall::getToolResult));
         List<TrpgCombat> rows = combatMapper.selectList(
                 new LambdaQueryWrapper<TrpgCombat>()
                         .and(wrapper -> wrapper
@@ -1118,37 +1137,62 @@ public class TrpgCombatLifecycleService {
                                 .eq(TrpgCombat::getFinishRequestedStepId,
                                         replyStepId)));
         for (TrpgCombat combat : rows) {
-            if (Objects.equals(combat.getStartRequestedStepId(),
+            boolean cancelStart = Objects.equals(combat.getStartRequestedStepId(),
                     replyStepId)
                     && GroupChatConstant
                     .COMBAT_STATUS_START_REQUESTED.equals(
-                    combat.getStatus())) {
+                    combat.getStatus())
+                    && !hasRetainedControlRequest(retainedCalls,
+                            "startCombat", combat.getId());
+            boolean clearFinish = Objects.equals(combat.getFinishRequestedStepId(),
+                    replyStepId)
+                    && !hasRetainedControlRequest(retainedCalls,
+                            "markCombatFinished", combat.getId());
+            if (!cancelStart && !clearFinish) {
+                continue;
+            }
+            if (cancelStart) {
                 combat.setStatus(
                         GroupChatConstant.COMBAT_STATUS_CANCELLED);
             }
-            if (Objects.equals(combat.getFinishRequestedStepId(),
-                    replyStepId)) {
+            combat.setUpdatedAt(LocalDateTime.now());
+            if (clearFinish) {
                 combat.setFinishRequestedStepId(null);
-                combatMapper.update(null,
+                combatMapper.update(combat,
                         new LambdaUpdateWrapper<TrpgCombat>()
                                 .eq(TrpgCombat::getId,
                                         combat.getId())
                                 .set(TrpgCombat
                                                 ::getFinishRequestedStepId,
-                                        null)
-                                .set(TrpgCombat::getUpdatedAt,
-                                        LocalDateTime.now()));
-                if (!Objects.equals(combat.getStartRequestedStepId(),
-                        replyStepId)
-                        || !GroupChatConstant
-                        .COMBAT_STATUS_START_REQUESTED.equals(
-                        combat.getStatus())) {
-                    continue;
-                }
+                                        null));
+            } else {
+                combatMapper.updateById(combat);
             }
-            combat.setUpdatedAt(LocalDateTime.now());
-            combatMapper.updateById(combat);
         }
+    }
+
+    private boolean hasRetainedControlRequest(
+            List<GroupChatToolCall> calls, String toolName, Long combatId) {
+        if (calls == null || combatId == null) {
+            return false;
+        }
+        for (GroupChatToolCall call : calls) {
+            if (!toolName.equals(call.getToolName())
+                    || !StringUtils.hasText(call.getToolResult())) {
+                continue;
+            }
+            try {
+                JsonNode result = objectMapper.readTree(call.getToolResult());
+                if (result != null && result.isObject()
+                        && result.path("combatId").isIntegralNumber()
+                        && result.path("combatId").asLong() == combatId) {
+                    return true;
+                }
+            } catch (tools.jackson.core.JacksonException ignored) {
+                // Failed tool calls can contain plain-text errors rather than a result DTO.
+            }
+        }
+        return false;
     }
 
     public TrpgCombat requireActiveCombat(

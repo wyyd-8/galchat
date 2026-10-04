@@ -593,6 +593,9 @@ public class CharacterCardContextFormatter {
         }
         addStatus(statuses, meleeAttackedThisRound,
                 "本轮已被近战攻击");
+        if (!positive(stunnedRemainingRounds)) {
+            statuses.add("眩晕：无");
+        }
     }
 
     private boolean positive(Integer value) {

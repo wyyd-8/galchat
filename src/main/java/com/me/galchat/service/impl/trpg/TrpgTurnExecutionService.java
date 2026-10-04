@@ -538,11 +538,14 @@ public class TrpgTurnExecutionService {
             turnMapper.updateById(turn);
             return;
         }
-        checkpointService.restore(turn, failedStep);
+        transactionTemplate.execute(status -> {
+            checkpointService.restore(turn, failedStep);
+            combatLifecycleService.clearControlMarkersForRetry(
+                    failedStep.getId());
+            return null;
+        });
         clearRuntimeSnapshotForRetry(failedStep);
         decisionStore.deleteByReplyStepId(failedStep.getId());
-        combatLifecycleService.clearControlMarkersForRetry(
-                failedStep.getId());
         LocalDateTime now = LocalDateTime.now();
         List<GroupChatReplyStep> blockedTail =
                 stepMapper.selectList(

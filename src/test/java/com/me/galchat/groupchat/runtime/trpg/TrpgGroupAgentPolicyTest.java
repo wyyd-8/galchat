@@ -489,7 +489,7 @@ class TrpgGroupAgentPolicyTest {
         assertThat(exposedToolNames(combatInvocation.tools()))
                 .contains("readSkillRules", "updateWeaponState",
                         "requestFirearmAttack", "requestMeleeAttack")
-                .doesNotContain("askForClarification")
+                .contains("askForClarification")
                 .doesNotContain("requestPushedCheck");
 
         var routeInvocation = policy.prepare(
@@ -507,7 +507,12 @@ class TrpgGroupAgentPolicyTest {
                 .containsExactly(clarificationTools);
         assertThat(routeInvocation.prompt().getInstructions()
                 .getLast().getText())
-                .contains("无法唯一确定时调用askForClarification")
+                .contains("才调用askForClarification公开澄清一个问题")
+                .contains("目标尚未声明防守方式是正常流程")
+                .contains("当且仅当攻击方没有声明一次攻击时，才允许不路由目标")
+                .contains("目标不能防守时仍须保留目标")
+                .contains("每个目标只出现一次")
+                .contains("不得先追问巴里“闪避还是反击”")
                 .contains("不确定是否需要追问时不要调用");
 
         var inquiryInvocation = policy.prepare(

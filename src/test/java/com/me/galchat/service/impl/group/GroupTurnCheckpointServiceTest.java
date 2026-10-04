@@ -33,7 +33,7 @@ class GroupTurnCheckpointServiceTest {
     @org.junit.jupiter.api.BeforeAll
     static void initMybatisPlusTableInfo() {
         com.me.galchat.support.MybatisPlusTestSupport.initialize(
-                GroupChatReplyStep.class);
+                GroupChatReplyStep.class, com.me.galchat.domain.po.TrpgCombat.class);
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -48,6 +48,70 @@ class GroupTurnCheckpointServiceTest {
         when(fixture.toolCallMapper().selectCount(org.mockito.ArgumentMatchers.any())).thenReturn(remainingCalls);
         fixture.service().restore(fixture.turn(), fixture.step());
         verify(completions, org.mockito.Mockito.times(remainingCalls == 0 ? 1 : 0)).deleteById(7L);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "startCombat,8,success,true", "startCombat,9,success,true",
+            "startCombat,10,success,false", "startCombat,8,error,false",
+            "startCombat,8,other-combat,false",
+            "markCombatFinished,8,success,true", "markCombatFinished,9,success,true",
+            "markCombatFinished,10,success,false", "markCombatFinished,8,error,false",
+            "markCombatFinished,8,other-combat,false"
+    })
+    void combatControlRecoveryPreservesOnlySuccessfulRequestsWithinCheckpoint(
+            String tool, long callId, String resultKind, boolean preserve) {
+        Fixture fixture = fixture(GroupTurnCheckpointService.PAUSED);
+        var combats = mock(com.me.galchat.mapper.TrpgCombatMapper.class);
+        var lifecycle = new com.me.galchat.service.impl.trpg.TrpgCombatLifecycleService(
+                mock(GroupConversationService.class), mock(GroupReplyPlanService.class),
+                mock(com.me.galchat.mapper.GroupReplyPlanMapper.class), fixture.turnMapper(),
+                fixture.toolCallMapper(), fixture.stepMapper(), fixture.messageMapper(),
+                mock(com.me.galchat.mapper.CocCharacterMapper.class), combats,
+                mock(com.me.galchat.service.impl.trpg.TrpgQuickNpcTemplateService.class),
+                JsonMapper.builder().build());
+        boolean start = "startCombat".equals(tool);
+        var combat = new com.me.galchat.domain.po.TrpgCombat().setId(200L)
+                .setStatus(start ? GroupChatConstant.COMBAT_STATUS_START_REQUESTED
+                        : GroupChatConstant.COMBAT_STATUS_ACTIVE);
+        if (start) combat.setStartRequestedStepId(fixture.step().getId());
+        else combat.setFinishRequestedStepId(fixture.step().getId());
+        when(combats.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(combat));
+        String result = switch (resultKind) {
+            case "success" -> "{\"combatId\":200}";
+            case "other-combat" -> "{\"combatId\":201}";
+            default -> "当前步骤不允许调用";
+        };
+        var retained = new java.util.ArrayList<>(List.of(new GroupChatToolCall()
+                .setId(callId).setReplyStepId(fixture.step().getId())
+                .setToolName(tool).setToolResult(result)));
+        var restored = new java.util.concurrent.atomic.AtomicBoolean();
+        when(fixture.toolCallMapper().selectList(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> restored.get() ? List.copyOf(retained) : List.of());
+        when(fixture.toolCallMapper().deleteAfterCheckpoint(fixture.step().getId(), 9L))
+                .thenAnswer(invocation -> {
+                    retained.removeIf(call -> call.getId() > 9L);
+                    restored.set(true);
+                    return 1;
+                });
+
+        fixture.service().restore(fixture.turn(), fixture.step());
+        lifecycle.clearControlMarkersForRetry(fixture.step().getId());
+
+        if (start) {
+            assertThat(combat.getStatus()).isEqualTo(preserve
+                    ? GroupChatConstant.COMBAT_STATUS_START_REQUESTED
+                    : GroupChatConstant.COMBAT_STATUS_CANCELLED);
+        } else {
+            assertThat(combat.getFinishRequestedStepId())
+                    .isEqualTo(preserve ? fixture.step().getId() : null);
+        }
+        if (preserve) {
+            verify(combats, org.mockito.Mockito.never()).updateById(
+                    org.mockito.ArgumentMatchers.any(com.me.galchat.domain.po.TrpgCombat.class));
+            verify(combats, org.mockito.Mockito.never()).update(
+                    org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        }
     }
 
     @Test

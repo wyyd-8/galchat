@@ -93,6 +93,8 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
         if (toolNames.stream().anyMatch(com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService.TOOLS::contains)
                 || toolNames.contains("publishExplorationScenes")
                 || diceToolCount == 1 || clarification
+                || toolNames.contains("startCombat") || finishMarker
+                || toolNames.contains("adjustBasicAttributes")
                 || toolNames.contains("purchaseEquipment")
                 || toolNames.contains("suspendInvestigators")
                 || toolNames.contains("resumeSuspendedInvestigators")
@@ -102,9 +104,6 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
                 || toolNames.contains("showMaterial")) {
             return transactionTemplate.execute(status ->
                     executeAndRecord(prompt, response, replyStepId));
-        }
-        if (finishMarker && toolNames.size() == 1) {
-            return delegate.executeToolCalls(prompt, response);
         }
         return executeAndRecord(prompt, response, replyStepId);
     }

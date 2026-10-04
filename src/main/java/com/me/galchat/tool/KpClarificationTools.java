@@ -27,6 +27,7 @@ public class KpClarificationTools {
             description = "KP在裁定前向一名调查员公开追问一个必要问题。"
                     + "仅在目标、方法、对象、选择或尚未被明确理解的重大风险会实质影响裁定时调用；"
                     + "不确定是否需要追问时不要调用，已经明确理解风险时不得重复确认。"
+                    + "战斗反应路由阶段只可澄清已有行动声明中影响路由的缺失信息，不得询问目标选择闪避、反击、寻找掩护等防守方式；防守选择由后续正式防守步骤处理。"
                     + "TEAM表示团队共同危险决定，系统只向真人玩家确认。",
             returnDirect = true)
     public TrpgStepInteractionService.InteractionRequest

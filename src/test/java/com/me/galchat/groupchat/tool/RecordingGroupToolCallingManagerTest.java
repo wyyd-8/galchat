@@ -134,7 +134,7 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"requestCheck", "showMaterial", "purchaseEquipment", "suspendInvestigators", "resumeSuspendedInvestigators", "finishSceneExploration", "endSceneExploration", "resumeWaitingInvestigators", "updateQuickNotes", "updateWeaponState", "stashWeapon", "equipWeaponFromStash", "updateCombatStates", "publishExplorationScenes"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"requestCheck", "startCombat", "markCombatFinished", "adjustBasicAttributes", "showMaterial", "purchaseEquipment", "suspendInvestigators", "resumeSuspendedInvestigators", "finishSceneExploration", "endSceneExploration", "resumeWaitingInvestigators", "updateQuickNotes", "updateWeaponState", "stashWeapon", "equipWeaponFromStash", "updateCombatStates", "publishExplorationScenes"})
     void recoverableToolExecutionAndRecordingUseOneTransaction(String toolName) {
         ToolCallingManager delegate = mock(ToolCallingManager.class);
         GroupToolCallStore store = mock(GroupToolCallStore.class);
@@ -160,7 +160,7 @@ class RecordingGroupToolCallingManagerTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.CsvSource({"purchaseEquipment,false", "purchaseEquipment,true", "showMaterial,false", "showMaterial,true", "suspendInvestigators,false", "suspendInvestigators,true", "resumeSuspendedInvestigators,false", "resumeSuspendedInvestigators,true", "finishSceneExploration,false", "finishSceneExploration,true", "endSceneExploration,false", "endSceneExploration,true", "resumeWaitingInvestigators,false", "resumeWaitingInvestigators,true", "updateQuickNotes,false", "updateQuickNotes,true", "updateWeaponState,false", "updateWeaponState,true", "stashWeapon,false", "stashWeapon,true", "equipWeaponFromStash,false", "equipWeaponFromStash,true", "updateCombatStates,false", "updateCombatStates,true", "publishExplorationScenes,false", "publishExplorationScenes,true"})
+    @org.junit.jupiter.params.provider.CsvSource({"startCombat,false", "startCombat,true", "markCombatFinished,false", "markCombatFinished,true", "adjustBasicAttributes,false", "adjustBasicAttributes,true", "purchaseEquipment,false", "purchaseEquipment,true", "showMaterial,false", "showMaterial,true", "suspendInvestigators,false", "suspendInvestigators,true", "resumeSuspendedInvestigators,false", "resumeSuspendedInvestigators,true", "finishSceneExploration,false", "finishSceneExploration,true", "endSceneExploration,false", "endSceneExploration,true", "resumeWaitingInvestigators,false", "resumeWaitingInvestigators,true", "updateQuickNotes,false", "updateQuickNotes,true", "updateWeaponState,false", "updateWeaponState,true", "stashWeapon,false", "stashWeapon,true", "equipWeaponFromStash,false", "equipWeaponFromStash,true", "updateCombatStates,false", "updateCombatStates,true", "publishExplorationScenes,false", "publishExplorationScenes,true"})
     void toolEffectAndRecordShareCommitWithoutAdvancingCheckpoint(String toolName, boolean recordFails) {
         var mapper = mock(com.me.galchat.mapper.GroupChatToolCallMapper.class);
         var checkpoints = mock(GroupTurnCheckpointService.class);
@@ -284,32 +284,6 @@ class RecordingGroupToolCallingManagerTest {
                 .hasMessageContaining("枪械攻击工具已自动更新武器状态");
 
         verifyNoInteractions(delegate);
-    }
-
-    @Test
-    void combatFinishMarkerIsExecutedButNotRecorded() {
-        ToolCallingManager delegate = mock(ToolCallingManager.class);
-        GroupToolCallStore store = mock(GroupToolCallStore.class);
-        TransactionTemplate transactionTemplate =
-                mock(TransactionTemplate.class);
-        RecordingGroupToolCallingManager manager =
-                new RecordingGroupToolCallingManager(
-                        delegate, store, transactionTemplate);
-        Prompt prompt = prompt(Map.of(
-                ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY, 41L));
-        ChatResponse response =
-                responseWithCalls("markCombatFinished");
-        ToolExecutionResult result = mock(ToolExecutionResult.class);
-        when(delegate.executeToolCalls(prompt, response))
-                .thenReturn(result);
-
-        assertThat(manager.executeToolCalls(prompt, response))
-                .isSameAs(result);
-
-        verify(store, never()).saveExecution(
-                org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any());
     }
 
     private Prompt prompt(Map<String, Object> toolContext) {

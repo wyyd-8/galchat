@@ -23,6 +23,9 @@ const freshPlan = (): ReplyPlan => ({ source: 'USER', displayName: '群聊', ite
 export function useWorkspace() {
   const session = reactive(currentSession())
   const withdrawingConversations = reactive(new Set<number>())
+  const savingPlanConversations = reactive(new Set<number>())
+  const savingActorRuntimes = reactive(new Set<string>())
+  const settingsSaves = new Map<number, { pending: number; succeeded: boolean; ready: Promise<boolean>; finish: (success: boolean) => void }>()
   const loading = reactive({ boot: false, worlds: false, workspace: false, chat: false, sending: false,
     get withdrawing() { return selectedConversationId.value != null && withdrawingConversations.has(selectedConversationId.value) } })
   const userInfo = ref<UserInfo | null>(null)
@@ -36,6 +39,12 @@ export function useWorkspace() {
   const worldSave = ref<WorldSave | null>(null)
   const conversations = ref<Conversation[]>([])
   const selectedConversationId = ref<number | null>(null)
+  const conversationReady = ref(false)
+  const savingReplyPlan = computed(() => selectedConversationId.value != null && savingPlanConversations.has(selectedConversationId.value))
+  const savingActorKeys = computed(() => {
+    const prefix = `${selectedConversationId.value}:`
+    return [...savingActorRuntimes].filter(key => key.startsWith(prefix)).map(key => key.slice(prefix.length))
+  })
   const messages = ref<GroupMessage[]>([])
   const reasoning = reactive<Record<number, string>>({})
   const replyPlans = ref<ReplyPlan[]>([])
@@ -54,6 +63,7 @@ export function useWorkspace() {
   const replyTurnState = ref<ReplyTurnState | null>(null)
   const generationFailure = ref<GenerationFailureState | null>(null)
   const generationFailureOpen = ref(false)
+  const generationFailed = ref(false)
   const latestDiceRoll = ref<DiceRollAggregate | null>(null)
   const incomingDiceRolls = ref<DiceRollAggregate[]>([])
   const hasOlderGroupMessages = ref(false)
@@ -61,6 +71,8 @@ export function useWorkspace() {
   let catchingUpGenerationId: string | null = null
   let generationConnection: { conversationId: number; requestId: string; controller: AbortController } | null = null
   let conversationRevision = 0
+  let conversationLoad: { revision: number; ready: Promise<boolean> } | null = null
+  let generationOperation: ReturnType<typeof beginGenerationOperation> | null = null
   let worldRevision = 0
   const characterData = createCharacterData({ worldId: selectedWorldId, characters, templates: characterTemplates,
     sessionKey: () => `${session.id ?? ''}:${session.token ?? ''}` })
@@ -112,6 +124,7 @@ export function useWorkspace() {
     if (sessionStorage.getItem(key) === clientRequestId) sessionStorage.removeItem(key)
   }
   function resetWorkspace() {
+    conversationReady.value = false
     characterData.clearSession()
     worldRevision++
     conversationRevision++; disconnectGeneration()
@@ -125,6 +138,21 @@ export function useWorkspace() {
   function setReplyPlans(plans: ReplyPlan[]) {
     replyPlans.value = plans
     replyPlan.value = activeReplyPlan(plans) || freshPlan()
+  }
+
+  function setConversationParticipants(conversation: Conversation) {
+    const planned = [...new Set(replyPlan.value.items
+      .filter(item => item.actorType === 'character')
+      .map(item => item.actorId)
+      .filter((id): id is number => typeof id === 'number'))]
+    if (conversation.mode === 'trpg') {
+      const key = `galchat:trpg-participants:${conversation.id}`
+      const remembered = decodeParticipantIds(localStorage.getItem(key))
+      participantIds.value = resolveParticipantIds(conversation.characterIds, remembered, planned)
+      if (conversation.characterIds !== undefined || (!remembered.length && planned.length)) {
+        localStorage.setItem(key, encodeParticipantIds(participantIds.value))
+      }
+    } else participantIds.value = conversation.characterIds ?? planned
   }
 
   function refreshPlanForAcceptedTurn(conversationId: number, turnId: number) {
@@ -260,6 +288,7 @@ export function useWorkspace() {
     try { worlds.value = await api.userWorlds(session.id) } finally { loading.worlds = false }
   }
   async function selectWorld(id: number) {
+    conversationReady.value = false
     characterData.reset()
     const revision = ++worldRevision
     const chatRevision = ++conversationRevision
@@ -334,10 +363,13 @@ export function useWorkspace() {
   }
   async function createTemplate(payload: WorldTemplate) { await api.createWorldTemplate(payload); await loadTemplates(); notify('世界模板已创建', '', 'success') }
   async function loadEditableWorldTemplate() {
-    if (!selectedWorldId.value || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
-    return api.myWorldTemplate(selectedWorldId.value)
+    const scope = characterData.capture()
+    if (!scope || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
+    const template = await api.myWorldTemplate(scope.worldId)
+    return scope.current() ? template : undefined
   }
-  async function updateTemplate(payload: WorldTemplate) {
+  async function updateTemplate(payload: WorldTemplate, expectedWorldId = selectedWorldId.value) {
+    if (expectedWorldId !== selectedWorldId.value) return false
     const scope = captureWorldMutation()
     if (!scope || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
     await api.updateWorldTemplate(scope.worldId, payload)
@@ -460,7 +492,13 @@ export function useWorkspace() {
     return created
   }
   async function selectConversation(id: number) {
+    conversationReady.value = false
+    setReplyPlans([])
+    participantIds.value = []
     const revision = ++conversationRevision
+    let finishLoad!: (ready: boolean) => void
+    conversationLoad = { revision, ready: new Promise<boolean>(resolve => { finishLoad = resolve }) }
+    let loaded = false
     disconnectGeneration()
     const worldId = selectedWorldId.value
     selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRolls.value = []; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
@@ -480,30 +518,22 @@ export function useWorkspace() {
       modelApis.value = models
       combatOverview.value = overview
       investigatorCards.value = cards
-      const plannedParticipantIds = [...new Set(replyPlan.value.items
-        .filter((item) => item.actorType === 'character')
-        .map((item) => item.actorId)
-        .filter((id): id is number => typeof id === 'number'))]
-      if (conversationDetail.mode === 'trpg') {
-        const storageKey = `galchat:trpg-participants:${conversationDetail.id}`
-        const rememberedParticipantIds = decodeParticipantIds(localStorage.getItem(storageKey))
-        participantIds.value = resolveParticipantIds(
-          conversationDetail.characterIds,
-          rememberedParticipantIds,
-          plannedParticipantIds,
-        )
-        if (conversationDetail.characterIds !== undefined || (!rememberedParticipantIds.length && plannedParticipantIds.length)) {
-          localStorage.setItem(storageKey, encodeParticipantIds(participantIds.value))
-        }
-      } else {
-        participantIds.value = conversationDetail.characterIds ?? plannedParticipantIds
-      }
+      setConversationParticipants(conversationDetail)
       await scrollToBottom(true)
+      loaded = revision === conversationRevision && selectedConversationId.value === id && selectedWorldId.value === worldId
+      if (loaded) conversationReady.value = true
     } catch (error) { notify('会话加载失败', errorMessage(error), 'danger') }
-    finally { if (revision === conversationRevision && selectedConversationId.value === id && selectedWorldId.value === worldId) loading.chat = false }
+    finally {
+      if (revision === conversationRevision && selectedConversationId.value === id && selectedWorldId.value === worldId) {
+        loading.chat = false
+        if (loaded) conversationLoad = null
+      }
+      finishLoad(loaded)
+    }
     if (revision === conversationRevision && selectedConversationId.value === id && storedGeneration(id)) {
       void resumeGeneration(id)
     }
+    return loaded
   }
   async function closeConversation() {
     const scope = captureWorldMutation()
@@ -536,6 +566,7 @@ export function useWorkspace() {
     }
     conversationRevision++
     disconnectGeneration()
+    conversationReady.value = false
     selectedConversationId.value = null
     chatDrafts.forget(`world:${worldId}:group:${conversationId}`)
     loading.chat = false
@@ -632,26 +663,56 @@ export function useWorkspace() {
       else notify('已撤回最近一轮群聊', '', 'success')
     } finally { withdrawingConversations.delete(conversationId) }
   }
+  function beginSettingsSave(conversationId: number) {
+    let batch = settingsSaves.get(conversationId)
+    if (!batch) {
+      let finish!: (success: boolean) => void
+      const ready = new Promise<boolean>(resolve => { finish = resolve })
+      batch = { pending: 0, succeeded: true, ready, finish }
+      settingsSaves.set(conversationId, batch)
+    }
+    const saving = batch
+    saving.pending++
+    return (success: boolean) => {
+      saving.succeeded &&= success
+      if (--saving.pending === 0) {
+        settingsSaves.delete(conversationId)
+        saving.finish(saving.succeeded)
+      }
+    }
+  }
   async function savePlan() {
+    if (!conversationReady.value || loading.chat || loading.sending || loading.withdrawing || savingReplyPlan.value) return false
     const conversationId = selectedConversationId.value
     if (!conversationId) return
     const revision = conversationRevision
     const worldId = selectedWorldId.value
     const items = replyPlan.value.items.map((item, index) => ({ ...item, order: index + 1 }))
     if (!items.length) throw new Error('回复顺序至少保留一位角色')
-    const saved = await api.saveReplyPlan(conversationId, {
-      source: 'USER', executionKey: 'default', displayName: '群聊', items,
-    })
-    if (revision !== conversationRevision || selectedConversationId.value !== conversationId || selectedWorldId.value !== worldId) return
-    setReplyPlans([saved])
-    notify('回复顺序已保存', '', 'success')
+    savingPlanConversations.add(conversationId)
+    const finishSave = beginSettingsSave(conversationId)
+    let succeeded = false
+    try {
+      const saved = await api.saveReplyPlan(conversationId, {
+        source: 'USER', executionKey: 'default', displayName: '群聊', items,
+      })
+      succeeded = true
+      if (revision !== conversationRevision || selectedConversationId.value !== conversationId || selectedWorldId.value !== worldId) return
+      setReplyPlans([saved])
+      notify('回复顺序已保存', '', 'success')
+    } finally {
+      savingPlanConversations.delete(conversationId)
+      finishSave(succeeded)
+    }
   }
   function movePlanItem(from: number, to: number) {
+    if (savingReplyPlan.value) return
     const items = replyPlan.value.items; if (from === to || to < 0 || to >= items.length) return
     const [moved] = items.splice(from, 1); if (moved) items.splice(to, 0, moved)
   }
-  function deletePlanItem(index: number) { replyPlan.value.items.splice(index, 1) }
+  function deletePlanItem(index: number) { if (!savingReplyPlan.value) replyPlan.value.items.splice(index, 1) }
   function addPlanItem(actorId: number) {
+    if (savingReplyPlan.value) return
     if (!replyPlan.value.items.some((item) => item.actorId === actorId)) replyPlan.value.items.push({ order: replyPlan.value.items.length + 1, actorType: 'character', actorId })
   }
 
@@ -671,11 +732,22 @@ export function useWorkspace() {
     ))
   }
 
-  function applyEvent(event: GroupChatEvent) {
+  function applyEvent(event: GroupChatEvent, optimisticMessageId?: number) {
     if (event.eventType === 'stream.caught_up') {
       catchingUpGenerationId = null
       void scrollToBottom()
       return
+    }
+    if (event.eventType === 'turn.accepted' && event.messageId != null && optimisticMessageId != null) {
+      // The confirmation belongs to this submission, so reconcile by its local ID,
+      // never by content or actor (both can legitimately repeat in later steps).
+      const optimistic = messages.value.find(message => message.id === optimisticMessageId)
+      if (optimistic) Object.assign(optimistic, {
+        id: event.messageId,
+        turnId: event.turnId,
+        replyStepId: event.replyStepId,
+        sequenceNo: event.sequence ?? optimistic.sequenceNo,
+      })
     }
     const step = event.replyStepId
     if (event.eventType === 'game_time.changed' && selectedConversationId.value) {
@@ -796,6 +868,7 @@ export function useWorkspace() {
     clientRequestId: string,
     connect: (onEvent: (event: GroupChatEvent) => void, signal: AbortSignal) => Promise<void>,
     catchingUp = false,
+    optimisticMessageId?: number,
   ) {
     if (selectedConversationId.value !== conversationId) throw new DOMException('会话已切换', 'AbortError')
     const conversation = selectedConversation.value
@@ -805,6 +878,7 @@ export function useWorkspace() {
     const connection = { conversationId, requestId: clientRequestId, controller: new AbortController() }
     generationConnection = connection
     loading.sending = true
+    generationFailed.value = false
     if (!catchingUp) {
       generationFailure.value = null
       generationFailureOpen.value = false
@@ -830,18 +904,22 @@ export function useWorkspace() {
           accepted ||= event.eventType === 'turn.accepted' || event.turnId != null
           if (event.eventType === 'generation.failed') {
             failed = true
+            if (selectedConversationId.value === conversationId) generationFailed.value = true
             // A reconnect may only return a completion marker without turn metadata.
             // Its absence is evidence of rejection only on the original stream.
             rejectedBeforeAcceptance ||= !accepted && !resumed
           }
           if (event.eventType === 'generation.completed') completed = true
           if (['generation.failed', 'generation.completed', 'turn.completed', 'turn.waiting_input', 'turn.paused'].includes(event.eventType)) terminal = true
-          if (selectedConversationId.value === conversationId) applyEvent(event)
+          if (selectedConversationId.value === conversationId) applyEvent(event, optimisticMessageId)
         },
       })
       if (terminal) forgetGeneration(conversationId, clientRequestId)
       return { failed, terminal, completed, rejectedBeforeAcceptance: rejectedBeforeAcceptance && !accepted }
     } catch (error) {
+      if (!isGenerationAbort(error) && selectedConversationId.value === conversationId && conversationRevision === revision) {
+        generationFailed.value = true
+      }
       if (error instanceof GenerationStartRejected) forgetGeneration(conversationId, clientRequestId)
       throw error
     } finally {
@@ -861,10 +939,62 @@ export function useWorkspace() {
       }
     }
   }
+  function beginGenerationOperation() {
+    let finish!: (ready: boolean) => void
+    const operation = {
+      revision: conversationRevision,
+      syncing: false,
+      synced: false,
+      ready: new Promise<boolean>(resolve => { finish = resolve }),
+      finish: (ready: boolean) => finish(ready),
+    }
+    generationOperation = operation
+    loading.sending = true
+    return operation
+  }
+  async function finishGenerationOperation(operation: ReturnType<typeof beginGenerationOperation>) {
+    // The stream may be closed while history is still loading. Only its owning
+    // operation can release the send lock, including after leaving and reopening.
+    const current = generationOperation === operation && operation.revision === conversationRevision
+    if (generationOperation === operation) generationOperation = null
+    if (current) loading.sending = false
+    operation.finish(current && operation.synced)
+    if (current) await scrollToBottom()
+  }
+  function pendingConversationHistory(revision: number) {
+    // Replay recovery supersedes a failed initial load while its history is syncing.
+    if (generationOperation?.revision === revision && generationOperation.syncing) return generationOperation.ready
+    if (conversationLoad?.revision === revision) return conversationLoad.ready
+    return null
+  }
+  function pendingGenerationReadiness(revision: number): Promise<boolean> | null {
+    const conversationId = selectedConversationId.value
+    const history = pendingConversationHistory(revision)
+    const settings = conversationId == null ? undefined : settingsSaves.get(conversationId)?.ready
+    if (!history && !settings) return null
+    return (async () => {
+      let pendingSettings = settings
+      let pendingHistory = history
+      do {
+        const [historyReady, settingsReady] = await Promise.all([pendingHistory ?? true, pendingSettings ?? true])
+        if (conversationRevision !== revision || selectedConversationId.value !== conversationId) return false
+        if (!settingsReady) {
+          generationFailed.value = true
+          notify('已取消本次生成', '设置保存失败，请保存成功后重试。', 'danger')
+          return false
+        }
+        if (!historyReady) return false
+        // Include saves started while this submission was waiting.
+        pendingSettings = conversationId == null ? undefined : settingsSaves.get(conversationId)?.ready
+        pendingHistory = pendingConversationHistory(revision)
+      } while (pendingSettings || pendingHistory)
+      return true
+    })()
+  }
   async function resumeGeneration(conversationId: number) {
     const clientRequestId = storedGeneration(conversationId)
     if (!clientRequestId) return
-    loading.sending = true
+    const operation = beginGenerationOperation()
     try {
       const result = await consumeGeneration(
         conversationId,
@@ -876,7 +1006,7 @@ export function useWorkspace() {
       const conversation = selectedConversation.value
       if (conversation?.id === conversationId
         && (conversation.mode === 'trpg' || result.completed || result.failed)) {
-        await syncConversationState(conversation)
+        await syncConversationState(conversation, operation)
       }
     } catch (error) {
       if (isGenerationAbort(error)) return
@@ -885,20 +1015,25 @@ export function useWorkspace() {
       const conversation = selectedConversation.value
       if (conversation?.id === conversationId
         && conversation.mode === 'trpg') {
-        await syncConversationState(conversation).catch(() => undefined)
+        await syncConversationState(conversation, operation).catch(() => undefined)
       }
     } finally {
-      if (!generationConnection) loading.sending = false
-      await scrollToBottom()
+      await finishGenerationOperation(operation)
     }
   }
-  async function syncConversationState(conversation: Conversation) {
-    const revision = conversationRevision
+  async function syncConversationState(conversation: Conversation, operation: ReturnType<typeof beginGenerationOperation>) {
+    const revision = operation.revision
+    if (revision !== conversationRevision || selectedConversationId.value !== conversation.id) return
+    operation.syncing = true
+    operation.synced = false
     const worldId = selectedWorldId.value
-    const [detail, history, plans, turn, overview, cards] = await Promise.all([
+    const recoveringInitialLoad = conversationLoad?.revision === revision
+    const [detail, history, plans, turn, overview, cards, runtimes, models] = await Promise.all([
       api.conversation(conversation.id), api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id),
       conversation.mode === 'trpg' ? loadCombatOverview(conversation.id) : [],
       conversation.mode === 'trpg' ? loadInvestigatorCards(conversation.id) : [],
+      recoveringInitialLoad ? api.actorRuntimes(conversation.id) : [],
+      recoveringInitialLoad ? api.modelApis() : [],
     ])
     if (revision !== conversationRevision || selectedConversationId.value !== conversation.id || selectedWorldId.value !== worldId) return
     const hydrated = await hydrateGroupMessages(history)
@@ -914,6 +1049,14 @@ export function useWorkspace() {
     currentTurn.value = turn
     combatOverview.value = overview
     investigatorCards.value = cards
+    if (recoveringInitialLoad) {
+      setConversationParticipants(detail)
+      actorRuntimes.value = runtimes
+      modelApis.value = models
+    }
+    conversationReady.value = true
+    operation.synced = true
+    if (conversationLoad?.revision === revision) conversationLoad = null
   }
   async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
     const conversation = selectedConversation.value
@@ -927,34 +1070,42 @@ export function useWorkspace() {
     notify('游戏时间已校正', gameTime.displayText, 'success')
   }
   async function startTrpgTurn(investigatorDirection?: string): Promise<boolean> {
+    const revision = conversationRevision
+    const history = pendingGenerationReadiness(revision)
+    if (history) {
+      if (!await history || conversationRevision !== revision) return false
+    }
     const conversation = selectedConversation.value
     if (!conversation || conversation.mode !== 'trpg' || conversation.status !== 'active' || loading.sending) return false
-    loading.sending = true
+    const operation = beginGenerationOperation()
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
-      await consumeGeneration(
+      const result = await consumeGeneration(
         conversation.id,
         clientRequestId,
         (onEvent, signal) => streamTrpgTurn.continue(
           conversation.id, clientRequestId, onEvent,
           investigatorDirection?.trim() || undefined, signal),
       )
-      await syncConversationState(conversation)
-      return true
+      await syncConversationState(conversation, operation)
+      return !result.failed
     } catch (error) {
       if (isGenerationAbort(error)) return false
-      await syncConversationState(conversation).catch(() => undefined)
+      if (selectedConversationId.value === conversation.id && conversationRevision === revision) generationFailed.value = true
+      await syncConversationState(conversation, operation).catch(() => undefined)
       notify('行动轮启动失败', errorMessage(error), 'danger')
       return false
     }
-    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
+    finally { await finishGenerationOperation(operation) }
   }
   async function retryGroupTurn() {
+    const readiness = pendingGenerationReadiness(conversationRevision)
+    if (readiness && !await readiness) return false
     const conversation = selectedConversation.value
     const turn = currentTurn.value
     if (!conversation || conversation.mode !== 'chat' || turn?.status !== 'failed' || loading.sending || loading.withdrawing) return
     generationFailureOpen.value = false
-    loading.sending = true
+    const operation = beginGenerationOperation()
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
       await consumeGeneration(conversation.id, clientRequestId,
@@ -963,12 +1114,12 @@ export function useWorkspace() {
       if (failure?.conversationId === conversation.id && failure.detail.code === 'GROUP_CHECKPOINT_UNAVAILABLE') {
         failure.turnId ??= turn.turnId
       }
-      await syncConversationState(conversation)
+      await syncConversationState(conversation, operation)
     } catch (error) {
       if (isGenerationAbort(error)) return false
-      await syncConversationState(conversation).catch(() => undefined)
+      await syncConversationState(conversation, operation).catch(() => undefined)
       notify('群聊回复重试失败', errorMessage(error), 'danger')
-    } finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
+    } finally { await finishGenerationOperation(operation) }
   }
   async function withdrawGenerationFailure() {
     const failure = generationFailure.value
@@ -991,9 +1142,11 @@ export function useWorkspace() {
     await startTrpgTurn()
   }
   async function selectSceneOption(optionNo: string) {
+    const readiness = pendingGenerationReadiness(conversationRevision)
+    if (readiness && !await readiness) return false
     const conversation = selectedConversation.value; const turn = currentTurn.value
     if (!conversation || !turn?.waitingForUser || turn.inputType !== 'selection' || !turn.stepId || loading.sending) return
-    loading.sending = true
+    const operation = beginGenerationOperation()
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
       const { turnId, stepId } = turn
@@ -1004,18 +1157,20 @@ export function useWorkspace() {
           conversation.id, turnId, stepId,
           { clientRequestId, optionNo }, onEvent, signal),
       )
-      await syncConversationState(conversation)
+      await syncConversationState(conversation, operation)
     } catch (error) {
       if (isGenerationAbort(error)) return false
-      await syncConversationState(conversation).catch(() => undefined)
+      await syncConversationState(conversation, operation).catch(() => undefined)
       notify('地点选择失败', errorMessage(error), 'danger')
     }
-    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
+    finally { await finishGenerationOperation(operation) }
   }
   async function endExploration() {
+    const readiness = pendingGenerationReadiness(conversationRevision)
+    if (readiness && !await readiness) return false
     const conversation = selectedConversation.value; const turn = currentTurn.value
     if (!conversation || !turn?.waitingForUser || turn.inputType !== 'message' || !turn.stepId || loading.sending) return
-    loading.sending = true
+    const operation = beginGenerationOperation()
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
       const { turnId, stepId } = turn
@@ -1026,18 +1181,21 @@ export function useWorkspace() {
           conversation.id, turnId, stepId,
           clientRequestId, onEvent, signal),
       )
-      await syncConversationState(conversation)
+      await syncConversationState(conversation, operation)
     } catch (error) {
       if (isGenerationAbort(error)) return false
-      await syncConversationState(conversation).catch(() => undefined)
+      await syncConversationState(conversation, operation).catch(() => undefined)
       notify('结束探索失败', errorMessage(error), 'danger')
     }
-    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
+    finally { await finishGenerationOperation(operation) }
   }
 
   async function askKp() {
-    const conversation = selectedConversation.value
     const revision = conversationRevision
+    const originalQuestion = inquiryInput.value
+    const readiness = pendingGenerationReadiness(revision)
+    if (readiness && (!await readiness || inquiryInput.value !== originalQuestion)) return false
+    const conversation = selectedConversation.value
     const turn = currentTurn.value
     const question = inquiryInput.value.trim()
     if (!conversation || conversation.mode !== 'trpg'
@@ -1045,7 +1203,7 @@ export function useWorkspace() {
       || !turn?.waitingForUser || !turn.canAskKp
       || turn.inputType !== 'message' || !turn.stepId
       || loading.sending) return
-    loading.sending = true
+    const operation = beginGenerationOperation()
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
       const { turnId, stepId } = turn
@@ -1056,24 +1214,25 @@ export function useWorkspace() {
           conversation.id, turnId, stepId,
           { clientRequestId, question }, onEvent, signal),
       )
-      await syncConversationState(conversation)
+      await syncConversationState(conversation, operation)
       if (!result.failed && selectedConversationId.value === conversation.id && conversationRevision === revision) {
         if (inquiryInput.value.trim() === question) inquiryInput.value = ''
         composerIntent.value = 'action'
       }
     } catch (error) {
       if (isGenerationAbort(error)) return false
-      await syncConversationState(conversation).catch(() => undefined)
+      await syncConversationState(conversation, operation).catch(() => undefined)
       notify('询问 KP 失败', errorMessage(error), 'danger')
     } finally {
-      if (!generationConnection) loading.sending = false
-      await scrollToBottom()
+      await finishGenerationOperation(operation)
     }
   }
   async function retryStep(message: GroupMessage) {
+    const readiness = pendingGenerationReadiness(conversationRevision)
+    if (readiness && !await readiness) return false
     const conversation = selectedConversation.value
     if (!conversation || conversation.mode !== 'trpg' || !message.turnId || !message.replyStepId || loading.sending) return
-    loading.sending = true
+    const operation = beginGenerationOperation()
     try {
       const clientRequestId = crypto.randomUUID?.() || `web-${Date.now()}`
       await consumeGeneration(
@@ -1083,15 +1242,22 @@ export function useWorkspace() {
           conversation.id, message.turnId!, message.replyStepId!,
           clientRequestId, onEvent, signal),
       )
-      await syncConversationState(conversation)
+      await syncConversationState(conversation, operation)
     } catch (error) {
       if (isGenerationAbort(error)) return false
-      await syncConversationState(conversation).catch(() => undefined)
+      await syncConversationState(conversation, operation).catch(() => undefined)
       notify('角色行动重试失败', errorMessage(error), 'danger')
     }
-    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
+    finally { await finishGenerationOperation(operation) }
   }
   async function sendMessage() {
+    const revision = conversationRevision
+    const originalInput = messageInput.value
+    const history = pendingGenerationReadiness(revision)
+    if (history) {
+      if (!await history || conversationRevision !== revision
+        || messageInput.value !== originalInput) return
+    }
     const content = messageInput.value.trim(); const conversation = selectedConversation.value
     if (!content || !conversation || conversation.status !== 'active' || loading.sending || loading.withdrawing) return
     const waitingStep = currentTurn.value?.steps.find((step) => step.stepId === currentTurn.value?.stepId)
@@ -1107,14 +1273,12 @@ export function useWorkspace() {
         return
       }
     }
-    const originalInput = messageInput.value
     const userId = session.id
     const restoreInput = () => {
       if (session.id === userId) chatDrafts.restoreIfEmpty(`world:${conversation.userWorldId}:group:${conversation.id}`, { action: originalInput })
     }
-    const revision = conversationRevision
     const optimisticId = tempMessageId--
-    messageInput.value = ''; loading.sending = true
+    messageInput.value = ''; const operation = beginGenerationOperation()
     if (conversation.mode === 'chat' && !manualChat) replyTurnState.value = beginReplyTurn()
     messages.value.push({ id: optimisticId, conversationId: conversation.id, speakerType: manualCharacter ? 'character' : 'user', speakerId: manualCharacter ? waitingStep?.actorId : undefined, speakerName: manualCharacter ? characterById(waitingStep?.actorId)?.characterName : undefined, messageKind: 'dialogue', content,
       sequenceNo: Date.now(), status: 'completed', createdAt: new Date().toISOString() })
@@ -1132,6 +1296,7 @@ export function useWorkspace() {
           (onEvent, signal) => streamTrpgTurn.message(
             conversation.id, turnId, stepId,
             { clientRequestId, content }, onEvent, signal),
+          false, optimisticId,
         )
       } else if (manualChat) {
         const turn = currentTurn.value
@@ -1143,6 +1308,7 @@ export function useWorkspace() {
             conversation.id, turn.turnId, turn.stepId!,
             { clientRequestId, content }, onEvent, signal,
           ),
+          false, optimisticId,
         )
       } else {
         result = await consumeGeneration(
@@ -1150,6 +1316,7 @@ export function useWorkspace() {
           clientRequestId,
           (onEvent, signal) => streamGroupMessage(
             conversation.id, { clientRequestId, content }, onEvent, signal),
+          false, optimisticId,
         )
       }
       if (result.rejectedBeforeAcceptance) {
@@ -1159,7 +1326,7 @@ export function useWorkspace() {
         }
       }
       try {
-        await syncConversationState(conversation)
+        await syncConversationState(conversation, operation)
       } catch (error) {
         if (selectedConversationId.value === conversation.id && conversationRevision === revision) {
           notify('会话状态同步失败', errorMessage(error), 'danger')
@@ -1169,7 +1336,7 @@ export function useWorkspace() {
       if (isGenerationAbort(error)) return false
       restoreInput()
       if (conversation.mode === 'trpg') {
-        await syncConversationState(conversation).catch(() => undefined)
+        await syncConversationState(conversation, operation).catch(() => undefined)
       } else if (selectedConversationId.value === conversation.id && conversationRevision === revision) {
         messages.value = messages.value.filter((message) => message.id !== optimisticId)
         replyTurnState.value = updateReplyTurn(replyTurnState.value, {
@@ -1178,16 +1345,23 @@ export function useWorkspace() {
       }
       notify('消息发送失败', errorMessage(error), 'danger')
     }
-    finally { if (!generationConnection) loading.sending = false; await scrollToBottom() }
+    finally { await finishGenerationOperation(operation) }
   }
 
   async function saveActorRuntime(payload: GroupActorRuntimeSavePayload) {
+    if (!conversationReady.value || loading.chat) return
     const conversation = selectedConversation.value
     if (!conversation) return
+    const savingKey = `${conversation.id}:${payload.actorType}:${payload.actorId ?? ''}`
+    if (savingActorRuntimes.has(savingKey)) return
+    savingActorRuntimes.add(savingKey)
+    const finishSave = beginSettingsSave(conversation.id)
+    let succeeded = false
     const revision = conversationRevision
     const worldId = selectedWorldId.value
     try {
       const saved = await api.saveActorRuntime(conversation.id, payload)
+      succeeded = true
       if (revision !== conversationRevision || selectedConversationId.value !== conversation.id || selectedWorldId.value !== worldId) return
       const key = `${saved.actorType}:${saved.actorId ?? ''}`
       const exists = actorRuntimes.value.some((value) => `${value.actorType}:${value.actorId ?? ''}` === key)
@@ -1199,6 +1373,9 @@ export function useWorkspace() {
     } catch (error) {
       notify('发言方式保存失败', errorMessage(error), 'danger')
       return undefined
+    } finally {
+      savingActorRuntimes.delete(savingKey)
+      finishSave(succeeded)
     }
   }
   async function scrollToBottom(force = false) {
@@ -1213,7 +1390,7 @@ export function useWorkspace() {
   onMounted(boot)
   return {
     session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
-    conversations, selectedConversationId, selectedConversation, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, actorRuntimes, modelApis, combatOverview, investigatorCards, replyTurnState,
+    conversations, selectedConversationId, selectedConversation, conversationReady, savingReplyPlan, savingActorKeys, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, actorRuntimes, modelApis, combatOverview, investigatorCards, replyTurnState, generationFailed,
     latestDiceRoll, incomingDiceRolls, hasOlderGroupMessages, generationFailure, generationFailureOpen, loadDiceAggregate,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,

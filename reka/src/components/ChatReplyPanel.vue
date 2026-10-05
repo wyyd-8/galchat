@@ -11,6 +11,7 @@ const props = defineProps<{
   username: string
   availableCharacters: Character[]
   actorRuntimes: GroupActorRuntime[]
+  savingActorKeys?: string[]
   modelApis: ModelApi[]
   messages: GroupMessage[]
   turnState: ReplyTurnState | null
@@ -57,6 +58,7 @@ const rows = computed(() => props.items.map(item => {
   const modelId = runtime?.modelApiAvailable && runtime.modelApiId != null ? String(runtime.modelApiId) : ''
   return {
     item, character, modelId,
+    saving: props.savingActorKeys?.includes(`${item.actorType}:${item.actorId ?? ''}`) ?? false,
     name: replyPlanActorName(item, props.username, character?.characterName),
     modelName: modelId ? props.modelApis.find(model => String(model.id) === modelId)?.name || runtime?.modelApiName || '自定义模型' : '默认模型',
     phase: props.turnState && !props.dirty ? replyActorPhase(props.turnState, item, props.messages) : null,
@@ -78,7 +80,7 @@ function toggleEditing() {
   else editing.value = true
 }
 function selectModel(item: ReplyPlanItem, event: Event) {
-  if (props.locked || item.actorType !== 'character' || item.actorId == null) return
+  if (props.locked || props.savingActorKeys?.includes(`${item.actorType}:${item.actorId ?? ''}`) || item.actorType !== 'character' || item.actorId == null) return
   const value = (event.target as HTMLSelectElement).value
   emit('saveModel', { actorType: 'character', actorId: item.actorId, controlMode: 'MODEL', modelApiId: value ? Number(value) : undefined })
 }
@@ -168,7 +170,7 @@ function drop(index: number) {
             </div>
             <details v-if="row.item.actorType === 'character'" class="chat-reply-model">
               <summary :aria-label="`设置${row.name}的回复模型`"><span :title="row.modelName">{{ row.modelName }}</span><ChevronDown :size="12" /></summary>
-              <label><span>回复模型</span><select :value="row.modelId" :aria-label="`选择${row.name}的回复模型`" :disabled="locked" @change="selectModel(row.item, $event)"><option value="">默认模型</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select><small>选择后立即保存</small></label>
+              <label><span>回复模型</span><select :value="row.modelId" :aria-label="`选择${row.name}的回复模型`" :disabled="locked || row.saving" @change="selectModel(row.item, $event)"><option value="">默认模型</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select><small>{{ row.saving ? '正在保存…' : '选择后立即保存' }}</small></label>
             </details>
             <div v-if="editing && canEdit" class="chat-reply-member-actions">
               <button :disabled="locked || index === 0" :aria-label="`上移${row.name}`" title="上移" @click="emit('move', index, index - 1)"><ArrowUp :size="14" /></button>

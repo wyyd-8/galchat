@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import test from 'node:test'
-import type { Conversation, GroupMessage } from '../api/types.ts'
+import type { Conversation, GroupChatEvent, GroupMessage } from '../api/types.ts'
 
 const sourceRoot = new URL('../', import.meta.url)
 registerHooks({
@@ -368,8 +368,10 @@ test(`keeps the generation error dialog open after ${scenario || 'normal turn'} 
 })
 }
 
-test('refresh discards debug details and resyncs an expired generation as retryable', async () => {
+test('refresh discards debug details and resyncs an expired generation as retryable', async t => {
   const { api, streamGroupGeneration } = await import('../api/client.ts')
+  t.mock.method(api, 'actorRuntimes', async () => [])
+  t.mock.method(api, 'modelApis', async () => [])
   const { useWorkspace } = await import('../composables/useWorkspace.ts')
   const { createRenderer, defineComponent, h } = await import('vue')
   const previousWindow = globalThis.window
@@ -1086,6 +1088,47 @@ test('group mutation: reopening a saved reply plan keeps omitted members availab
   assert.deepEqual(workspace.replyPlan.value.items.map(item => item.actorId), [101, 102])
 })
 
+for (const failLoad of [false, true]) {
+  test(`reply settings cannot reuse another conversation during an incomplete load (failed=${failLoad})`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { notice } = await import('../composables/useNotice.ts')
+    t.after(() => clearTimeout(notice.timer))
+    const previousPlan = workspace.replyPlan.value
+    let release!: () => void
+    t.mock.method(api, 'groupMessages', async () => {
+      await new Promise<void>(resolve => { release = resolve })
+      if (failLoad) throw new Error('history unavailable')
+      return []
+    })
+    const selecting = workspace.selectConversation(8)
+    const cleared = { plans: [...workspace.replyPlans.value], items: [...workspace.replyPlan.value.items], participants: [...workspace.participantIds.value] }
+    const writes: number[] = []
+    t.mock.method(api, 'saveReplyPlan', async (id: number, payload: any) => { writes.push(id); return payload })
+    const runtimeWrites: number[] = []
+    const runtime = { actorType: 'character' as const, actorId: 101, controlMode: 'MANUAL' as const }
+    t.mock.method(api, 'saveActorRuntime', async (id: number) => { runtimeWrites.push(id); return { ...runtime, modelApiAvailable: true } })
+    // Even a stale editor's payload must not be persisted to the new conversation.
+    workspace.replyPlan.value = previousPlan
+    await workspace.savePlan()
+    await workspace.saveActorRuntime(runtime)
+    release()
+    await selecting
+    if (failLoad) {
+      await workspace.savePlan()
+      await workspace.saveActorRuntime(runtime)
+    }
+    assert.deepEqual(cleared, { plans: [], items: [], participants: [] })
+    assert.deepEqual(writes, [])
+    assert.deepEqual(runtimeWrites, [])
+    t.mock.method(api, 'groupMessages', async () => [])
+    await workspace.selectConversation(8)
+    await workspace.savePlan()
+    await workspace.saveActorRuntime(runtime)
+    assert.deepEqual(writes, [8], 'settings remain editable after a successful load')
+    assert.deepEqual(runtimeWrites, [8])
+  })
+}
+
 for (const navigation of ['stay', 'conversation', 'world'] as const) {
   test(`group mutation: deletion preserves the current view after ${navigation}`, async t => {
     const { workspace, api } = await groupMutationFixture(t)
@@ -1274,6 +1317,83 @@ for (const mode of ['chat', 'trpg'] as const) {
         : new Response('data: {"eventType":"generation.failed","turnId":42,"error":"模型失败"}\n\n'))
       await sending
       assert.equal(workspace.messageInput.value, draft || (failure === 'rejected' ? '打开门' : ''))
+    })
+  }
+}
+
+for (const mode of ['chat', 'trpg'] as const) {
+  for (const outcome of ['recovered', 'pending', 'failed', 'switched'] as const) {
+    test(`initial history failure permits ${mode} submissions only after replay recovery (${outcome})`, async t => {
+      const { workspace, api } = await groupMutationFixture(t)
+      const { streamGroupGeneration, streamTrpgTurn } = await import('../api/client.ts')
+      const { notice } = await import('../composables/useNotice.ts')
+      t.after(() => clearTimeout(notice.timer))
+      workspace.conversations.value[0]!.mode = mode
+      t.mock.method(api, 'conversation', async (id: number) => ({ id, userWorldId: 3, worldId: 2,
+        mode, title: String(id), status: 'active', characterIds: [102] }))
+      const runtime = { actorType: 'character' as const, actorId: 102, controlMode: 'MANUAL' as const, modelApiAvailable: true }
+      t.mock.method(api, 'actorRuntimes', async () => [runtime])
+      t.mock.method(api, 'combatOverview', async () => [])
+      t.mock.method(api, 'investigatorCards', async () => [])
+      const recovered: GroupMessage = { id: 90, conversationId: 7, turnId: 42,
+        speakerType: 'user', messageKind: 'dialogue', content: 'recovered history', sequenceNo: 1, status: 'completed' }
+      let reads = 0
+      let release!: () => void
+      t.mock.method(api, 'groupMessages', async (id: number) => {
+        if (id !== 7) return []
+        if (++reads === 1) throw new Error('initial history unavailable')
+        if (reads === 2) {
+          await new Promise<void>(resolve => { release = resolve })
+        }
+        if (outcome === 'failed') throw new Error('recovery history unavailable')
+        return [recovered]
+      })
+      sessionStorage.setItem('galchat:generation:7', 'recovery-request')
+      t.mock.method(streamGroupGeneration, 'resume', async (_id: number, _request: string, receive: (event: GroupChatEvent) => void) => {
+        receive({ eventType: 'generation.completed', conversationId: 7, turnId: 42, eventSequence: 1 })
+      })
+      await workspace.selectConversation(7)
+      await waitFor(() => !!release)
+      assert.equal(workspace.conversationReady.value, false)
+      let requests = 0
+      globalThis.fetch = async () => {
+        requests++
+        return new Response('data: {"eventType":"generation.completed","conversationId":7,"turnId":43}\n\n')
+      }
+      t.mock.method(streamTrpgTurn, 'continue', async (_id: number, _request: string, receive: (event: GroupChatEvent) => void) => {
+        requests++
+        receive({ eventType: 'generation.completed', conversationId: 7, turnId: 43 })
+      })
+      if (outcome === 'recovered') {
+        release()
+        await waitFor(() => !workspace.loading.sending)
+        assert.equal(workspace.messages.value[0]?.content, 'recovered history')
+      }
+      workspace.messageInput.value = 'new draft'
+      const send = () => mode === 'chat' ? workspace.sendMessage() : workspace.startTrpgTurn()
+      const sending = send()
+      if (outcome !== 'recovered') {
+        await new Promise(resolve => setTimeout(resolve, 0))
+        assert.equal(requests, 0, 'must wait for authoritative history')
+        if (outcome === 'switched') await workspace.selectConversation(8)
+        release()
+      }
+      await sending
+      await waitFor(() => !workspace.loading.sending)
+      const success = outcome === 'recovered' || outcome === 'pending'
+      assert.equal(requests, success ? 1 : 0)
+      if (success) {
+        assert.equal(workspace.conversationReady.value, true)
+        assert.deepEqual(workspace.participantIds.value, [102])
+        assert.deepEqual(workspace.actorRuntimes.value, [runtime])
+      }
+      if (outcome === 'failed') {
+        assert.equal(workspace.conversationReady.value, false)
+        await send()
+        assert.equal(requests, 0, 'failed recovery must keep submissions blocked')
+        assert.equal(workspace.messageInput.value, 'new draft')
+      }
+      if (outcome === 'switched') assert.equal(workspace.selectedConversationId.value, 8)
     })
   }
 }
@@ -1552,4 +1672,523 @@ test('late group character refresh cannot replace another world profile', async 
   finish([{ userWorldId: 3, characterId: 101, characterName: '旧世界', favorValue: 15 }])
   await sending
   assert.equal(workspace.characters.value[0]!.favorValue, 90)
+})
+
+for (const mode of ['chat', 'trpg'] as const) for (const syncFails of [false, true]) {
+  test(`${mode} manual speech replaces its optimistic message before the round ends (sync fails=${syncFails})`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { notice } = await import('../composables/useNotice.ts')
+    t.after(() => clearTimeout(notice.timer))
+    workspace.conversations.value[0]!.mode = mode
+    workspace.currentTurn.value = {
+      turnId: 42, stepId: 99, status: 'waiting_input', inputType: 'message', waitingForUser: true,
+      sceneOptions: {}, steps: [{ stepId: 99, itemOrder: 1, actorType: 'character', actorId: 101, status: 'waiting_input' }],
+    }
+    // Identical words by the same actor in another step must remain a separate message.
+    const earlier: GroupMessage = { id: 70, conversationId: 7, turnId: 41, replyStepId: 98,
+      speakerType: 'character', speakerId: 101, speakerName: '调查员', messageKind: 'dialogue',
+      content: '打开门', sequenceNo: 1, status: 'completed' }
+    const submitted: GroupMessage = { ...earlier, id: 71, turnId: 42, replyStepId: 99, sequenceNo: 2 }
+    const following: GroupMessage = { ...submitted, id: 72, replyStepId: 100, sequenceNo: 3 }
+    workspace.messages.value = [earlier]
+    t.mock.method(api, 'groupMessages', async () => {
+      if (syncFails) throw new Error('history unavailable')
+      return [earlier, submitted, following]
+    })
+    t.mock.method(api, 'combatOverview', async () => [])
+    t.mock.method(api, 'investigatorCards', async () => [])
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    let requested = false
+    globalThis.fetch = async () => {
+      requested = true
+      return new Response(new ReadableStream<Uint8Array>({ start(value) { controller = value } }))
+    }
+    const sendEvent = (event: Record<string, unknown>) => controller.enqueue(
+      new TextEncoder().encode(`data: ${JSON.stringify({ conversationId: 7, turnId: 42, ...event })}\n\n`))
+    workspace.messageInput.value = '打开门'
+    const sending = workspace.sendMessage()
+    try {
+      await waitFor(() => requested)
+      assert.equal(workspace.messages.value.length, 2)
+      assert.ok(workspace.messages.value[1]!.id < 0)
+      sendEvent({ eventType: 'turn.accepted', replyStepId: 99, messageId: 71, sequence: 2 })
+      if (mode === 'chat') sendEvent({ eventType: 'message.completed', replyStepId: 99, messageId: 71, sequence: 2,
+        speaker: { type: 'character', id: 101, name: '调查员' }, content: '打开门' })
+      await waitFor(() => workspace.messages.value.some(message => message.id === 71))
+      assert.equal(workspace.loading.sending, true)
+      assert.deepEqual(workspace.messages.value.map(message => ({ id: message.id, step: message.replyStepId, sequence: message.sequenceNo })),
+        [{ id: 70, step: 98, sequence: 1 }, { id: 71, step: 99, sequence: 2 }])
+      // A replay and subsequent AI speech must neither duplicate nor consume the manual speech.
+      sendEvent({ eventType: 'turn.accepted', replyStepId: 99, messageId: 71, sequence: 2 })
+      if (mode === 'chat') sendEvent({ eventType: 'message.completed', replyStepId: 99, messageId: 71, content: '打开门' })
+      sendEvent({ eventType: 'reply.started', replyStepId: 100, messageId: 72, sequence: 3,
+        speaker: { type: 'character', id: 101, name: '调查员' } })
+      sendEvent({ eventType: 'message.delta', replyStepId: 100, messageId: 72, delta: '打开门' })
+      sendEvent({ eventType: 'message.completed', replyStepId: 100, messageId: 72, content: '打开门' })
+      await waitFor(() => workspace.messages.value.some(message => message.id === 72 && message.status === 'completed'))
+      assert.deepEqual(workspace.messages.value.map(message => message.id), [70, 71, 72])
+      assert.deepEqual(workspace.messages.value.map(message => message.content), ['打开门', '打开门', '打开门'])
+    } finally {
+      sendEvent({ eventType: 'turn.completed' })
+      controller.close()
+      await sending
+    }
+    assert.deepEqual(workspace.messages.value.map(message => message.id), [70, 71, 72])
+  })
+}
+
+for (const mode of ['chat', 'manual', 'trpg'] as const) {
+  test(`queued ${mode} send waits for initial history and uses the loaded turn exactly once`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const turn = mode === 'chat' ? null : {
+      turnId: 42, stepId: 99, status: 'waiting_input', inputType: 'message', waitingForUser: true,
+      sceneOptions: {}, steps: [{ stepId: 99, itemOrder: 1, actorType: 'character', actorId: 101, status: 'waiting_input' }],
+    }
+    workspace.conversations.value[1]!.mode = mode === 'trpg' ? 'trpg' : 'chat'
+    t.mock.method(api, 'currentTurn', async () => turn)
+    t.mock.method(api, 'combatOverview', async () => [])
+    t.mock.method(api, 'investigatorCards', async () => [])
+    let release!: (messages: GroupMessage[]) => void
+    let reads = 0
+    const sent: GroupMessage = { id: 81, conversationId: 8, turnId: 42, speakerType: mode === 'chat' ? 'user' : 'character', messageKind: 'dialogue', content: '打开门', sequenceNo: 2, status: 'completed' }
+    t.mock.method(api, 'groupMessages', async () => ++reads === 1
+      ? new Promise<GroupMessage[]>(resolve => { release = resolve }) : [sent])
+    const requests: string[] = []
+    globalThis.fetch = async (url) => {
+      requests.push(String(url))
+      return new Response('data: {"eventType":"turn.accepted","conversationId":8,"turnId":42,"messageId":81}\n\ndata: {"eventType":"turn.completed","conversationId":8,"turnId":42}\n\n')
+    }
+    const selecting = workspace.selectConversation(8)
+    workspace.messageInput.value = '打开门'
+    const sending = workspace.sendMessage()
+    const duplicate = workspace.sendMessage()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const beforeLoad = { requests: [...requests], draft: workspace.messageInput.value }
+    release([])
+    await Promise.all([selecting, sending, duplicate])
+    assert.deepEqual(beforeLoad, { requests: [], draft: '打开门' })
+    assert.equal(requests.length, 1)
+    if (mode !== 'chat') assert.match(requests[0]!, /turns\/42\/steps\/99/)
+    assert.deepEqual(workspace.messages.value.map(message => message.id), [81])
+  })
+}
+
+for (const outcome of ['failed', 'switched', 'reopened'] as const) {
+  test(`queued send is cancelled and preserves drafts when history is ${outcome}`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { notice } = await import('../composables/useNotice.ts')
+    t.after(() => clearTimeout(notice.timer))
+    let release!: () => void
+    let first = true
+    t.mock.method(api, 'combatOverview', async () => [])
+    t.mock.method(api, 'investigatorCards', async () => [])
+    t.mock.method(api, 'groupMessages', async () => {
+      if (first) {
+        first = false
+        await new Promise<void>(resolve => { release = resolve })
+        if (outcome === 'failed') throw new Error('history unavailable')
+      }
+      return []
+    })
+    let requests = 0
+    globalThis.fetch = async () => { requests++; return new Response('data: {"eventType":"generation.completed"}\n\n') }
+    const selecting = workspace.selectConversation(8)
+    workspace.messageInput.value = '待发送草稿'
+    const sending = workspace.sendMessage()
+    if (outcome !== 'failed') {
+      await workspace.selectConversation(7)
+      if (outcome === 'reopened') await workspace.selectConversation(8)
+    }
+    release()
+    await Promise.all([selecting, sending])
+    assert.equal(requests, 0)
+    if (outcome === 'switched') await workspace.selectConversation(8)
+    assert.equal(workspace.messageInput.value, '待发送草稿')
+  })
+}
+
+for (const accepted of [false, true]) {
+  test(`TRPG start reports streamed failure (accepted=${accepted})`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    workspace.conversations.value[0]!.mode = 'trpg'
+    t.mock.method(api, 'combatOverview', async () => [])
+    t.mock.method(api, 'investigatorCards', async () => [])
+    const { streamTrpgTurn } = await import('../api/client.ts')
+    t.mock.method(streamTrpgTurn, 'continue', async (_id: number, _request: string, receive: (event: GroupChatEvent) => void) => {
+      if (accepted) receive({ eventType: 'turn.accepted', conversationId: 7, turnId: 42 })
+      receive({ eventType: 'generation.failed', conversationId: 7, ...(accepted ? { turnId: 42 } : {}), error: 'cannot start' })
+    })
+    assert.equal(await workspace.startTrpgTurn(), false)
+  })
+}
+
+test('TRPG start also waits until its initial history is ready', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  workspace.conversations.value[1]!.mode = 'trpg'
+  t.mock.method(api, 'combatOverview', async () => [])
+  t.mock.method(api, 'investigatorCards', async () => [])
+  let release!: () => void
+  let first = true
+  t.mock.method(api, 'groupMessages', async () => {
+    if (first) { first = false; await new Promise<void>(resolve => { release = resolve }) }
+    return []
+  })
+  let requests = 0
+  const { streamTrpgTurn } = await import('../api/client.ts')
+  t.mock.method(streamTrpgTurn, 'continue', async (_id: number, _request: string, receive: (event: GroupChatEvent) => void) => {
+    requests++
+    receive({ eventType: 'turn.completed', conversationId: 8, turnId: 42 })
+  })
+  const selecting = workspace.selectConversation(8)
+  const starting = workspace.startTrpgTurn()
+  const requestsBeforeLoad = requests
+  release()
+  await selecting
+  assert.equal(await starting, true)
+  assert.equal(requestsBeforeLoad, 0)
+  assert.equal(requests, 1)
+})
+
+for (const mode of ['chat', 'trpg'] as const) {
+  test(`history synchronization keeps ${mode} sends queued despite an old conversation finishing`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { streamTrpgTurn } = await import('../api/client.ts')
+    t.mock.method(api, 'combatOverview', async () => [])
+    t.mock.method(api, 'investigatorCards', async () => [])
+    workspace.conversations.value.forEach(c => { c.mode = mode })
+    const originalConversation = api.conversation
+    t.mock.method(api, 'conversation', async (id: number) => ({ ...await originalConversation(id), mode }))
+    const releases = new Map<number, () => void>()
+    let defer = true
+    let requests = 0
+    t.mock.method(api, 'groupMessages', async (id: number): Promise<GroupMessage[]> => {
+      const snapshot = requests
+      if (defer) await new Promise<void>(resolve => { releases.set(id, resolve) })
+      return [{ id: snapshot + 100, conversationId: id, speakerType: 'user', messageKind: 'dialogue',
+        content: `turn-${snapshot}`, sequenceNo: snapshot, status: 'completed' }]
+    })
+    globalThis.fetch = async () => {
+      requests++
+      return new Response('data: {"eventType":"generation.completed"}\n\n')
+    }
+    t.mock.method(streamTrpgTurn, 'continue', async (_id: number, _request: string, receive: (event: GroupChatEvent) => void) => {
+      requests++
+      receive({ eventType: 'generation.completed' })
+    })
+    const send = () => mode === 'chat' ? workspace.sendMessage() : workspace.startTrpgTurn()
+    workspace.messageInput.value = 'first'
+    const oldSend = send()
+    await waitFor(() => releases.has(7))
+    defer = false
+    await workspace.selectConversation(8)
+    defer = true
+    workspace.messageInput.value = 'second'
+    const newSend = send()
+    await waitFor(() => releases.has(8))
+    releases.get(7)!()
+    await oldSend
+    const stillBusy = workspace.loading.sending
+    defer = false
+    workspace.messageInput.value = 'third'
+    const queued = send()
+    const duplicate = send()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const beforeSync = { requests, draft: workspace.messageInput.value }
+    defer = false
+    releases.get(8)!()
+    await Promise.all([newSend, queued, duplicate])
+    assert.equal(stillBusy, true, 'old request must not unlock the new conversation')
+    assert.deepEqual(beforeSync, { requests: 2, draft: 'third' })
+    assert.equal(requests, 3, 'queued submission runs exactly once after history is ready')
+    assert.deepEqual(workspace.messages.value.map(message => message.content), ['turn-3'])
+  })
+}
+
+for (const outcome of ['failed', 'switched', 'edited'] as const) {
+  test(`history synchronization cancels a queued send when ${outcome}`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { notice } = await import('../composables/useNotice.ts')
+    t.after(() => clearTimeout(notice.timer))
+    t.mock.method(api, 'combatOverview', async () => [])
+    t.mock.method(api, 'investigatorCards', async () => [])
+    let release!: () => void
+    let first = true
+    t.mock.method(api, 'groupMessages', async () => {
+      if (first) {
+        first = false
+        await new Promise<void>(resolve => { release = resolve })
+        if (outcome === 'failed') throw new Error('history unavailable')
+      }
+      return []
+    })
+    let requests = 0
+    globalThis.fetch = async () => {
+      requests++
+      return new Response('data: {"eventType":"generation.completed"}\n\n')
+    }
+    workspace.messageInput.value = 'first'
+    const sending = workspace.sendMessage()
+    await waitFor(() => !!release)
+    workspace.messageInput.value = 'queued draft'
+    const queued = workspace.sendMessage()
+    if (outcome === 'switched') await workspace.selectConversation(8)
+    if (outcome === 'edited') workspace.messageInput.value = 'edited draft'
+    release()
+    await Promise.all([sending, queued])
+    assert.equal(requests, 1)
+    if (outcome === 'switched') await workspace.selectConversation(7)
+    assert.equal(workspace.messageInput.value, outcome === 'edited' ? 'edited draft' : 'queued draft')
+  })
+}
+
+
+for (const failSave of [false, true]) {
+  test(`reply order rejects edits and duplicate saves until completion (failure=${failSave})`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { notice } = await import('../composables/useNotice.ts')
+    t.after(() => clearTimeout(notice.timer))
+    workspace.addPlanItem(102)
+    let release!: () => void
+    const save = t.mock.method(api, 'saveReplyPlan', async (_id: number, payload: any) => {
+      await new Promise<void>(resolve => { release = resolve })
+      if (failSave) throw new Error('save unavailable')
+      return payload
+    })
+    const pending = workspace.savePlan().catch(() => false)
+    workspace.movePlanItem(0, 1)
+    workspace.deletePlanItem(0)
+    workspace.addPlanItem(103)
+    // A duplicate must finish immediately, without submitting or queuing a write.
+    const duplicate = workspace.savePlan()
+    assert.equal(save.mock.callCount(), 1)
+    assert.deepEqual(workspace.replyPlan.value.items.map(item => item.actorId), [101, 102])
+    assert.equal(workspace.savingReplyPlan.value, true)
+    release()
+    await Promise.all([pending, duplicate])
+    assert.equal(workspace.savingReplyPlan.value, false)
+    workspace.movePlanItem(0, 1)
+    assert.deepEqual(workspace.replyPlan.value.items.map(item => item.actorId), [102, 101])
+    t.mock.method(api, 'saveReplyPlan', async (_id: number, payload: any) => payload)
+    await workspace.savePlan()
+  })
+
+  test(`actor model rejects duplicate saves until completion (failure=${failSave})`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { notice } = await import('../composables/useNotice.ts')
+    t.after(() => clearTimeout(notice.timer))
+    let release!: () => void
+    const save = t.mock.method(api, 'saveActorRuntime', async (_id: number, payload: any) => {
+      if (payload.actorId === 101) await new Promise<void>(resolve => { release = resolve })
+      if (failSave && payload.actorId === 101) throw new Error('save unavailable')
+      return { ...payload, modelApiAvailable: true }
+    })
+    const payload = { actorType: 'character' as const, actorId: 101, controlMode: 'MODEL' as const, modelApiId: 1 }
+    const pending = workspace.saveActorRuntime(payload)
+    const duplicate = workspace.saveActorRuntime({ ...payload, modelApiId: 2 })
+    assert.equal(save.mock.callCount(), 1)
+    assert.deepEqual(workspace.savingActorKeys.value, ['character:101'])
+    await workspace.saveActorRuntime({ ...payload, actorId: 102 })
+    assert.equal(save.mock.callCount(), 2, 'another actor remains independent')
+    release()
+    await Promise.all([pending, duplicate])
+    assert.deepEqual(workspace.savingActorKeys.value, [])
+    t.mock.method(api, 'saveActorRuntime', async (_id: number, value: any) => ({ ...value, modelApiAvailable: true }))
+    await workspace.saveActorRuntime({ ...payload, modelApiId: 2 })
+    assert.equal(workspace.actorRuntimes.value.find(item => item.actorId === 101)?.modelApiId, 2)
+  })
+}
+
+test('pending settings locks follow their conversation across navigation', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  let releasePlan!: () => void
+  let releaseActor!: () => void
+  t.mock.method(api, 'saveReplyPlan', async (_id: number, payload: any) => {
+    await new Promise<void>(resolve => { releasePlan = resolve })
+    return payload
+  })
+  t.mock.method(api, 'saveActorRuntime', async (_id: number, payload: any) => {
+    await new Promise<void>(resolve => { releaseActor = resolve })
+    return { ...payload, modelApiAvailable: true }
+  })
+  const pendingPlan = workspace.savePlan()
+  const pendingActor = workspace.saveActorRuntime({ actorType: 'character', actorId: 101, controlMode: 'MODEL', modelApiId: 1 })
+  await workspace.selectConversation(8)
+  assert.equal(workspace.savingReplyPlan.value, false)
+  assert.deepEqual(workspace.savingActorKeys.value, [])
+  await workspace.selectConversation(7)
+  assert.equal(workspace.savingReplyPlan.value, true)
+  assert.deepEqual(workspace.savingActorKeys.value, ['character:101'])
+  releasePlan(); releaseActor()
+  await Promise.all([pendingPlan, pendingActor])
+  assert.equal(workspace.savingReplyPlan.value, false)
+  assert.deepEqual(workspace.savingActorKeys.value, [])
+})
+
+for (const kind of ['chat-plan', 'chat-model', 'trpg-model'] as const) {
+  for (const outcome of ['success', 'failure', 'switched', 'edited'] as const) {
+    test(`generation waits for ${kind} settings (${outcome})`, async t => {
+      const { workspace, api } = await groupMutationFixture(t)
+      const { streamTrpgTurn } = await import('../api/client.ts')
+      const { notice } = await import('../composables/useNotice.ts')
+      t.after(() => clearTimeout(notice.timer))
+      const trpg = kind === 'trpg-model'
+      if (trpg) workspace.conversations.value[0]!.mode = 'trpg'
+      t.mock.method(api, 'combatOverview', async () => [])
+      t.mock.method(api, 'investigatorCards', async () => [])
+      let release!: () => void
+      let persisted = 'old'
+      t.mock.method(api, kind === 'chat-plan' ? 'saveReplyPlan' : 'saveActorRuntime', async (_id: number, payload: any) => {
+        await new Promise<void>(resolve => { release = resolve })
+        if (outcome === 'failure') throw new Error('settings unavailable')
+        persisted = 'new'
+        return { ...payload, modelApiAvailable: true }
+      })
+      const saving = (kind === 'chat-plan' ? workspace.savePlan()
+        : workspace.saveActorRuntime({ actorType: 'character', actorId: 101, controlMode: 'MODEL', modelApiId: 2 })).catch(() => undefined)
+      const used: string[] = []
+      globalThis.fetch = async () => {
+        used.push(persisted)
+        return new Response('data: {"eventType":"generation.completed","conversationId":7,"turnId":43}\n\n')
+      }
+      t.mock.method(streamTrpgTurn, 'continue', async (_id: number, _request: string, receive: (event: GroupChatEvent) => void) => {
+        used.push(persisted)
+        receive({ eventType: 'generation.completed', conversationId: 7, turnId: 43 })
+      })
+      workspace.messageInput.value = 'queued message'
+      const submit = () => trpg ? workspace.startTrpgTurn('retained direction') : workspace.sendMessage()
+      const sending = submit()
+      const duplicate = submit()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const beforeSave = [...used]
+      if (outcome === 'switched') {
+        await workspace.selectConversation(8)
+        await workspace.selectConversation(7)
+      }
+      if (outcome === 'edited') workspace.messageInput.value = 'changed draft'
+      release()
+      await Promise.all([saving, sending, duplicate])
+      assert.deepEqual(beforeSave, [], 'must not start generation with old settings')
+      const cancelled = outcome === 'failure' || outcome === 'switched' || (!trpg && outcome === 'edited')
+      assert.deepEqual(used, cancelled ? [] : ['new'], 'queued duplicate must not create a second generation')
+      if (outcome === 'failure') {
+        assert.equal(workspace.messageInput.value, 'queued message')
+        assert.equal(workspace.generationFailed.value, true, 'cancel automatic progression after settings failure')
+        assert.equal(workspace.loading.sending, false)
+      }
+      if (!trpg && outcome === 'edited') assert.equal(workspace.messageInput.value, 'changed draft')
+    })
+  }
+}
+
+for (const action of ['retryGroup', 'selection', 'endExploration', 'inquiry', 'retryStep', 'trpgMessage'] as const) {
+  for (const failSave of [false, true]) test(`${action} waits for model save (failure=${failSave})`, async t => {
+    const { workspace, api } = await groupMutationFixture(t)
+    const { notice } = await import('../composables/useNotice.ts')
+    t.after(() => clearTimeout(notice.timer))
+    if (action !== 'retryGroup') workspace.conversations.value[0]!.mode = 'trpg'
+    workspace.currentTurn.value = { turnId: 42, stepId: 99, status: action === 'retryGroup' ? 'failed' : 'waiting_input',
+      waitingForUser: true, canAskKp: true, inputType: action === 'selection' ? 'selection' : 'message',
+      sceneOptions: {}, steps: [{ stepId: 99, itemOrder: 1, actorType: 'user', status: 'waiting_input' }] }
+    t.mock.method(api, 'combatOverview', async () => [])
+    t.mock.method(api, 'investigatorCards', async () => [])
+    let release!: () => void
+    t.mock.method(api, 'saveActorRuntime', async (_id: number, payload: any) => {
+      await new Promise<void>(resolve => { release = resolve })
+      if (failSave) throw new Error('model save failed')
+      return { ...payload, modelApiAvailable: true }
+    })
+    const saving = workspace.saveActorRuntime({ actorType: 'character', actorId: 101, controlMode: 'MODEL', modelApiId: 2 })
+    const requests: string[] = []
+    globalThis.fetch = async (url: any) => {
+      requests.push(String(url))
+      return new Response('data: {"eventType":"generation.completed","conversationId":7,"turnId":42}\n\n')
+    }
+    workspace.inquiryInput.value = 'Where is the door?'
+    workspace.messageInput.value = 'Open the door'
+    const sending = action === 'retryGroup' ? workspace.retryGroupTurn()
+      : action === 'selection' ? workspace.selectSceneOption('A')
+      : action === 'endExploration' ? workspace.endExploration()
+      : action === 'inquiry' ? workspace.askKp()
+      : action === 'trpgMessage' ? workspace.sendMessage()
+      : workspace.retryStep({ ...workspace.messages.value[0]!, turnId: 42, replyStepId: 99 })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const beforeSave = [...requests]
+    release()
+    await Promise.all([saving, sending])
+    assert.deepEqual(beforeSave, [])
+    assert.equal(requests.length, failSave ? 0 : 1)
+    if (failSave) assert.equal(workspace.inquiryInput.value, 'Where is the door?')
+  })
+}
+
+test('queued generation waits for all actors and settings added while waiting', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  const releases = new Map<number, () => void>()
+  t.mock.method(api, 'saveActorRuntime', async (_id: number, payload: any) => {
+    await new Promise<void>(resolve => { releases.set(payload.actorId, resolve) })
+    return { ...payload, modelApiAvailable: true }
+  })
+  const save = (actorId: number) => workspace.saveActorRuntime({ actorType: 'character', actorId, controlMode: 'MODEL', modelApiId: 2 })
+  const first = save(101)
+  let requests = 0
+  globalThis.fetch = async () => { requests++; return new Response('data: {"eventType":"generation.completed"}\n\n') }
+  workspace.messageInput.value = 'queued'
+  const sending = workspace.sendMessage()
+  const second = save(102)
+  releases.get(101)!()
+  await first
+  await new Promise(resolve => setTimeout(resolve, 0))
+  const beforeSecond = requests
+  releases.get(102)!()
+  await Promise.all([second, sending])
+  assert.equal(beforeSecond, 0)
+  assert.equal(requests, 1)
+})
+
+test('a later actor save failure cancels a generation already waiting for another actor', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  let release!: () => void
+  t.mock.method(api, 'saveActorRuntime', async (_id: number, payload: any) => {
+    if (payload.actorId === 102) throw new Error('second actor save failed')
+    await new Promise<void>(resolve => { release = resolve })
+    return { ...payload, modelApiAvailable: true }
+  })
+  const save = (actorId: number) => workspace.saveActorRuntime({ actorType: 'character', actorId, controlMode: 'MODEL', modelApiId: 2 })
+  const first = save(101)
+  let requests = 0
+  globalThis.fetch = async () => { requests++; return new Response('data: {"eventType":"generation.completed"}\n\n') }
+  workspace.messageInput.value = 'retained'
+  const sending = workspace.sendMessage()
+  await save(102)
+  release()
+  await Promise.all([first, sending])
+  assert.equal(requests, 0)
+  assert.equal(workspace.messageInput.value, 'retained')
+})
+
+test('pending saves in another conversation do not delay sending here', async t => {
+  const { workspace, api } = await groupMutationFixture(t)
+  const { notice } = await import('../composables/useNotice.ts')
+  t.after(() => clearTimeout(notice.timer))
+  let release!: () => void
+  t.mock.method(api, 'saveActorRuntime', async (_id: number, payload: any) => {
+    await new Promise<void>(resolve => { release = resolve })
+    return { ...payload, modelApiAvailable: true }
+  })
+  const saving = workspace.saveActorRuntime({ actorType: 'character', actorId: 101, controlMode: 'MODEL', modelApiId: 2 })
+  await workspace.selectConversation(8)
+  const requests: string[] = []
+  globalThis.fetch = async (url: any) => { requests.push(String(url)); return new Response('data: {"eventType":"generation.completed"}\n\n') }
+  workspace.messageInput.value = 'B message'
+  const sending = workspace.sendMessage()
+  try {
+    await waitFor(() => requests.length > 0)
+    assert.match(requests[0]!, /conversations\/8\//)
+  } finally { release(); await Promise.all([saving, sending]) }
 })

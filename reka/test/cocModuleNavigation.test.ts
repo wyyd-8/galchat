@@ -20,8 +20,12 @@ registerHooks({
     if (url.endsWith('.vue')) {
       if (url.endsWith('/App.vue')) {
         const raw = readFileSync(new URL(url), 'utf8')
-        const source = raw.replace('</script>', `defineExpose({ canDeleteWorld, confirmWorldDeletion, busy, isMobile, run, mobileDeleteWorldOpen, templateForm, templatePublished, openEditTemplate, openCreateTemplate, refreshModelApis, importWorld, dialogs, accountForm, passwordForm, openAccount, templateReturnToSettings, mobileLoreOpen, workspace, direct, view, moduleLibrary, home, logout, selectWorld, selectConversation, openDirectChat, navigateMobile });\n</script>`)
+        const source = raw.replace('</script>', `defineExpose({ saveTemplate, saveCharacterTemplate, characterTemplateForm, openCreateCharacterTemplate, canDeleteWorld, confirmWorldDeletion, busy, isMobile, run, mobileDeleteWorldOpen, templateForm, templatePublished, openEditTemplate, openCreateTemplate, refreshModelApis, importWorld, dialogs, accountForm, passwordForm, openAccount, templateReturnToSettings, mobileLoreOpen, workspace, direct, view, moduleLibrary, home, logout, selectWorld, selectConversation, openDirectChat, navigateMobile });\n</script>`)
         return { format: 'module-typescript', shortCircuit: true, source: compileScript(parse(source).descriptor, { id: 'app-navigation' }).content }
+      }
+      if (url.endsWith('/ui/BaseDialog.vue')) {
+        const source = readFileSync(new URL(url), 'utf8').replace('</script>', 'defineExpose({ open });</script>')
+        return { format: 'module-typescript', shortCircuit: true, source: compileScript(parse(source).descriptor, { id: 'base-dialog' }).content }
       }
       if (url.endsWith('/AuthDialog.vue')) {
         const source = readFileSync(new URL(url), 'utf8').replace('</script>', 'defineExpose({ form, submit });</script>')
@@ -787,3 +791,81 @@ test('failed unlock keeps the locked editor and its unsaved draft', async t => {
   assert.equal(vm.canFullEdit, false)
   assert.equal(vm.hasUnsavedChanges, true)
 })
+
+async function renderTemplateBoundary(dialog, busy, isMobile) {
+  const { baseParse, compile, NodeTypes } = await import('@vue/compiler-dom')
+  const Vue = await import('vue')
+  const { renderToString } = await import('@vue/server-renderer')
+  const root = baseParse(parse(readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')).descriptor.template!.content)
+  const boundary = root.children.find(node => node.type === NodeTypes.ELEMENT && node.tag === 'BaseDialog'
+    && node.props.some(prop => prop.name === 'model' && prop.exp?.content === `dialogs.${dialog}`))
+  const editor = boundary.children.find(node => node.type === NodeTypes.ELEMENT && ['div', 'fieldset'].includes(node.tag))
+  const header = boundary.loc.source.slice(0, boundary.loc.source.indexOf('>') + 1)
+  const editorHeader = editor.loc.source.slice(0, editor.loc.source.indexOf('>') + 1)
+  const template = `${header}${editorHeader}<input /><textarea /><button>编辑</button></${editor.tag}></BaseDialog>`
+  const render = new Function('Vue', compile(template, { mode: 'function', prefixIdentifiers: true }).code)(Vue)
+  return renderToString(Vue.createSSRApp({
+    components: { BaseDialog: { props: ['closeDisabled'], setup: (props, { slots }) => () => Vue.h('section', { 'data-close-disabled': String(Boolean(props.closeDisabled)) }, slots.default?.()) } },
+    setup: () => ({ busy, isMobile, dialogs: { [dialog]: true }, templateDialogTitle: '', templateDialogDescription: '', characterTemplateDialogTitle: '' }), render,
+  }))
+}
+
+test('world and character template forms block editing and dismissal throughout save', async () => {
+  for (const dialog of ['template', 'characterTemplate']) {
+    for (const isMobile of [false, true]) {
+      const locked = await renderTemplateBoundary(dialog, true, isMobile)
+      assert.match(locked, /data-close-disabled="true"/)
+      assert.match(locked, /<fieldset[^>]* disabled[^>]* inert/)
+      const unlocked = await renderTemplateBoundary(dialog, false, isMobile)
+      assert.match(unlocked, /data-close-disabled="false"/)
+      assert.doesNotMatch(unlocked, / disabled| inert/)
+    }
+  }
+})
+
+test('a locked dialog rejects close requests until saving finishes', async t => {
+  await appFixture(t)
+  const { createRenderer, reactive, h, nextTick } = await import('vue')
+  const { default: component } = await import('../src/components/ui/BaseDialog.vue')
+  component.render = () => null
+  const state = reactive({ open: true, locked: true })
+  let dialog
+  const renderer = createRenderer({ patchProp() {}, insert() {}, remove() {}, createElement: () => ({}), createText: () => ({}), createComment: () => ({}), setText() {}, setElementText() {}, parentNode: () => null, nextSibling: () => null })
+  const app = renderer.createApp({ render: () => h(component, { ref: value => { dialog = value }, modelValue: state.open, closeDisabled: state.locked, title: '保存', 'onUpdate:modelValue': value => { state.open = value } }) })
+  app.mount({}); t.after(() => app.unmount())
+  dialog.open = false
+  assert.equal(state.open, true)
+  state.locked = false; await nextTick()
+  dialog.open = false
+  assert.equal(state.open, false)
+  state.open = true; state.locked = true; await nextTick()
+  state.open = false; await nextTick()
+  assert.equal(dialog.open, false, 'parent session cleanup can still close a locked dialog')
+})
+
+for (const kind of ['world', 'character']) {
+  test(`${kind} template save unlocks after failure and preserves draft for retry`, async t => {
+    const {parent,api}=await appFixture(t)
+    parent.view='library'
+    parent.workspace.session.id=1
+    parent.workspace.worlds.value=[{id:3,worldId:13,name:'world',myWorld:true}]
+    parent.workspace.selectedWorldId.value=3
+    const isWorld=kind==='world'
+    if(isWorld) parent.openCreateTemplate(); else parent.openCreateCharacterTemplate()
+    const form=isWorld?parent.templateForm:parent.characterTemplateForm
+    form.name='draft'; form.background='background'
+    let reject
+    t.mock.method(api,isWorld?'createWorldTemplate':'createCharacterTemplate',()=>new Promise((_,fail)=>{reject=fail}))
+    const pending=parent.run(isWorld?parent.saveTemplate:parent.saveCharacterTemplate,isWorld?'template':'characterTemplate')
+    assert.equal(parent.busy,true)
+    reject(new Error('offline')); await pending
+    assert.equal(parent.busy,false)
+    assert.equal(parent.dialogs[isWorld?'template':'characterTemplate'],true)
+    assert.equal(form.name,'draft')
+    t.mock.method(api,isWorld?'createWorldTemplate':'createCharacterTemplate',async()=>({}))
+    t.mock.method(api,isWorld?'worldTemplates':'characterTemplates',async()=>[])
+    await parent.run(isWorld?parent.saveTemplate:parent.saveCharacterTemplate,isWorld?'template':'characterTemplate')
+    assert.equal(parent.busy,false)
+    assert.equal(parent.dialogs[isWorld?'template':'characterTemplate'],false)
+  })
+}

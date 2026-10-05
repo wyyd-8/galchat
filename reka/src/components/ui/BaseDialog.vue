@@ -7,7 +7,7 @@ import { useDialogPresence } from '@/composables/useDialogPresence'
 import { ArrowLeft, X } from '@lucide/vue'
 import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 
-const open = defineModel<boolean>({ required: true })
+const visible = defineModel<boolean>({ required: true })
 const props = withDefaults(defineProps<{
   title: string
   description?: string
@@ -18,10 +18,19 @@ const props = withDefaults(defineProps<{
   mobilePresentation?: 'sheet' | 'page'
   mobileBack?: () => void
   embedded?: boolean
+  closeDisabled?: boolean
 }>(), { description: '', size: 'md', layer: 'default', contentClass: '', contentStyle: undefined, mobilePresentation: 'sheet' })
+const open = computed({
+  get: () => visible.value,
+  set: value => { if (value || !props.closeDisabled) visible.value = value },
+})
+function preventLockedClose(event: Event) {
+  if (props.closeDisabled) event.preventDefault()
+}
 const { isMobile } = useMobileViewport()
 useDialogPresence(computed(() => open.value && !props.embedded))
 useMobileDialogHistory(open, computed(() => isMobile.value && !props.embedded), async () => {
+  if (props.closeDisabled) return
   if (props.mobileBack) await props.mobileBack()
   else open.value = false
 })
@@ -53,16 +62,16 @@ function initialFocus(event: Event) {
   <DialogRoot v-else v-model:open="open">
     <DialogPortal>
       <DialogOverlay class="dialog-overlay" :class="layerClass" />
-      <DialogContent class="dialog-content" :class="[`dialog-${size}`, layerClass, contentClass]" :style="contentStyle" v-bind="description ? {} : { 'aria-describedby': undefined }" :data-mobile-presentation="mobilePresentation" @open-auto-focus="initialFocus" @close-auto-focus="restoreFocus">
+      <DialogContent class="dialog-content" :class="[`dialog-${size}`, layerClass, contentClass]" :style="contentStyle" v-bind="description ? {} : { 'aria-describedby': undefined }" :data-mobile-presentation="mobilePresentation" @open-auto-focus="initialFocus" @close-auto-focus="restoreFocus" @escape-key-down="preventLockedClose" @interact-outside="preventLockedClose">
         <header class="dialog-header">
-          <button v-if="isMobile && mobilePresentation === 'page' && mobileBack" class="icon-button mobile-dialog-back" aria-label="返回" @click="mobileBack"><ArrowLeft :size="22" /></button>
-          <DialogClose v-else-if="isMobile && mobilePresentation === 'page'" class="icon-button mobile-dialog-back" aria-label="返回"><ArrowLeft :size="22" /></DialogClose>
+          <button v-if="isMobile && mobilePresentation === 'page' && mobileBack" class="icon-button mobile-dialog-back" aria-label="返回" :disabled="closeDisabled" @click="mobileBack"><ArrowLeft :size="22" /></button>
+          <DialogClose v-else-if="isMobile && mobilePresentation === 'page'" class="icon-button mobile-dialog-back" aria-label="返回" :disabled="closeDisabled"><ArrowLeft :size="22" /></DialogClose>
           <div>
             <DialogTitle class="dialog-title">{{ title }}</DialogTitle>
             <DialogDescription v-if="description" class="dialog-description">{{ description }}</DialogDescription>
           </div>
           <slot name="header-actions" />
-          <DialogClose v-if="!isMobile || mobilePresentation !== 'page'" class="icon-button" aria-label="关闭"><X :size="18" /></DialogClose>
+          <DialogClose v-if="!isMobile || mobilePresentation !== 'page'" class="icon-button" aria-label="关闭" :disabled="closeDisabled"><X :size="18" /></DialogClose>
         </header>
         <div class="dialog-body"><slot /></div>
         <footer v-if="$slots.footer" class="dialog-footer"><slot name="footer" /></footer>

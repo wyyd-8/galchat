@@ -1094,9 +1094,11 @@ async function changePassword() {
     <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.world = false">取消</button><button class="button primary" :disabled="!worldForm.worldId || busy" @click="run(() => workspace.createWorld({ ...worldForm, worldId: Number(worldForm.worldId) }), 'world')">创建</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.template" mobile-presentation="page" :title="templateDialogTitle" :description="isMobile ? '' : templateDialogDescription" size="lg">
+  <BaseDialog v-model="dialogs.template" :close-disabled="busy" mobile-presentation="page" :title="templateDialogTitle" :description="isMobile ? '' : templateDialogDescription" size="lg">
+    <fieldset class="template-editor-fields" :disabled="busy" :inert="busy" :aria-busy="busy">
     <div class="form-grid"><label class="field"><span>模板名称</span><input v-model.trim="templateForm.name" /></label><label class="field"><span>作者</span><input v-model.trim="templateForm.author" /></label><MobileTemplateImageUpload v-if="isMobile" v-model="templateForm.image" kind="world" :name="templateForm.name" :disabled="busy" @busy-change="uploading.world = $event" /><DesktopTemplateImageUpload v-else v-model="templateForm.image" class="full" kind="world" :name="templateForm.name" :disabled="busy" @busy-change="uploading.world = $event" /><label class="field full"><span>世界背景</span><textarea v-model.trim="templateForm.background" rows="7" /></label><label class="switch-row full"><span><strong>公开模板</strong><small>{{ templatePublished ? '已公开，不能再改为私有' : '其他用户可以发现并使用；公开后不能再改为私有' }}</small></span><input v-model="templateForm.visible" type="checkbox" :disabled="templatePublished" /></label></div>
-    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.template = false">取消</button><button class="button primary" :disabled="!templateForm.name || !templateForm.background || busy || uploading.world" @click="run(saveTemplate, 'template')">{{ templateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
+    </fieldset>
+    <template #footer><button v-if="!isMobile" class="button ghost" :disabled="busy" @click="dialogs.template = false">取消</button><button class="button primary" :disabled="!templateForm.name || !templateForm.background || busy || uploading.world" @click="run(saveTemplate, 'template')">{{ templateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.templatePreview" mobile-presentation="page" :title="isMobile ? '世界模板' : selectedTemplatePreview?.name || '世界模板'" :description="isMobile ? '' : selectedTemplatePreview?.author ? `作者：${selectedTemplatePreview.author}` : '匿名创作者'" size="lg">
@@ -1272,7 +1274,8 @@ async function changePassword() {
     <template #footer><button v-if="workspace.canEditSelectedWorld.value && !characterChoice" class="button ghost" @click="openCreateCharacterTemplate">新建角色模板</button><button v-if="!isMobile" class="button primary" :disabled="!characterChoice || characterPickerPhase === 'moving' || busy" @click="run(() => workspace.addCharacter(Number(characterChoice), characterPrompt), 'character')">添加</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.characterTemplate" mobile-presentation="page" :title="characterTemplateDialogTitle" size="lg">
+  <BaseDialog v-model="dialogs.characterTemplate" :close-disabled="busy" mobile-presentation="page" :title="characterTemplateDialogTitle" size="lg">
+    <fieldset class="template-editor-fields" :disabled="busy" :inert="busy" :aria-busy="busy">
     <div v-if="isMobile" class="form-stack">
       <label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label>
       <MobileTemplateImageUpload v-model="characterTemplateForm.image" kind="character" :name="characterTemplateForm.name" :disabled="busy" @busy-change="uploading.character = $event" />
@@ -1282,7 +1285,8 @@ async function changePassword() {
       <button class="mobile-v1-row" @click="mobileFavorListOpen = true"><span><strong>好感阶段提示词</strong><small>{{ favorabilityRows.length }} 个阶段 · 按阈值逐条编辑</small></span><ChevronRight :size="16" /></button>
     </div>
     <div v-else class="form-grid"><label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label><label class="field"><span>初始好感</span><input v-model.number="characterTemplateForm.initFavor" type="number" min="0" max="100" /></label><DesktopTemplateImageUpload v-model="characterTemplateForm.image" class="full" kind="character" :name="characterTemplateForm.name" :disabled="busy" @busy-change="uploading.character = $event" /><label class="field full"><span>背景</span><textarea v-model.trim="characterTemplateForm.background" rows="4" /></label><label class="field full"><span>性格</span><textarea v-model.trim="characterTemplateForm.personality" rows="4" /></label><label class="field full"><span>CoC 跑团偏好</span><textarea v-model.trim="characterTemplateForm.cocPlayStyle" rows="4" placeholder="例如：倾向优先调查无人探索的地点；遇到明显危险时更愿意与同伴结伴。" /></label><div class="field full"><span>好感阶段的角色表现</span><div class="favorability-list"><div v-for="row in favorabilityRows" :key="row.id" class="favorability-row"><input v-model.number="row.threshold" type="number" min="0" max="100" placeholder="好感度" /><input v-model.trim="row.prompt" placeholder="达到该好感度时的角色表现" /><button class="icon-button" title="删除阶段" @click="removeFavorabilityRow(row.id)"><Trash2 :size="15" /></button></div></div><button class="button ghost add-row-button" @click="addFavorabilityRow"><Plus :size="15" />添加阶段</button></div></div>
-    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.characterTemplate = false">取消</button><button class="button primary" :disabled="!characterTemplateForm.name || busy || uploading.character" @click="run(saveCharacterTemplate, 'characterTemplate')">{{ characterTemplateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
+    </fieldset>
+    <template #footer><button v-if="!isMobile" class="button ghost" :disabled="busy" @click="dialogs.characterTemplate = false">取消</button><button class="button primary" :disabled="!characterTemplateForm.name || busy || uploading.character" @click="run(saveCharacterTemplate, 'characterTemplate')">{{ characterTemplateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
   <CharacterFavorDialog v-model="dialogs.characterEdit" :character="selectedCharacter" :world-name="workspace.selectedWorld.value?.name" :can-edit="workspace.canEditSelectedWorld.value" :saving="busy" @save="saveSelectedCharacterFavor" />
@@ -1466,3 +1470,7 @@ async function changePassword() {
   </BaseDialog>
   <NoticeToast />
 </template>
+
+<style scoped>
+.template-editor-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+</style>

@@ -15,5 +15,14 @@ export function useScopedChatDraft(scope: Ref<string | null>, fields: Record<str
     const draft = key ? drafts.get(key) : undefined
     Object.entries(fields).forEach(([name, field]) => { field.value = draft?.[name] ?? defaults[name] ?? '' })
   }, { flush: 'sync' })
-  return { forget: (key: string) => drafts.delete(key), clear: () => drafts.clear() }
+  function restoreIfEmpty(key: string, values: Record<string, string>) {
+    const draft = scope.value === key ? snapshot() : { ...defaults, ...drafts.get(key) }
+    for (const [name, value] of Object.entries(values)) {
+      if (draft[name]) continue
+      draft[name] = value
+      if (scope.value === key && fields[name]) fields[name].value = value
+    }
+    drafts.set(key, draft)
+  }
+  return { restoreIfEmpty, forget: (key: string) => drafts.delete(key), clear: () => drafts.clear() }
 }

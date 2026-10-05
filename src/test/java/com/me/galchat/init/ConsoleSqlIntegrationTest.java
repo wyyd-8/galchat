@@ -4,11 +4,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static com.me.galchat.support.ConsoleSqlTestSupport.initializeSchema;
 
 @SpringBootTest
@@ -17,6 +19,22 @@ class ConsoleSqlIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Test
+    void toolCallIdsAreUniqueOnlyWithinTheirUserMessage() throws Exception {
+        initializeSchema(jdbcTemplate);
+        String insert = """
+                INSERT INTO user_chat_tool_call (user_message_id, step_no, tool_call_id, tool_name, tool_arguments)
+                VALUES (?, 1, 'functions.searchInfo:0', 'searchInfo', '{}')
+                """;
+        jdbcTemplate.update(insert, 10L);
+        jdbcTemplate.update(insert, 20L);
+
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT user_message_id FROM user_chat_tool_call ORDER BY id", Long.class))
+                .containsExactly(10L, 20L);
+        assertThatThrownBy(() -> jdbcTemplate.update(insert, 20L)).isInstanceOf(DuplicateKeyException.class);
+    }
 
     @Test
     void createsTheCompleteCurrentSchemaFromAnEmptyNamespace()
@@ -49,6 +67,7 @@ class ConsoleSqlIntegrationTest {
                 "execution_mode", "model_api_id");
         assertThat(columns(schema, "user_character_info"))
                 .contains("model_api_id");
+        assertThat(columns(schema, "user_event_log")).contains("source_user_message_id");
         assertThat(columns(schema, "trpg_completion"))
                 .containsExactly("conversation_id", "turn_id", "data");
         for (var table : com.baomidou.mybatisplus.core.metadata.TableInfoHelper.getTableInfos()) {
@@ -74,6 +93,7 @@ class ConsoleSqlIntegrationTest {
                 "idx_reply_step_root_interaction",
                 "idx_reply_step_prompt_message",
                 "idx_binding_chat",
+                "idx_user_event_log_source_message",
                 "uk_tool_call_id");
 
         assertThat(jdbcTemplate.queryForObject(

@@ -30,8 +30,9 @@ registerHooks({
 async function mountDirectChat() {
   const { api } = await import('../api/client.ts')
   const { useDirectChat } = await import('../composables/useDirectChat.ts')
+  const { createCharacterData } = await import('../composables/characterData.ts')
   const { computed, createRenderer, defineComponent, h, ref } = await import('vue')
-  const world = computed<UserWorld>(() => ({ id: 3, worldId: 2, name: '测试世界', thinkStatus: true }))
+  const world = computed<UserWorld>(() => ({ id: 3, worldId: 2, name: '测试世界' }))
   const characters = ref<Character[]>([{ userWorldId: 3, characterId: 7, characterName: '测试角色' }])
   let chat!: ReturnType<typeof useDirectChat>
   const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
@@ -52,7 +53,8 @@ async function mountDirectChat() {
   })
   const app = renderer.createApp(defineComponent({
     setup() {
-      chat = useDirectChat({ world, characters, reloadCharacters: async () => undefined })
+      const data = createCharacterData({ worldId: computed(() => world.value?.id ?? null), sessionKey: () => '', characters, templates: ref([]) })
+      chat = useDirectChat({ world, characters, saveCharacterModel: data.saveModel, reloadCharacters: async () => undefined })
       return () => h('div')
     },
   }))

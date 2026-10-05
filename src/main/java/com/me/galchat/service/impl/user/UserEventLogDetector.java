@@ -3,23 +3,28 @@ package com.me.galchat.service.impl.user;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.DateTimeConstant;
 import com.me.galchat.constant.UserEventLogConstant;
+import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserEventLog;
+import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserChatHistoryMapper;
 import com.me.galchat.service.IUserEventLogService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.json.JSONException;
-import org.json.JSONObject;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.MessageType;
-import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
+import com.me.galchat.service.impl.chat.SingleChatLockService;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.redisson.api.RLock;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.MessageType;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.StringUtils;
 
 @Service
 @Slf4j
@@ -29,6 +34,10 @@ public class UserEventLogDetector {
     private final ChatClient userEventLogClient;
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final IUserEventLogService userEventLogService;
+    private final UserCharacterInfoMapper userCharacterInfoMapper;
+    private final SingleChatLockService singleChatLockService;
+    private final TransactionTemplate transactions;
+    private final UserEventLogRetryScheduler retryScheduler;
 
     public void detectAndSave(Long userWorldId, Long characterId, Long userMessageId) {
         if (userWorldId == null || characterId == null || userMessageId == null) {
@@ -64,7 +73,44 @@ public class UserEventLogDetector {
             return;
         }
 
-        userEventLogService.addUserEventLog(userEventLog);
+        userEventLog.setSourceUserMessageId(userMessageId);
+        saveOrRetry(userEventLog);
+    }
+
+    private void saveOrRetry(UserEventLog event) {
+        RLock lock = singleChatLockService.tryLock(event.getUserWorldId(), event.getCharacterId());
+        if (lock == null) {
+            // Retry only persistence; do not pay for a second model call or hold up chat.
+            retryScheduler.schedule(() -> {
+                try {
+                    saveOrRetry(event);
+                } catch (Exception e) {
+                    log.warn("用户事件保存重试失败, userMessageId:{}", event.getSourceUserMessageId(), e);
+                }
+            });
+            return;
+        }
+        try {
+            transactions.executeWithoutResult(status -> {
+                UserChatHistory source = userChatHistoryMapper.selectById(event.getSourceUserMessageId());
+                if (source == null || !Objects.equals(source.getUserWorldId(), event.getUserWorldId())
+                        || !Objects.equals(source.getCharacterId(), event.getCharacterId())
+                        || (source.getType() != null && !MessageType.USER.getValue().equals(source.getType()))) {
+                    return;
+                }
+                if (userCharacterInfoMapper.selectCount(new LambdaQueryWrapper<UserCharacterInfo>()
+                        .eq(UserCharacterInfo::getUserWorldId, event.getUserWorldId())
+                        .eq(UserCharacterInfo::getCharacterId, event.getCharacterId())) == 0) {
+                    return;
+                }
+                if (userEventLogService.count(new LambdaQueryWrapper<UserEventLog>()
+                        .eq(UserEventLog::getSourceUserMessageId, event.getSourceUserMessageId())) == 0) {
+                    userEventLogService.addUserEventLog(event);
+                }
+            });
+        } finally {
+            singleChatLockService.unlock(lock);
+        }
     }
 
     private List<UserChatHistory> listHistories(Long userWorldId, Long characterId, Long userMessageId) {

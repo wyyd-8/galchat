@@ -11,12 +11,14 @@ import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserEventLogService;
 import com.me.galchat.service.IUserWorldPrefixService;
+import com.me.galchat.service.impl.chat.SingleChatLockService;
+import com.me.galchat.service.impl.chat.SingleChatRuntimeService;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.me.galchat.support.MybatisPlusTestSupport;
-import com.me.galchat.websocket.WebSocketServer;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.redisson.api.RedissonClient;
+import org.redisson.api.RLock;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -44,13 +46,16 @@ class UserEventLogConsumerTest {
         var events = mock(IUserEventLogService.class);
         var eventMapper = mock(UserEventLogMapper.class);
         var histories = mock(UserChatHistoryMapper.class);
-        var socket = mock(WebSocketServer.class);
         var topics = mock(TopicBoundaryService.class);
         var client = mock(ChatClient.class);
         var request = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
         var response = mock(ChatClient.CallResponseSpec.class);
-        var consumer = new UserEventLogConsumer(mock(RedissonClient.class), socket, events, worlds,
-                histories, characters, topics);
+        var locks = mock(SingleChatLockService.class);
+        var runtime = mock(SingleChatRuntimeService.class);
+        when(runtime.careClient(10L, 20L, client)).thenReturn(client);
+        when(locks.tryLock(10L, 20L)).thenReturn(mock(RLock.class));
+        var consumer = new UserEventLogConsumer(mock(RedissonClient.class), events, worlds,
+                histories, characters, topics, locks, runtime);
         ReflectionTestUtils.setField(consumer, "userEventCareClient", client);
 
         when(worlds.getById(10L)).thenReturn(new UserWorldPrefix().setId(10L).setAcitvePushStatus(enabled));
@@ -70,13 +75,12 @@ class UserEventLogConsumerTest {
 
         if (enabled) {
             String expected = hasEvent ? "考试顺利吗？" : "你如何理解勇气？";
-            verify(histories).insert(any(UserChatHistory.class));
-            verify(socket).sendMessageToSession(argThat(message ->
+            verify(histories).insert(argThat((UserChatHistory message) ->
                     message.getUserWorldId().equals(10L) && message.getCharacterId().equals(20L)
                             && expected.equals(message.getContent())));
             verify(topics).startAssistantMessageTopic(any(UserChatHistory.class));
         } else {
-            verifyNoInteractions(histories, socket, topics);
+            verifyNoInteractions(histories, topics);
             verify(client, never()).prompt();
             verify(events, never()).addUserEventLog(any());
         }

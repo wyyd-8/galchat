@@ -15,6 +15,8 @@ import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.singlechat.SingleChatClientFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
+import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
+import java.util.Optional;
 
 @Service
 public class SingleChatRuntimeService {
@@ -63,19 +65,31 @@ public class SingleChatRuntimeService {
 
     public ChatClient chatClient(
             Long userWorldId, Long characterId, ChatClient fallback) {
+        return resolveRuntime(userWorldId, characterId)
+                .map(ResolvedUserModelRuntime::newChatClientBuilder)
+                .map(clientFactory::create)
+                .orElse(fallback);
+    }
+
+    /** Care uses the character's provider/options, without chat memory or tool side effects. */
+    public ChatClient careClient(Long userWorldId, Long characterId, ChatClient fallback) {
+        return resolveRuntime(userWorldId, characterId)
+                .map(runtime -> runtime.newChatClientBuilder()
+                        .defaultAdvisors(new SimpleLoggerAdvisor()).build())
+                .orElse(fallback);
+    }
+
+    private Optional<ResolvedUserModelRuntime> resolveRuntime(Long userWorldId, Long characterId) {
         UserCharacterInfo character = requireCharacter(userWorldId, characterId);
         Long modelApiId = character.getModelApiId();
         if (modelApiId == null) {
-            return fallback;
+            return Optional.empty();
         }
         UserWorldPrefix world = worldService.getById(userWorldId);
         if (world == null || world.getUserId() == null) {
             throw new UserRequestException("单聊所属用户不存在");
         }
-        return runtimeProvider.resolveIfPresent(world.getUserId(), modelApiId)
-                .map(ResolvedUserModelRuntime::newChatClientBuilder)
-                .map(clientFactory::create)
-                .orElse(fallback);
+        return runtimeProvider.resolveIfPresent(world.getUserId(), modelApiId);
     }
 
     private UserCharacterInfo requireCharacter(Long userWorldId, Long characterId) {

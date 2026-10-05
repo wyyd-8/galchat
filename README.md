@@ -2,7 +2,7 @@
 
 GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目。用户可以创建或导入世界，与角色单独聊天、组织群聊，也可以选择模组，由 KP（主持人）和调查员共同推进跑团。聊天记忆、角色好感、行动轮、掷骰结果和存档共同构成可持续恢复的游戏状态。
 
-后端基于 Java 21、Spring Boot 和 Spring AI；前端位于 `reka/`，使用 Vue 3、TypeScript、Reka UI 和 Three.js。`python/` 提供输入完整性判断、检索重排和角色卡 PDF 工具。
+后端基于 Java 21、Spring Boot 和 Spring AI；前端位于 `reka/`，使用 Vue 3、TypeScript、Reka UI 和 Three.js。`python/` 提供检索重排和角色卡 PDF 工具。
 
 ## 功能介绍
 
@@ -150,7 +150,7 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 | AI | DeepSeek、OpenAI 兼容 API、Ollama Embedding、Spring AI Tool Calling |
 | 数据与并发 | PostgreSQL、pgvector、Redis、Redisson |
 | 前端 | Vue 3.5、TypeScript 6、Vite 8、Reka UI 2、Three.js |
-| Python 辅助服务 | FastAPI、PyTorch、Transformers、jieba |
+| Python 辅助服务 | FastAPI、PyTorch、Transformers |
 | 文件与邮件 | Aliyun OSS、Aliyun Direct Mail |
 
 ## 项目结构
@@ -177,7 +177,6 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 │   ├── tool/                   # 好感、KP、调查员等模型工具
 │   ├── domain/                 # PO / DTO / VO
 │   ├── mapper/                 # MyBatis Mapper
-│   ├── websocket/              # WebSocket 入口
 │   ├── consumer/               # 队列消费者
 │   ├── task/                   # 定时任务
 │   └── config/                 # Web、AI、Redis、向量库等配置
@@ -193,7 +192,6 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 │   ├── src/dice/               # 骰子展示与播放逻辑
 │   └── test/                   # 前端测试；部分测试与源文件同目录
 ├── python/
-│   ├── bert.py                # 输入完整性判断，localhost:8081
 │   ├── reranker_server.py     # 检索重排，localhost:8082
 │   ├── character_card_pdf.py  # 角色卡 PDF 服务（渲染、接口、启动）
 │   └── character_card/        # 字体、模板与字体许可证
@@ -283,7 +281,7 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
   -f src/test/java/com/me/galchat/init/console.sql
 ```
 
-`console.sql` 一次性建立当前全部 47 张业务表（含 `trpg_completion`）、业务索引和 CoC 技能定义种子数据，并安装 `vector` 扩展，无需额外维护脚本。该脚本面向空数据库，不是已有数据库的增量升级脚本。以下四张向量表及其索引由后端启动时通过 `VectorConfiguration` 的 Spring AI 自动初始化，使用 UUID 主键、1024 维向量及 HNSW 余弦索引：
+**数据库业务表结构、索引和 CoC 技能定义种子数据以 [`console.sql`](src/test/java/com/me/galchat/init/console.sql) 为准。** 该脚本一次性建立当前全部 47 张业务表（含 `trpg_completion`），并安装 `vector` 扩展；初始化空库无需额外迁移脚本。已有数据库升级前应先备份，再对照 `console.sql` 按差异调整，不要直接重跑完整建表脚本。以下四张向量表及其索引由后端启动时通过 `VectorConfiguration` 的 Spring AI 自动初始化，使用 UUID 主键、1024 维向量及 HNSW 余弦索引：
 
 - `world_detail_vector_store`
 - `chat_history_vector_store`
@@ -301,7 +299,7 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
 
 《太阳与九英镑》提供[个人模组导入 JSON](data/modules/sun-and-nine-pounds.json) 和[系统默认模组 SQL](data/modules/sun-and-nine-pounds.sql)，两种方式任选其一。该模组按可回访的地点网络组织，保留场景原文并补充 AI 主持说明；封面与 10 份展示材料已填写上传地址。
 
-模组与用户世界数据按需导入，不随建表自动创建。《古树林中》的当前导入 SQL 已包含七个时间场景及最终场景主持说明。历史武器修正和跑团重置属于旧数据维护，不参与空库初始化。已有数据库升级需备份后对照当前结构处理，不要重跑 `console.sql`。
+模组与用户世界数据按需导入，不随建表自动创建。《古树林中》的当前导入 SQL 已包含七个时间场景及最终场景主持说明。历史武器修正和跑团重置属于旧数据维护，不参与空库初始化。
 
 ### 2. 准备 Redis、Ollama 和后端配置
 
@@ -327,7 +325,7 @@ Windows：
 .\mvnw.cmd spring-boot:run
 ```
 
-默认 HTTP 地址为 `http://localhost:8080`，WebSocket 路径为 `/ws/{sid}`。Actuator 健康检查路径为 `/actuator/health`；当前鉴权拦截器未豁免该路径，需要携带 `token`。
+默认 HTTP 地址为 `http://localhost:8080`。Actuator 健康检查路径为 `/actuator/health`；当前鉴权拦截器未豁免该路径，需要携带 `token`。
 
 ### 4. 启动前端
 
@@ -337,20 +335,14 @@ npm ci
 npm run dev
 ```
 
-默认开发地址为 `http://localhost:5173`。`reka/vite.config.ts` 将 `/api` 请求转发到后端并移除 `/api` 前缀，将 `/ws` 转发到后端 WebSocket 服务。
+默认开发地址为 `http://localhost:5173`。`reka/vite.config.ts` 将 `/api` 请求转发到后端并移除 `/api` 前缀。
 
 登录后可导入或创建世界、添加角色并开始单聊或群聊；跑团需要选择模组、配置参与者和角色卡，再开始行动轮。
 
 ### 5. 可选：启动 Python 辅助服务
 
 ```bash
-python -m pip install fastapi uvicorn torch "transformers>=4.36.0" pydantic jieba
-```
-
-输入完整性判断服务需要事先在 `python/bert_model/` 放置可加载的分类模型与 tokenizer；该模型不随 Git 仓库提供。
-
-```bash
-python python/bert.py
+python -m pip install -r python/requirements-reranker.txt
 ```
 
 检索重排服务默认加载 `Alibaba-NLP/gte-multilingual-reranker-base`，首次启动可能需要下载模型：
@@ -365,16 +357,22 @@ python python/reranker_server.py
 RERANKER_MODEL_PATH=/path/to/gte-multilingual-reranker-base python python/reranker_server.py
 ```
 
-reranker 还支持 `RERANKER_DEVICE`、`RERANKER_MAX_LENGTH`、`RERANKER_BATCH_SIZE` 和 `RERANKER_TORCH_DTYPE`。Java 当前直接调用本机 `8081` 和 `8082`；异机部署需要调整 Java 侧地址。
+reranker 还支持 `RERANKER_DEVICE`、`RERANKER_MAX_LENGTH`、`RERANKER_BATCH_SIZE` 和 `RERANKER_TORCH_DTYPE`。Java 当前直接调用本机 `8082`；异机部署需要调整 Java 侧地址。
 
-这两个服务调用失败时，BERT 判断会使用延迟任务兜底，reranker 会保留原始向量召回顺序，可先不启动它们来验证主流程。
+重排服务调用失败或返回无效结果时，按各来源候选的向量检索分数降序取前 5 条；无分数或分数非有限数的候选（包括未做向量检索的最近记忆）不参与回退。可先不启动它来验证主流程。正常重排仍可处理无向量分数的最近记忆。
+
+依赖版本固定在 `python/requirements-reranker.txt`；模块会恢复 GTE 在 Transformers 5 加载时未正确初始化的位置索引和 RoPE 缓存。升级依赖或模型后，使用真实模型回归检查排序及跨批次推理（离线运行需先缓存模型）：
+
+```bash
+HF_HUB_OFFLINE=1 RUN_RERANKER_MODEL_TESTS=1 python -m unittest discover -s python -p 'test_*.py' -v
+```
 
 ### 可选：生成角色卡 PDF
 
 在「跑团工具 → 人物卡」右上角导出 PDF。前端直接调用可选 Python 服务，服务不可用时隐藏按钮。全部代码位于 `python/character_card_pdf.py`，所需字体和模板位于同级 `character_card/` 文件夹。
 
 ```bash
-python -m pip install Pillow reportlab fastapi uvicorn
+python -m pip install -r python/requirements-pdf.txt
 python python/character_card_pdf.py
 ```
 
@@ -409,11 +407,17 @@ python python/character_card_pdf.py
 | 掷骰 | `GET /dice-rolls/{id}`、`GET /dice-rolls/{id}/results`、`POST /dice-roll-results/{id}/roll` |
 | 跑团存档 | `GET/POST /trpg-saves/{conversationId}`、`POST /trpg-saves/{conversationId}/load` |
 | 跑团回滚 | `GET /trpg-saves/{conversationId}/rollback-status`；`POST` 同前缀下的 `/rollback-turn`、`/rollback-scene`、`/rollback-initial` |
-| 图片与实时连接 | `POST /upload`、WebSocket `/ws/{sid}` |
+| 图片上传与关怀查询 | `POST /upload`、`GET /history/care` |
 
-单聊思考模式的 `POST /ai/chat` 支持 `clientRequestId`。同一账号、世界、角色下重复提交相同标识时，尚在生成的请求续接原流；已经完成的请求只返回完成状态，不重复调用模型。SSE 事件带递增的 `sequence`，恢复接口的 `after` 只返回该序号之后的事件；`generation.user` 提供已保存的用户消息 ID，用于合并历史，`generation.completed` / `generation.failed` 表示终态。
+单聊的 `POST /ai/chat` 支持 `clientRequestId`。同一账号、世界、角色下重复提交相同标识时，尚在生成的请求续接原流；已经完成的请求只返回完成状态，不重复调用模型。SSE 事件带递增的 `sequence`，恢复接口的 `after` 只返回该序号之后的事件；`generation.user` 提供已保存的用户消息 ID，用于合并历史，`generation.completed` / `generation.failed` 表示终态。
 
-切换角色时，单聊消息及发送状态按会话隔离，原回复继续生成。断线后前端自动尝试续接，刷新页面后重新进入对应单聊也会恢复；恢复标识保存在当前浏览器标签页的 `sessionStorage`，退出账号时清除。仅生成中的请求保留回放缓存；生成、落库及归档全部结束后立即释放原流，前端重新读取数据库历史。后端仅短期保留不含消息内容的完成标识，用于防止重复提交，不保留原流。回放缓存位于后端实例内存，多实例部署需要将续接请求路由到原实例。服务重启或缓存过期后返回 `generation.expired`，前端重新加载持久化历史，不自动重发消息；未完成的回复可撤回后重发。撤回、移除角色及读取世界存档会清除对应的单聊回放缓存。非思考模式沿用 WebSocket 队列生成与历史加载机制。
+切换角色时，单聊消息及发送状态按会话隔离，原回复继续生成。断线后前端自动尝试续接，刷新页面后重新进入对应单聊也会恢复；恢复标识保存在当前浏览器标签页的 `sessionStorage`，退出账号时清除。仅生成中的请求保留回放缓存；生成、落库及归档全部结束后立即释放原流，前端重新读取数据库历史。后端仅短期保留不含消息内容的完成标识，用于防止重复提交，不保留原流。回放缓存位于后端实例内存，多实例部署需要将续接请求路由到原实例。服务重启或缓存过期后返回 `generation.expired`，前端重新加载持久化历史，不自动重发消息；未完成的回复可撤回后重发。撤回、移除角色及读取世界存档会清除对应的单聊回放缓存。所有单聊统一使用流式请求。
+
+主动关怀仍由后端定时生成并写入聊天历史。前端在北京时间 08:00、13:00、19:00、21:00 起各 40 分钟内，每分钟通过 `GET /history/care?userworldid=…&after=…` 查询当前世界的新关怀消息。应用隐藏时暂停；进入世界或恢复前台时立即补查。接口只读取独立的助手消息，按 ID 升序分页，每页最多 100 条；前端按账号和世界保存游标，成功处理后才推进，失败时保留进度。首次查询不传 `after`，仅建立最新消息基线，避免重复提醒全部历史消息。仅在世界启用主动消息时轮询；聊天 SSE 不受影响。
+
+可从数据库重建的 Redis 缓存均有期限：角色提示词与好感值为 5 分钟，世界归属校验为 30 分钟；角色模板与世界提示词使用 `spring.cache.redis.time-to-live`（默认 60 分钟，空值或非正值回退为 60 分钟）。读取不续期，共享 Hash 的写入也不延长已有期限，过期后重新读取数据库。后端启动时通过 SCAN 为上述旧的无期限缓存补齐 TTL，不延长已有期限。单聊话题边界、延迟队列和分布式锁属于业务状态，不在缓存过期迁移范围内。TTL 限制偶发旧缓存的存活时间，并不消除并发回填本身。
+
+缓存集成测试使用 `GALCHAT_TEST_REDIS_PORT` 指向仅用于测试的本机 Redis 实例，执行 `RedisCacheExpiryIntegrationTest`；测试会清空该实例的默认数据库，不能连接业务实例。未设置此环境变量时跳过这组集成测试。
 
 单聊、群聊与跑团通过公共 `GenerationStreams` 管理生成生命周期，各自保留业务事件适配。群聊恢复接口也支持 `after`；使用新增的 `eventSequence` 作为流事件游标，原有 `sequence` 仍表示消息排序。前端共用 SSE 解析及 `followGeneration` 连接逻辑，遇到断线或非正常 EOF 时最多续接两次（间隔 500ms、1s），只恢复原请求，不重新 POST。页面内续接按游标补发，刷新后从头回放当前生成并合并历史。群聊切换会话、退出账号和组件卸载会取消本地订阅，服务端生成继续执行。跨设备按会话发现当前流尚未接入，恢复入口仍依赖本地请求标识。
 
@@ -445,4 +449,4 @@ npm run type-check
 npm run build
 ```
 
-`npm run build` 已包含类型检查；前端测试直接使用 Node 的测试运行器执行 TypeScript 文件，需要使用支持直接运行 TypeScript 的 Node 版本。`npm run preview` 可预览构建产物；部署时需配置 `/api`、`/ws` 后端路由，并支持 WebSocket 和 SSE 长连接。
+`npm run build` 已包含类型检查；前端测试直接使用 Node 的测试运行器执行 TypeScript 文件，需要使用支持直接运行 TypeScript 的 Node 版本。`npm run preview` 可预览构建产物；部署时需配置 `/api` 后端路由，并支持 SSE 长连接。

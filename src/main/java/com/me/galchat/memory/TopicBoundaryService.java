@@ -12,6 +12,8 @@ import org.json.JSONArray;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -99,10 +101,23 @@ public class TopicBoundaryService {
                     .ifPresent(interval -> chatHistoryVectorService.deleteChatHistory(
                             userWorldId, characterId, interval.start(), interval.end()));
         }
-        if (starts.isEmpty() && lastRemainingMessageId == null) {
-            redisTemplate.delete(buildKey(conversationInfo));
+        Runnable publish = () -> {
+            if (starts.isEmpty() && lastRemainingMessageId == null) {
+                redisTemplate.delete(buildKey(conversationInfo));
+            } else {
+                saveBoundary(conversationInfo, new TopicBoundary(starts, lastRemainingMessageId));
+            }
+        };
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish.run();
+                }
+            });
         } else {
-            saveBoundary(conversationInfo, new TopicBoundary(starts, lastRemainingMessageId));
+            publish.run();
         }
     }
 

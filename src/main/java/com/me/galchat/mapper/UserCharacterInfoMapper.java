@@ -14,6 +14,11 @@ import org.apache.ibatis.annotations.Param;
  */
 public interface UserCharacterInfoMapper extends BaseMapper<UserCharacterInfo> {
 
+    int compareAndSetFavorValue(@Param("userWorldId") Long userWorldId,
+                                @Param("characterId") Long characterId,
+                                @Param("expectedFavor") int expectedFavor,
+                                @Param("newFavor") int newFavor);
+
     Integer updateFavorValue(@Param("userWorldId") Long userWorldId,
                              @Param("characterId") Long characterId,
                              @Param("favorChange") Integer favorChange);

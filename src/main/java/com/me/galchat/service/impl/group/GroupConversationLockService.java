@@ -5,15 +5,22 @@ import com.me.galchat.exception.UserRequestException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
+import org.redisson.api.RFuture;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class GroupConversationLockService {
+
+    // Detached generations outlive servlet threads. Task owners must not reenter
+    // synchronous mutation locks, which use positive Java thread IDs.
+    private static final AtomicLong GENERATION_OWNER = new AtomicLong(-1);
 
     private final RedissonClient redissonClient;
 
@@ -25,6 +32,34 @@ public class GroupConversationLockService {
             throw new UserRequestException("群聊会话id不能为空");
         }
         return tryLock(RedisConstant.GROUP_CONVERSATION_LOCK_PREFIX + conversationId);
+    }
+
+    public OwnedLock tryLockWithOwner(Long conversationId) {
+        if (conversationId == null) {
+            throw new UserRequestException("群聊会话id不能为空");
+        }
+        RLock lock = redissonClient.getLock(RedisConstant.GROUP_CONVERSATION_LOCK_PREFIX + conversationId);
+        long ownerThreadId = GENERATION_OWNER.getAndDecrement();
+        RFuture<Boolean> acquisition = lock.tryLockAsync(0, -1, TimeUnit.MILLISECONDS, ownerThreadId);
+        try {
+            return acquisition.get() ? new OwnedLock(lock, ownerThreadId) : null;
+        } catch (InterruptedException e) {
+            // Acquisition can still succeed in Redis after this caller is interrupted.
+            acquisition.whenComplete((acquired, error) -> {
+                if (Boolean.TRUE.equals(acquired)) {
+                    lock.unlockAsync(ownerThreadId).whenComplete((ignored, failure) -> {
+                        if (failure != null) {
+                            log.warn("释放中断请求的群聊锁失败, lock:{}, ownerThreadId:{}",
+                                    lock.getName(), ownerThreadId, failure);
+                        }
+                    });
+                }
+            });
+            Thread.currentThread().interrupt();
+            throw new UserRequestException("群聊操作被中断，请稍后再试");
+        } catch (ExecutionException e) {
+            throw new IllegalStateException("获取群聊锁失败", e.getCause());
+        }
     }
 
     public OwnedLock tryWorldLock(Long userWorldId) {

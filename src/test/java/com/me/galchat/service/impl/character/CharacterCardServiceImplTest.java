@@ -353,6 +353,43 @@ class CharacterCardServiceImplTest {
     }
 
     @Test
+    void kpCardOmitsOnlyUnmodifiedLowBaseSkillsWithoutRemovingDiceValues() {
+        CocCharacter card = characterWithAllAttributes(50)
+                .setId(71L).setRunId(5L).setName("林恩").setActorType("PLAYER");
+        when(characterMapper.selectList(any())).thenReturn(List.of(card));
+        when(skillDefMapper.selectList(null)).thenReturn(List.of(
+                skillDefinition(1L, "人类学", 1, null),
+                skillDefinition(2L, "心理学", 5, null),
+                skillDefinition(3L, "克苏鲁神话", 0, null),
+                skillDefinition(4L, "科学:化学", 1, null),
+                skillDefinition(5L, "医学", 1, null),
+                skillDefinition(6L, "聆听", 20, null),
+                skillDefinition(7L, "边界技能", 6, null)));
+        when(skillMapper.selectList(any())).thenReturn(List.of(
+                new CocCharacterSkill().setDisplayName("科学:化学")
+                        .setBaseValue(5).setValue(5),
+                new CocCharacterSkill().setDisplayName("医学")
+                        .setBaseValue(1).setValue(0),
+                new CocCharacterSkill().setDisplayName("自定义基础技能")
+                        .setBaseValue(2).setValue(2).setIsCustom(true),
+                new CocCharacterSkill().setDisplayName("未知基础技能")
+                        .setValue(2).setIsCustom(true)));
+
+        List<CocDiceCharacterVO> cards = service.listDiceCharacters(5L);
+        String prompt = new CharacterCardContextFormatter().format(cards);
+
+        assertThat(prompt)
+                .doesNotContain("人类学=", "心理学=", "克苏鲁神话=", "自定义基础技能=")
+                .contains("科学:化学=5", "医学=0", "聆听=20", "边界技能=6", "未知基础技能=2")
+                .contains("STR=50", "力量=50");
+        assertThat(cards.getFirst().checkValues())
+                .containsEntry("人类学", 1).containsEntry("心理学", 5)
+                .containsEntry("克苏鲁神话", 0).containsEntry("自定义基础技能", 2);
+        assertThat(JsonMapper.builder().build().writeValueAsString(cards))
+                .doesNotContain("baseCheckValues");
+    }
+
+    @Test
     void cardReadReturnsEveryDefinedSkillWithItsEffectiveValue() {
         CocCharacter card = characterWithAllAttributes(50)
                 .setId(71L).setRunId(5L).setName("林恩").setDex(41);

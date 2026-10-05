@@ -11,6 +11,7 @@ const props = defineProps<{
   username: string
   availableCharacters: Character[]
   actorRuntimes: GroupActorRuntime[]
+  savingActorKeys?: string[]
   modelApis: ModelApi[]
   messages: GroupMessage[]
   turnState: ReplyTurnState | null
@@ -20,9 +21,11 @@ const props = defineProps<{
   loading: boolean
   closed: boolean
   dirty: boolean
+  canRetry?: boolean
 }>()
 const emit = defineEmits<{
   save: []
+  retry: []
   move: [from: number, to: number]
   remove: [index: number]
   add: [actorId: number]
@@ -46,6 +49,7 @@ const phaseLabels: Record<ReplyActorPhase, string> = { waiting: '等待中', rep
 const turnLabels = { starting: '准备回复', running: '正在依次回复', completed: '本轮回复完成', failed: '本轮回复中断' }
 const turnLabel = computed(() => props.closed ? '会话已结束'
   : props.loading ? '正在加载'
+  : props.canRetry ? turnLabels.failed
   : props.turnState ? turnLabels[props.turnState.phase]
   : props.sending ? '准备回复' : '等待新的消息')
 const rows = computed(() => props.items.map(item => {
@@ -54,6 +58,7 @@ const rows = computed(() => props.items.map(item => {
   const modelId = runtime?.modelApiAvailable && runtime.modelApiId != null ? String(runtime.modelApiId) : ''
   return {
     item, character, modelId,
+    saving: props.savingActorKeys?.includes(`${item.actorType}:${item.actorId ?? ''}`) ?? false,
     name: replyPlanActorName(item, props.username, character?.characterName),
     modelName: modelId ? props.modelApis.find(model => String(model.id) === modelId)?.name || runtime?.modelApiName || '自定义模型' : '默认模型',
     phase: props.turnState && !props.dirty ? replyActorPhase(props.turnState, item, props.messages) : null,
@@ -75,7 +80,7 @@ function toggleEditing() {
   else editing.value = true
 }
 function selectModel(item: ReplyPlanItem, event: Event) {
-  if (props.locked || item.actorType !== 'character' || item.actorId == null) return
+  if (props.locked || props.savingActorKeys?.includes(`${item.actorType}:${item.actorId ?? ''}`) || item.actorType !== 'character' || item.actorId == null) return
   const value = (event.target as HTMLSelectElement).value
   emit('saveModel', { actorType: 'character', actorId: item.actorId, controlMode: 'MODEL', modelApiId: value ? Number(value) : undefined })
 }
@@ -133,10 +138,10 @@ function drop(index: number) {
         <div><h2>回复角色</h2><p>{{ items.length }} 位角色参与回复</p></div>
       </header>
 
-      <section class="chat-reply-overview" :class="{ failed: turnState?.phase === 'failed' }" aria-label="本轮回复状态">
+      <section class="chat-reply-overview" :class="{ failed: turnState?.phase === 'failed' || canRetry }" aria-label="本轮回复状态">
         <div class="chat-reply-overview-line" role="status">
           <LoaderCircle v-if="sending || loading" class="spin" :size="14" />
-          <CircleAlert v-else-if="turnState?.phase === 'failed'" :size="14" />
+          <CircleAlert v-else-if="turnState?.phase === 'failed' || canRetry" :size="14" />
           <Check v-else-if="turnState?.phase === 'completed'" :size="14" />
           <span v-else class="chat-reply-idle-dot" />
           <strong>{{ turnLabel }}</strong>
@@ -144,6 +149,7 @@ function drop(index: number) {
         </div>
         <div v-if="turnState && !dirty && items.length && !closed && !loading" class="chat-reply-progress" role="progressbar" aria-label="本轮回复进度" :aria-valuenow="completedCount" :aria-valuemax="items.length" :aria-valuemin="0"><span :style="{ width: `${completedCount / items.length * 100}%` }" /></div>
         <p v-if="turnState?.error" role="alert">{{ turnState.error }}</p>
+        <button v-if="canRetry" class="button secondary chat-reply-retry" :disabled="sending || loading || closed" @click="emit('retry')">重试本轮回复</button>
       </section>
 
       <section class="chat-reply-order" aria-label="回复顺序">
@@ -164,7 +170,7 @@ function drop(index: number) {
             </div>
             <details v-if="row.item.actorType === 'character'" class="chat-reply-model">
               <summary :aria-label="`设置${row.name}的回复模型`"><span :title="row.modelName">{{ row.modelName }}</span><ChevronDown :size="12" /></summary>
-              <label><span>回复模型</span><select :value="row.modelId" :aria-label="`选择${row.name}的回复模型`" :disabled="locked" @change="selectModel(row.item, $event)"><option value="">默认模型</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select><small>选择后立即保存</small></label>
+              <label><span>回复模型</span><select :value="row.modelId" :aria-label="`选择${row.name}的回复模型`" :disabled="locked || row.saving" @change="selectModel(row.item, $event)"><option value="">默认模型</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select><small>{{ row.saving ? '正在保存…' : '选择后立即保存' }}</small></label>
             </details>
             <div v-if="editing && canEdit" class="chat-reply-member-actions">
               <button :disabled="locked || index === 0" :aria-label="`上移${row.name}`" title="上移" @click="emit('move', index, index - 1)"><ArrowUp :size="14" /></button>
@@ -213,6 +219,7 @@ function drop(index: number) {
 .chat-reply-progress > span { height: 100%; display: block; background: #597d6d; transition: width 250ms ease; }
 .chat-reply-overview.failed { background: #f8eeed; border-color: #e8d4d2; color: var(--wine); }
 .chat-reply-overview p { margin: 8px 0 0; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.chat-reply-retry { width: 100%; margin-top: 12px; min-height: 34px; font-size: 12px; }
 .chat-reply-order { margin-top: 23px; }
 .chat-reply-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .chat-reply-section-heading h3 { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; }

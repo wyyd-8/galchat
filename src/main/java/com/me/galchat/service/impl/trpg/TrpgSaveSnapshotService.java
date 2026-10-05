@@ -130,14 +130,14 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                 .filter(Objects::nonNull)
                 .toList();
         List<Long> sceneIds = sceneIds(plans);
+        TrpgSaveSnapshotDTO.CursorSnapshot cursors = normalizeCursors(restoreMapper.selectCursors(conversationId));
         TrpgSaveSnapshotDTO snapshot = new TrpgSaveSnapshotDTO()
                 .setFormatVersion(TrpgSaveServiceImpl.FORMAT_VERSION)
                 .setConversationId(conversationId)
                 .setUserWorldId(conversation.getUserWorldId())
                 .setWorldId(conversation.getWorldId())
                 .setModuleId(conversation.getModuleId())
-                .setCursors(normalizeCursors(
-                        restoreMapper.selectCursors(conversationId)))
+                .setCursors(cursors)
                 .setConversationState(conversationState(conversation))
                 .setReplyPlans(plans)
                 .setReplyPlanItems(planItems)
@@ -190,6 +190,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                                 .eq(TrpgCombat::getConversationId, conversationId)
                                 .orderByAsc(TrpgCombat::getId)))
                 .setRestorableTurns(restorableTurns(conversationId))
+                .setLastDice(captureLastDice(conversationId, cursors))
                 .setCompletion(completionMapper.selectById(conversationId))
                 .setCheckpoint(checkpointMapper.selectById(conversationId))
                 .setRedisState(redisStateService.capture(
@@ -247,6 +248,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
             completionMapper.insert(completion);
         }
         restoreRestorableTurns(snapshot.getRestorableTurns());
+        restoreLastDice(snapshot.getLastDice());
         restorePlans(conversationId, snapshot);
         restoreCharacters(conversationId, snapshot);
         restoreSuspensions(conversationId, snapshot);
@@ -281,6 +283,7 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
             throw new UserRequestException("跑团完成报告存档身份不一致");
         }
         validateCursors(snapshot.getCursors());
+        validateLastDice(snapshot);
         List<GroupReplyPlan> plans = safe(snapshot.getReplyPlans());
         Set<Long> planIds = new HashSet<>();
         for (GroupReplyPlan plan : plans) {
@@ -454,7 +457,13 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                     : safe(turnSnapshot.getReplySteps())) {
                 if (step.getParentStepId() != null
                         && (!currentStepIds.contains(step.getParentStepId())
-                        || !currentStepIds.contains(step.getRootStepId())
+                        || !currentStepIds.contains(step.getRootStepId()))) {
+                    throw new UserRequestException(
+                            "跑团子步骤存档不合法");
+                }
+                if (GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(
+                        step.getActionType())
+                        && (step.getParentStepId() == null
                         || step.getInteractionSeq() == null
                         || step.getInteractionSeq() <= 0
                         || !StringUtils.hasText(
@@ -483,7 +492,8 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                         || !validId(toolCall.getId(), cursors.getMaxToolCallId(), toolCallIds)
                         || !currentStepIds.contains(toolCall.getReplyStepId())
                         || toolCall.getDiceRollSummaryId() != null
-                        && !currentSummaryIds.contains(toolCall.getDiceRollSummaryId())) {
+                        && !currentSummaryIds.contains(toolCall.getDiceRollSummaryId())
+                        && !isRetainedDiceReference(snapshot, toolCall.getDiceRollSummaryId())) {
                     throw new UserRequestException("跑团工具调用存档不合法");
                 }
             }
@@ -655,6 +665,68 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
         }
     }
 
+    private boolean isRetainedDiceReference(TrpgSaveSnapshotDTO snapshot, Long id) {
+        if (snapshot.getLastDice() == null || id <= 0 || id > snapshot.getCursors().getMaxDiceSummaryId()) return false;
+        if (id.equals(snapshot.getLastDice().getSummary().getId())) return true;
+        DiceRollSummary summary = diceSummaryMapper.selectById(id);
+        return summary != null && Objects.equals(summary.getConversationId(), snapshot.getConversationId());
+    }
+
+    private TrpgSaveSnapshotDTO.DiceSnapshot captureLastDice(Long conversationId,
+            TrpgSaveSnapshotDTO.CursorSnapshot cursors) {
+        if (cursors.getMaxDiceSummaryId() == 0) return null;
+        DiceRollSummary summary = diceSummaryMapper.selectById(cursors.getMaxDiceSummaryId());
+        if (summary == null) throw new IllegalStateException("最后一组掷骰概要不存在，无法存档");
+        return new TrpgSaveSnapshotDTO.DiceSnapshot().setSummary(summary)
+                .setResults(diceResultMapper.selectList(new LambdaQueryWrapper<DiceRollResult>()
+                        .eq(DiceRollResult::getSummaryId, summary.getId()).orderByAsc(DiceRollResult::getId)))
+                .setMessages(messageMapper.selectList(new LambdaQueryWrapper<GroupChatMessage>()
+                        .eq(GroupChatMessage::getConversationId, conversationId)
+                        .eq(GroupChatMessage::getMessageKind, GroupChatConstant.MESSAGE_DICE_ROLL)
+                        .apply("content::jsonb ->> 'summaryId' = {0}", summary.getId().toString())
+                        .orderByAsc(GroupChatMessage::getId)));
+    }
+
+    private void restoreLastDice(TrpgSaveSnapshotDTO.DiceSnapshot dice) {
+        if (dice == null) return; // Older saves restore their resumable-turn dice above.
+        diceResultMapper.delete(new LambdaQueryWrapper<DiceRollResult>()
+                .eq(DiceRollResult::getSummaryId, dice.getSummary().getId()));
+        diceSummaryMapper.deleteById(dice.getSummary().getId());
+        diceSummaryMapper.insert(dice.getSummary());
+        safe(dice.getResults()).forEach(diceResultMapper::insert);
+        for (GroupChatMessage message : safe(dice.getMessages())) {
+            messageMapper.deleteById(message.getId());
+            messageMapper.insert(message);
+        }
+    }
+
+    private void validateLastDice(TrpgSaveSnapshotDTO snapshot) {
+        var dice = snapshot.getLastDice();
+        if (dice == null) return;
+        var summary = dice.getSummary();
+        if (summary == null || !Objects.equals(summary.getConversationId(), snapshot.getConversationId())
+                || !Objects.equals(summary.getId(), snapshot.getCursors().getMaxDiceSummaryId())) {
+            throw new UserRequestException("跑团最后一组掷骰存档不合法");
+        }
+        Set<Long> ids = new HashSet<>();
+        for (DiceRollResult result : safe(dice.getResults())) {
+            if (result == null || result.getId() == null || result.getId() <= 0
+                    || result.getId() > snapshot.getCursors().getMaxDiceResultId()
+                    || !Objects.equals(result.getSummaryId(), summary.getId()) || !ids.add(result.getId())) {
+                throw new UserRequestException("跑团最后一组掷骰明细不合法");
+            }
+        }
+        ids.clear();
+        for (GroupChatMessage message : safe(dice.getMessages())) {
+            if (message == null || message.getId() == null || message.getId() <= 0
+                    || message.getId() > snapshot.getCursors().getMaxMessageId()
+                    || !Objects.equals(message.getConversationId(), snapshot.getConversationId())
+                    || !ids.add(message.getId())) {
+                throw new UserRequestException("跑团最后一组掷骰消息不合法");
+            }
+        }
+    }
+
     private void restoreCharacters(
             Long conversationId, TrpgSaveSnapshotDTO snapshot) {
         List<Long> currentCharacterIds = characterMapper.selectList(
@@ -814,24 +886,6 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                         new LambdaQueryWrapper<GroupChatAgentDecision>()
                                 .in(GroupChatAgentDecision::getReplyStepId, stepIds)
                                 .orderByAsc(GroupChatAgentDecision::getId));
-        List<Long> diceSummaryIds = toolCalls.stream()
-                .map(GroupChatToolCall::getDiceRollSummaryId)
-                .filter(Objects::nonNull)
-                .distinct().toList();
-        List<DiceRollSummary> diceSummaries = diceSummaryIds.isEmpty()
-                ? List.of() : diceSummaryMapper.selectList(
-                        new LambdaQueryWrapper<DiceRollSummary>()
-                                .in(DiceRollSummary::getId, diceSummaryIds)
-                                .eq(DiceRollSummary::getConversationId, conversationId)
-                                .orderByAsc(DiceRollSummary::getId));
-        Set<Long> capturedSummaryIds = diceSummaries.stream()
-                .map(DiceRollSummary::getId)
-                .collect(java.util.stream.Collectors.toSet());
-        List<DiceRollResult> diceResults = capturedSummaryIds.isEmpty()
-                ? List.of() : diceResultMapper.selectList(
-                        new LambdaQueryWrapper<DiceRollResult>()
-                                .in(DiceRollResult::getSummaryId, capturedSummaryIds)
-                                .orderByAsc(DiceRollResult::getId));
         return turns.stream().map(turn -> {
             List<GroupChatReplyStep> turnSteps = steps.stream()
                     .filter(step -> Objects.equals(step.getTurnId(), turn.getId()))
@@ -842,10 +896,6 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
             List<GroupChatToolCall> turnToolCalls = toolCalls.stream()
                     .filter(call -> turnStepIds.contains(call.getReplyStepId()))
                     .toList();
-            Set<Long> turnSummaryIds = turnToolCalls.stream()
-                    .map(GroupChatToolCall::getDiceRollSummaryId)
-                    .filter(Objects::nonNull)
-                    .collect(java.util.stream.Collectors.toSet());
             return new TrpgSaveSnapshotDTO.RestorableTurnSnapshot()
                     .setTurn(turn)
                     .setReplySteps(turnSteps)
@@ -857,12 +907,6 @@ public class TrpgSaveSnapshotService implements ITrpgSaveSnapshotService {
                     .setAgentDecisions(decisions.stream()
                             .filter(decision -> turnStepIds.contains(
                                     decision.getReplyStepId()))
-                            .toList())
-                    .setDiceSummaries(diceSummaries.stream()
-                            .filter(summary -> turnSummaryIds.contains(summary.getId()))
-                            .toList())
-                    .setDiceResults(diceResults.stream()
-                            .filter(result -> turnSummaryIds.contains(result.getSummaryId()))
                             .toList());
         }).toList();
     }

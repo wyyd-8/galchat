@@ -1,6 +1,7 @@
 package com.me.galchat.service;
 
 import com.me.galchat.domain.po.UserChatHistory;
+import com.me.galchat.domain.vo.CareMessagePage;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 import java.util.List;
@@ -17,6 +18,8 @@ public interface IUserChatHistoryService extends IService<UserChatHistory> {
 
     List<UserChatHistory> listHistory(Long userWorldId, Long characterId, Long id, Integer size);
 
-    void withdrawLatestUserMessage(Long userWorldId, Long characterId);
+    CareMessagePage listCareMessages(Long userWorldId, Long after);
+
+    void withdrawLatestUserMessage(Long userWorldId, Long characterId, Long expectedMessageId);
 
 }

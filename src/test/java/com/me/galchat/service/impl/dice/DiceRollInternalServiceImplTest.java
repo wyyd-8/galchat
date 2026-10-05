@@ -72,6 +72,7 @@ class DiceRollInternalServiceImplTest {
                 .setStatus(DiceRollConstant.STATUS_COMPLETED)
                 .setTotalResult("理智检定失败");
         when(summaryMapper.selectByIdForUpdate(101L)).thenReturn(summary);
+        when(summaryMapper.selectOne(any())).thenReturn(summary);
 
         var results = service.appendDiceRollRound(
                 7L, 101L, List.of(draft(null, "0", resolution("SAN_LOSS"))));

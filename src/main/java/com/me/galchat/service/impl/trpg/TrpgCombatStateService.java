@@ -2,7 +2,9 @@ package com.me.galchat.service.impl.trpg;
 
 import com.me.galchat.service.impl.group.GroupConversationService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.domain.dto.KpCombatStateDTOs;
+import com.me.galchat.domain.dto.KpToolStateUndo;
 import com.me.galchat.domain.po.CocCharacter;
 import com.me.galchat.domain.po.GroupConversation;
 import com.me.galchat.domain.po.TrpgCombat;
@@ -102,8 +104,10 @@ public class TrpgCombatStateService {
         }
 
         List<KpCombatStateDTOs.State> states = new ArrayList<>();
+        List<KpToolStateUndo.CardChange> undo = new ArrayList<>();
         for (PreparedChange change : prepared) {
             CocCharacter target = change.target();
+            var before = KpToolStateUndo.CardState.of(target);
             boolean changed = false;
             if (change.inCover() != null
                     && !Objects.equals(target.getInCover(),
@@ -127,10 +131,18 @@ public class TrpgCombatStateService {
             }
             if (changed) {
                 target.setUpdatedAt(LocalDateTime.now());
-                if (characterMapper.updateById(target) == 0) {
+                // updateById skips null fields; releasing a restraint must clear the stored ID.
+                int updated = change.changesRestraint() && change.restrainedById() == null
+                        ? characterMapper.update(target,
+                                new LambdaUpdateWrapper<CocCharacter>()
+                                        .eq(CocCharacter::getId, target.getId())
+                                        .set(CocCharacter::getRestrainedByCharacterId, null))
+                        : characterMapper.updateById(target);
+                if (updated == 0) {
                     throw new UserRequestException("人物卡战斗状态更新失败");
                 }
             }
+            undo.add(new KpToolStateUndo.CardChange(before, KpToolStateUndo.CardState.of(target)));
             CocCharacter restrainer = byId.get(
                     target.getRestrainedByCharacterId());
             states.add(new KpCombatStateDTOs.State(
@@ -140,7 +152,7 @@ public class TrpgCombatStateService {
                             target.getCoverActionForfeitPending()),
                     restrainer == null ? null : restrainer.getName()));
         }
-        return new KpCombatStateDTOs.Result(List.copyOf(states));
+        return new KpCombatStateDTOs.Result(List.copyOf(states), new KpToolStateUndo(conversationId, List.copyOf(undo), null));
     }
 
     private Set<Long> participantIds(TrpgCombat combat) {

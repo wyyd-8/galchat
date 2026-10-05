@@ -124,10 +124,11 @@ public class GroupContextAssembler {
     }
 
     public String baseSystemPrompt(GroupConversation conversation, GroupActorRef currentActor) {
-        String actorPrompt = GroupChatConstant.ACTOR_KP.equals(currentActor.type())
-                ? chatService.buildWorldSystemPrompt(
-                        conversation.getWorldId(), conversation.getUserWorldId())
-                : GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
+        // KP context comes from the TRPG module, cards and rules, never the chat world.
+        if (GroupChatConstant.ACTOR_KP.equals(currentActor.type())) {
+            return "";
+        }
+        String actorPrompt = GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
                 ? chatService.buildChatSystemPrompt(
                         conversation.getWorldId(), conversation.getUserWorldId(), currentActor.id())
                 : chatService.buildSystemPrompt(

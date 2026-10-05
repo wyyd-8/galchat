@@ -14,7 +14,7 @@ import { observeConversationResize, resetConversationScrollFollowing, scrollConv
 const input = defineModel<string>('input', { required: true })
 const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
 const props = defineProps<{ world: UserWorld; character: Character; messages: DirectMessage[]; modelApis: ModelApi[]; loading: { history: boolean; sending: boolean; withdrawing: boolean; model: boolean }; canWithdraw: boolean; hasOlderMessages: boolean; settingsSaving?: boolean; settingsError?: string; canEditTemplate?: boolean; removing?: boolean }>()
-const emit = defineEmits<{ saveSettings: [settings: { userInfoPrompt: string; modelApiId?: number }]; editTemplate: []; remove: []; back: []; send: []; withdraw: []; loadEarlier: []; edit: []; selectModel: [modelApiId?: number]; focus: []; composition: [value: boolean, input: string] }>()
+const emit = defineEmits<{ saveSettings: [settings: { userInfoPrompt: string; modelApiId?: number }]; editTemplate: []; remove: []; back: []; send: []; withdraw: []; loadEarlier: []; edit: []; selectModel: [modelApiId?: number] }>()
 const { isMobile } = useMobileViewport()
 const profileOpen = ref(false)
 const noteOpen = ref(false)
@@ -143,9 +143,7 @@ function handleScroll(event: Event) {
 function handleReasoningScroll(event: Event) {
   updateReasoningScrollFollowing(event.currentTarget as HTMLElement)
 }
-function composition(value: boolean, event: CompositionEvent) {
-  composing.value = value; const target = event.target as HTMLTextAreaElement; emit('composition', value, target.value)
-}
+function composition(value: boolean) { composing.value = value }
 function keydown(event: KeyboardEvent) {
   if (shouldSubmitChatKey(event, isMobile.value, composing.value)) { event.preventDefault(); emit('send') }
 }
@@ -191,7 +189,7 @@ function selectModel(event: Event) {
   <main class="chat-page direct-chat-page">
     <header class="chat-header">
       <div v-if="!isMobile" class="direct-chat-heading"><button class="icon-button bordered" aria-label="返回世界" @click="emit('back')"><ArrowLeft :size="17" /></button><span class="message-avatar large" :style="character.characterImage ? { backgroundImage: `url(${character.characterImage})` } : {}">{{ character.characterImage ? '' : character.characterName.slice(0, 1) }}</span><span><small>与角色单独对话</small><h1>{{ character.characterName }}</h1></span></div>
-      <div v-if="!isMobile" class="chat-header-actions"><span class="live-status active"><i />{{ world.thinkStatus === false ? (world.eotDetectionStatus ? '智能判断是否说完' : '连续消息模式') : '逐字显示思考和回复' }}</span></div>
+      <div v-if="!isMobile" class="chat-header-actions"><span class="live-status active"><i />逐字显示思考和回复</span></div>
       <template v-if="isMobile"><button class="icon-button" aria-label="返回世界" @click="emit('back')"><ArrowLeft :size="23" /></button><button class="mobile-chat-title" @click="profileOpen = true"><strong>{{ character.characterName }}</strong><small>{{ world.name }} · 单聊</small></button><button class="icon-button" aria-label="角色详情" @click="profileOpen = true"><MoreHorizontal :size="22" /></button></template>
     </header>
     <div class="direct-chat-layout">
@@ -210,7 +208,7 @@ function selectModel(event: Event) {
           </template>
         </div></div></div>
         <button v-if="awayFromLatest" class="chat-jump-latest" aria-label="回到最新" title="回到最新" @click="returnToLatest"><ArrowDown :size="16" /><span class="chat-jump-latest-label">回到最新</span></button>
-        <div class="composer direct-composer"><button v-if="isMobile" class="icon-button" aria-label="聊天操作" @click="menuOpen = true"><Plus :size="23" /></button><button v-if="!isMobile" class="icon-button withdraw-button" :disabled="!canWithdraw" :title="canWithdraw ? '撤回上一轮' : '暂无可撤回的用户消息，或当前仍在处理消息'" aria-label="撤回上一轮" @click="emit('withdraw')"><LoaderCircle v-if="loading.withdrawing" class="spin" :size="17" /><RotateCcw v-else :size="17" /></button><textarea ref="inputElement" v-model="input" rows="1" placeholder="输入给角色的消息…" :disabled="loading.sending" @input="resizeInput" aria-label="给角色的消息" @focus="emit('focus')" @compositionstart="composition(true, $event)" @compositionend="composition(false, $event)" @keydown="keydown" /><button class="send-button" aria-label="发送消息" :disabled="!input.trim() || loading.sending" @click="emit('send')"><LoaderCircle v-if="loading.sending" class="spin" :size="19" /><Send v-else :size="19" /></button></div>
+        <div class="composer direct-composer"><button v-if="isMobile" class="icon-button" aria-label="聊天操作" @click="menuOpen = true"><Plus :size="23" /></button><button v-if="!isMobile" class="icon-button withdraw-button" :disabled="!canWithdraw" :title="canWithdraw ? '撤回上一轮' : '暂无可撤回的消息，或当前仍在处理消息'" aria-label="撤回上一轮" @click="emit('withdraw')"><LoaderCircle v-if="loading.withdrawing" class="spin" :size="17" /><RotateCcw v-else :size="17" /></button><textarea ref="inputElement" v-model="input" rows="1" placeholder="输入给角色的消息…" :disabled="loading.sending" @input="resizeInput" aria-label="给角色的消息" @compositionstart="composition(true)" @compositionend="composition(false)" @keydown="keydown" /><button class="send-button" aria-label="发送消息" :disabled="!input.trim() || loading.sending || loading.withdrawing || loading.model || settingsSaving" @click="emit('send')"><LoaderCircle v-if="loading.sending" class="spin" :size="19" /><Send v-else :size="19" /></button></div>
       </section>
       <div v-if="!isMobile" class="chat-side-host">
         <aside class="direct-character-panel" aria-label="角色面板">
@@ -274,6 +272,6 @@ function selectModel(event: Event) {
       <button class="mobile-chat-row" :disabled="!hasOlderMessages || loading.history" @click="menuOpen = false; emit('loadEarlier')"><span><strong>加载更早记录</strong></span><History :size="18" /></button>
       <template #footer><button class="button secondary" @click="menuOpen = false">取消</button></template>
     </BaseDialog>
-    <BaseDialog v-if="isMobile" v-model="withdrawOpen" title="撤回上一轮" mobile-presentation="page" content-class="mobile-chat-confirm"><p class="mobile-chat-notice mobile-withdraw-notice">撤回会删除上一条用户消息及其触发的回复，并回滚相应好感变化。</p><h3>当前操作范围</h3><p class="mobile-chat-muted">{{ character.characterName }} · 上一轮对话</p><template #footer><button class="button secondary" @click="withdrawOpen = false">取消</button><button class="button danger" :disabled="!canWithdraw || loading.withdrawing" @click="withdrawOpen = false; emit('withdraw')">确认撤回</button></template></BaseDialog>
+    <BaseDialog v-if="isMobile" v-model="withdrawOpen" title="撤回上一轮" mobile-presentation="page" content-class="mobile-chat-confirm"><p class="mobile-chat-notice mobile-withdraw-notice">撤回会移除最近一轮消息：用户消息及其触发的回复会一并撤回，并回滚相应好感变化；角色主动发来的消息会单独撤回。</p><h3>当前操作范围</h3><p class="mobile-chat-muted">{{ character.characterName }} · 上一轮对话</p><template #footer><button class="button secondary" @click="withdrawOpen = false">取消</button><button class="button danger" :disabled="!canWithdraw || loading.withdrawing" @click="withdrawOpen = false; emit('withdraw')">确认撤回</button></template></BaseDialog>
   </main>
 </template>

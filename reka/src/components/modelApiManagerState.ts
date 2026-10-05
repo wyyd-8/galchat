@@ -27,18 +27,34 @@ export function createModelApiManagerState(gateway: ModelApiGateway) {
   const testingId = ref<number | null>(null)
   const deletingId = ref<number | null>(null)
 
+  let revision = 0
+  let mutationRevision = 0
+  const mutations = new Map<number, { revision: number; model: ModelApi | null }>()
+
   function upsert(model: ModelApi) {
+    mutations.set(model.id, { revision: ++mutationRevision, model })
     const index = models.value.findIndex((item) => item.id === model.id)
     if (index < 0) models.value = [model, ...models.value]
     else models.value = models.value.map((item) => item.id === model.id ? model : item)
   }
 
   async function load() {
+    const request = ++revision
+    const beforeMutations = mutationRevision
     loading.value = true
     try {
-      models.value = await gateway.list()
+      const rows = await gateway.list()
+      if (request === revision) {
+        const latest = new Map(rows.map(model => [model.id, model]))
+        for (const [id, change] of mutations) {
+          if (change.revision <= beforeMutations) continue
+          if (change.model) latest.set(id, change.model)
+          else latest.delete(id)
+        }
+        models.value = [...latest.values()]
+      }
     } finally {
-      loading.value = false
+      if (request === revision) loading.value = false
     }
   }
 
@@ -79,6 +95,7 @@ export function createModelApiManagerState(gateway: ModelApiGateway) {
     deletingId.value = id
     try {
       await gateway.delete(id)
+      mutations.set(id, { revision: ++mutationRevision, model: null })
       models.value = models.value.filter((item) => item.id !== id)
     } finally {
       deletingId.value = null

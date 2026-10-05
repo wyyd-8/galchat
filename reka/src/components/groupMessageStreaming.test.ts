@@ -140,6 +140,127 @@ test('keeps earlier dice rounds visible after streaming a follow-up round and sy
   })), [{ id: 100, cards: [601] }, { id: 101, cards: [602] }])
 })
 
+test('keeps SAN check, loss and insanity cards together as automatic rounds complete during streaming', async (t) => {
+  const { api, streamTrpgTurn } = await import('../api/client.ts')
+  const { useWorkspace } = await import('../composables/useWorkspace.ts')
+  const { splitDiceAggregateByRound, createDiceMessagePresentation } = await import('../dice/domain/dicePlayback.ts')
+  const { createRenderer, defineComponent, h } = await import('vue')
+  const previousWindow = globalThis.window
+  const previousLocalStorage = globalThis.localStorage
+  const previousSessionStorage = globalThis.sessionStorage
+  const storage = new Map<string, string>()
+  const webStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    key: (index: number) => [...storage.keys()][index] ?? null,
+    get length() { return storage.size },
+  }
+  Object.assign(globalThis, {
+    window: { addEventListener() {}, clearTimeout, setTimeout },
+    localStorage: webStorage,
+    sessionStorage: webStorage,
+  })
+  t.after(() => Object.assign(globalThis, {
+    window: previousWindow, localStorage: previousLocalStorage,
+    sessionStorage: previousSessionStorage,
+  }))
+
+  let workspace!: ReturnType<typeof useWorkspace>
+  const renderer = createRenderer<Record<string, unknown>, Record<string, unknown>>({
+    patchProp() {}, insert(child, parent) { child.parent = parent }, remove() {},
+    createElement: () => ({}), createText: (text) => ({ text }),
+    createComment: (text) => ({ text }), setText(node, text) { node.text = text },
+    setElementText(node, text) { node.text = text },
+    parentNode: (node) => node.parent as Record<string, unknown> | null,
+    nextSibling: () => null,
+  })
+  const app = renderer.createApp(defineComponent({
+    setup() { workspace = useWorkspace(); return () => h('div') },
+  }))
+  app.mount({})
+  t.after(() => app.unmount())
+  const conversation: Conversation = {
+    id: 7, userWorldId: 3, worldId: 2,
+    mode: 'trpg', title: '旧宅调查', status: 'active',
+  }
+  workspace.conversations.value = [conversation]
+  workspace.selectedConversationId.value = 7
+
+  const results: DiceRollAggregate['results'] = [{
+    id: 601, summaryId: 501, roundNo: 1, reason: '林恩目睹怪物',
+    resolution: { type: 'SAN_CHECK' },
+  }]
+  let summary = { ...diceRoll.summary, status: 'PENDING', roundCount: 1 }
+  t.mock.method(api, 'conversation', async () => conversation)
+  t.mock.method(api, 'replyPlan', async () => [{ source: 'USER', displayName: '群聊', items: [] }])
+  t.mock.method(api, 'currentTurn', async () => null)
+  t.mock.method(api, 'combatOverview', async () => [])
+  t.mock.method(api, 'investigatorCards', async () => [])
+  t.mock.method(api, 'diceSummary', async () => structuredClone(summary))
+  t.mock.method(api, 'diceResults', async () => structuredClone(results))
+  t.mock.method(api, 'groupMessages', async () => [{
+    ...diceMessage, diceRoll: undefined,
+    content: JSON.stringify({ summaryId: 501, roundNos: [...new Set(results.map(result => result.roundNo))] }),
+  }])
+  const visibleCards = () => workspace.messages.value.flatMap(message =>
+    splitDiceAggregateByRound(message.diceRoll!).map(aggregate => ({
+      ids: aggregate.results.map(result => result.id),
+      status: createDiceMessagePresentation(aggregate).statusLabel,
+    })))
+  const snapshots: ReturnType<typeof visibleCards>[] = []
+  let streamedRounds: number[] | undefined
+  let streamedMessageCount = 0
+  t.mock.method(streamTrpgTurn, 'continue', async (_id: number, _requestId: string, onEvent: (event: GroupChatEvent) => void) => {
+    const event = {
+      conversationId: 7, turnId: 42, replyStepId: 9,
+      messageId: 100, sequence: 10, speaker: { type: 'kp', name: 'KP' },
+    }
+    onEvent({ ...event, eventType: 'reply.started', messageKind: 'dialogue' })
+    onEvent({ ...event, eventType: 'dice_roll.created', toolName: 'requestSanCheck',
+      diceRoll: { summary: structuredClone(summary), results: structuredClone(results) },
+    })
+    onEvent({ ...event, eventType: 'message.completed', messageKind: 'dice_roll' })
+
+    // A player roll returns a new loss round for this same persisted message.
+    results[0] = { ...results[0]!, resolvedAt: '2026-09-29T10:00:00',
+      resolution: { type: 'SAN_CHECK', outcome: { category: 'FAILURE' } } }
+    results.push({ id: 602, summaryId: 501, roundNo: 2, reason: '林恩损失理智',
+      resolution: { type: 'SAN_LOSS' } })
+    summary = { ...summary, roundCount: 2 }
+    await workspace.refreshDiceRoll(501)
+    snapshots.push(visibleCards())
+
+    results[1] = { ...results[1]!, resolvedAt: '2026-09-29T10:00:01',
+      resultData: { formula: '1D6', modules: [], result: 6 } }
+    results.push(
+      { id: 603, summaryId: 501, roundNo: 3, reason: '林恩临时疯狂', resolution: { type: 'TEMPORARY_INSANITY_TYPE' } },
+      { id: 604, summaryId: 501, roundNo: 3, reason: '林恩临时疯狂', resolution: { type: 'TEMPORARY_INSANITY_DURATION' } },
+    )
+    summary = { ...summary, roundCount: 3 }
+    await workspace.refreshDiceRoll(501)
+    snapshots.push(visibleCards())
+    results[2] = { ...results[2]!, resolvedAt: '2026-09-29T10:00:02' }
+    results[3] = { ...results[3]!, resolvedAt: '2026-09-29T10:00:02' }
+    summary = { ...summary, status: 'COMPLETED' }
+    await workspace.refreshDiceRoll(501)
+    streamedRounds = [...(workspace.messages.value[0]?.diceRoundNos || [])]
+    streamedMessageCount = workspace.messages.value.length
+    snapshots.push(visibleCards())
+    onEvent({ eventType: 'turn.paused', conversationId: 7, turnId: 42 })
+  })
+
+  assert.equal(await workspace.startTrpgTurn(), true)
+  assert.deepEqual(snapshots[0], [{ ids: [601], status: '失败' }, { ids: [602], status: '未投掷' }])
+  assert.deepEqual(snapshots[1], [
+    { ids: [601], status: '失败' }, { ids: [602], status: '-6' }, { ids: [603, 604], status: '未投掷' },
+  ])
+  assert.deepEqual(snapshots[2]?.map(card => card.ids), [[601], [602], [603, 604]])
+  assert.deepEqual(streamedRounds, [1, 2, 3])
+  assert.equal(streamedMessageCount, 1)
+  assert.deepEqual(visibleCards().map(card => card.ids), [[601], [602], [603, 604]])
+})
+
 test('keeps continued streaming output below the dice message from the same reply step', async () => {
   const { api, streamTrpgTurn } = await import('../api/client.ts')
   const { useWorkspace } = await import('../composables/useWorkspace.ts')

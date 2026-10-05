@@ -2,6 +2,10 @@ package com.me.galchat.service.impl.trpg;
 
 import com.me.galchat.service.impl.group.GroupConversationService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.me.galchat.domain.dto.KpWaitingInvestigatorDTOs;
+import com.me.galchat.utils.RedisAfterCommitCleanup;
+import java.util.Objects;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
@@ -48,7 +52,7 @@ public class TrpgChildSceneCommandService {
             "startChildScene";
 
     @Transactional(rollbackFor = Exception.class)
-    public String startChildScene(
+    public StartResult startChildScene(
             Long conversationId,
             Long replyStepId,
             String childSceneName,
@@ -63,15 +67,14 @@ public class TrpgChildSceneCommandService {
         List<PreparedChildStart> earlier = recordedStartCalls(
                 replyStepId).stream()
                 .map(call -> readPreparedStart(
-                        execution, call.getToolArguments()))
+                        execution, call))
                 .filter(java.util.Objects::nonNull)
                 .toList();
         ensureDistinctDestinationAndInvestigators(
                 sceneName, selected, earlier);
-        return "已创建子场景“" + sceneName
-                + "”，调查员"
-                + String.join("、", selected.names())
-                + "将进入该场景。";
+        return new StartResult(true, "已接受子场景请求“" + sceneName
+                + "”，调查员" + String.join("、", selected.names())
+                + "将在本轮结束后进入该场景。");
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -109,7 +112,7 @@ public class TrpgChildSceneCommandService {
             for (GroupChatToolCall call :
                     recordedStartCalls(step.getId())) {
                 PreparedChildStart prepared = readPreparedStart(
-                        execution, call.getToolArguments());
+                        execution, call);
                 if (prepared != null) {
                     ensureDistinctDestinationAndInvestigators(
                             prepared.sceneName(), prepared.selected(),
@@ -141,7 +144,7 @@ public class TrpgChildSceneCommandService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public String resumeWaitingInvestigators(
+    public KpWaitingInvestigatorDTOs.Result resumeWaitingInvestigators(
             Long conversationId,
             Long replyStepId,
             List<String> investigatorNames) {
@@ -150,18 +153,57 @@ public class TrpgChildSceneCommandService {
         Selected selected = selectItems(
                 execution, investigatorNames,
                 GroupChatConstant.PARTICIPANT_WAITING);
+        Set<Long> ready = progressStore.readyCharacterIds(conversationId, execution.plan().getId());
+        List<KpWaitingInvestigatorDTOs.Undo> undo = selected.items().stream()
+                .map(item -> new KpWaitingInvestigatorDTOs.Undo(item.getId(), item.getSubjectCharacterId(),
+                        item.getParticipantStatus(), item.getUpdatedAt(), ready.contains(item.getSubjectCharacterId())))
+                .toList();
         LocalDateTime now = LocalDateTime.now();
         for (GroupReplyPlanItem item : selected.items()) {
-            item.setParticipantStatus(
-                            GroupChatConstant.PARTICIPANT_ACTIVE)
-                    .setUpdatedAt(now);
-            itemMapper.updateById(item);
-            progressStore.clearReady(
-                    conversationId, execution.plan().getId(),
-                    item.getSubjectCharacterId());
+            item.setParticipantStatus(GroupChatConstant.PARTICIPANT_ACTIVE).setUpdatedAt(now);
+            if (itemMapper.updateById(item) != 1) {
+                throw new IllegalStateException("恢复等待调查员失败");
+            }
+            progressStore.clearReady(conversationId, execution.plan().getId(), item.getSubjectCharacterId());
         }
-        return String.join("、", selected.names())
-                + "已结束等待，将从下一轮开始正常参与行动。";
+        return new KpWaitingInvestigatorDTOs.Result(String.join("、", selected.names())
+                + "已结束等待，将从下一轮开始正常参与行动。", execution.plan().getId(), undo);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void rollbackWaitingResume(Long conversationId, KpWaitingInvestigatorDTOs.Result result) {
+        if (result == null || result.scenePlanId() == null || result.undo() == null || result.undo().isEmpty()) {
+            throw new IllegalStateException("恢复等待记录缺少撤销数据，无法回滚");
+        }
+        GroupReplyPlan scene = planMapper.selectById(result.scenePlanId());
+        if (scene == null || !Objects.equals(scene.getConversationId(), conversationId)) {
+            throw new IllegalStateException("恢复等待场景已变化，无法回滚");
+        }
+        for (var undo : result.undo()) {
+            GroupReplyPlanItem item = undo == null || undo.itemId() == null ? null : itemMapper.selectById(undo.itemId());
+            if (item == null || undo.characterId() == null
+                    || !Objects.equals(item.getPlanId(), scene.getId())
+                    || !Objects.equals(item.getSubjectCharacterId(), undo.characterId())
+                    || !GroupChatConstant.PARTICIPANT_ACTIVE.equals(item.getParticipantStatus())
+                    || !GroupChatConstant.PARTICIPANT_WAITING.equals(undo.statusBefore())) {
+                throw new IllegalStateException("恢复等待调查员状态已变化，无法安全回滚");
+            }
+        }
+        for (var undo : result.undo()) {
+            int updated = itemMapper.update(null, new LambdaUpdateWrapper<GroupReplyPlanItem>()
+                    .eq(GroupReplyPlanItem::getId, undo.itemId())
+                    .eq(GroupReplyPlanItem::getPlanId, scene.getId())
+                    .eq(GroupReplyPlanItem::getParticipantStatus, GroupChatConstant.PARTICIPANT_ACTIVE)
+                    .set(GroupReplyPlanItem::getParticipantStatus, undo.statusBefore())
+                    .set(GroupReplyPlanItem::getUpdatedAt, undo.updatedBefore()));
+            if (updated != 1) throw new IllegalStateException("恢复等待调查员回滚失败");
+            if (undo.readyBefore()) {
+                RedisAfterCommitCleanup.run("恢复等待调查员结束标记", () ->
+                        progressStore.markReady(conversationId, scene.getId(), undo.characterId()));
+            } else {
+                progressStore.clearReady(conversationId, scene.getId(), undo.characterId());
+            }
+        }
     }
 
     public boolean canStartChildScene(
@@ -247,23 +289,44 @@ public class TrpgChildSceneCommandService {
 
     private PreparedChildStart readPreparedStart(
             SceneExecution execution,
-            String toolArguments) {
+            GroupChatToolCall call) {
+        if (call.getToolArguments() == null || call.getToolResult() == null) return null;
         try {
             ChildSceneStartArguments arguments =
                     objectMapper.readValue(
-                            toolArguments,
+                            call.getToolArguments(),
                             ChildSceneStartArguments.class);
+            if (arguments == null) return null;
             String sceneName = normalizeSceneName(
                     arguments.childSceneName());
             Selected selected = selectItems(
                     execution,
                     arguments.investigatorNames(),
                     GroupChatConstant.PARTICIPANT_ACTIVE);
+            if (!isAcceptedStart(call.getToolResult(), sceneName, selected.names())) return null;
             return new PreparedChildStart(sceneName, selected);
         } catch (JacksonException | UserRequestException ignored) {
             return null;
         }
     }
+
+    private boolean isAcceptedStart(String result, String sceneName, List<String> names) {
+        // Old saves contain a JSON string (or raw text), so recognize only the exact old success response.
+        String legacySuccess = "已创建子场景“" + sceneName + "”，调查员"
+                + String.join("、", names) + "将进入该场景。";
+        if (legacySuccess.equals(result)) return true;
+        try {
+            var node = objectMapper.readTree(result);
+            return node != null && (node.isTextual()
+                    ? legacySuccess.equals(node.asText())
+                    : node.isObject() && node.path("accepted").isBoolean()
+                    && node.path("accepted").asBoolean());
+        } catch (JacksonException ignored) {
+            return false;
+        }
+    }
+
+    public record StartResult(boolean accepted, String message) {}
 
     private GroupReplyPlan requireActiveScene(
             GroupConversation conversation) {

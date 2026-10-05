@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import BaseDialog from './ui/BaseDialog.vue'
 import { useMobileViewport } from '@/composables/useMobileViewport'
 import { api } from '@/api/client'
 import { errorMessage, notify } from '@/composables/useNotice'
 
 const open = defineModel<boolean>({ required: true })
+const props = defineProps<{ submitting?: boolean }>()
 const emit = defineEmits<{ submit: [payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }] }>()
 const { isMobile } = useMobileViewport()
 const mode = ref<'login' | 'register' | 'reset'>('login')
-const busy = ref(false)
+const localBusy = ref(false)
+const busy = computed(() => localBusy.value || props.submitting === true)
 const codeBusy = ref(false)
 const form = reactive({ email: '', password: '', confirmPassword: '', code: '' })
+watch(open, () => { Object.assign(form, { password: '', confirmPassword: '', code: '' }) }, { flush: 'sync' })
 const title = computed(() => mode.value === 'reset' ? '找回密码' : isMobile.value ? (mode.value === 'login' ? 'GalChat' : '创建账号') : (mode.value === 'login' ? '回到你的世界' : '建立旅人档案'))
 const description = computed(() => mode.value === 'reset' ? '输入账户邮箱，获取验证码后将自动填写，5 分钟内有效。' : isMobile.value ? undefined : '世界、角色、单聊与群聊记录会保存在当前账号下。')
 
@@ -25,7 +28,7 @@ async function submit() {
   if (!form.email || !form.password) return notify('请填写邮箱和密码', '', 'danger')
   if (mode.value !== 'login' && form.password !== form.confirmPassword) return notify('两次密码不一致', '', 'danger')
   if (mode.value === 'reset' && !/^\d{6}$/.test(form.code)) return notify('请填写 6 位邮箱验证码', '', 'danger')
-  busy.value = true
+  localBusy.value = true
   if (mode.value === 'reset') {
     const { email, password, code } = form
     try {
@@ -34,11 +37,11 @@ async function submit() {
       form.email = email
       emit('submit', { mode: 'login', email, password })
     } catch (error) { notify('重置失败', errorMessage(error), 'danger') }
-    finally { busy.value = false }
+    finally { await nextTick(); localBusy.value = false }
     return
   }
   try { emit('submit', { mode: mode.value, email: form.email, password: form.password, code: form.code }) }
-  finally { window.setTimeout(() => { busy.value = false }, 500) }
+  finally { await nextTick(); localBusy.value = false }
 }
 async function sendCode() {
   if (codeBusy.value || busy.value) return

@@ -60,6 +60,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -76,8 +78,9 @@ class GroupChatServiceTest {
                 GroupChatReplyStep.class);
     }
 
-    @Test
-    void persistedStepUsesTheActorSelectedChatClient() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void persistedStepUsesTheActorSelectedChatClient(boolean retry) {
         DeepSeekChatModel fallbackModel = newChatModel();
         DeepSeekChatModel selectedModel = newChatModel();
         ChatClient fallback = ChatClient.builder(fallbackModel).build();
@@ -95,10 +98,13 @@ class GroupChatServiceTest {
                 mock(GroupConversationService.class);
         IUserWorldPrefixService worlds =
                 mock(IUserWorldPrefixService.class);
+        GroupTurnCheckpointService checkpoints = mock(GroupTurnCheckpointService.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupConversationLockService locks = mock(GroupConversationLockService.class);
         GroupChatService service = new GroupChatService(
-                conversations, mock(GroupConversationLockService.class),
+                conversations, locks,
                 mock(GroupTurnPlanResolver.class), runtimes, messages,
-                mock(GroupChatTurnMapper.class), steps,
+                turns, steps,
                 mock(GroupTurnRecoveryService.class),
                 new GroupToolContextFactory(), worlds,
                 immediateTransactionTemplate(), diceMessageCodec(),
@@ -106,7 +112,7 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class), actorRuntime);
+                checkpoints, actorRuntime);
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(3L)
                 .setMode(GroupChatConstant.MODE_CHAT);
@@ -158,15 +164,36 @@ class GroupChatServiceTest {
                 Flux.just(new ChatResponse(List.of(new Generation(
                         new AssistantMessage("自选模型回复"))))));
 
-        List<GroupChatEvent> events = service.streamPersistedStep(
-                conversation, turn, step,
-                "优先确认地下室入口。").collectList().block();
+        Flux<GroupChatEvent> stream;
+        if (retry) {
+            turn.setStatus(GroupChatConstant.STATUS_FAILED);
+            when(conversations.requireActive(7L)).thenReturn(conversation);
+            when(locks.tryLockWithOwner(7L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+            when(turns.selectList(any())).thenReturn(List.of(turn));
+            when(checkpoints.restoreChat(conversation, turn)).thenAnswer(invocation -> {
+                turn.setStatus(GroupChatConstant.STATUS_RUNNING);
+                return List.of(step);
+            });
+            stream = service.retry(7L, 30L);
+        } else {
+            stream = service.streamPersistedStep(conversation, turn, step, "优先确认地下室入口。");
+        }
+        List<GroupChatEvent> events = stream.collectList().block();
 
-        assertThat(events.getLast().getContent())
+        assertThat(events.stream().filter(event -> GroupChatConstant.EVENT_MESSAGE_COMPLETED.equals(event.getEventType()))
+                .findFirst().orElseThrow().getContent())
                 .isEqualTo("自选模型回复");
         assertThat(preparedContext.get().investigatorDirection())
-                .isEqualTo("优先确认地下室入口。");
+                .isEqualTo(retry ? null : "优先确认地下室入口。");
         verify(fallbackModel, never()).stream(any(Prompt.class));
+        verify(messages, times(1)).insert(any(GroupChatMessage.class));
+        verify(turns, never()).insert(any(GroupChatTurn.class));
+        if (retry) {
+            verify(contextPolicy, never()).prepareTurnStarted(any(), any());
+            verify(checkpoints).restoreChat(conversation, turn);
+            verify(locks).unlock(any());
+        }
+        verify(checkpoints).recordBoundary(turn, step, GroupTurnCheckpointService.COMPLETED);
     }
 
     @Test
@@ -251,6 +278,7 @@ class GroupChatServiceTest {
                 mock(GroupChatReplyStepMapper.class);
         TransactionTemplate transactionTemplate =
                 immediateTransactionTemplate();
+        GroupTurnCheckpointService checkpoints = mock(GroupTurnCheckpointService.class);
         GroupChatService service = new GroupChatService(
                 conversationService, lockService, turnPlanResolver,
                 runtimes, messages, turns, steps,
@@ -262,7 +290,7 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class),
+                checkpoints,
                 defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L)
@@ -283,7 +311,7 @@ class GroupChatServiceTest {
                 .setStatus(GroupChatConstant.STATUS_WAITING_INPUT);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turns.selectById(30L)).thenReturn(turn);
@@ -325,6 +353,7 @@ class GroupChatServiceTest {
                                         message.getContent())));
         verify(turnPlanResolver).onTurnCompleted(
                 conversation, GroupChatConstant.PLAN_SOURCE_USER);
+        verify(checkpoints).recordBoundary(turn, step, GroupTurnCheckpointService.COMPLETED);
     }
 
     @Test
@@ -597,7 +626,7 @@ class GroupChatServiceTest {
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         GroupChatRequestDTO request = new GroupChatRequestDTO();
@@ -645,7 +674,7 @@ class GroupChatServiceTest {
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireActive(7L))
                 .thenReturn(conversation);
-        when(lockService.tryLock(7L)).thenReturn(
+        when(lockService.tryLockWithOwner(7L)).thenReturn(
                 new GroupConversationLockService.OwnedLock(
                         mock(RLock.class), 1L));
         when(turnMapper.countNonTerminalByConversationId(7L))
@@ -744,7 +773,7 @@ class GroupChatServiceTest {
                 List.of()));
         when(agentPolicy.actorName(
                 1L, new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 9L))).thenReturn("Alice");
-        when(lockService.tryLock(7L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        when(lockService.tryLockWithOwner(7L)).thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         AtomicLong sequence = new AtomicLong();
         when(conversationService.nextSequence(7L)).thenAnswer(invocation -> sequence.incrementAndGet());
 
@@ -882,6 +911,7 @@ class GroupChatServiceTest {
         GroupChatReplyStepMapper stepMapper = mock(GroupChatReplyStepMapper.class);
         GroupTurnRecoveryService recoveryService = mock(GroupTurnRecoveryService.class);
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
+        GroupTurnCheckpointService checkpoints = mock(GroupTurnCheckpointService.class);
         GroupChatService service = new GroupChatService(
                 conversationService, lockService, turnPlanResolver, runtimeRegistry,
                 messageMapper, turnMapper, stepMapper, recoveryService, new GroupToolContextFactory(),
@@ -891,7 +921,7 @@ class GroupChatServiceTest {
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class),
                 mock(TrpgCombatLifecycleService.class),
-                mock(GroupTurnCheckpointService.class),
+                checkpoints,
                 defaultActorRuntime());
         org.springframework.test.util.ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor",
                 (org.springframework.core.task.TaskExecutor) Runnable::run);
@@ -911,7 +941,7 @@ class GroupChatServiceTest {
                 .setMode(GroupChatConstant.MODE_CHAT)
                 .setStatus(GroupChatConstant.STATUS_ACTIVE);
         when(conversationService.requireActive(7L)).thenReturn(conversation);
-        when(lockService.tryLock(7L))
+        when(lockService.tryLockWithOwner(7L))
                 .thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         when(runtimeRegistry.require(GroupChatConstant.MODE_CHAT)).thenReturn(runtime);
         when(runtime.turnPolicy()).thenReturn(turnPolicy);
@@ -962,6 +992,9 @@ class GroupChatServiceTest {
                 GroupChatConstant.STATUS_STREAMING.equals(message.getStatus())));
         verify(recoveryService).cancelPendingSteps(201L, "context failed");
         verify(contextPolicy, never()).load(conversation, secondAction);
+        verify(checkpoints).initializeStep(argThat(t -> t.getId().equals(201L)),
+                argThat(step -> step.getId().equals(203L)));
+        verify(checkpoints, never()).recordBoundary(any(), any(), anyString());
     }
 
     @Test
@@ -1235,8 +1268,9 @@ class GroupChatServiceTest {
                 30L, "模型未返回有效内容");
     }
 
-    @Test
-    void combatRouteClarificationIsPublicAndCompletesRouteChild() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void combatRouteClarificationIsPublicAndCompletesRouteChild(boolean alreadyCommitted) {
         DeepSeekChatModel model = newChatModel();
         ChatClient chatClient = ChatClient.builder(model).build();
         GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
@@ -1251,6 +1285,7 @@ class GroupChatServiceTest {
                 mock(GroupConversationService.class);
         TrpgCombatLifecycleService combats =
                 mock(TrpgCombatLifecycleService.class);
+        var checkpoints = mock(GroupTurnCheckpointService.class);
         GroupChatService service = new GroupChatService(
                 conversations, mock(GroupConversationLockService.class),
                 mock(GroupTurnPlanResolver.class), runtimes, messages,
@@ -1262,7 +1297,7 @@ class GroupChatServiceTest {
                 JsonMapper.builder().build(), emptyMaterialFeed(),
                 mock(TrpgSceneSelectionService.class),
                 mock(GroupAgentDecisionStore.class), combats,
-                mock(GroupTurnCheckpointService.class),
+                checkpoints,
                 defaultActorRuntime());
         GroupConversation conversation = new GroupConversation()
                 .setId(7L).setUserWorldId(5L).setWorldId(2L)
@@ -1315,6 +1350,13 @@ class GroupChatServiceTest {
                 reactor.core.publisher.Flux.just(
                         new ChatResponse(List.of(direct))));
 
+        if (alreadyCommitted) {
+            when(steps.selectById(31L)).thenReturn(new GroupChatReplyStep().setId(31L).setOutputMessageId(40L));
+            when(messages.selectById(40L)).thenReturn(new GroupChatMessage().setId(40L)
+                    .setReplyStepId(31L).setConversationId(7L).setTurnId(30L).setSequenceNo(10L)
+                    .setContent("你攻击的是门边还是窗边的食尸鬼？"));
+        }
+
         List<GroupChatEvent> events = service.streamPersistedStep(
                 conversation, turn, route).collectList().block();
 
@@ -1324,6 +1366,9 @@ class GroupChatServiceTest {
                         GroupChatConstant.EVENT_MESSAGE_COMPLETED);
         assertThat(events.getLast().getContent())
                 .isEqualTo("你攻击的是门边还是窗边的食尸鬼？");
+        if (alreadyCommitted) verify(messages, never()).insert(any(GroupChatMessage.class));
+        assertThat(events.getLast().getMessageId()).isEqualTo(40L);
+        verify(checkpoints, never()).recordBoundary(any(), any(), any());
         assertThat(route.getStatus())
                 .isEqualTo(GroupChatConstant.STATUS_COMPLETED);
         verify(combats, never()).completeReactionRoute(
@@ -1376,7 +1421,7 @@ class GroupChatServiceTest {
                 1,
                 1);
         when(conversationService.requireActive(7L)).thenReturn(conversation);
-        when(lockService.tryLock(7L))
+        when(lockService.tryLockWithOwner(7L))
                 .thenReturn(new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
         when(runtimeRegistry.require(GroupChatConstant.MODE_CHAT)).thenReturn(runtime);
         when(runtime.turnPolicy()).thenReturn(turnPolicy);
@@ -1613,8 +1658,9 @@ class GroupChatServiceTest {
                 .isEqualTo("{\"summaryId\":501,\"roundNos\":[2]}");
     }
 
-    @Test
-    void historyKeepsUserMessagesWithoutReplyStepDecision() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void historyKeepsUserMessagesWithoutReplyStepDecision(boolean onlyUser) {
         GroupConversationService conversationService =
                 mock(GroupConversationService.class);
         GroupChatMessageMapper messageMapper =
@@ -1698,12 +1744,25 @@ class GroupChatServiceTest {
                 .thenReturn(List.of(new GroupChatReplyStep()
                         .setId(41L).setOutputMessageId(91L)));
 
+        if (onlyUser) {
+            when(messageMapper.selectList(any())).thenReturn(new java.util.ArrayList<>(List.of(
+                    new GroupChatMessage().setId(90L).setConversationId(7L).setTurnId(31L)
+                            .setSpeakerType(GroupChatConstant.ACTOR_USER)
+                            .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE).setContent("你好")
+                            .setSequenceNo(1L).setStatus(GroupChatConstant.STATUS_COMPLETED))));
+        }
+
         List<GroupChatMessageVO> history =
                 service.listHistory(7L, null, 50);
 
-        assertThat(history).extracting(
-                        GroupChatMessageVO::getDecisionContent)
-                .containsExactly(null, "先回应用户的问候。");
+        if (onlyUser) {
+            assertThat(history).extracting(GroupChatMessageVO::getContent).containsExactly("你好");
+            assertThat(history.getFirst().getDecisionContent()).isNull();
+            verify(stepMapper, never()).selectBatchIds(any());
+        } else {
+            assertThat(history).extracting(GroupChatMessageVO::getDecisionContent)
+                    .containsExactly(null, "先回应用户的问候。");
+        }
     }
 
     @Test
@@ -1875,6 +1934,124 @@ class GroupChatServiceTest {
         assertThat(history).extracting(
                         GroupChatMessageVO::getDecisionContent)
                 .containsExactly(null, "窗边泥点可能来自外面。");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void retryRejectsOlderTurnsAndReportsMissingCheckpointWithoutGenerating(boolean olderTurn) {
+        GroupConversationService conversations = mock(GroupConversationService.class);
+        GroupConversationLockService locks = mock(GroupConversationLockService.class);
+        GroupChatTurnMapper turns = mock(GroupChatTurnMapper.class);
+        GroupChatMessageMapper messages = mock(GroupChatMessageMapper.class);
+        GroupChatReplyStepMapper steps = mock(GroupChatReplyStepMapper.class);
+        GroupTurnCheckpointService checkpoints = mock(GroupTurnCheckpointService.class);
+        GroupRuntimeRegistry runtimes = mock(GroupRuntimeRegistry.class);
+        var service = new GroupChatService(conversations, locks, mock(GroupTurnPlanResolver.class),
+                runtimes, messages, turns, steps, mock(GroupTurnRecoveryService.class),
+                new GroupToolContextFactory(), mock(IUserWorldPrefixService.class), immediateTransactionTemplate(),
+                diceMessageCodec(), JsonMapper.builder().build(), emptyMaterialFeed(),
+                mock(TrpgSceneSelectionService.class), mock(GroupAgentDecisionStore.class),
+                mock(TrpgCombatLifecycleService.class), checkpoints, defaultActorRuntime());
+        GroupConversation conversation = new GroupConversation().setId(7L).setMode("chat");
+        GroupChatTurn turn = new GroupChatTurn().setId(101L).setConversationId(7L).setStatus("failed");
+        var lock = new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L);
+        when(conversations.requireActive(7L)).thenReturn(conversation);
+        when(locks.tryLockWithOwner(7L)).thenReturn(lock);
+        when(turns.selectList(any())).thenReturn(List.of(turn));
+        when(checkpoints.restoreChat(conversation, turn))
+                .thenThrow(new com.me.galchat.exception.GroupCheckpointUnavailableException());
+
+        var events = new GroupGenerationStreamRegistry().start(7L, "chat-retry",
+                service.retry(7L, olderTurn ? 100L : 101L)).collectList().block();
+
+        assertThat(events.getFirst().getEventType()).isEqualTo(GroupChatConstant.EVENT_GENERATION_FAILED);
+        if (olderTurn) {
+            assertThat(events.getFirst().getError()).contains("最近一轮");
+            org.mockito.Mockito.verifyNoInteractions(checkpoints);
+        } else {
+            assertThat(events.getFirst().getError()).contains("撤回本轮对话");
+            assertThat(events.getFirst().getErrorDetail().getCode()).isEqualTo("GROUP_CHECKPOINT_UNAVAILABLE");
+            assertThat(events.getFirst().getErrorDetail().getRetryable()).isFalse();
+        }
+        org.mockito.Mockito.verifyNoInteractions(runtimes, messages, steps);
+        verify(locks).unlock(lock);
+        assertThat(turn.getStatus()).isEqualTo("failed");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            GroupChatConstant.ACTION_TRPG_SCENE,
+            GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE,
+            GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE,
+            GroupChatConstant.ACTION_TRPG_SCENE_SELECTION
+    })
+    void stepAndCheckpointCommitTogetherBeforeContextLoading(String actionType) {
+        var steps = mock(GroupChatReplyStepMapper.class);
+        var checkpoints = mock(GroupTurnCheckpointService.class);
+        var runtimes = mock(GroupRuntimeRegistry.class);
+        var runtime = mock(GroupModeRuntime.class);
+        var contexts = mock(GroupContextPolicy.class);
+        var transactions = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        var activeTransaction = new AtomicReference<TransactionStatus>();
+        var runningTransaction = new AtomicReference<TransactionStatus>();
+        var checkpointTransaction = new AtomicReference<TransactionStatus>();
+        var persistedStatus = new AtomicReference<>(GroupChatConstant.STATUS_PENDING);
+        var commits = new java.util.ArrayList<TransactionStatus>();
+        when(transactions.getTransaction(any())).thenAnswer(invocation -> {
+            var status = new org.springframework.transaction.support.SimpleTransactionStatus();
+            activeTransaction.set(status);
+            return status;
+        });
+        doAnswer(invocation -> {
+            commits.add(invocation.getArgument(0));
+            activeTransaction.set(null);
+            return null;
+        }).when(transactions).commit(any());
+        when(steps.updateById(any(GroupChatReplyStep.class))).thenAnswer(invocation -> {
+            var updated = invocation.<GroupChatReplyStep>getArgument(0);
+            persistedStatus.set(updated.getStatus());
+            if (GroupChatConstant.STATUS_RUNNING.equals(updated.getStatus())) {
+                runningTransaction.set(activeTransaction.get());
+            }
+            return 1;
+        });
+        doAnswer(invocation -> {
+            checkpointTransaction.set(activeTransaction.get());
+            return null;
+        }).when(checkpoints).initializeStep(any(), any());
+        var service = new GroupChatService(mock(GroupConversationService.class),
+                mock(GroupConversationLockService.class), mock(GroupTurnPlanResolver.class), runtimes,
+                mock(GroupChatMessageMapper.class), mock(GroupChatTurnMapper.class), steps,
+                mock(GroupTurnRecoveryService.class), new GroupToolContextFactory(),
+                mock(IUserWorldPrefixService.class), new TransactionTemplate(transactions), diceMessageCodec(),
+                JsonMapper.builder().build(), emptyMaterialFeed(), mock(TrpgSceneSelectionService.class),
+                mock(GroupAgentDecisionStore.class), mock(TrpgCombatLifecycleService.class),
+                checkpoints, defaultActorRuntime());
+        var conversation = new GroupConversation().setId(7L).setMode(GroupChatConstant.MODE_TRPG);
+        var turn = new GroupChatTurn().setId(101L).setConversationId(7L)
+                .setPlanSource(GroupChatConstant.PLAN_SOURCE_SCENE).setStatus(GroupChatConstant.STATUS_RUNNING);
+        var step = new GroupChatReplyStep().setId(301L).setTurnId(101L).setStepNo(4)
+                .setActionType(actionType)
+                .setSpeakerType(GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE.equals(actionType)
+                        ? GroupChatConstant.ACTOR_KP : GroupChatConstant.ACTOR_CHARACTER)
+                .setSpeakerId(GroupChatConstant.ACTION_COMBAT_REACTION_ROUTE.equals(actionType) ? null : 9L)
+                .setStatus(GroupChatConstant.STATUS_PENDING);
+        when(runtimes.require(GroupChatConstant.MODE_TRPG)).thenReturn(runtime);
+        when(runtime.contextPolicy()).thenReturn(contexts);
+        var preparationFailure = new IllegalStateException("context unavailable");
+        when(contexts.load(any(), any())).thenAnswer(invocation -> {
+            // At this interruption point, recovery must find the checkpoint's step running.
+            assertThat(persistedStatus.get()).isEqualTo(GroupChatConstant.STATUS_RUNNING);
+            assertThat(runningTransaction.get()).isNotNull().isSameAs(checkpointTransaction.get());
+            assertThat(commits).contains(runningTransaction.get());
+            assertThat(activeTransaction.get()).as("context loading must stay outside the transaction").isNull();
+            throw preparationFailure;
+        });
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                service.streamPersistedStep(conversation, turn, step).collectList().block())
+                .isSameAs(preparationFailure);
+        verify(contexts).load(any(), any());
     }
 
     private TransactionTemplate immediateTransactionTemplate() {

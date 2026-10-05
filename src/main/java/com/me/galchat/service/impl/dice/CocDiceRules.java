@@ -86,8 +86,10 @@ public final class CocDiceRules {
             CocCheckOutcome checkOutcome, String successFormula, String failureFormula) {
         Objects.requireNonNull(checkOutcome, "理智检定结果不能为空");
         return switch (checkOutcome) {
-            case CRITICAL_SUCCESS, SUCCESS -> successFormula;
-            case FAILURE, FUMBLE -> failureFormula;
+            case CRITICAL_SUCCESS -> Integer.toString(SanLossExpression.bound(successFormula, false));
+            case FUMBLE -> Integer.toString(SanLossExpression.bound(failureFormula, true));
+            case SUCCESS -> successFormula;
+            case FAILURE -> failureFormula;
         };
     }
 

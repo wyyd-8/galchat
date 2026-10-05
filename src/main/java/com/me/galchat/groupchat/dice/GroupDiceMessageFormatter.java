@@ -55,7 +55,8 @@ public class GroupDiceMessageFormatter {
                 .collect(Collectors.joining(","));
         StringBuilder content = new StringBuilder()
                 .append("<dice-roll summary-id=\"").append(reference.summaryId())
-                .append("\" rounds=\"").append(rounds).append("\">");
+                .append("\" rounds=\"").append(rounds).append("\">")
+                .append("\nKP发起了一次掷骰。");
         if (StringUtils.hasText(summary.getReason())) {
             content.append("\n原因：").append(summary.getReason());
         }

@@ -24,6 +24,9 @@ public final class KpWeaponStateDTOs {
             Integer remainingAmmo,
             Integer ammoCapacity,
             boolean broken,
-            boolean changed) {
+            boolean changed, KpToolStateUndo undo) {
+        public Result(String characterName, String weaponName, Integer remainingAmmo, Integer ammoCapacity, boolean broken, boolean changed) {
+            this(characterName, weaponName, remainingAmmo, ammoCapacity, broken, changed, null);
+        }
     }
 }

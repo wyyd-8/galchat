@@ -506,7 +506,7 @@ public class CharacterCardContextFormatter {
                     .append(value(card.sanMax()));
             result.append("；CON：").append(value(card.con()));
             result.append("；护甲：").append(value(card.armor()));
-            appendCheckValues(result, card.checkValues());
+            appendCheckValues(result, card.checkValues(), card.baseCheckValues());
             appendStatuses(result, card, namesById);
             result.append("\n</").append(cardName).append('>');
         }
@@ -514,15 +514,22 @@ public class CharacterCardContextFormatter {
                 .toString();
     }
 
-    private void appendCheckValues(StringBuilder result, Map<String, Integer> checkValues) {
+    private void appendCheckValues(StringBuilder result, Map<String, Integer> checkValues,
+                                   Map<String, Integer> baseCheckValues) {
         if (checkValues == null || checkValues.isEmpty()) {
             return;
         }
         StringJoiner values = new StringJoiner("，");
         checkValues.entrySet().stream()
+                .filter(entry -> {
+                    Integer base = baseCheckValues == null ? null : baseCheckValues.get(entry.getKey());
+                    return base == null || base > 5 || !base.equals(entry.getValue());
+                })
                 .sorted(Map.Entry.comparingByKey(String.CASE_INSENSITIVE_ORDER))
                 .forEach(entry -> values.add(entry.getKey() + "=" + entry.getValue()));
-        result.append("\n检定值：").append(values);
+        if (values.length() > 0) {
+            result.append("\n检定值：").append(values);
+        }
     }
 
     private void appendStatuses(
@@ -586,6 +593,9 @@ public class CharacterCardContextFormatter {
         }
         addStatus(statuses, meleeAttackedThisRound,
                 "本轮已被近战攻击");
+        if (!positive(stunnedRemainingRounds)) {
+            statuses.add("眩晕：无");
+        }
     }
 
     private boolean positive(Integer value) {

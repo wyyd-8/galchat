@@ -14,6 +14,9 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.rag.retrieval.search.DocumentRetriever;
+import org.springframework.ai.rag.Query;
+import org.springframework.ai.rag.retrieval.search.VectorStoreDocumentRetriever;
+import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -31,6 +34,26 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class GroupTopicVectorServiceTest {
+
+    @Test
+    void preChatHistoryRetrievalKeepsConversationAndWindowBoundary() {
+        DocumentRetriever retriever = mock(DocumentRetriever.class);
+        GroupTopicVectorService service = new GroupTopicVectorService(
+                mock(GroupChatMessageMapper.class), mock(GroupChatMemberMapper.class),
+                mock(ChatClient.class), mock(VectorStore.class), retriever,
+                mock(EmbeddingModel.class), mock(JdbcTemplate.class));
+        Document memory = Document.builder().text("旧话题").build();
+        when(retriever.retrieve(any())).thenReturn(List.of(memory));
+
+        assertThat(service.queryBeforeWindow(7L, 20L, "钥匙")).containsExactly(memory);
+
+        ArgumentCaptor<Query> query = ArgumentCaptor.forClass(Query.class);
+        verify(retriever).retrieve(query.capture());
+        assertThat(query.getValue().text()).isEqualTo("钥匙");
+        FilterExpressionBuilder filter = new FilterExpressionBuilder();
+        assertThat(query.getValue().context().get(VectorStoreDocumentRetriever.FILTER_EXPRESSION))
+                .isEqualTo(filter.and(filter.eq("conversationId", 7L), filter.lte("endSequence", 20L)).build());
+    }
 
     @Test
     void archivedTopicStoresEnabledCharacterVisibility() {

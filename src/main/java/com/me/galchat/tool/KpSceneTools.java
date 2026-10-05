@@ -1,5 +1,6 @@
 package com.me.galchat.tool;
 
+import com.me.galchat.domain.dto.KpSceneFinishDTOs;
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.exception.UserAuthException;
@@ -25,7 +26,7 @@ public class KpSceneTools {
                     结束子场景不会影响父场景。
                     调用后的公开消息只能说明“XXX决定离开了XX”，不得加入后续前往场景的任何内容。
                     """)
-    public String finishSceneExploration(ToolContext context) {
+    public KpSceneFinishDTOs.FinishResult finishSceneExploration(ToolContext context) {
         Map<String, Object> values = requireContext(context);
         if (!GroupChatConstant.ACTOR_KP.equals(
                 TypeConvertUtils.asString(values.get(
@@ -39,8 +40,7 @@ public class KpSceneTools {
         if (conversationId == null || replyStepId == null) {
             throw new UserRequestException("KP结束场景工具缺少群聊或回复步骤上下文");
         }
-        lifecycleService.requestKpFinish(conversationId, replyStepId);
-        return "当前场景已请求结算；结束子场景不会影响父场景。公开消息只能说明‘XXX决定离开了XX’，不得加入后续前往场景的任何内容。";
+        return lifecycleService.requestKpFinish(conversationId, replyStepId);
     }
 
     private Map<String, Object> requireContext(ToolContext context) {

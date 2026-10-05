@@ -14,6 +14,7 @@ public interface ITrpgSaveService {
 
     void load(Long userId, Long conversationId);
 
+    /** Caller holds the conversation lock and a REPEATABLE READ transaction, with conversation read inside it. */
     void saveBeforeTurn(GroupConversation conversation);
 
     TrpgRollbackOverviewVO getRollbackOverview(

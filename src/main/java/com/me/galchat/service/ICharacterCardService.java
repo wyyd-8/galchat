@@ -18,7 +18,7 @@ public interface ICharacterCardService {
     List<CocDiceCharacterVO> listInvestigatorCards(Long runId);
     DiceRollResultVO rollLuck(Long id);
     CocDiceCharacterVO requireDiceCharacter(Long runId, String characterName);
-    void updateQuickNotes(Long runId, String characterName, String quickNotes);
+    com.me.galchat.domain.dto.KpToolStateUndo.NotesResult updateQuickNotes(Long runId, String characterName, String quickNotes);
     KpWeaponStateDTOs.Result updateWeaponState(
             Long runId, String characterName, String weaponName,
             KpWeaponStateDTOs.Update update);

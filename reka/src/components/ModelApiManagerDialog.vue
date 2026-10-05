@@ -16,6 +16,7 @@ import {
 import { modelApiEditorFingerprint } from './modelApiEditorDraft'
 import { parseOpenAiCurl, requestOverrideWarnings } from '@/components/modelApiCurlImport'
 
+const emit = defineEmits<{ changed: [] }>()
 const open = defineModel<boolean>({ required: true })
 const manager = createModelApiManagerState({
   list: api.modelApis,
@@ -39,8 +40,8 @@ const editorBaseline = ref('')
 const editorOpen = computed({
   get: () => editorVisible.value,
   set: (visible: boolean) => {
+    if (manager.saving.value) return
     if (!visible && isMobile.value) {
-      if (manager.saving.value) return
       if (editorDirty.value) { discardEditorOpen.value = true; return }
     }
     editorVisible.value = visible
@@ -82,6 +83,7 @@ watch(open, (value) => {
 })
 
 function openCreate() {
+  if (manager.saving.value) return
   editorMode.value = 'create'
   editingId.value = null
   Object.assign(form, { name: '', baseUrl: '', modelName: '', apiKey: '', requestOverrides: {} })
@@ -92,6 +94,7 @@ function openCreate() {
 }
 
 function openEdit(model: ModelApi) {
+  if (manager.saving.value) return
   editorMode.value = 'edit'
   editingId.value = model.id
   Object.assign(form, {
@@ -124,6 +127,7 @@ function resetCurlImport() {
 }
 
 function importCurl() {
+  if (manager.saving.value) return
   try {
     const parsed = parseOpenAiCurl(curlSource.value)
     form.baseUrl = parsed.baseUrl
@@ -140,20 +144,24 @@ function importCurl() {
 }
 
 function discardEditor() {
+  if (manager.saving.value) return
   discardEditorOpen.value = false
   editorVisible.value = false
 }
 
 function clearOverrides() {
+  if (manager.saving.value) return
   form.requestOverrides = {}
   curlParsed.value = false
 }
 
 async function saveModel() {
+  if (manager.saving.value) return
   try {
     if (editorMode.value === 'create') await manager.create(payload())
     else if (editingId.value) await manager.update(editingId.value, payload())
     editorVisible.value = false
+    emit('changed')
     notify(editorMode.value === 'create' ? '模型配置已添加' : '模型配置已更新', '可以随时运行连接与能力测试。', 'success')
   } catch (error) {
     notify('模型配置保存失败', errorMessage(error), 'danger')
@@ -164,6 +172,7 @@ async function testModel(model: ModelApi) {
   if (isMobile.value) showResult(model)
   try {
     const tested = await manager.test(model.id)
+    emit('changed')
     if (tested.status === 'SUCCESS') notify('模型测试通过', tested.name, 'success')
     else if (tested.status === 'PARTIAL') notify('模型部分能力可用', tested.lastTestMessage || tested.name)
     else notify('模型测试失败', tested.lastTestMessage || tested.name, 'danger')
@@ -178,6 +187,7 @@ async function confirmDelete() {
   const target = deleteTarget.value
   try {
     await manager.delete(target.id)
+    emit('changed')
     deleteTarget.value = null
     if (editingId.value === target.id) editorVisible.value = false
     if (resultTarget.value?.id === target.id) resultOpen.value = false
@@ -233,7 +243,7 @@ async function confirmDelete() {
     size="lg"
     content-class="model-api-editor-dialog"
   >
-    <div class="form-stack">
+    <fieldset class="form-stack model-api-fields" :disabled="manager.saving.value" :inert="manager.saving.value" :aria-busy="manager.saving.value">
       <button v-if="isMobile" class="button secondary" @click="curlOpen = true"><TerminalSquare :size="17" />从 cURL 导入连接</button>
       <ModelCurlImport v-else v-model="curlSource" :error="curlError" :parsed="curlParsed" @parse="importCurl" />
 
@@ -261,7 +271,7 @@ async function confirmDelete() {
       </section>
       <p v-if="isMobile" class="mobile-model-notice">修改连接信息后，原测试结果重置。保存后可重新测试。</p>
       <button v-if="isMobile && editingModel" class="button ghost danger-text" @click="deleteTarget = editingModel">删除此配置</button>
-    </div>
+    </fieldset>
     <template #footer>
       <button v-if="!isMobile" class="button ghost" :disabled="manager.saving.value" @click="editorOpen = false">取消</button>
       <button class="button primary" :disabled="!canSave || manager.saving.value" @click="saveModel">
@@ -274,8 +284,10 @@ async function confirmDelete() {
     <template #footer><button class="button secondary" @click="discardEditorOpen = false">继续编辑</button><button class="button danger" @click="discardEditor">放弃修改</button></template>
   </BaseDialog>
   <BaseDialog v-model="curlOpen" title="从 cURL 导入" mobile-presentation="page" layer="foreground">
-    <ModelCurlImport v-model="curlSource" :error="curlError" :parsed="curlParsed" standalone @parse="importCurl" />
-    <template #footer><button class="button primary" :disabled="!curlSource.trim()" @click="importCurl">解析并填充</button></template>
+    <fieldset class="model-api-fields" :disabled="manager.saving.value" :inert="manager.saving.value">
+      <ModelCurlImport v-model="curlSource" :error="curlError" :parsed="curlParsed" standalone @parse="importCurl" />
+    </fieldset>
+    <template #footer><button class="button primary" :disabled="manager.saving.value || !curlSource.trim()" @click="importCurl">解析并填充</button></template>
   </BaseDialog>
   <BaseDialog v-model="resultOpen" title="测试结果" mobile-presentation="page" layer="foreground" size="md">
     <template v-if="resultModel">
@@ -300,6 +312,7 @@ async function confirmDelete() {
 </template>
 
 <style scoped>
+.model-api-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
 .field .model-api-key-field > input { padding-right: 48px; }
 .model-api-key-field > .icon-button { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; }
 .mobile-model-notice { margin: 16px 0; padding: 14px; border-radius: 11px; background: var(--pine-soft); color: #44614f; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }

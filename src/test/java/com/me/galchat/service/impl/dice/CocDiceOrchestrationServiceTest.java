@@ -242,6 +242,32 @@ class CocDiceOrchestrationServiceTest {
                         "reason", "全自动射击进入后续弹组")));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {1, 6})
+    void singleShotRejectsMultipleBulletsBeforeDeductingAmmo(int remainingAmmo) {
+        when(cards.requireDiceCharacter(5L, "猎人")).thenReturn(
+                card(11L, 88L, "猎人", Map.of("射击:步枪/霰弹枪", 60)));
+        when(cards.requireDiceCharacter(5L, "目标")).thenReturn(
+                card(21L, 91L, "目标", Map.of()));
+        CocCharacterWeapon weapon = shotgun("1D6", remainingAmmo);
+        when(cards.requireWeaponForUpdate(5L, "猎人", "泵动霰弹枪"))
+                .thenReturn(weapon);
+        stubCreate(7L);
+
+        assertThatThrownBy(() -> service.requestFirearmAttack(
+                7L, 5L, new KpFirearmRequestDTOs.Attack(
+                        "射击目标", "猎人", "泵动霰弹枪",
+                        FirearmFiringMode.SINGLE, true,
+                        List.of(new KpFirearmRequestDTOs.Target(
+                                "目标", 6, CocPercentileModifier.NORMAL)))))
+                .isInstanceOf(com.me.galchat.exception.UserRequestException.class)
+                .hasMessageContaining("单发模式每个目标的子弹数必须为1");
+
+        assertThat(weapon.getRemainingAmmo()).isEqualTo(remainingAmmo);
+        verify(cards, never()).updateWeapon(any());
+        verify(internal, never()).createDiceRoll(any(), any(), any());
+    }
+
     @Test
     void shotgunSelectsNearMediumAndFarDamageForEachTarget() {
         CocDiceCharacterVO attacker = card(
@@ -584,6 +610,79 @@ class CocDiceOrchestrationServiceTest {
                                     "code", "SMALL_TARGET",
                                     "reason", "目标“快速移动的小型目标”体型过小")));
         });
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "1D1+3,6,0,30,false,false,false",
+            "1D1+5,6,2,30,false,false,false",
+            "6,4,0,30,true,true,false",
+            "11,2,0,30,true,false,true",
+            "1D1+3,30,3,1,true,true,false"
+    })
+    void firearmInjuriesDependOnEachHitRatherThanCombinedDamage(
+            String formula, int bullets, int armor, int attackRoll,
+            boolean majorWound, boolean dying, boolean dead) {
+        when(cards.requireDiceCharacter(5L, "枪手"))
+                .thenReturn(card(11L, 88L, "枪手", Map.of("射击:冲锋枪", 60)));
+        when(cards.requireDiceCharacter(5L, "目标"))
+                .thenReturn(cardWithArmor(21L, 91L, "目标", Map.of(), armor));
+        CocCharacter target = damageCard(21L, "目标").setDying(false);
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(target);
+        when(cards.requireWeaponForUpdate(5L, "枪手", "冲锋枪"))
+                .thenReturn(new CocCharacterWeapon().setId(81L).setCharacterId(11L)
+                        .setName("冲锋枪").setSkillName("射击:冲锋枪").setDamage(formula)
+                        .setRemainingAmmo(30).setCanImpale(true).setMalfunction("96"));
+        when(internal.createDiceRoll(any(), any(), any())).thenAnswer(invocation -> {
+            List<DiceRollResult> rows = materialize(101L, 1, invocation.getArgument(2));
+            rows.forEach(row -> row.setResultData(new DiceRollResultVO("1D100", List.of(), attackRoll)));
+            return new DiceRollAggregate(new DiceRollSummary().setId(101L)
+                    .setConversationId(7L).setRoundCount(1).setStatus(DiceRollConstant.STATUS_COMPLETED), rows);
+        });
+        when(internal.appendDiceRollRound(eq(7L), eq(101L), any())).thenAnswer(invocation -> {
+            List<DiceRollResult> rows = materialize(101L, 2, invocation.getArgument(2));
+            rows.forEach(row -> row.setResultData(DiceUtils.roll(row.getResultData().getFormula())));
+            return rows;
+        });
+
+        service.requestFirearmAttack(7L, 5L, new KpFirearmRequestDTOs.Attack(
+                "扫射", "枪手", "冲锋枪", FirearmFiringMode.FULL_AUTO, true,
+                List.of(new KpFirearmRequestDTOs.Target("目标", bullets, CocPercentileModifier.NORMAL))));
+
+        assertThat(target.getHpCurrent()).isZero();
+        assertThat(target.getUnconscious()).isTrue();
+        assertThat(target.getMajorWound()).isEqualTo(majorWound);
+        assertThat(target.getDying()).isEqualTo(dying);
+        assertThat(target.getDead()).isEqualTo(dead);
+    }
+
+    @Test
+    void playerFirearmDamageKeepsEachHitSeparateAndRetryDoesNotReapplyDamage() {
+        var summary = new DiceRollSummary().setId(101L).setConversationId(7L)
+                .setRoundCount(2).setStatus(DiceRollConstant.STATUS_PENDING);
+        var pending = new DiceRollResult().setId(301L).setSummaryId(101L).setRoundNo(2)
+                .setDisplayOrder(1).setResultData(DiceUtils.prepare("(1D1+3)+(1D1+3)+(1D1+3)"))
+                .setResolutionData(com.me.galchat.domain.vo.DiceResolutionDataVO.pending(
+                        DiceRollConstant.TYPE_DAMAGE, 201L, Map.of(
+                                "firearm", true, "hitCount", 3, "runId", 5L,
+                                "cardId", 21L, "characterName", "目标", "conValue", 50)));
+        var target = damageCard(21L, "目标").setDying(false);
+        when(internal.requireResult(301L)).thenReturn(pending);
+        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.listResultEntities(101L)).thenReturn(List.of(pending));
+        when(cards.lockDiceCharacter(5L, 21L)).thenReturn(target);
+
+        var first = service.rollPlayerResult(301L);
+        var retry = service.rollPlayerResult(301L);
+
+        assertThat(first.rolledResult().getResultData().getResult()).isEqualTo(12);
+        assertThat(retry.rolledResult().getResultData()).isEqualTo(first.rolledResult().getResultData());
+        assertThat(target.getHpCurrent()).isZero();
+        assertThat(target.getMajorWound()).isFalse();
+        assertThat(target.getDying()).isFalse();
+        assertThat(target.getDead()).isFalse();
+        assertThat(target.getUnconscious()).isTrue();
+        verify(cards, times(1)).updateDiceCharacter(target);
     }
 
     @Test
@@ -1199,6 +1298,32 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
+    void candidateChecksIgnoreZeroValues() {
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(
+                card(11L, null, "林恩", Map.of("克苏鲁神话", 0, "神秘学", 50)));
+        stubCreate(7L);
+        service.requestCheck(7L, 5L, new KpDiceRequestDTOs.Check("辨认符号",
+                CocCheckDifficulty.REGULAR, new KpDiceRequestDTOs.CheckTarget(
+                "林恩", List.of("克苏鲁神话", "神秘学"), CocPercentileModifier.NORMAL)));
+        assertThat(createdDrafts()).singleElement().satisfies(draft ->
+                assertThat(draft.getResolutionData().getRule())
+                        .containsEntry("checkName", "神秘学").containsEntry("targetValue", 50));
+    }
+
+    @Test
+    void candidateChecksRejectOnlyZeroValuesWithoutCreatingDice() {
+        when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(
+                card(11L, null, "林恩", Map.of("克苏鲁神话", 0, "神秘学", 0)));
+        for (List<String> names : List.of(List.of("克苏鲁神话"), List.of("克苏鲁神话", "神秘学"))) {
+            assertThatThrownBy(() -> service.requestCheck(7L, 5L, new KpDiceRequestDTOs.Check(
+                    "辨认符号", CocCheckDifficulty.REGULAR, new KpDiceRequestDTOs.CheckTarget(
+                    "林恩", names, CocPercentileModifier.NORMAL))))
+                    .isInstanceOf(com.me.galchat.exception.UserRequestException.class);
+        }
+        verify(internal, never()).createDiceRoll(any(), any(), any());
+    }
+
+    @Test
     void groupCheckUsesEachCharactersHighestCandidateCheckValue() {
         when(cards.requireDiceCharacter(5L, "林恩")).thenReturn(
                 card(11L, null, "林恩", Map.of("追踪", 40, "侦查", 70)));
@@ -1330,14 +1455,14 @@ class CocDiceOrchestrationServiceTest {
                 DiceRollConstant.TOOL_REQUEST_GROUP_CHECK)))
                 .thenReturn(102L);
         DiceRollSummary previous = new DiceRollSummary()
-                .setId(101L)
+                .setId(99L)
                 .setConversationId(7L)
                 .setRoundCount(1)
                 .setStatus(DiceRollConstant.STATUS_COMPLETED);
         DiceRollResult failed = resolvedCheck(
-                201L, 101L, 1, "林恩", 11L, 70, "FAILURE");
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(previous);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(failed));
+                201L, 99L, 1, "林恩", 11L, 70, "FAILURE");
+        when(internal.requireSummary(99L)).thenReturn(previous);
+        when(internal.listResultEntities(99L)).thenReturn(List.of(failed));
         when(cards.requireDiceCharacter(5L, "林恩"))
                 .thenReturn(player("林恩", 70));
         DiceRollSummary latest = new DiceRollSummary()
@@ -1347,7 +1472,7 @@ class CocDiceOrchestrationServiceTest {
                 .setStatus(DiceRollConstant.STATUS_COMPLETED);
         DiceRollResult latestFailure = resolvedCheck(
                 202L, 102L, 1, "林恩", 11L, 70, "FAILURE");
-        when(internal.requireSummaryForUpdate(102L)).thenReturn(latest);
+        when(internal.requireSummary(102L)).thenReturn(latest);
         when(internal.listResultEntities(102L)).thenReturn(List.of(latestFailure));
         when(internal.appendDiceRollRound(any(), any(), any()))
                 .thenAnswer(invocation -> {
@@ -1356,19 +1481,20 @@ class CocDiceOrchestrationServiceTest {
                     return materialize(summaryId, 2, drafts);
                 });
 
+        stubCreate(7L);
         KpDiceToolResult result = service.requestPushedCheck(
                 7L,
                 5L,
                 new KpDiceRequestDTOs.Pushed(
                         "孤注一掷搜索密室",
-                        101L,
+                        99L,
                         CocCheckDifficulty.REGULAR,
                         null,
                         List.of(target("林恩", "侦查"))));
 
         assertThat(result.summary().getId()).isEqualTo(101L);
         assertThat(result.results()).singleElement().satisfies(pushed -> {
-            assertThat(pushed.getRoundNo()).isEqualTo(2);
+            assertThat(pushed.getRoundNo()).isEqualTo(1);
             assertThat(pushed.getResolution().getSourceResultId()).isNull();
             assertThat(pushed.getResolution().getOutcome()).isNull();
         });
@@ -1378,26 +1504,27 @@ class CocDiceOrchestrationServiceTest {
     @Test
     void pushedCheckUsesFreshExecutorSkillDifficultyAndModifier() {
         DiceRollSummary previous = new DiceRollSummary()
-                .setId(101L)
+                .setId(99L)
                 .setConversationId(7L)
                 .setRoundCount(1)
                 .setStatus(DiceRollConstant.STATUS_COMPLETED);
         DiceRollResult oldCheck = resolvedCheck(
-                201L, 101L, 1, "林恩", 11L, 70, "FAILURE");
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(previous);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(oldCheck));
+                201L, 99L, 1, "林恩", 11L, 70, "FAILURE");
+        when(internal.requireSummary(99L)).thenReturn(previous);
+        when(internal.listResultEntities(99L)).thenReturn(List.of(oldCheck));
         when(cards.requireDiceCharacter(5L, "陈默")).thenReturn(
                 card(12L, 88L, "陈默", Map.of("急救", 60, "医学", 80)));
         when(internal.appendDiceRollRound(any(), any(), any()))
                 .thenAnswer(invocation -> materialize(
-                        101L, 2, invocation.getArgument(2)));
+                        99L, 2, invocation.getArgument(2)));
 
+        stubCreate(7L);
         KpDiceToolResult result = service.requestPushedCheck(
                 7L,
                 5L,
                 new KpDiceRequestDTOs.Pushed(
                         "陈默改用医学处理伤势",
-                        101L,
+                        99L,
                         CocCheckDifficulty.HARD,
                         null,
                         List.of(new KpDiceRequestDTOs.CheckTarget(
@@ -1419,27 +1546,28 @@ class CocDiceOrchestrationServiceTest {
     @Test
     void pushedCheckUsesFreshGroupTargetsAndRule() {
         DiceRollSummary previous = new DiceRollSummary()
-                .setId(101L)
+                .setId(99L)
                 .setConversationId(7L)
                 .setRoundCount(1)
                 .setStatus(DiceRollConstant.STATUS_COMPLETED);
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(previous);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(
-                resolvedCheck(201L, 101L, 1, "旧执行者", 10L, 50, "FAILURE")));
+        when(internal.requireSummary(99L)).thenReturn(previous);
+        when(internal.listResultEntities(99L)).thenReturn(List.of(
+                resolvedCheck(201L, 99L, 1, "旧执行者", 10L, 50, "FAILURE")));
         when(cards.requireDiceCharacter(5L, "林恩"))
                 .thenReturn(player("林恩", 70));
         when(cards.requireDiceCharacter(5L, "陈默"))
                 .thenReturn(card(12L, 88L, "陈默", Map.of("医学", 80)));
         when(internal.appendDiceRollRound(any(), any(), any()))
                 .thenAnswer(invocation -> materialize(
-                        101L, 2, invocation.getArgument(2)));
+                        99L, 2, invocation.getArgument(2)));
 
+        stubCreate(7L);
         KpDiceToolResult result = service.requestPushedCheck(
                 7L,
                 5L,
                 new KpDiceRequestDTOs.Pushed(
                         "两人换方法继续救治",
-                        101L,
+                        99L,
                         CocCheckDifficulty.REGULAR,
                         GroupCheckRule.ANY_SUCCESS,
                         List.of(
@@ -1459,26 +1587,27 @@ class CocDiceOrchestrationServiceTest {
     @Test
     void pushedCheckDoesNotRevalidateKpEligibilityDecision() {
         DiceRollSummary previous = new DiceRollSummary()
-                .setId(101L)
+                .setId(99L)
                 .setConversationId(7L)
                 .setRoundCount(1)
                 .setStatus(DiceRollConstant.STATUS_PENDING);
         DiceRollResult successful = resolvedCheck(
-                201L, 101L, 1, "林恩", 11L, 70, "SUCCESS");
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(previous);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(successful));
+                201L, 99L, 1, "林恩", 11L, 70, "SUCCESS");
+        when(internal.requireSummary(99L)).thenReturn(previous);
+        when(internal.listResultEntities(99L)).thenReturn(List.of(successful));
         when(cards.requireDiceCharacter(5L, "林恩"))
                 .thenReturn(player("林恩", 70));
         when(internal.appendDiceRollRound(any(), any(), any()))
                 .thenAnswer(invocation -> materialize(
-                        101L, 2, invocation.getArgument(2)));
+                        99L, 2, invocation.getArgument(2)));
 
+        stubCreate(7L);
         assertThatCode(() -> service.requestPushedCheck(
                 7L,
                 5L,
                 new KpDiceRequestDTOs.Pushed(
                         "KP判定可以孤注一掷",
-                        101L,
+                        99L,
                         null,
                         null,
                         List.of(target("林恩", "侦查")))))
@@ -1488,15 +1617,15 @@ class CocDiceOrchestrationServiceTest {
     @Test
     void pushedCheckAllowsSummaryContainingCheckAndHealing() {
         DiceRollSummary summary = new DiceRollSummary()
-                .setId(101L)
+                .setId(99L)
                 .setConversationId(7L)
                 .setRoundCount(2)
                 .setStatus(DiceRollConstant.STATUS_COMPLETED);
         DiceRollResult check = resolvedCheck(
-                201L, 101L, 1, "林恩", 11L, 70, "FAILURE");
+                201L, 99L, 1, "林恩", 11L, 70, "FAILURE");
         DiceRollResult healing = new DiceRollResult()
                 .setId(202L)
-                .setSummaryId(101L)
+                .setSummaryId(99L)
                 .setRoundNo(2)
                 .setDisplayOrder(1)
                 .setDisplayType(DiceRollConstant.TYPE_HEALING)
@@ -1507,55 +1636,32 @@ class CocDiceOrchestrationServiceTest {
                         Map.of("characterName", "陈默", "cardId", 12L))
                         .setOutcome(Map.of("characterName", "陈默", "healing", 2)))
                 .setResolvedAt(LocalDateTime.now());
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(check, healing));
+        when(internal.requireSummary(99L)).thenReturn(summary);
+        when(internal.listResultEntities(99L)).thenReturn(List.of(check, healing));
         when(cards.requireDiceCharacter(5L, "林恩"))
                 .thenReturn(player("林恩", 70));
-        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
+        when(internal.appendDiceRollRound(eq(7L), eq(99L), any()))
                 .thenAnswer(invocation -> materialize(
-                        101L, 3, invocation.getArgument(2)));
+                        99L, 3, invocation.getArgument(2)));
 
+        stubCreate(7L);
         KpDiceToolResult result = service.requestPushedCheck(
                 7L,
                 5L,
                 new KpDiceRequestDTOs.Pushed(
                         "继续尝试检定",
-                        101L,
+                        99L,
                         CocCheckDifficulty.REGULAR,
                         null,
                         List.of(target("林恩", "侦查"))));
 
         assertThat(result.summary().getId()).isEqualTo(101L);
-        assertThat(result.summary().getRoundCount()).isEqualTo(3);
+        assertThat(result.summary().getRoundCount()).isEqualTo(1);
         assertThat(result.results()).singleElement().satisfies(pushed -> {
-            assertThat(pushed.getRoundNo()).isEqualTo(3);
+            assertThat(pushed.getRoundNo()).isEqualTo(1);
             assertThat(pushed.getResolution().getType()).isEqualTo("CHECK");
             assertThat(pushed.getResolution().getCharacterName()).isEqualTo("林恩");
         });
-    }
-
-    @Test
-    void pushedCheckRejectsNonCheckSummary() {
-        DiceRollSummary summary = new DiceRollSummary()
-                .setId(101L)
-                .setConversationId(7L)
-                .setRoundCount(1)
-                .setStatus(DiceRollConstant.STATUS_COMPLETED);
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(
-                resolvedSanCheck(
-                        201L, 101L, "林恩", 11L, null, "FAILURE")));
-
-        assertThatThrownBy(() -> service.requestPushedCheck(
-                7L,
-                5L,
-                new KpDiceRequestDTOs.Pushed(
-                        "错误关联",
-                        101L,
-                        null,
-                        null,
-                        List.of(target("林恩", "侦查")))))
-                .hasMessageContaining("不是普通检定");
     }
 
     @Test
@@ -1703,99 +1809,6 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
-    void sanLossUsesActualBranchAndDefersMadnessWhilePlayerDiceIsPending() {
-        when(followUps.requireLatestSummaryId(7L, Set.of("requestSanCheck")))
-                .thenReturn(101L);
-        DiceRollSummary summary = new DiceRollSummary()
-                .setId(101L)
-                .setConversationId(7L)
-                .setRoundCount(1)
-                .setStatus(DiceRollConstant.STATUS_COMPLETED);
-        DiceRollResult playerCheck = resolvedSanCheck(
-                201L, 101L, "林恩", 11L, null, "FAILURE");
-        DiceRollResult agentCheck = resolvedSanCheck(
-                202L, 101L, "陈默", 12L, 88L, "FAILURE");
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
-        when(internal.listResultEntities(101L))
-                .thenReturn(List.of(playerCheck, agentCheck));
-        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
-                .thenAnswer(invocation -> {
-                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
-                    List<DiceRollResult> created = materialize(101L, 2, drafts);
-                    created.get(1).setResultData(
-                            new DiceRollResultVO("1D6", List.of(), 6));
-                    return created;
-                });
-        CocCharacter agentCard = new CocCharacter()
-                .setId(12L)
-                .setRunId(5L)
-                .setName("陈默")
-                .setSanCurrent(60);
-        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(agentCard);
-
-        KpDiceToolResult created = service.rollSanLoss(
-                7L,
-                5L,
-                new KpDiceRequestDTOs.SanLoss("目睹怪物", "0", "1D6"));
-
-        assertThat(created.summary().getRoundCount()).isEqualTo(2);
-        assertThat(created.results())
-                .filteredOn(result -> result.getCharacterId() == null)
-                .singleElement()
-                .satisfies(result -> {
-                    assertThat(result.getResultData().getFormula()).isEqualTo("1D6");
-                    assertThat(result.getResultData().getResult()).isNull();
-                });
-        verify(internal, times(1))
-                .appendDiceRollRound(eq(7L), eq(101L), any());
-    }
-
-    @Test
-    void sanConstantZeroDoesNotCreateClickablePlaceholder() {
-        when(followUps.requireLatestSummaryId(7L, Set.of("requestSanCheck")))
-                .thenReturn(101L);
-        DiceRollSummary summary = new DiceRollSummary()
-                .setId(101L)
-                .setConversationId(7L)
-                .setRoundCount(1)
-                .setStatus(DiceRollConstant.STATUS_COMPLETED);
-        DiceRollResult playerCheck = resolvedSanCheck(
-                201L, 101L, "林恩", 11L, null, "SUCCESS");
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(playerCheck));
-        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
-                .thenAnswer(invocation -> {
-                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
-                    List<DiceRollResult> created = materialize(101L, 2, drafts);
-                    created.getFirst().setResultData(
-                            new DiceRollResultVO("0", List.of(), 0));
-                    return created;
-                });
-        CocCharacter card = new CocCharacter()
-                .setId(11L)
-                .setRunId(5L)
-                .setName("林恩")
-                .setSanCurrent(60);
-        when(cards.lockDiceCharacter(5L, 11L)).thenReturn(card);
-
-        KpDiceToolResult result = service.rollSanLoss(
-                7L,
-                5L,
-                new KpDiceRequestDTOs.SanLoss("看到尸体", "0", "1D6"));
-
-        assertThat(result.results()).singleElement().satisfies(detail -> {
-            assertThat(detail.getResultData().getFormula()).isEqualTo("0");
-            assertThat(detail.getResultData().getModules()).isEmpty();
-            assertThat(detail.getResultData().getResult()).isZero();
-        });
-        assertThat(result.summary().getStatus())
-                .isEqualTo(DiceRollConstant.STATUS_COMPLETED);
-        assertThat(result.semanticResult()).isEqualTo("林恩理智-0");
-        verify(internal, times(1))
-                .appendDiceRollRound(eq(7L), eq(101L), any());
-    }
-
-    @Test
     void madnessRoundIsCreatedOnceUnderSummaryLock() {
         DiceRollSummary summary = new DiceRollSummary()
                 .setId(101L)
@@ -1852,60 +1865,6 @@ class CocDiceOrchestrationServiceTest {
         verify(internal, times(1))
                 .appendDiceRollRound(eq(7L), eq(101L), any());
         verify(messageRoundAppender).appendRounds(7L, 101L, List.of(3));
-    }
-
-    @Test
-    void agentOnlySanLossCreatesAndSettlesMadnessRoundImmediately() {
-        when(followUps.requireLatestSummaryId(7L, Set.of("requestSanCheck")))
-                .thenReturn(101L);
-        DiceRollSummary summary = new DiceRollSummary()
-                .setId(101L)
-                .setConversationId(7L)
-                .setRoundCount(1)
-                .setStatus(DiceRollConstant.STATUS_COMPLETED);
-        DiceRollResult agentCheck = resolvedSanCheck(
-                201L, 101L, "陈默", 12L, 88L, "FAILURE");
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
-        when(internal.listResultEntities(101L)).thenReturn(List.of(agentCheck));
-        AtomicLong appendCount = new AtomicLong();
-        when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
-                .thenAnswer(invocation -> {
-                    List<DiceRollResultCreateDTO> drafts = invocation.getArgument(2);
-                    int round = appendCount.incrementAndGet() == 1 ? 2 : 3;
-                    List<DiceRollResult> created = materialize(101L, round, drafts);
-                    for (DiceRollResult result : created) {
-                        String type = result.getResolutionData().getType();
-                        int value = switch (type) {
-                            case "SAN_LOSS" -> 6;
-                            case "TEMPORARY_INSANITY_TYPE" -> 9;
-                            default -> 4;
-                        };
-                        result.setResultData(new DiceRollResultVO(
-                                result.getResultData().getFormula(), List.of(), value));
-                    }
-                    return created;
-                });
-        when(randomSource.d100()).thenReturn(37);
-        CocCharacter card = new CocCharacter()
-                .setId(12L)
-                .setRunId(5L)
-                .setName("陈默")
-                .setSanCurrent(60);
-        when(cards.lockDiceCharacter(5L, 12L)).thenReturn(card);
-
-        KpDiceToolResult result = service.rollSanLoss(
-                7L,
-                5L,
-                new KpDiceRequestDTOs.SanLoss("目睹怪物", "0", "1D6"));
-
-        assertThat(result.summary().getRoundCount()).isEqualTo(3);
-        assertThat(result.results()).hasSize(3);
-        assertThat(result.semanticResult())
-                .contains("陈默理智-6；进入临时疯狂：恐惧症（昆虫恐惧症：害怕昆虫），持续4小时");
-        assertThat(card.getSanCurrent()).isEqualTo(54);
-        assertThat(card.getTemporaryInsanityPhase()).isEqualTo("9:037");
-        verify(internal, times(2))
-                .appendDiceRollRound(eq(7L), eq(101L), any());
     }
 
     @Test
@@ -2320,7 +2279,7 @@ class CocDiceOrchestrationServiceTest {
     }
 
     @Test
-    void followUpHealingAppendsToSuccessfulSingleCheck() {
+    void followUpHealingCreatesNewGroupFromSuccessfulSingleCheck() {
         when(followUps.requireLatestSummaryId(
                 7L,
                 Set.of(
@@ -2335,7 +2294,7 @@ class CocDiceOrchestrationServiceTest {
                 .setStatus(DiceRollConstant.STATUS_COMPLETED);
         DiceRollResult source = resolvedCheck(
                 201L, 101L, 1, "林恩", 11L, 70, "SUCCESS");
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(summary);
+        when(internal.requireSummary(101L)).thenReturn(summary);
         when(internal.listResultEntities(101L)).thenReturn(List.of(source));
         when(internal.appendDiceRollRound(eq(7L), eq(101L), any()))
                 .thenAnswer(invocation -> {
@@ -2350,6 +2309,12 @@ class CocDiceOrchestrationServiceTest {
         CocCharacter locked = damageCard(12L, "陈默").setHpCurrent(4);
         when(cards.lockDiceCharacter(5L, 12L)).thenReturn(locked);
 
+        when(internal.createDiceRoll(eq(7L), any(), any())).thenAnswer(i -> {
+            var created = materialize(102L, 1, i.getArgument(2));
+            created.getFirst().setResultData(new DiceRollResultVO("3", List.of(), 3));
+            return new DiceRollAggregate(new DiceRollSummary().setId(102L).setConversationId(7L)
+                    .setRoundCount(1).setStatus(DiceRollConstant.STATUS_COMPLETED), created);
+        });
         KpDiceToolResult result = service.rollHealing(
                 7L,
                 5L,
@@ -2360,11 +2325,11 @@ class CocDiceOrchestrationServiceTest {
                         List.of(new KpDiceRequestDTOs.HealingTarget(
                                 "陈默", "林恩", "3"))));
 
-        assertThat(result.summary().getId()).isEqualTo(101L);
-        assertThat(result.summary().getRoundCount()).isEqualTo(2);
+        assertThat(result.summary().getId()).isEqualTo(102L);
+        assertThat(result.summary().getRoundCount()).isEqualTo(1);
         assertThat(locked.getHpCurrent()).isEqualTo(7);
         assertThat(result.results()).singleElement().satisfies(healing -> {
-            assertThat(healing.getRoundNo()).isEqualTo(2);
+            assertThat(healing.getRoundNo()).isEqualTo(1);
             assertThat(healing.getResolution().getSourceResultId())
                     .isEqualTo(201L);
         });
@@ -2374,7 +2339,7 @@ class CocDiceOrchestrationServiceTest {
     void followUpHealingRejectsFailedSingleCheck() {
         when(followUps.requireLatestSummaryId(eq(7L), any()))
                 .thenReturn(101L);
-        when(internal.requireSummaryForUpdate(101L)).thenReturn(
+        when(internal.requireSummary(101L)).thenReturn(
                 new DiceRollSummary()
                         .setId(101L)
                         .setConversationId(7L)

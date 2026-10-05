@@ -102,7 +102,7 @@ class TrpgEquipmentServiceTest {
         InOrder writes = inOrder(stashMapper, weaponMapper);
         writes.verify(stashMapper).insert(any(TrpgWeaponStash.class));
         writes.verify(weaponMapper).deleteById(901L);
-        assertThat(result).isEqualTo(new KpEquipmentDTOs.StashResult(
+        assertThat(result).usingRecursiveComparison().ignoringFields("undo").isEqualTo(new KpEquipmentDTOs.StashResult(
                 901L, ".38/9mm自动手枪", "林恩",
                 "圣玛丽医院 - 阁楼",
                 KpEquipmentDTOs.StashReason.DISARMED));
@@ -147,7 +147,7 @@ class TrpgEquipmentServiceTest {
         InOrder writes = inOrder(weaponMapper, stashMapper);
         writes.verify(weaponMapper).insert(any(CocCharacterWeapon.class));
         writes.verify(stashMapper).deleteById(901L);
-        assertThat(result).isEqualTo(new KpEquipmentDTOs.EquipResult(
+        assertThat(result).usingRecursiveComparison().ignoringFields("undo").isEqualTo(new KpEquipmentDTOs.EquipResult(
                 901L, ".38/9mm自动手枪", "周远"));
     }
 

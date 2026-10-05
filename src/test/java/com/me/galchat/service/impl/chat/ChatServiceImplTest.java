@@ -7,6 +7,9 @@ import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.impl.trpg.TrpgRunMemoryService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -23,8 +26,8 @@ class ChatServiceImplTest {
     private final IUserWorldPrefixService userWorldPrefixService = mock(IUserWorldPrefixService.class);
     private final IUserCharacterInfoService userCharacterInfoService = mock(IUserCharacterInfoService.class);
     private final TrpgRunMemoryService runMemoryService = mock(TrpgRunMemoryService.class);
-    private final ChatServiceImpl chatService = new ChatServiceImpl(null, null, null, null, null, userWorldPrefixService,
-            userCharacterInfoService, null, null, null, runMemoryService);
+    private final ChatServiceImpl chatService = new ChatServiceImpl(null, null, null, null, userWorldPrefixService,
+            userCharacterInfoService, null, null, runMemoryService);
 
     @Test
     void ordinaryChatGetsFreshRunIndexWithoutAddingItToBaseRolePrompt() {
@@ -78,6 +81,27 @@ class ChatServiceImplTest {
     }
 
     @Test
+    void sharedChatPromptLabelsWorldBackgroundBeforeCharacterInformation() {
+        when(userWorldPrefixService.buildWorldPrompt(10L)).thenReturn("故事发生在骑士学院。");
+        when(userCharacterInfoService.buildCharacterPrompt(1L, 2L)).thenReturn("name: Alice");
+
+        String prompt = chatService.buildChatSystemPrompt(10L, 1L, 2L);
+
+        assertThat(prompt).containsOnlyOnce("【世界背景】")
+                .contains("【世界背景】\n故事发生在骑士学院。\nname: Alice");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"", "   "})
+    void missingWorldBackgroundDoesNotEmitAnEmptySection(String background) {
+        when(userWorldPrefixService.buildWorldPrompt(10L)).thenReturn(background);
+
+        assertThat(chatService.buildChatSystemPrompt(10L, 1L, 2L))
+                .doesNotContain("【世界背景】");
+    }
+
+    @Test
     void streamsReasoningFromProviderNeutralAssistantMetadata() {
         ChatResponse response = new ChatResponse(List.of(new Generation(
                 AssistantMessage.builder()
@@ -94,6 +118,22 @@ class ChatServiceImplTest {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple(ChatConstant.THINKING_TYPE, "思考"),
                         org.assertj.core.groups.Tuple.tuple(ChatConstant.RESPONSE_TYPE, "答案"));
+    }
+
+    @Test
+    void preservesWhitespaceDeltasInBothResponseAndReasoning() {
+        List<ChatFluxVO> events = Flux.fromIterable(List.of("Hello", " ", "world", "\n\n", "\t", "next", ""))
+                .concatMap(delta -> {
+                    var response = new ChatResponse(List.of(new Generation(AssistantMessage.builder()
+                            .content(delta).properties(Map.of("reasoningContent", delta)).build())));
+                    return ReflectionTestUtils.<Flux<ChatFluxVO>>invokeMethod(chatService, "toChatFlux", response);
+                }).collectList().block();
+
+        for (String type : List.of(ChatConstant.RESPONSE_TYPE, ChatConstant.THINKING_TYPE)) {
+            assertThat(events.stream().filter(event -> type.equals(event.getType()))
+                    .map(ChatFluxVO::getContent).toList())
+                    .containsExactly("Hello", " ", "world", "\n\n", "\t", "next");
+        }
     }
 
 }

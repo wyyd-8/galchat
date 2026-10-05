@@ -4,6 +4,7 @@ public final class GroupChatConstant {
     public static final String TURN_SOURCE_SUMMARY = "summary";
     public static final String ACTION_TRPG_SUMMARY = "trpg_summary";
     public static final String ACTION_TRPG_RUN_SCENE_CLOSE = "trpg_run_scene_close";
+    public static final String ACTION_TRPG_TURN_FINALIZE = "trpg_turn_finalize";
 
     private GroupChatConstant() {
     }
@@ -110,6 +111,7 @@ public final class GroupChatConstant {
     public static final String COMBAT_ORDER_INVESTIGATORS_FIRST = "INVESTIGATORS_FIRST";
 
     public static final int DEFAULT_HISTORY_PAGE_SIZE = 50;
+    public static final int MAX_GROUP_CHARACTERS = 10;
     public static final int MAX_REPLY_STEPS = 12;
     public static final int MAX_GROUP_TOPIC_CHARS = 8000;
     public static final int MAX_CONSECUTIVE_WITHDRAW_COUNT = 3;

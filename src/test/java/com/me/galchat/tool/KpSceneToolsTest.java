@@ -26,7 +26,7 @@ class KpSceneToolsTest {
                 ChatToolContextConstant.GROUP_REPLY_STEP_ID_KEY,
                 8L));
 
-        String result = tools.finishSceneExploration(context);
+        tools.finishSceneExploration(context);
 
         verify(service).requestKpFinish(7L, 8L);
         Tool annotation = KpSceneTools.class
@@ -39,9 +39,6 @@ class KpSceneToolsTest {
                 .contains("必须调用")
                 .contains("决定离开了")
                 .contains("不得加入后续前往场景的任何内容");
-        assertThat(result)
-                .contains("结束子场景不会影响父场景")
-                .contains("只能说明‘XXX决定离开了XX’")
-                .contains("不得加入后续前往场景的任何内容");
+
     }
 }

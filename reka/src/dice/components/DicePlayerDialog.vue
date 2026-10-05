@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ArrowRight, CircleAlert, Dices, LoaderCircle, RotateCcw, Swords } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import MobileDicePlayer from './MobileDicePlayer.vue'
+import DiceRoundNavigation from './DiceRoundNavigation.vue'
 import { useMobileViewport } from '@/composables/useMobileViewport'
 import DiceModifierNotice from '@/dice/components/DiceModifierNotice.vue'
 import diceCriticalSuccessUrl from '@/dice/assets/audio/dice_superwin.mp3'
@@ -20,6 +21,7 @@ import {
   createDicePlayerInitialState,
   createDiceAutoPlayPlan,
   createDiceModuleOutcomeToneMap,
+  createDiceModuleEffectToneMap,
   createDiceModifierNotice,
   createDiceOutcomeVfxPlan,
   createDicePlayerPreparedResult,
@@ -59,8 +61,8 @@ import type {
 
 const open = defineModel<boolean>({ required: true })
 const { isMobile } = useMobileViewport()
-const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean; embedded?: boolean }>()
-const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: []; phaseChange: [phase: DicePlayerPhase] }>()
+const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean; embedded?: boolean; hasPreviousRound?: boolean; hasNextRound?: boolean; roundPosition?: number; roundCount?: number }>()
+const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: []; phaseChange: [phase: DicePlayerPhase]; previousRound: []; nextRound: [] }>()
 
 const tray = ref<HTMLElement | null>(null)
 const surface = ref<HTMLElement | null>(null)
@@ -302,6 +304,11 @@ function arrangeDiceModuleRows() {
   if (!tray.value) return
   const modules = Array.from(tray.value.querySelectorAll<HTMLElement>(':scope > .dice-module'))
   if (!modules.length) return
+  const effectTones = createDiceModuleEffectToneMap(props.request?.presentation)
+  modules.forEach((module, index) => {
+    if (effectTones[index]) module.dataset.effectTone = effectTones[index]
+    else delete module.dataset.effectTone
+  })
 
   const rows: HTMLElement[] = []
   let moduleIndex = 0
@@ -645,7 +652,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <MobileDicePlayer @phase-change="emit('phaseChange', $event)" :embedded="embedded" v-if="isMobile" v-model="open" :request="request" :show-continue="showContinue" :auto-continue="autoContinue" @roll="emit('roll')" @complete="emit('complete')" @continue="emit('continue')" @cancel-auto-continue="emit('cancelAutoContinue')" />
+  <MobileDicePlayer @phase-change="emit('phaseChange', $event)" :embedded="embedded" v-if="isMobile" v-model="open" :request="request" :show-continue="showContinue" :auto-continue="autoContinue" :has-previous-round="hasPreviousRound" :has-next-round="hasNextRound" :round-position="roundPosition" :round-count="roundCount" @previous-round="emit('previousRound')" @next-round="emit('nextRound')" @roll="emit('roll')" @complete="emit('complete')" @continue="emit('continue')" @cancel-auto-continue="emit('cancelAutoContinue')" />
   <BaseDialog
     v-else
     :embedded="embedded"
@@ -739,7 +746,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="groupOutcomeVisibility.showIndividuals" class="dice-group-outcome-track">
           <div class="dice-group-result-boxes">
-            <template v-for="(group, index) in summary.groups" :key="group.label">
+            <template v-for="(group, index) in summary.groups" :key="request.presentation.groups[index]!.moduleStart">
               <article
                 class="dice-group-result-box"
                 :class="[
@@ -750,6 +757,8 @@ onBeforeUnmount(() => {
                         : request.presentation.groups[index]?.success ? 'is-success' : 'is-failure'
                     : 'is-concealed',
                   {
+                    'is-stun': request.presentation.groups[index]?.effectTone === 'stun',
+                    'is-insanity': request.presentation.valueType === 'insanity',
                     'is-winner': isWinnerHighlighted && request.presentation.groups[index]?.winner,
                     'is-loser': isWinnerHighlighted && hasOpposedWinner && !request.presentation.groups[index]?.winner,
                   },
@@ -767,7 +776,7 @@ onBeforeUnmount(() => {
                     <span>{{ group.expression }}</span>
                   </small>
                 </span>
-                <b v-if="isDiceGroupResultRevealed(index)" class="dice-group-outcome">
+                <b v-if="isDiceGroupResultRevealed(index)" class="dice-group-outcome" :title="request.presentation.groups[index]?.outcomeDescription">
                   <strong>{{ diceGroupResultDisplay(index, group.result)?.value }}</strong>
                   <small v-if="diceGroupResultDisplay(index, group.result)?.label">
                     {{ diceGroupResultDisplay(index, group.result)?.label }}
@@ -847,7 +856,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
-      <div v-if="showRollAction || showContinueAction" class="dice-player-actions" :class="{ 'has-continue': showContinueAction }">
+      <div v-if="showRollAction || showContinueAction || hasPreviousRound || hasNextRound" class="dice-player-actions" :class="{ 'has-continue': showContinueAction }">
         <button
           v-if="showRollAction"
           class="button secondary dice-player-replay"
@@ -861,6 +870,7 @@ onBeforeUnmount(() => {
           {{ presentation.actionLabel }}
         </button>
         <button v-if="showContinueAction" class="button primary dice-player-continue" type="button" @click="handleContinueAction">{{ continueActionLabel }}</button>
+        <DiceRoundNavigation :phase="status" :show-continue="showContinueAction" :has-previous="hasPreviousRound" :has-next="hasNextRound" :round-position="roundPosition" :round-count="roundCount" @previous="emit('previousRound')" @next="emit('nextRound')" />
       </div>
     </footer>
   </BaseDialog>

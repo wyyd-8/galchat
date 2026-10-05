@@ -32,6 +32,7 @@ public final class KpCombatStateDTOs {
             String restrainedByCharacterName) {
     }
 
-    public record Result(List<State> states) {
+    public record Result(List<State> states, KpToolStateUndo undo) {
+        public Result(List<State> states) { this(states, null); }
     }
 }

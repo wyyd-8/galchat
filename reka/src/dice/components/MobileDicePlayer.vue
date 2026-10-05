@@ -3,10 +3,12 @@ import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue
 import { ArrowDown, Dices, LoaderCircle, RotateCcw } from '@lucide/vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
 import DiceModifierNotice from './DiceModifierNotice.vue'
+import DiceRoundNavigation from './DiceRoundNavigation.vue'
 import { watchMobileDicePreparation } from './mobileDiceLifecycle'
 import { createCountdownController } from '@/components/trpgTurnExperiments'
 import {
   createDiceAutoPlayPlan, createDiceGroupResultDisplay, createDiceModifierNotice,
+  createDiceModuleEffectToneMap,
   createDicePlayerPreparedResult, createDicePlayerStatus, createDicePlayerSummary,
   resolveDicePlayerMode, shouldShowDiceContinueAction, shouldShowDiceRollAction,
   type DicePlaybackGroupPresentation, type DicePlaybackRequest, type DicePlayerPhase,
@@ -24,8 +26,8 @@ import superLoseUrl from '@/dice/assets/audio/dice_superlose.mp3'
 import type { DiceRollResult, ThreeDiceBoard } from '@/dice/renderer/ThreeDice'
 
 const open = defineModel<boolean>({ required: true })
-const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean; embedded?: boolean }>()
-const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: []; phaseChange: [phase: DicePlayerPhase] }>()
+const props = defineProps<{ request: DicePlaybackRequest | null; showContinue?: boolean; autoContinue?: boolean; embedded?: boolean; hasPreviousRound?: boolean; hasNextRound?: boolean; roundPosition?: number; roundCount?: number }>()
+const emit = defineEmits<{ roll: []; complete: []; continue: []; cancelAutoContinue: []; phaseChange: [phase: DicePlayerPhase]; previousRound: []; nextRound: [] }>()
 const stageScroll = ref<HTMLElement | null>(null)
 const surface = ref<HTMLElement | null>(null)
 const tray = ref<HTMLElement | null>(null)
@@ -115,7 +117,10 @@ async function resumeFollow() {
 function buildRows() {
   if (!tray.value) return
   const elements = Array.from(tray.value.querySelectorAll<HTMLElement>(':scope > .dice-module'))
+  const effectTones = createDiceModuleEffectToneMap(props.request?.presentation)
   mounts.value = elements.map((module, moduleIndex) => {
+    if (effectTones[moduleIndex]) module.dataset.effectTone = effectTones[moduleIndex]
+    else delete module.dataset.effectTone
     const dice = Array.from(module.querySelectorAll<HTMLElement>('.die-slot:not(.die-slot-placeholder)'))
     const header = document.createElement('div')
     header.className = 'mobile-group-heading'
@@ -344,18 +349,19 @@ onBeforeUnmount(() => { retire(); disposeSharedRenderer?.() })
    <p v-if="error" class="mobile-error" role="alert">{{error}}</p>
   </section>
  </div>
- <div v-if="!embedded && (showRollAction || showContinueAction)" class="mobile-v4-actions">
+ <div v-if="!embedded && (showRollAction || showContinueAction || hasPreviousRound || hasNextRound)" class="mobile-v4-actions">
   <button v-if="showRollAction" class="button" :class="status === 'complete' ? 'secondary' : 'primary'" :disabled="presentation.actionDisabled" @click="handleRollAction"><LoaderCircle v-if="presentation.actionDisabled" class="spin" :size="17"/><RotateCcw v-else-if="status === 'complete' || status === 'error'" :size="17"/><Dices v-else :size="17"/>{{status === 'playing' && flowPhase === 'revealing' ? '展示结果中' : presentation.actionLabel}}</button>
   <button v-if="showContinueAction" class="button primary" @click="handleContinueAction">{{continueActionLabel}}</button>
+  <DiceRoundNavigation :phase="status" :show-continue="showContinueAction" :has-previous="hasPreviousRound" :has-next="hasNextRound" :round-position="roundPosition" :round-count="roundCount" @previous="emit('previousRound')" @next="emit('nextRound')" />
  </div>
  <template v-for="host in mounts" :key="host.module">
   <Teleport :to="host.header"><div class="mobile-group-title"><span>第 {{host.module+1}} 组 <small>/ {{modules.length}}</small></span><strong>{{[groupAt(host.module)?.label,groupAt(host.module)?.checkName].filter(Boolean).join(' · ')}}</strong></div><div class="mobile-group-sub"><span>{{modules[host.module]?.expression}} · {{Math.ceil((modules[host.module]?.dice.length || 0)/2)}} 行</span><span v-if="(groupAt(host.module)?.moduleCount || 0)>1">{{scopeLabel(groupAt(host.module)!)}} · 详情在第 {{groupAt(host.module)!.moduleStart+groupAt(host.module)!.moduleCount}} 组后</span><span v-else>{{skinLabel}}骰面</span></div></Teleport>
   <Teleport v-if="!embedded" :to="host.details">
    <template v-for="(g,gi) in endsAt(host.module)" :key="gi">
-    <article class="mobile-inline-result" :class="[`tone-${isRevealed(g)?g.outcomeTone:'pending'}`,{'is-revealed':isRevealed(g)}]" :data-start="g.moduleStart" :data-end="g.moduleStart+g.moduleCount-1" aria-live="polite">
+    <article class="mobile-inline-result" :class="[`tone-${isRevealed(g)?g.outcomeTone:'pending'}`,{'is-revealed':isRevealed(g),'is-stun':g.effectTone==='stun'}]" :data-start="g.moduleStart" :data-end="g.moduleStart+g.moduleCount-1" aria-live="polite">
      <template v-if="request?.presentation">
       <div v-if="host.module===modules.length-1&&!specialOutcome&&gi===0" class="inline-original-context"><span>{{originalSummary?.formulaLabel}}</span><strong>{{originalSummary?.formulaValue}}</strong></div>
-      <div class="inline-original-group"><div class="inline-original-person"><strong>{{g.label}}</strong><small>{{scopeLabel(g)}}</small><div><em v-if="g.difficultyLabel">{{g.difficultyLabel}}</em><span>{{g.checkName}}</span></div></div><div class="inline-result-number"><strong :class="{'is-text-value':request.presentation.kind==='value-roll'}">{{originalDisplay(g)?.value || (isRevealed(g) ? '—' : '?')}}</strong><small>{{originalDisplay(g)?.label||(!isRevealed(g)?'等待本组完成':'')}}</small></div></div>
+      <div class="inline-original-group"><div class="inline-original-person"><strong>{{g.label}}</strong><small>{{scopeLabel(g)}}</small><div><em v-if="g.difficultyLabel">{{g.difficultyLabel}}</em><span>{{g.checkName}}</span></div></div><div class="inline-result-number" :title="isRevealed(g) ? g.outcomeDescription : undefined"><strong :class="{'is-text-value':request.presentation.kind==='value-roll'}">{{originalDisplay(g)?.value || (isRevealed(g) ? '—' : '?')}}</strong><small>{{originalDisplay(g)?.label||(!isRevealed(g)?'等待本组完成':'')}}</small></div></div>
      </template>
      <div v-else class="inline-original-numeric"><div class="inline-result-number"><small>{{originalSummary?.resultLabel}}</small><strong>{{isRevealed(g)?originalSummary?.resultValue:'?'}}</strong></div><div class="inline-original-copy"><span>{{originalSummary?.formulaLabel}}</span><h3>{{originalSummary?.formulaValue}}</h3><div><span>{{originalSummary?.moduleLabel}}</span><span>{{originalSummary?.diceLabel}}</span><span>{{originalSummary?.skinLabel}}骰面</span></div><div v-if="(originalSummary?.groups.length || 0) > 1" class="inline-numeric-groups"><span v-for="group in originalSummary?.groups" :key="group.label">{{ group.label }} · {{ group.expression }}<b v-if="isRevealed(g)"> = {{ group.result }}</b></span></div></div></div>
 
@@ -455,6 +461,12 @@ onBeforeUnmount(() => { retire(); disposeSharedRenderer?.() })
 .dialog-content.mobile-v4-window[data-mobile-presentation] .inline-numeric-groups b{font-weight:500}
 .dialog-content.mobile-v4-window[data-mobile-presentation] .dice-modifier-notice-badge{min-height:44px;font-size:12px;--dice-accent:#294f49;--dice-accent-rgb:41,79,73}
 
+
+.dialog-content.mobile-v4-window[data-mobile-presentation] .dice-module[data-effect-tone="stun"]{border-radius:14px;background:linear-gradient(145deg,#f8f5fc,#efe8f7);box-shadow:inset 0 0 0 1px rgba(123,97,168,.3)}
+.dialog-content.mobile-v4-window[data-mobile-presentation] .dice-module[data-effect-tone="stun"] .mobile-group-rows{background:radial-gradient(ellipse at center,#e9e0f3 0,transparent 72%)}
+.dialog-content.mobile-v4-window[data-mobile-presentation] .dice-module[data-effect-tone="stun"] .mobile-group-heading,.dialog-content.mobile-v4-window[data-mobile-presentation] .mobile-inline-result.is-stun{padding:12px}
+.dialog-content.mobile-v4-window[data-mobile-presentation] .mobile-inline-result.is-stun{border-color:rgba(123,97,168,.3);border-radius:12px;background:rgba(123,97,168,.05)}
+.dialog-content.mobile-v4-window[data-mobile-presentation] .mobile-inline-result.is-stun .inline-result-number strong,.dialog-content.mobile-v4-window[data-mobile-presentation] .mobile-inline-result.is-stun .inline-result-number small{color:#7b61a8}
 
 @media(max-width:360px){.dialog-content.mobile-v4-window[data-mobile-presentation] .dice-player-surface .die-slot{height:calc(min((100cqw - 10px)/2,188px) + 44px)}}
 

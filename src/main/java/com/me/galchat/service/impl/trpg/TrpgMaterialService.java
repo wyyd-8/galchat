@@ -81,8 +81,8 @@ public class TrpgMaterialService {
         }
         CocModuleMaterial material = requireByName(
                 conversation.getModuleId(), materialName);
-        if (stateStore.isShown(conversationId, material.getId())
-                || recoverFromMessages(conversationId, material.getId())) {
+        // Redis is a cache: a rolled-back display must not suppress a retry.
+        if (recoverFromMessages(conversationId, material.getId())) {
             return new DisplayResult(false, null);
         }
 
@@ -141,7 +141,7 @@ public class TrpgMaterialService {
                 Object value = content.get("materialId");
                 if (value instanceof Number number
                         && materialId.equals(number.longValue())) {
-                    safeMarkShown(conversationId, materialId);
+                    markShownAfterCommit(conversationId, materialId);
                     return true;
                 }
             } catch (JacksonException exception) {

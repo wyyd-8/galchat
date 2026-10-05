@@ -7,7 +7,7 @@ import com.me.galchat.groupchat.runtime.GroupActionSpec;
 import com.me.galchat.groupchat.runtime.GroupContextMaterial;
 import com.me.galchat.groupchat.runtime.GroupContextPolicy;
 import com.me.galchat.service.impl.group.GroupContextAssembler;
-import com.me.galchat.vector.GroupTopicVectorService;
+import com.me.galchat.vector.MutiSearchService;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Component;
@@ -21,14 +21,14 @@ public class ChatGroupContextPolicy implements GroupContextPolicy {
     private static final int RETRIEVAL_QUERY_MESSAGE_COUNT = 3;
 
     private final GroupTopicService topicService;
-    private final GroupTopicVectorService vectorService;
+    private final MutiSearchService searchService;
     private final GroupContextAssembler contextAssembler;
 
     public ChatGroupContextPolicy(GroupTopicService topicService,
-                                  GroupTopicVectorService vectorService,
+                                  MutiSearchService searchService,
                                   GroupContextAssembler contextAssembler) {
         this.topicService = topicService;
-        this.vectorService = vectorService;
+        this.searchService = searchService;
         this.contextAssembler = contextAssembler;
     }
 
@@ -47,7 +47,8 @@ public class ChatGroupContextPolicy implements GroupContextPolicy {
         long windowStart = topicService.windowStartSequence(conversation);
         List<Message> context = contextAssembler.assembleContextFrom(
                 conversation, action.actor(), windowStart);
-        String memory = vectorService.search(conversation.getId(), windowStart, retrievalQuery(context));
+        String memory = searchService.searchBeforeGroupChat(
+                conversation.getWorldId(), conversation.getId(), windowStart, retrievalQuery(context));
         if (!StringUtils.hasText(memory)) {
             return new GroupContextMaterial(context);
         }

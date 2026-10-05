@@ -134,7 +134,7 @@ public class GroupChatService {
         return Flux.defer(() -> {
             validateRequest(request);
             conversationService.requireAuthorized(conversationId);
-            GroupConversationLockService.OwnedLock lock = lockService.tryLock(conversationId);
+            GroupConversationLockService.OwnedLock lock = lockService.tryLockWithOwner(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException("当前群聊正在生成回复，请稍后再试"));
             }
@@ -184,6 +184,41 @@ public class GroupChatService {
             } catch (RuntimeException e) {
                 compression.finish();
                 return Flux.error(e);
+            }
+        });
+    }
+
+    public Flux<GroupChatEvent> retry(Long conversationId, Long turnId) {
+        return Flux.defer(() -> {
+            conversationService.requireAuthorized(conversationId);
+            GroupConversationLockService.OwnedLock lock = lockService.tryLockWithOwner(conversationId);
+            if (lock == null) return Flux.error(new UserRequestException("当前群聊正在生成回复，请稍后再试"));
+            try {
+                GroupConversation conversation = conversationService.requireActive(conversationId);
+                if (!GroupChatConstant.MODE_CHAT.equals(conversation.getMode())) {
+                    throw new UserRequestException("跑团请使用行动轮重试接口");
+                }
+                List<GroupChatTurn> turns = turnMapper.selectList(new LambdaQueryWrapper<GroupChatTurn>()
+                        .eq(GroupChatTurn::getConversationId, conversationId)
+                        .ne(GroupChatTurn::getStatus, GroupChatConstant.STATUS_WITHDRAWN)
+                        .orderByDesc(GroupChatTurn::getId).last("limit 1"));
+                if (turns.isEmpty() || !turnId.equals(turns.getFirst().getId())
+                        || !GroupChatConstant.STATUS_FAILED.equals(turns.getFirst().getStatus())) {
+                    throw new UserRequestException("只能重试最近一轮失败的群聊回复");
+                }
+                GroupChatTurn turn = turns.getFirst();
+                List<GroupChatReplyStep> remaining = checkpointService.restoreChat(conversation, turn);
+                GroupModeRuntime runtime = runtimeRegistry.require(conversation.getMode());
+                return Flux.concat(Flux.just(GroupChatEvent.builder()
+                                .eventType(GroupChatConstant.EVENT_TURN_ACCEPTED)
+                                .conversationId(conversationId).turnId(turnId).build()),
+                        executeChatActions(runtime, conversation, turn,
+                                remaining.stream().map(this::toPreparedAction).toList(), 0))
+                        .doOnError(error -> recoveryService.recoverInterrupted(conversationId))
+                        .doFinally(signal -> lockService.unlock(lock));
+            } catch (RuntimeException error) {
+                lockService.unlock(lock);
+                return Flux.error(error);
             }
         });
     }
@@ -242,7 +277,7 @@ public class GroupChatService {
                 decisionStore.contentByReplyStepIds(replyStepIds);
         Map<Long, Long> outputMessageIdsByStep = new HashMap<>();
         List<GroupChatReplyStep> replySteps =
-                stepMapper.selectBatchIds(replyStepIds);
+                replyStepIds.isEmpty() ? List.of() : stepMapper.selectBatchIds(replyStepIds);
         if (replySteps != null) {
             for (GroupChatReplyStep replyStep : replySteps) {
                 outputMessageIdsByStep.put(
@@ -272,7 +307,7 @@ public class GroupChatService {
             validateRequest(request);
             conversationService.requireAuthorized(conversationId);
             GroupConversationLockService.OwnedLock lock =
-                    lockService.tryLock(conversationId);
+                    lockService.tryLockWithOwner(conversationId);
             if (lock == null) {
                 return Flux.error(new UserRequestException(
                         "当前群聊正在执行回复，请稍后再试"));
@@ -418,6 +453,7 @@ public class GroupChatService {
         turn.setStatus(GroupChatConstant.STATUS_RUNNING)
                 .setUpdatedAt(now);
         turnMapper.updateById(turn);
+        checkpointService.recordBoundary(turn, step, GroupTurnCheckpointService.COMPLETED);
         return message;
     }
 
@@ -519,6 +555,9 @@ public class GroupChatService {
             stepMapper.insert(step);
             preparedActions.add(new PreparedAction(action, step));
         }
+        if (!preparedActions.isEmpty()) {
+            checkpointService.initializeStep(turn, preparedActions.getFirst().step());
+        }
         return new PreparedTurn(turn, userMessage, preparedActions);
     }
 
@@ -534,10 +573,15 @@ public class GroupChatService {
             if (shouldSkipStep(step)) {
                 return Flux.empty();
             }
-            if (GroupChatConstant.MODE_TRPG.equals(
-                    conversation.getMode())) {
-                checkpointService.initializeStep(turn, step);
-            }
+            // Recovery must never see a new checkpoint whose step is still pending.
+            // Commit both writes before context loading or model preparation can be interrupted.
+            transactionTemplate.executeWithoutResult(status -> {
+                step.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
+                stepMapper.updateById(step);
+                if (GroupChatConstant.MODE_TRPG.equals(conversation.getMode())) {
+                    checkpointService.initializeStep(turn, step);
+                }
+            });
             GroupContextMaterial context = runtime.contextPolicy()
                     .load(conversation, action)
                     .withInvestigatorDirection(
@@ -570,11 +614,8 @@ public class GroupChatService {
                 return executeBufferedCombatRoute(
                         requestSpec, conversation, turn, step, speaker);
             }
-            GroupChatMessage outputMessage = transactionTemplate.execute(status -> {
-                step.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
-                stepMapper.updateById(step);
-                return createStreamingMessage(conversation, turn, step);
-            });
+            GroupChatMessage outputMessage = transactionTemplate.execute(status ->
+                    createStreamingMessage(conversation, turn, step));
             if (outputMessage == null) {
                 throw new IllegalStateException("创建群聊回复消息失败");
             }
@@ -617,11 +658,6 @@ public class GroupChatService {
             GroupChatTurn turn,
             GroupChatReplyStep step,
             GroupChatEvent.Speaker speaker) {
-        transactionTemplate.executeWithoutResult(status -> {
-            step.setStatus(GroupChatConstant.STATUS_RUNNING)
-                    .setUpdatedAt(LocalDateTime.now());
-            stepMapper.updateById(step);
-        });
         return requestSpec.stream().chatResponse()
                 .collectList()
                 .flatMapMany(responses -> {
@@ -724,21 +760,29 @@ public class GroupChatService {
             TrpgStepInteractionService.InteractionRequest interaction) {
         return transactionTemplate.execute(status -> {
             LocalDateTime now = LocalDateTime.now();
-            GroupChatMessage message = new GroupChatMessage()
-                    .setConversationId(conversation.getId())
-                    .setSceneId(sceneId(turn))
-                    .setTurnId(turn.getId())
-                    .setReplyStepId(step.getId())
-                    .setSpeakerType(GroupChatConstant.ACTOR_KP)
-                    .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
-                    .setVisibility("public")
-                    .setContent(interaction.question())
-                    .setSequenceNo(conversationService.nextSequence(
-                            conversation.getId()))
-                    .setStatus(GroupChatConstant.STATUS_COMPLETED)
-                    .setCreatedAt(now)
-                    .setUpdatedAt(now);
-            messageMapper.insert(message);
+            GroupChatReplyStep persisted = stepMapper.selectById(step.getId());
+            GroupChatMessage message = persisted == null || persisted.getOutputMessageId() == null
+                    ? null : messageMapper.selectById(persisted.getOutputMessageId());
+            if (message == null) {
+                message = new GroupChatMessage()
+                        .setConversationId(conversation.getId())
+                        .setSceneId(sceneId(turn))
+                        .setTurnId(turn.getId())
+                        .setReplyStepId(step.getId())
+                        .setSpeakerType(GroupChatConstant.ACTOR_KP)
+                        .setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
+                        .setVisibility("public")
+                        .setContent(interaction.question())
+                        .setSequenceNo(conversationService.nextSequence(
+                                conversation.getId()))
+                        .setStatus(GroupChatConstant.STATUS_COMPLETED)
+                        .setCreatedAt(now)
+                        .setUpdatedAt(now);
+                messageMapper.insert(message);
+            } else if (!java.util.Objects.equals(message.getReplyStepId(), step.getId())
+                    || !java.util.Objects.equals(message.getTurnId(), turn.getId())) {
+                throw new IllegalStateException("追问消息不属于当前路由步骤");
+            }
             boolean orderedChild = step.getParentStepId() != null;
             step.setOutputMessageId(message.getId())
                     .setStatus(orderedChild
@@ -754,11 +798,8 @@ public class GroupChatService {
                             .set(GroupChatReplyStep::getPromptMessageId,
                                     message.getId())
                             .set(GroupChatReplyStep::getUpdatedAt, now));
-            if (orderedChild) {
-                checkpointService.recordBoundary(
-                        turn, step,
-                        GroupTurnCheckpointService.COMPLETED);
-            }
+            // Keep INTERACTION_COMMITTED until the answer establishes its own
+            // boundary, so a restart in between can resume this interaction.
             return message;
         });
     }
@@ -777,11 +818,6 @@ public class GroupChatService {
             GroupChatTurn turn,
             GroupChatReplyStep step,
             GroupChatEvent.Speaker speaker) {
-        transactionTemplate.executeWithoutResult(status -> {
-            step.setStatus(GroupChatConstant.STATUS_RUNNING)
-                    .setUpdatedAt(LocalDateTime.now());
-            stepMapper.updateById(step);
-        });
         return requestSpec.stream().chatResponse()
                 .collectList()
                 .flatMapMany(responses -> {
@@ -1382,12 +1418,8 @@ public class GroupChatService {
                             turnMapper.updateById(turn);
                         }
                     }
-                    if (GroupChatConstant.MODE_TRPG.equals(
-                            conversation.getMode())) {
-                        checkpointService.recordBoundary(
-                                turn, step,
-                                GroupTurnCheckpointService.COMPLETED);
-                    }
+                    checkpointService.recordBoundary(
+                            turn, step, GroupTurnCheckpointService.COMPLETED);
                 }));
     }
 

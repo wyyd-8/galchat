@@ -49,7 +49,7 @@ public class TrpgParticipantService {
         result.add(new Participant(
                 new GroupActorRef(
                         GroupChatConstant.ACTOR_USER, player.getId()),
-                player.getId(), player.getName(), "用户"));
+                player.getId(), player.getName(), "用户", Boolean.TRUE.equals(player.getDead())));
 
         Map<Long, CocCharacter> botCards = cards.stream()
                 .filter(card -> "BOT".equals(card.getActorType()))
@@ -75,7 +75,7 @@ public class TrpgParticipantService {
                     new GroupActorRef(
                             GroupChatConstant.ACTOR_CHARACTER,
                             member.getActorId()),
-                    card.getId(), card.getName(), card.getPlayerName()));
+                    card.getId(), card.getName(), card.getPlayerName(), Boolean.TRUE.equals(card.getDead())));
         }
         return List.copyOf(result);
     }
@@ -91,6 +91,10 @@ public class TrpgParticipantService {
             GroupActorRef actor,
             Long cardId,
             String investigatorName,
-            String controllerName) {
+            String controllerName,
+            boolean dead) {
+        public Participant(GroupActorRef actor, Long cardId, String investigatorName, String controllerName) {
+            this(actor, cardId, investigatorName, controllerName, false);
+        }
     }
 }

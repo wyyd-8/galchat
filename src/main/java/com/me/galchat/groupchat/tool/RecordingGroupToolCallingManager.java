@@ -61,6 +61,7 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
 
     private ToolExecutionResult executeToolCallsWithContext(
             Prompt prompt, ChatResponse response) {
+        validateChildSceneBatch(response);
         List<String> toolNames = toolNames(response);
         long diceToolCount = toolNames.stream()
                 .filter(DiceRollConstant.KP_STATE_TOOL_NAMES::contains)
@@ -89,15 +90,55 @@ public class RecordingGroupToolCallingManager implements ToolCallingManager {
             throw new UserRequestException(
                     "枪械攻击工具已自动更新武器状态，不能在同一裁定步骤重复覆盖");
         }
-        if (diceToolCount == 1 || clarification) {
+        if (toolNames.stream().anyMatch(com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService.TOOLS::contains)
+                || toolNames.contains("publishExplorationScenes")
+                || diceToolCount == 1 || clarification
+                || toolNames.contains("startCombat") || finishMarker
+                || toolNames.contains("adjustBasicAttributes")
+                || toolNames.contains("purchaseEquipment")
+                || toolNames.contains("suspendInvestigators")
+                || toolNames.contains("resumeSuspendedInvestigators")
+                || toolNames.contains("finishSceneExploration")
+                || toolNames.contains("endSceneExploration")
+                || toolNames.contains("resumeWaitingInvestigators")
+                || toolNames.contains("showMaterial")) {
             return transactionTemplate.execute(status ->
                     executeAndRecord(prompt, response, replyStepId));
         }
-        if (finishMarker && toolNames.size() == 1) {
-            return delegate.executeToolCalls(prompt, response);
-        }
         return executeAndRecord(prompt, response, replyStepId);
     }
+
+    private void validateChildSceneBatch(ChatResponse response) {
+        if (response == null || response.getResults() == null) return;
+        var calls = response.getResults().stream()
+                .flatMap(generation -> generation.getOutput().getToolCalls().stream())
+                .filter(call -> "startChildScene".equals(call.name())).toList();
+        if (calls.size() < 2) return;
+        var scenes = new java.util.HashSet<String>();
+        var investigators = new java.util.HashSet<String>();
+        var json = tools.jackson.databind.json.JsonMapper.builder().build();
+        for (var call : calls) {
+            ChildSceneArguments args;
+            try {
+                args = json.readValue(call.arguments(), ChildSceneArguments.class);
+            } catch (tools.jackson.core.JacksonException exception) {
+                throw new UserRequestException("子场景参数无法解析");
+            }
+            if (args == null || args.childSceneName() == null || args.investigatorNames() == null) {
+                throw new UserRequestException("子场景参数不完整");
+            }
+            if (!scenes.add(args.childSceneName().trim())) {
+                throw new UserRequestException("同一目的地只应调用一次子场景工具");
+            }
+            for (String name : args.investigatorNames()) {
+                if (name == null || !investigators.add(name.trim())) {
+                    throw new UserRequestException("同一调查员不能在本批调用中前往多个子场景");
+                }
+            }
+        }
+    }
+
+    private record ChildSceneArguments(String childSceneName, List<String> investigatorNames) {}
 
     private Integer executionUserId(Prompt prompt) {
         ChatOptions options = prompt.getOptions();

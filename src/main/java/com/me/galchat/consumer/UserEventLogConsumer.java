@@ -11,7 +11,8 @@ import com.me.galchat.memory.TopicBoundaryService;
 import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.IUserEventLogService;
 import com.me.galchat.service.IUserWorldPrefixService;
-import com.me.galchat.websocket.WebSocketServer;
+import com.me.galchat.service.impl.chat.SingleChatLockService;
+import com.me.galchat.service.impl.chat.SingleChatRuntimeService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
@@ -19,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RDelayedQueue;
+import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.redisson.codec.JsonJacksonCodec;
 import org.json.JSONException;
@@ -42,12 +44,13 @@ import java.util.concurrent.TimeUnit;
 public class UserEventLogConsumer {
 
     private final RedissonClient redissonClient;
-    private final WebSocketServer webSocketServer;
     private final IUserEventLogService userEventLogService;
     private final IUserWorldPrefixService userWorldPrefixService;
     private final UserChatHistoryMapper userChatHistoryMapper;
     private final IUserCharacterInfoService userCharacterInfoService;
     private final TopicBoundaryService topicBoundaryService;
+    private final SingleChatLockService singleChatLockService;
+    private final SingleChatRuntimeService singleChatRuntimeService;
 
     @Resource(name = "userEventCareClient")
     private ChatClient userEventCareClient;
@@ -115,6 +118,19 @@ public class UserEventLogConsumer {
             return;
         }
 
+        RLock conversationLock = singleChatLockService.tryLock(task.getUserWorldId(), task.getCharacterId());
+        if (conversationLock == null) {
+            retryUserEventLogTask(task);
+            return;
+        }
+        try {
+            generateUserEventCare(task, userEventLogIds);
+        } finally {
+            singleChatLockService.unlock(conversationLock);
+        }
+    }
+
+    private void generateUserEventCare(UserEventLogDelayTaskDTO task, List<Long> userEventLogIds) {
         UserWorldPrefix userWorld = userWorldPrefixService.getById(task.getUserWorldId());
         if (userWorld == null) {
             return;
@@ -148,7 +164,7 @@ public class UserEventLogConsumer {
                 return;
             }
             String prompt = userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId());
-            content = userEventCareClient.prompt()
+            content = careClient(task).prompt()
                     .system("""
                         你是一个专业的主动关怀消息生成机器人，需要扮演下文中给定的角色，为用户生成一条关怀消息。
                         你会收到同一用户和同一角色之间的一组用户事件，每条事件包含时间和描述。
@@ -166,7 +182,7 @@ public class UserEventLogConsumer {
                 return;
             }
             String prompt = userCharacterInfoService.buildCharacterPrompt(task.getUserWorldId(), task.getCharacterId());
-            content = userEventCareClient.prompt()
+            content = careClient(task).prompt()
                     .system("""
                         你是一个专业的主动关怀消息生成机器人，需要扮演下文中给定的角色，为用户生成一条关怀消息。
                         现在已经是夜间了，给定的事件都是 今天用户所发生的事件 。
@@ -196,13 +212,10 @@ public class UserEventLogConsumer {
         userChatHistoryMapper.insert(message);
         topicBoundaryService.startAssistantMessageTopic(message);
         updateLastChatInfo(message);
+    }
 
-        try {
-            webSocketServer.sendMessageToSession(message);
-        } catch (Exception e) {
-            log.warn("推送用户事件关怀消息失败, userWorldId:{}, characterId:{}, messageId:{}",
-                    message.getUserWorldId(), message.getCharacterId(), message.getId(), e);
-        }
+    private ChatClient careClient(UserEventLogDelayTaskDTO task) {
+        return singleChatRuntimeService.careClient(task.getUserWorldId(), task.getCharacterId(), userEventCareClient);
     }
 
     private boolean isRecentlyChatted(LocalDateTime lastChatTime, LocalDateTime now) {
@@ -222,7 +235,7 @@ public class UserEventLogConsumer {
     private String generateDailyDiscussionQuestion(UserEventLogDelayTaskDTO task, UserWorldPrefix userWorld) {
         List<String> recentTopics = listRecentDiscussionTopics(task.getUserWorldId(), task.getCharacterId());
         String contextPrompt = buildWorldCharacterPrompt(userWorld, task.getUserWorldId(), task.getCharacterId());
-        String content = userEventCareClient.prompt()
+        String content = careClient(task).prompt()
                 .system("""
                         你是一个专业的主动聊天问题生成机器人，需要扮演下文中给定的角色。
                         请基于当前世界观与角色设定，生成一个自然、简短、主动发给用户的深度或思辨问题。

@@ -61,6 +61,9 @@ public interface TrpgAutoSaveMapper {
             @Param("conversationId") Long conversationId,
             @Param("savedAt") java.time.LocalDateTime savedAt);
 
+    @Delete("DELETE FROM trpg_auto_save WHERE conversation_id = #{conversationId}")
+    int deleteByConversationId(@Param("conversationId") Long conversationId);
+
     @Delete("""
             DELETE FROM trpg_auto_save
             WHERE conversation_id = #{conversationId}

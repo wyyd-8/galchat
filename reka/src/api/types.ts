@@ -53,7 +53,7 @@ export interface WorldTemplate {
 }
 export interface UserWorld {
   id: number; userId?: number; worldId?: number; name: string; image?: string; acitvePushStatus?: boolean
-  dailyCompanionMode?: boolean; favorSystemStatus?: string; eotDetectionStatus?: boolean; thinkStatus?: boolean
+  dailyCompanionMode?: boolean; favorSystemStatus?: string
   addSpecialPrompt?: boolean; myWorld?: boolean
 }
 export interface WorldDetail { id?: number; worldId?: number; about?: string; details?: string }
@@ -122,11 +122,12 @@ export interface ChatHistory {
   id?: number; userWorldId?: number; characterId?: number; content?: string; type?: string
   userMessageId?: number; stepNo?: number; timestamp?: string
 }
+export interface CareMessagePage { messages: ChatHistory[]; nextCursor: number; hasMore: boolean }
 export interface ChatMessagePayload {
-  type?: string; worldId: number; userWorldId: number; characterId: number; message: string
-  clientRequestId?: string; isTyping?: boolean; length?: number; revision?: number; triggerType?: string
+  worldId: number; userWorldId: number; characterId: number; message: string
+  clientRequestId?: string
 }
-export interface ChatFlux { type: string; content?: string; sequence?: number }
+export interface ChatFlux { type: string; content?: string; sequence?: number; errorDetail?: GenerationErrorDetail }
 export interface DirectMessage {
   id: string; historyId?: number; userMessageId?: number; role: 'user' | 'assistant' | 'thinking' | 'tool'; content: string; time?: string; complete?: boolean
 }
@@ -353,7 +354,7 @@ export interface DiceValue { sides: number; value?: number; role?: string; selec
 export interface DiceModule { expression: string; diceCount: number; diceSides: number; modifier?: string; dice: DiceValue[]; result?: number; placeholder?: boolean }
 export interface DiceResult { formula: string; modules: DiceModule[]; result?: number }
 export interface DiceModifierFactor { source?: 'KP' | 'BACKEND'; kind: 'BONUS' | 'PENALTY'; diceCount?: number; code?: string; reason: string }
-export interface DiceResolution { type?: string; sourceResultId?: number; groupRule?: 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'; characterName?: string; checkName?: string; difficulty?: 'REGULAR' | 'HARD' | 'EXTREME'; targetValue?: number; modifierFactors?: DiceModifierFactor[]; rule?: Record<string, unknown>; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
+export interface DiceResolution { type?: string; sourceResultId?: number; groupRule?: 'ANY_SUCCESS' | 'ALL_SUCCESS' | 'SEPARATE'; characterName?: string; checkName?: string; targetCharacterName?: string; difficulty?: 'REGULAR' | 'HARD' | 'EXTREME'; targetValue?: number; modifierFactors?: DiceModifierFactor[]; rule?: Record<string, unknown>; outcome?: Record<string, unknown>; effect?: Record<string, unknown> }
 export interface DiceRollSummary { id: number; conversationId: number; reason?: string; totalResult?: string; roundCount?: number; status: string; toolName?: string; createdAt?: string; updatedAt?: string }
 export interface DiceRollDetail { id: number; summaryId: number; characterId?: number; roundNo?: number; displayOrder?: number; displayType?: string; reason?: string; resultData?: DiceResult; resolution?: DiceResolution; resolvedAt?: string; createdAt?: string; updatedAt?: string }
 export interface DiceRollProgress { summary: DiceRollSummary; rolledResult: DiceRollDetail; createdResults: DiceRollDetail[] }

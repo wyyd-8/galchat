@@ -1,34 +1,57 @@
 import { computed, nextTick, onUnmounted, reactive, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
-import { api, createChatSocket, streamChat, resumeChat, currentSession } from '@/api/client'
-import type { Character, ChatFlux, ChatHistory, ChatMessagePayload, DirectMessage, ModelApi, UserWorld } from '@/api/types'
+import { api, streamChat, resumeChat, currentSession } from '@/api/client'
+import type { Character, ChatFlux, ChatHistory, ChatMessagePayload, DirectMessage, GenerationErrorDetail, ModelApi, SingleChatRuntime, UserWorld } from '@/api/types'
 import { resetConversationScrollFollowing, scrollConversationToLatest } from '@/components/reasoningScroll'
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
 import { useScopedChatDraft } from '@/components/chatInputState'
 import { errorMessage, notify } from './useNotice'
 import { followGeneration, GenerationStartRejected } from '@/streaming/generationConnection'
+import { createCarePolling } from './carePolling'
 
 interface DirectChatContext {
   world: ComputedRef<UserWorld | null>
   characters: Ref<Character[]>
+  settingsSaving?: Ref<boolean>
   reloadCharacters: () => Promise<void>
+  saveCharacterModel: (worldId: number, characterId: number, modelApiId: number | undefined, valid: () => boolean) => Promise<SingleChatRuntime | undefined>
 }
 
 function formatTime(value?: string) { return value ? value.replace('T', ' ').slice(0, 16) : '' }
-function splitContent(value: string) {
-  const parts = value.split(/\r?\n/).map((part) => part.trim()).filter(Boolean)
-  return parts.length ? parts : [value]
+function newRequestId() { return crypto.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2)}` }
+function insertCareMessage(messages: DirectMessage[], message: DirectMessage) {
+  if (messages.some(item => item.historyId === message.historyId)) return
+  const index = messages.findIndex(item => (item.userMessageId ?? item.historyId ?? Infinity) > message.historyId!)
+  messages.splice(index < 0 ? messages.length : index, 0, message)
+}
+// The server pages primary messages, then expands their replies, reasoning and tools.
+function hasOlderHistory(history: ChatHistory[]) {
+  return history.filter(item => item.type == null || item.type.toLowerCase() === 'user'
+    || (item.type.toLowerCase() === 'assistant' && item.userMessageId == null)).length === 30
+}
+function historyConfirmsWithdrawal(history: ChatHistory[], messageId: number) {
+  return !history.some(message => message.id === messageId)
+    && (!hasOlderHistory(history) || history.some(message => message.id != null && message.id < messageId))
 }
 
 export function useDirectChat(context: DirectChatContext) {
+  interface Failure {
+    message: string; detail: GenerationErrorDetail; payload: ChatMessagePayload
+    userMessageId?: number; retry: 'withdraw' | 'send' | null
+    recovery?: { historyIds: number[] | null; withdrawalRequested?: boolean }
+    errorIds: string[]
+  }
   interface Generation {
     requestId: string; sequence: number; base: DirectMessage[]; live: DirectMessage[]; following: DirectMessage[]
     assistant: DirectMessage | null; thinkingNeedsSeparator: boolean
+    historyIds: number[] | null
+    retryErrorIds: string[]
   }
   function freshState(world?: UserWorld, characterId = 0) {
-    return reactive({ world, characterId, messages: [] as DirectMessage[], modelApis: [] as ModelApi[],
+    return reactive({ world, characterId, invalidated: false, messages: [] as DirectMessage[], modelApis: [] as ModelApi[],
       loading: { history: false, sending: false, withdrawing: false, model: false },
-      hasOlder: false, generation: null as Generation | null,
-      controller: null as AbortController | null, historyRevision: 0 })
+      hasOlder: false, historyReady: false, generation: null as Generation | null,
+      failure: null as Failure | null, failureOpen: false,
+      controller: null as AbortController | null, historyRevision: 0, modelListRevision: 0 })
   }
   type State = ReturnType<typeof freshState>
   const states = new Map<string, State>()
@@ -49,6 +72,8 @@ export function useDirectChat(context: DirectChatContext) {
     get model() { return active.value.loading.model },
   })
   const hasOlderMessages = computed(() => active.value.hasOlder)
+  const generationFailure = computed(() => active.value.failure)
+  const generationFailureOpen = computed({ get: () => active.value.failureOpen, set: value => { active.value.failureOpen = value } })
   const storagePrefix = () => `galchat.direct-generation:${typeof localStorage === 'undefined' ? '' : currentSession().id ?? ''}:`
   const stateKey = (worldId: number, characterId: number) => `${storagePrefix()}${worldId}:${characterId}`
   function pending(state: State) {
@@ -63,18 +88,21 @@ export function useDirectChat(context: DirectChatContext) {
   }
   function isActive(state: State) { return active.value === state && context.world.value?.id === state.world?.id && selectedCharacterId.value === state.characterId }
   function notifyFor(state: State, title: string, detail: string) { if (isActive(state)) notify(title, detail, 'danger') }
-  const selectedCharacter = computed(() => context.characters.value.find((item) => item.characterId === selectedCharacterId.value) || null)
+  const selectedCharacter = computed(() => context.characters.value.find((item) => item.characterId === selectedCharacterId.value && item.userWorldId === context.world.value?.id) || null)
+  const withdrawalTarget = computed(() => [...messages.value].reverse().find(item => item.historyId != null
+    && item.complete !== false && (item.role === 'user'
+      || (item.role === 'assistant' && item.userMessageId == null))))
   const canWithdraw = computed(() => {
-    if (loading.history || loading.sending || loading.withdrawing || active.value.generation) return false
-    return messages.value.some((item) => item.role === 'user')
+    if (!active.value.historyReady || loading.history || loading.sending || loading.withdrawing || active.value.generation) return false
+    return withdrawalTarget.value != null
+  })
+  const canRetryGenerationFailure = computed(() => {
+    const state = active.value; const failure = state.failure
+    return Boolean(isActive(state) && failure?.retry && state.historyReady && !state.generation
+      && !loading.history && !loading.sending && !loading.withdrawing && !loading.model && !context.settingsSaving?.value
+      && (failure.retry === 'send' || (canWithdraw.value && failure.userMessageId === withdrawalTarget.value?.historyId)))
   })
 
-  let socket: WebSocket | null = null
-  let connecting: Promise<WebSocket> | null = null
-  let socketWorldId: number | null = null
-  let lastTypingKey: string | null = null
-  let composing = false
-  let ignoreInputWatch = false
   let notificationAsked = false
 
   function roleOf(item: ChatHistory): DirectMessage['role'] {
@@ -83,7 +111,7 @@ export function useDirectChat(context: DirectChatContext) {
     if (item.type === 'ASSISTANT' || item.type === 'assistant') return 'assistant'
     return 'user'
   }
-  function historyMessages(history: ChatHistory[], split = false): DirectMessage[] {
+  function historyMessages(history: ChatHistory[]): DirectMessage[] {
     const result: DirectMessage[] = []
     let currentUserMessageId: number | undefined
     let currentThinking: { message: DirectMessage; reasoning: string; toolCount: number } | null = null
@@ -131,22 +159,21 @@ export function useDirectChat(context: DirectChatContext) {
       }
 
       currentThinking = null
-      const parts = split ? splitContent(content) : [content]
-      result.push(...parts.map((part, index) => ({
-        id: `history-${item.id || Date.now()}-${index}`,
+      result.push({
+        id: `history-${item.id || Date.now()}-0`,
         historyId: item.id,
         userMessageId: item.userMessageId ?? (role === 'user' ? item.id : undefined),
         role,
-        content: part,
+        content,
         time: formatTime(item.timestamp),
-      })))
+      })
     })
     return result
   }
   function payload(message = ''): ChatMessagePayload | null {
     const world = context.world.value; const character = selectedCharacter.value
     if (!world?.id || !world.worldId || !character) return null
-    return { type: 'chat', worldId: world.worldId, userWorldId: world.id, characterId: character.characterId, message }
+    return { worldId: world.worldId, userWorldId: world.id, characterId: character.characterId, message }
   }
   async function scrollToBottom(force = false) {
     await nextTick()
@@ -156,23 +183,90 @@ export function useDirectChat(context: DirectChatContext) {
     scrollConversationToLatest(viewport)
   }
 
-  async function loadHistory(state: State) {
+  async function loadModelApis(targets: State[]) {
+    const ownEpoch = epoch
+    const requests = targets.map(state => ({ state, revision: ++state.modelListRevision }))
+    const models = await api.modelApis()
+    if (disposed || ownEpoch !== epoch) return
+    for (const { state, revision } of requests) {
+      if (!state.invalidated && revision === state.modelListRevision) state.modelApis = models
+    }
+  }
+  async function refreshModelApis() {
+    // Include cached conversations, since reopening one can reuse its history.
+    const currentStates = new Set([...states.values(), active.value])
+    await loadModelApis([...currentStates].filter(state => !state.invalidated))
+  }
+
+  async function loadHistory(state: State, preserveOlder = false) {
     const revision = ++state.historyRevision; const ownEpoch = epoch
+    const messagesAtStart = new Set(state.messages)
     state.loading.history = true
+    if (state.failure?.recovery) {
+      state.failure.retry = null; state.failure.detail.retryable = false
+    }
+    const valid = () => !disposed && ownEpoch === epoch && revision === state.historyRevision
+    void loadModelApis([state]).catch(error => {
+      if (valid()) notifyFor(state, '模型列表加载失败', errorMessage(error))
+    })
     try {
-      const [history, models] = await Promise.all([api.history(state.world!.id, state.characterId), api.modelApis()])
-      if (disposed || ownEpoch !== epoch || revision !== state.historyRevision) return
+      const history = await api.history(state.world!.id, state.characterId)
+      if (!valid()) return
       const errors = state.messages.filter(message => message.complete === false)
-      state.messages = [...historyMessages(history, state.world?.thinkStatus === false), ...errors]
-      state.modelApis = models; state.hasOlder = history.length === 30
+      const hasOlder = hasOlderHistory(history)
+      const boundary = Math.min(...history.flatMap(item => item.id == null ? [] : [item.id]))
+      const older = preserveOlder && hasOlder ? state.messages.filter(message => {
+        const id = message.userMessageId ?? message.historyId
+        return message.complete !== false && id != null && id < boundary
+      }) : []
+      const arrivedCare = state.messages.filter(message => !messagesAtStart.has(message)
+        && message.role === 'assistant' && message.historyId != null && message.userMessageId == null)
+      state.messages = [...older, ...historyMessages(history), ...errors]
+      arrivedCare.forEach(message => insertCareMessage(state.messages, message))
+      state.historyReady = true
+      reconcileFailure(state, history)
+      // Retained pages own the oldest cursor, including an already exhausted one.
+      if (!older.length) state.hasOlder = hasOlder
+      return history
     } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '单聊记录加载失败', errorMessage(error)) }
     finally { if (revision === state.historyRevision) state.loading.history = false }
+  }
+  function reconcileFailure(state: State, history: ChatHistory[]) {
+    const failure = state.failure
+    if (!failure?.recovery || !failure.payload.message) return
+    if (failure.userMessageId != null) {
+      // Only generation.user identifies the row owned by this request. Matching text
+      // may belong to an older round or another browser tab and cannot authorize deletion.
+      const present = history.some(message => roleOf(message) === 'user' && message.id === failure.userMessageId)
+      // An absent row proves withdrawal only if this page reaches its ID (or is the
+      // entire history). A full page of newer messages cannot confirm deletion.
+      if (historyConfirmsWithdrawal(history, failure.userMessageId) && failure.recovery.withdrawalRequested) {
+        prepareFailureResend(state, failure)
+        return
+      }
+      failure.retry = present ? 'withdraw' : null
+    } else {
+      const previousIds = failure.recovery.historyIds
+      // Without an anchor, resending is safe only if there are no new persisted rows.
+      // Keep the pre-send snapshot across failed history reads so a later reload can retry.
+      failure.retry = history.length === 0 || (previousIds != null
+        && history.every(message => message.id == null || previousIds.includes(message.id))) ? 'send' : null
+    }
+    failure.detail.retryable = failure.retry != null
+    if (failure.retry === 'send') {
+      chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: failure.payload.message })
+    }
+  }
+  function prepareFailureResend(state: State, failure: Failure) {
+    failure.retry = 'send'; failure.userMessageId = undefined; failure.recovery = undefined
+    failure.detail.retryable = true
+    chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: failure.payload.message })
   }
   async function selectCharacter(id: number) {
     const world = context.world.value
     if (!world) return
     const selection = ++selectionRevision
-    selectedCharacterId.value = id; closeSocket()
+    selectedCharacterId.value = id
     const key = stateKey(world.id, id)
     let state = states.get(key)
     if (!state) { state = freshState({ ...world }, id); states.set(key, state) }
@@ -180,7 +274,6 @@ export function useDirectChat(context: DirectChatContext) {
     active.value = state
     if (!state.loading.sending && !state.generation) await loadHistory(state)
     if (selection !== selectionRevision || !isActive(state) || disposed) return
-    if (world.thinkStatus === false) void ensureSocket(world.id).catch(() => undefined)
     const requestId = state.generation?.requestId || pending(state)
     if (requestId && !state.loading.sending) void consumeGeneration(state, requestId)
     // Keep active/background conversations, bound completed conversation caches.
@@ -201,9 +294,9 @@ export function useDirectChat(context: DirectChatContext) {
     try {
       const history = await api.history(state.world.id, state.characterId, 30, beforeId)
       if (disposed || ownEpoch !== epoch || revision !== state.historyRevision) return
-      const older = historyMessages(history, state.world.thinkStatus === false)
+      const older = historyMessages(history)
       if (state.generation) state.generation.base = [...older, ...state.generation.base]
-      state.messages = [...older, ...state.messages]; state.hasOlder = history.length === 30
+      state.messages = [...older, ...state.messages]; state.hasOlder = hasOlderHistory(history)
       const previousTop = viewport?.scrollTop ?? 0
       await nextTick()
       if (isActive(state) && viewport && scroller.value === viewport) viewport.scrollTop = previousTop + viewport.scrollHeight - previousHeight
@@ -211,13 +304,13 @@ export function useDirectChat(context: DirectChatContext) {
     finally { if (revision === state.historyRevision) state.loading.history = false }
   }
   function disposeConnections() {
-    epoch++; closeSocket()
+    epoch++; carePolling.stop()
     states.forEach(state => state.controller?.abort())
   }
   function invalidateWorld(worldId: number, characterId?: number) {
     for (const [key, state] of states) {
       if (state.world?.id !== worldId || (characterId != null && state.characterId !== characterId)) continue
-      state.controller?.abort(); state.generation = null; state.historyRevision++
+      state.invalidated = true; state.controller?.abort(); state.generation = null; state.historyRevision++; state.modelListRevision++
       remember(state, null); states.delete(key)
       if (active.value === state) close()
     }
@@ -235,11 +328,7 @@ export function useDirectChat(context: DirectChatContext) {
     chatDrafts.clear(); input.value = ''; clearChatReadingPositions()
   }
   function close() {
-    selectionRevision++; selectedCharacterId.value = null; active.value = freshState(); closeSocket()
-  }
-  function closeSocket() {
-    connecting = null; socketWorldId = null; lastTypingKey = null
-    if (socket) { socket.close(); socket = null }
+    selectionRevision++; selectedCharacterId.value = null; active.value = freshState()
   }
   function notifyPush(item: ChatHistory) {
     if (roleOf(item) !== 'assistant' || !item.content) return
@@ -253,54 +342,46 @@ export function useDirectChat(context: DirectChatContext) {
       notificationAsked = true; void Notification.requestPermission().then((permission) => { if (permission === 'granted') show() })
     }
   }
-  function handleSocketMessage(event: MessageEvent<string>) {
-    let item: ChatHistory
-    try { item = JSON.parse(event.data) as ChatHistory } catch { return }
-    if (typeof item.type !== 'string' || typeof item.content !== 'string') return
-    if (disposed || item.userWorldId !== socketWorldId || item.userWorldId !== context.world.value?.id) return
-    notifyPush(item)
-    const state = states.get(stateKey(item.userWorldId!, item.characterId!))
-    if (!state) return
-    state.messages.push(...historyMessages([item], true))
-    if (!isActive(state)) return
-    void scrollToBottom()
-    if (roleOf(item) === 'assistant') void context.reloadCharacters()
+  function receiveCareMessages(items: ChatHistory[]) {
+    for (const item of items) {
+      if (disposed || item.userWorldId !== context.world.value?.id || item.id == null) continue
+      const state = states.get(stateKey(item.userWorldId!, item.characterId!))
+      if (state?.messages.some(message => message.historyId === item.id)) continue
+      notifyPush(item)
+      if (!state) continue
+      const pushed = historyMessages([item])[0]!
+      if (state.generation) {
+        const generation = state.generation
+        const anchor = generation.live[0]?.historyId
+        insertCareMessage(anchor != null && item.id < anchor ? generation.base : generation.following, pushed)
+        state.messages = [...generation.base, ...generation.live, ...generation.following]
+      } else insertCareMessage(state.messages, pushed)
+      if (isActive(state)) void scrollToBottom()
+    }
+    if (items.length) void context.reloadCharacters()
   }
-  function ensureSocket(worldId: number) {
-    if (socket?.readyState === WebSocket.OPEN && socketWorldId === worldId) return Promise.resolve(socket)
-    if (connecting && socketWorldId === worldId) return connecting
-    closeSocket(); socket = createChatSocket(worldId); socketWorldId = worldId
-    const current = socket
-    connecting = new Promise<WebSocket>((resolve, reject) => {
-      let settled = false
-      current.addEventListener('open', () => { settled = true; if (socket === current) connecting = null; resolve(current) }, { once: true })
-      current.addEventListener('message', event => { if (socket === current) handleSocketMessage(event) })
-      current.addEventListener('error', () => { if (!settled) reject(new Error('WebSocket 连接失败')) }, { once: true })
-      current.addEventListener('close', () => {
-        if (socket === current) { socket = null; socketWorldId = null; connecting = null }
-        if (!settled) reject(new Error('WebSocket 连接已关闭'))
-      }, { once: true })
-    })
-    return connecting
-  }
-  async function sendTyping(isTyping: boolean) {
-    if (context.world.value?.thinkStatus !== false) return
-    const data = payload(); if (!data) return
-    const key = `${data.worldId}:${data.userWorldId}:${data.characterId}`
-    if (isTyping && lastTypingKey === key) return
-    if (!isTyping && lastTypingKey !== key) return
-    lastTypingKey = isTyping ? key : null
-    try {
-      const current = isTyping ? await ensureSocket(data.userWorldId) : socket
-      if (current?.readyState === WebSocket.OPEN) current.send(JSON.stringify({ ...data, type: 'typing', isTyping }))
-    } catch { if (isTyping) lastTypingKey = null }
-  }
-  function setComposing(value: boolean, currentInput: string) { composing = value; void sendTyping(composing || currentInput.length > 0) }
-  function focus() { if (composing || input.value.length > 0) void sendTyping(true) }
-  watch(input, (value) => {
-    if (ignoreInputWatch) { ignoreInputWatch = false; return }
-    void sendTyping(composing || value.length > 0)
+  const carePolling = createCarePolling({
+    now: () => Date.now(),
+    visible: () => typeof document !== 'undefined' && document.visibilityState !== 'hidden',
+    schedule: (callback, delay) => { const timer = setTimeout(callback, delay); return () => clearTimeout(timer) },
+    readCursor: key => {
+      try {
+        const value = localStorage.getItem(key)
+        const cursor = value == null ? NaN : Number(value)
+        return Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : undefined
+      } catch { return undefined }
+    },
+    writeCursor: (key, cursor) => { try { localStorage.setItem(key, String(cursor)) } catch { /* In-page progress still works. */ } },
+    fetchPage: (worldId, after, signal) => api.careMessages(worldId, after, signal),
+    receive: receiveCareMessages,
   })
+  watch(() => [context.world.value?.id, context.world.value?.acitvePushStatus] as const, ([worldId, enabled]) => {
+    if (worldId != null && enabled) {
+      carePolling.start(`galchat.care-cursor:${currentSession().id ?? ''}:${worldId}`, worldId)
+    } else carePolling.stop()
+  }, { immediate: true, flush: 'sync' })
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', carePolling.visibilityChanged)
+  if (typeof window !== 'undefined') window.addEventListener?.('focus', carePolling.refresh)
 
   function applyChunk(state: State, generation: Generation, chunk: ChatFlux) {
     if (chunk.sequence != null) {
@@ -314,8 +395,9 @@ export function useDirectChat(context: DirectChatContext) {
       const anchor = Number(chunk.content)
       if (Number.isSafeInteger(anchor) && anchor > 0) {
         const owner = (message: DirectMessage) => message.userMessageId ?? message.historyId ?? 0
-        generation.following = generation.base.filter(message => owner(message) > anchor)
-        generation.base = generation.base.filter(message => owner(message) < anchor)
+        const persisted = [...generation.base, ...generation.following]
+        generation.following = persisted.filter(message => owner(message) > anchor)
+        generation.base = persisted.filter(message => owner(message) < anchor)
         if (live[0]?.role === 'user') { live[0].historyId = anchor; live[0].userMessageId = anchor }
       }
     } else if (chunk.type === 'thinking' || chunk.type === 'tool') {
@@ -333,27 +415,50 @@ export function useDirectChat(context: DirectChatContext) {
       }
       generation.assistant.content += chunk.content || ''
     } else if (chunk.type === 'generation.failed') {
-      live.push({ id: `${generation.requestId}-error`, role: 'assistant', content: chunk.content || '角色回复生成失败，请稍后重试。', complete: false })
+      const message = chunk.errorDetail?.message || chunk.content || '角色回复生成失败，请稍后重试。'
+      live.push({ id: `${generation.requestId}-error`, role: 'assistant', content: message, complete: false })
+      showGenerationFailure(state, generation, message, { event: chunk }, undefined, chunk.errorDetail)
+      state.failure!.recovery = { historyIds: generation.historyIds }
     }
     state.messages = [...generation.base, ...live, ...generation.following]
     if (isActive(state)) void scrollToBottom()
   }
 
-  async function consumeGeneration(state: State, requestId: string, payload?: ChatMessagePayload) {
+  function showGenerationFailure(state: State, generation: Generation, message: string, response: Record<string, unknown>, error?: unknown, detail?: GenerationErrorDetail) {
+    const user = generation.live.find(item => item.role === 'user')
+    const payload: ChatMessagePayload = { worldId: state.world!.worldId!, userWorldId: state.world!.id,
+      characterId: state.characterId, message: user?.content || '' }
+    state.failure = { message, payload, userMessageId: user?.historyId, retry: null,
+      errorIds: [...generation.retryErrorIds, `${generation.requestId}-error`], detail: detail ?? {
+      errorId: '服务端未提供', code: error ? 'CLIENT_REQUEST_FAILED' : '服务端未提供', category: 'CLIENT', message,
+      retryable: false, occurredAt: new Date().toISOString(), operation: 'send-direct-message',
+      request: user ? { method: 'POST', path: '/ai/chat', body: { ...payload, clientRequestId: generation.requestId } }
+        : { method: 'GET', path: `/ai/chat/${state.world!.id}/${state.characterId}/generations/${encodeURIComponent(generation.requestId)}`, after: generation.sequence },
+      response, stack: error instanceof Error ? error.stack || error.message : '服务端未返回堆栈信息。',
+    } }
+    // Only a server-reported failure opens actions; transport errors keep recovery state.
+    state.failureOpen = response.event != null || error instanceof GenerationStartRejected
+  }
+
+  async function consumeGeneration(state: State, requestId: string, payload?: ChatMessagePayload, retryErrorIds: string[] = []) {
     if (state.loading.sending) return
     const ownEpoch = epoch
-    const generation = state.generation ?? reactive<Generation>({ requestId, sequence: 0, base: [...state.messages], live: [], following: [], assistant: null, thinkingNeedsSeparator: false })
+    const generation = state.generation ?? reactive<Generation>({ requestId, sequence: 0, base: [...state.messages], live: [], following: [], assistant: null, thinkingNeedsSeparator: false,
+      retryErrorIds,
+      historyIds: payload && state.historyReady ? state.messages.flatMap(message => message.historyId == null ? [] : [message.historyId]) : null })
+    state.failure = null; state.failureOpen = false
     state.generation = generation; state.loading.sending = true
     remember(state, requestId)
     if (payload) applyChunk(state, generation, { type: 'generation.started', content: payload.message })
     const controller = new AbortController(); state.controller = controller
     const valid = () => !disposed && ownEpoch === epoch && !controller.signal.aborted && state.generation === generation
-    let terminal = false; let expired = false
+    let terminal = false; let expired = false; let failed = false
     const receive = (chunk: ChatFlux) => {
       if (!valid()) return
       applyChunk(state, generation, chunk)
       terminal ||= ['generation.completed', 'generation.failed', 'generation.expired'].includes(chunk.type)
       expired ||= chunk.type === 'generation.expired'
+      failed ||= chunk.type === 'generation.failed'
     }
     try {
       await followGeneration<ChatFlux>({
@@ -368,20 +473,38 @@ export function useDirectChat(context: DirectChatContext) {
       if (!valid()) return
       if (terminal) {
         remember(state, null); state.generation = null
-        await loadHistory(state)
-        if (expired) {
-          if (ownEpoch === epoch && !disposed) notifyFor(state, '回复续接已失效', '已重新加载历史；若回复未完成，可撤回后重新发送。')
+        if (!failed && !expired) {
+          state.messages = state.messages.filter(message => message.complete !== false || !generation.retryErrorIds.includes(message.id))
         }
-        if (isActive(state)) await context.reloadCharacters()
+        const history = await loadHistory(state, true)
+        if (disposed || ownEpoch !== epoch || controller.signal.aborted) return
+        const userMessage = generation.live.find(message => message.role === 'user')
+        if ((failed || expired) && userMessage && userMessage.historyId == null) {
+          // A missing anchor or failed history read does not prove the send failed.
+          const unsent = history && (history.length === 0 || (generation.historyIds != null
+            && history.every(message => message.id == null || generation.historyIds!.includes(message.id))))
+          if (unsent) chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: userMessage.content })
+        }
+        if (expired) {
+          showGenerationFailure(state, generation, '回复续接已失效，请核对聊天记录后重新发送。', { type: 'generation.expired' })
+          if (ownEpoch === epoch && !disposed) notifyFor(state, '回复续接已失效', history
+            ? '已重新加载历史；未保存的消息已尝试恢复到草稿，请核对后重试。'
+            : '历史加载失败，请重新进入此单聊核对记录后重试。')
+        }
+        if (context.world.value?.id === state.world?.id) await context.reloadCharacters()
       }
     } catch (error) {
       if (valid()) {
         if (payload && error instanceof GenerationStartRejected) {
+          chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: payload.message })
           remember(state, null); state.generation = null
-          state.messages = generation.base
-          if (isActive(state) && !input.value) input.value = payload.message
-          notifyFor(state, '单聊消息发送失败', errorMessage(error))
-        } else notifyFor(state, '单聊连接中断', `${errorMessage(error)}。重新进入此单聊可继续恢复。`)
+          state.messages = [...generation.base, ...generation.following]
+          showGenerationFailure(state, generation, errorMessage(error), { message: errorMessage(error) }, error)
+          state.failure!.retry = 'send'; state.failure!.detail.retryable = true
+        } else {
+          showGenerationFailure(state, generation, `${errorMessage(error)}。重新进入此单聊可继续恢复。`, { message: errorMessage(error) }, error)
+          notifyFor(state, '回复连接中断', '重新进入此单聊可继续恢复。')
+        }
       }
     } finally {
       if (ownEpoch === epoch && !disposed && state.controller === controller) {
@@ -394,42 +517,83 @@ export function useDirectChat(context: DirectChatContext) {
   async function send() {
     const state = active.value
     const content = input.value.trim(); const data = payload()
-    if (!content || !data || state.loading.sending || state.loading.history || state.loading.withdrawing) return
+    if (!content || !data || state.loading.sending || state.loading.history || state.loading.withdrawing || state.loading.model || context.settingsSaving?.value) return
     const requestId = state.generation?.requestId || pending(state)
     if (requestId) { await consumeGeneration(state, requestId); return }
-    ignoreInputWatch = true; input.value = ''
-    if (state.world?.thinkStatus !== false) {
-      await consumeGeneration(state, crypto.randomUUID?.() || `web-${Date.now()}-${Math.random().toString(36).slice(2)}`, { ...data, message: content })
-      return
-    }
-    const ownEpoch = epoch
-    state.messages.push({ id: `user-${Date.now()}`, role: 'user', content, time: '刚刚' }); state.loading.sending = true
-    try {
-      const current = await ensureSocket(data.userWorldId)
-      if (disposed || ownEpoch !== epoch) return
-      current.send(JSON.stringify({ ...data, type: 'fragment', message: `${content}\n` }))
-      current.send(JSON.stringify({ ...data, type: 'typing', message: '', isTyping: false }))
-      lastTypingKey = null
-    } catch (error) {
-      if (ownEpoch === epoch && !disposed) {
-        state.messages.push({ id: `error-${Date.now()}`, role: 'assistant', content: '发送失败，请稍后再试。', complete: false })
-        notifyFor(state, '单聊消息发送失败', errorMessage(error))
-      }
-    } finally { state.loading.sending = false; if (isActive(state)) await scrollToBottom() }
+    input.value = ''
+    await consumeGeneration(state, newRequestId(), { ...data, message: content })
   }
   async function withdraw() {
     const state = active.value
-    if (!state.world || !canWithdraw.value || state.generation) return
+    const expectedMessageId = withdrawalTarget.value?.historyId
+    if (!state.world || !canWithdraw.value || state.generation || expectedMessageId == null) return
+    await withdrawTarget(state, expectedMessageId)
+  }
+  async function withdrawTarget(state: State, expectedMessageId: number, forRetry = false) {
     const ownEpoch = epoch
+    const withdrawnText = state.messages.find(message => message.historyId === expectedMessageId && message.role === 'user')?.content
+    const failure = state.failure
+    state.failureOpen = false
+    if (forRetry && failure?.userMessageId === expectedMessageId && failure.recovery) {
+      failure.recovery.withdrawalRequested = true
+    }
     state.loading.withdrawing = true
+    carePolling.pause()
     try {
-      await api.withdrawMessage(state.world.id, state.characterId)
+      state.historyReady = false
+      await api.withdrawMessage(state.world!.id, state.characterId, expectedMessageId)
       if (disposed || ownEpoch !== epoch) return
-      state.messages = state.messages.filter(message => message.complete !== false)
-      await loadHistory(state)
-      if (isActive(state)) { await context.reloadCharacters(); notify('已撤回上一轮消息', '', 'success') }
-    } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '撤回失败', errorMessage(error)) }
-    finally { state.loading.withdrawing = false }
+      if (!forRetry && withdrawnText) chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: withdrawnText })
+      if (state.failure?.userMessageId === expectedMessageId) {
+        if (forRetry) {
+          prepareFailureResend(state, state.failure)
+        } else { state.failure = null; state.failureOpen = false }
+      }
+      state.messages = state.messages.filter(message => (message.complete !== false
+        || (forRetry && !failure?.errorIds.includes(message.id)))
+        && message.historyId !== expectedMessageId && message.userMessageId !== expectedMessageId)
+      const characterRefresh = context.world.value?.id === state.world?.id
+        ? context.reloadCharacters().catch(error => notifyFor(state, '消息已撤回，角色数据刷新失败', errorMessage(error)))
+        : Promise.resolve()
+      const history = await loadHistory(state)
+      await characterRefresh
+      if (disposed || ownEpoch !== epoch) return
+      if (!history) {
+        notifyFor(state, '消息已撤回，历史刷新失败', forRetry
+          ? '请重新进入此单聊加载记录，再重试回复。'
+          : '请重新进入此单聊加载记录，再继续撤回。')
+        return
+      }
+      return true
+    } catch (error) {
+      if (ownEpoch === epoch && !disposed) {
+        // A stale target or a lost HTTP response requires authoritative history before retrying.
+        const history = await loadHistory(state)
+        if (history && ownEpoch === epoch && !disposed && forRetry
+          && state.failure === failure && failure?.retry === 'send') return true
+        if ((error instanceof TypeError || error instanceof SyntaxError)
+          && history && ownEpoch === epoch && !disposed && !forRetry
+          && historyConfirmsWithdrawal(history, expectedMessageId)) {
+          if (withdrawnText) chatDrafts.restoreIfEmpty(`world:${state.world!.id}:direct:${state.characterId}`, { input: withdrawnText })
+          if (state.failure?.userMessageId === expectedMessageId) state.failure = null
+          if (context.world.value?.id === state.world?.id) {
+            await context.reloadCharacters().catch(error => notifyFor(state, '角色数据刷新失败', errorMessage(error)))
+          }
+          return true
+        }
+        if (ownEpoch === epoch && !disposed) notifyFor(state, '撤回失败', errorMessage(error))
+      }
+    }
+    finally { state.loading.withdrawing = false; carePolling.resume() }
+  }
+
+  async function retryGenerationFailure() {
+    const state = active.value; const failure = state.failure; const ownEpoch = epoch
+    if (!failure || !canRetryGenerationFailure.value) return
+    if (failure.retry === 'withdraw' && !await withdrawTarget(state, failure.userMessageId!, true)) return
+    if (disposed || ownEpoch !== epoch || !isActive(state) || state.failure !== failure || context.settingsSaving?.value || state.loading.model) return
+    if (input.value === failure.payload.message) input.value = ''
+    await consumeGeneration(state, newRequestId(), { ...failure.payload }, failure.errorIds)
   }
 
   async function selectModel(modelApiId?: number) {
@@ -438,14 +602,18 @@ export function useDirectChat(context: DirectChatContext) {
     const ownEpoch = epoch
     state.loading.model = true
     try {
-      const runtime = await api.updateCharacterModel(state.world.id, state.characterId, modelApiId)
-      if (disposed || ownEpoch !== epoch) return
-      character.modelApiId = runtime.modelApiId
+      const valid = () => !disposed && ownEpoch === epoch && !state.invalidated
+      const runtime = await context.saveCharacterModel(state.world.id, state.characterId, modelApiId, valid)
+      if (!valid() || !runtime) return
       if (isActive(state)) notify('回复模型已更新', runtime.modelApiName || '已恢复默认模型', 'success')
     } catch (error) { if (ownEpoch === epoch && !disposed) notifyFor(state, '回复模型更新失败', errorMessage(error)) }
     finally { state.loading.model = false }
   }
 
-  onUnmounted(() => { disposed = true; disposeConnections() })
-  return { selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, selectCharacter, selectModel, loadEarlier, close, clearDrafts, invalidateWorld, send, withdraw, focus, setComposing }
+  onUnmounted(() => {
+    disposed = true; disposeConnections()
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', carePolling.visibilityChanged)
+    if (typeof window !== 'undefined') window.removeEventListener?.('focus', carePolling.refresh)
+  })
+  return { refreshModelApis, selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, generationFailure, generationFailureOpen, canRetryGenerationFailure, retryGenerationFailure, selectCharacter, selectModel, loadEarlier, close, clearDrafts, invalidateWorld, send, withdraw }
 }

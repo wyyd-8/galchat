@@ -33,13 +33,15 @@ const scroller = defineModel<HTMLElement | null>('scroller', { required: true })
 const autoAdvance = defineModel<boolean>('autoAdvance', { default: false })
 const directionEnabled = defineModel<boolean>('directionEnabled', { default: false })
 const investigatorDirection = defineModel<string>('investigatorDirection', { default: '' })
-const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; actorRuntimes?: GroupActorRuntime[]; modelApis?: ModelApi[]; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; loading: boolean; hasOlderMessages: boolean; completionBusy?: boolean; completionError?: string; persistActorRuntime?: (payload: GroupActorRuntimeSavePayload) => Promise<GroupActorRuntime | undefined> }>(), {
+const props = withDefaults(defineProps<{ conversation: Conversation; username: string; messages: GroupMessage[]; reasoning: Record<number, string>; characters: Character[]; replyPlan: ReplyPlan; replyPlans: ReplyPlan[]; availableCharacters: Character[]; currentTurn: CurrentTurn | null; actorRuntimes?: GroupActorRuntime[]; modelApis?: ModelApi[]; combatOverview?: TrpgCombatParticipantOverview[]; investigatorCards?: InvestigatorCardSummary[]; replyTurnState: ReplyTurnState | null; sending: boolean; withdrawing?: boolean; loading: boolean; hasOlderMessages: boolean; conversationReady?: boolean; savingReplyPlan?: boolean; savingActorKeys?: string[]; completionBusy?: boolean; completionError?: string; persistActorRuntime?: (payload: GroupActorRuntimeSavePayload) => Promise<GroupActorRuntime | undefined> }>(), {
+  conversationReady: true,
+  savingActorKeys: () => [],
   actorRuntimes: () => [],
   modelApis: () => [],
   combatOverview: () => [],
   investigatorCards: () => [],
 })
-const emit = defineEmits<{ back: []; openCompletion: []; generateCompletion: []; skipCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: []; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
+const emit = defineEmits<{ back: []; openCompletion: []; generateCompletion: []; skipCompletion: []; savePlan: []; movePlanItem: [from: number, to: number]; deletePlanItem: [index: number]; addPlanItem: [id: number]; saveActorRuntime: [payload: GroupActorRuntimeSavePayload]; loadEarlier: []; withdraw: []; openTools: [tool?: 'dice']; openCharacterCard: [cardId: number]; openDice: [aggregate: DiceRollAggregate]; send: []; askKp: []; startTurn: [investigatorDirection?: string]; retryGroupTurn: []; selectScene: [optionNo: string]; endExploration: []; correctTime: [dayNo: number, period: TrpgGameTimePeriod]; end: [] }>()
 const { isMobile } = useMobileViewport()
 const panelOpen = ref(false)
 const modelActor = ref<TrpgExecutionActor | null>(null)
@@ -117,7 +119,9 @@ const sceneProposalRole = computed(() => props.currentTurn?.waitingForUser && pr
   ? (props.currentTurn.itemOrder === 1 ? 'lead' : 'contributor')
   : null)
 const canEditPlan = computed(() => props.conversation.mode === 'chat' && props.replyPlan.source === 'USER')
-const planLocked = computed(() => props.sending || props.conversation.status !== 'active')
+const canRetryGroupTurn = computed(() => props.conversation.mode === 'chat'
+  && props.conversation.status === 'active' && props.currentTurn?.status === 'failed')
+const planLocked = computed(() => !props.conversationReady || props.savingReplyPlan || props.loading || props.sending || props.conversation.status !== 'active')
 const showSavePlan = computed(() => shouldShowSavePlan(canEditPlan.value, loadedPlanSignature.value, items.value))
 const replyTurnPhaseLabels = { starting: '准备回复', running: '回复进行中', completed: '本轮已完成', failed: '本轮失败' } as const
 const replyActorPhaseLabels: Record<ReplyActorPhase, string> = { waiting: '等待中', replying: '回复中', completed: '已完成', failed: '失败' }
@@ -227,7 +231,11 @@ function actorModelValue(item: ReplyPlanItem) {
   const runtime = actorRuntime(item)
   return runtime?.modelApiAvailable && runtime.modelApiId != null ? String(runtime.modelApiId) : ''
 }
+function actorRuntimeSaving(item: ReplyPlanItem) {
+  return props.savingActorKeys.includes(`${item.actorType}:${item.actorId ?? ''}`)
+}
 function selectActorModel(item: ReplyPlanItem, event: Event) {
+  if (planLocked.value || actorRuntimeSaving(item)) return
   if (item.actorType !== 'character' || item.actorId == null) return
   const value = (event.target as HTMLSelectElement).value
   emit('saveActorRuntime', {
@@ -264,7 +272,7 @@ function selectComposerIntent(intent: TrpgComposerIntent) {
   composerIntent.value = intent
 }
 function submitComposer() {
-  if (!composerValue.value.trim() || props.sending || props.conversation.status !== 'active' || !waitingForMessage.value) return
+  if (!composerValue.value.trim() || props.sending || props.withdrawing || props.conversation.status !== 'active' || !waitingForMessage.value) return
   if (effectiveComposerIntent.value === 'inquiry') emit('askKp')
   else emit('send')
 }
@@ -374,7 +382,7 @@ function handleReasoningScroll(event: Event) {
       <span class="mobile-execution-arrow" aria-hidden="true">›</span>
     </button>
 
-    <BaseDialog v-model="moreOpen" title="会话操作" mobile-presentation="sheet" content-class="mobile-chat-menu"><button v-if="conversation.mode === 'chat'" class="mobile-chat-row" :disabled="sending || conversation.status !== 'active'" @click="moreOpen = false; withdrawOpen = true"><span><strong>撤回上一轮</strong></span><RotateCcw :size="18" /></button><button class="mobile-chat-row" :disabled="loading || !hasOlderMessages" @click="moreOpen = false; emit('loadEarlier')"><span><strong>加载更早记录</strong></span><History :size="18" /></button><p class="mobile-chat-status">{{ conversation.status === 'active' ? '会话进行中' : '会话已结束' }}</p><button class="button secondary" @click="moreOpen = false; panelOpen = true"><UsersRound :size="18" />{{ conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序' }}</button><button v-if="conversation.mode === 'trpg'" class="button secondary" @click="moreOpen = false; emit('openTools')"><Archive :size="18" />跑团工具</button><button class="button ghost" :disabled="sending || (conversation.mode === 'trpg' && !!currentTurn && !['completed', 'failed', 'blocked', 'cancelled'].includes(currentTurn.status))" @click="moreOpen = false; emit('end')"><CircleStop :size="18" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></BaseDialog>
+    <BaseDialog v-model="moreOpen" title="会话操作" mobile-presentation="sheet" content-class="mobile-chat-menu"><button v-if="conversation.mode === 'chat'" class="mobile-chat-row" :disabled="sending || withdrawing || conversation.status !== 'active'" @click="moreOpen = false; withdrawOpen = true"><span><strong>撤回上一轮</strong></span><RotateCcw :size="18" /></button><button class="mobile-chat-row" :disabled="loading || !hasOlderMessages" @click="moreOpen = false; emit('loadEarlier')"><span><strong>加载更早记录</strong></span><History :size="18" /></button><p class="mobile-chat-status">{{ conversation.status === 'active' ? '会话进行中' : '会话已结束' }}</p><button class="button secondary" @click="moreOpen = false; panelOpen = true"><UsersRound :size="18" />{{ conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序' }}</button><button v-if="conversation.mode === 'trpg'" class="button secondary" @click="moreOpen = false; emit('openTools')"><Archive :size="18" />跑团工具</button><button class="button ghost" :disabled="sending || (conversation.mode === 'trpg' && !!currentTurn && !['completed', 'failed', 'blocked', 'cancelled'].includes(currentTurn.status))" @click="moreOpen = false; emit('end')"><CircleStop :size="18" />{{ conversation.status === 'active' ? (conversation.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作' }}</button></BaseDialog>
     <div class="chat-layout">
       <section class="chat-main">
         <div class="message-scroll"><div :ref="bindScroller" class="message-viewport" @scroll="handleScroll"><div>
@@ -430,7 +438,7 @@ function handleReasoningScroll(event: Event) {
           </span>
           <span class="clarification-prompt-status"><i />等待回复</span>
         </div>
-        <div v-if="isMobile && conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'dice'" class="mobile-pending-dice" role="status"><span>等待掷骰检定</span><button class="button secondary" @click="emit('openTools')">前往掷骰</button></div>
+        <div v-if="isMobile && conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'dice'" class="mobile-pending-dice" role="status"><span>等待掷骰检定</span><button class="button secondary" @click="emit('openTools', 'dice')">前往掷骰</button></div>
         <div v-if="!isMobile || conversation.status === 'active' || completionPending" class="composer" :class="{ disabled: conversation.status !== 'active', 'has-intent-toggle': canAskKp, 'has-withdraw': conversation.mode === 'chat', 'has-turn-experiments': betweenTrpgTurns }">
           <div v-if="betweenTrpgTurns && autoAdvance" class="turn-auto-advance-actions">
             <button class="button secondary turn-auto-advance-start" :disabled="sending" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ autoStartLabel }}</button>
@@ -441,7 +449,7 @@ function handleReasoningScroll(event: Event) {
             <button class="button ghost" :disabled="skipSummaryDisabled" title="保留现有记录，跳过人物后传与完成报告" @click="emit('skipCompletion')"><CircleStop :size="17" />直接结束跑团</button>
           </div>
           <button v-else-if="completionAvailable" class="button secondary turn-start-button" @click="emit('openCompletion')">翻阅完成记录</button>
-          <button v-else-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" title="开始下一轮，由参与者依次行动" :disabled="sending || conversation.status !== 'active'" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
+          <button v-else-if="conversation.mode === 'trpg' && !currentTurn?.waitingForUser" class="button secondary turn-start-button" title="开始下一轮，由参与者依次行动" :disabled="sending || withdrawing || conversation.status !== 'active'" @click="requestTurnStart"><LoaderCircle v-if="sending" class="spin" :size="17" /><Play v-else :size="17" />{{ turnButtonLabel }}</button>
           <button v-if="isMobile && betweenTrpgTurns && !autoAdvance" class="icon-button turn-experiment-settings" aria-label="行动轮设置" @click="turnSettingsOpen = true"><Settings2 :size="20" /></button><PopoverRoot v-if="!isMobile && betweenTrpgTurns && !autoAdvance">
             <PopoverTrigger as-child><button class="icon-button bordered turn-experiment-settings" type="button" title="行动轮设置" aria-label="行动轮设置"><Settings2 :size="17" /></button></PopoverTrigger>
             <PopoverPortal><PopoverContent class="turn-experiment-popover" side="top" align="end" :side-offset="10">
@@ -465,7 +473,7 @@ function handleReasoningScroll(event: Event) {
               <p>设置只在当前页面生效；刷新后重置，不写入存档或重试。</p>
             </PopoverContent></PopoverPortal>
           </PopoverRoot>
-          <button v-if="!isMobile && conversation.mode === 'chat'" class="icon-button withdraw-button" :disabled="sending || conversation.status !== 'active'" title="撤回上一轮" aria-label="撤回上一轮" @click="emit('withdraw')"><RotateCcw :size="17" /></button>
+          <button v-if="!isMobile && conversation.mode === 'chat'" class="icon-button withdraw-button" :disabled="sending || withdrawing || conversation.status !== 'active'" title="撤回上一轮" aria-label="撤回上一轮" @click="emit('withdraw')"><RotateCcw :size="17" /></button>
           <div v-if="isMobile && canAskKp" class="composer-intent-toggle" role="group" aria-label="选择发言方式"><button :class="{ active: composerIntent === 'action' }" :aria-pressed="composerIntent === 'action'" :disabled="sending" @click="selectComposerIntent('action')">行动</button><button :class="{ active: composerIntent === 'inquiry' }" :aria-pressed="composerIntent === 'inquiry'" :disabled="sending" @click="selectComposerIntent('inquiry')">询问 KP</button></div>
           <TooltipProvider v-if="!isMobile && canAskKp">
             <div class="composer-intent-toggle" role="group" aria-label="选择发言方式">
@@ -483,17 +491,18 @@ function handleReasoningScroll(event: Event) {
           <textarea ref="inputElement" v-if="conversation.mode !== 'trpg' || currentTurn?.waitingForUser" v-model="composerValue" :maxlength="effectiveComposerIntent === 'inquiry' ? 200 : undefined" :disabled="conversation.status !== 'active' || sending || !waitingForMessage" rows="1" :placeholder="composerPlaceholder" aria-label="会话消息" @input="resizeInput" @compositionstart="composing = true" @compositionend="composing = false" @keydown="keydown" />
           <div v-if="conversation.mode !== 'trpg' || waitingForMessage" class="composer-actions">
             <button v-if="!isMobile && effectiveComposerIntent === 'action' && conversation.mode === 'trpg' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType !== 'trpg_interaction_response' && replyPlan.source === 'SCENE'" class="button ghost" :disabled="sending" @click="emit('endExploration')"><Footprints :size="17" />结束探索</button>
-            <TooltipProvider><TooltipRoot><TooltipTrigger as-child><button class="send-button" :aria-label="effectiveComposerIntent === 'inquiry' ? '询问 KP' : '发送消息'" :disabled="!composerValue.trim() || sending || conversation.status !== 'active' || !waitingForMessage" @click="submitComposer"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">{{ isMobile ? '点击发送 · 回车换行' : effectiveComposerIntent === 'inquiry' ? 'Enter 询问 KP · Shift+Enter 换行' : 'Enter 发送 · Shift+Enter 换行' }}</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider>
+            <TooltipProvider><TooltipRoot><TooltipTrigger as-child><button class="send-button" :aria-label="effectiveComposerIntent === 'inquiry' ? '询问 KP' : '发送消息'" :disabled="!composerValue.trim() || sending || withdrawing || conversation.status !== 'active' || !waitingForMessage" @click="submitComposer"><LoaderCircle v-if="sending" class="spin" :size="19" /><Send v-else :size="19" /></button></TooltipTrigger><TooltipPortal><TooltipContent class="tooltip" :side-offset="8">{{ isMobile ? '点击发送 · 回车换行' : effectiveComposerIntent === 'inquiry' ? 'Enter 询问 KP · Shift+Enter 换行' : 'Enter 发送 · Shift+Enter 换行' }}</TooltipContent></TooltipPortal></TooltipRoot></TooltipProvider>
           </div>
         </div>
-        <div v-if="isMobile && conversation.status !== 'active' && !completionPending" class="mobile-closed-chat-footer"><button v-if="completionAvailable" class="button secondary" @click="emit('openCompletion')">翻阅完成记录</button><button class="button primary" @click="emit('back')">返回当前世界</button></div>
+        <div v-if="isMobile && conversation.status !== 'active' && !completionPending" class="mobile-closed-chat-footer"><button class="button secondary" @click="moreOpen = true">会话操作</button><button v-if="completionAvailable" class="button secondary" @click="emit('openCompletion')">翻阅完成记录</button><button class="button primary" @click="emit('back')">返回当前世界</button></div>
         <p v-if="completionPending && completionError" class="turn-completion-error" role="alert">{{ completionError }}</p>
       </section>
       <component v-if="!isMobile" :is="'div'" v-model="panelOpen" :title="conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序'" mobile-presentation="page" content-class="mobile-chat-panel" :class="{ 'chat-side-host': !isMobile }"><ChatReplyPanel v-if="conversation.mode === 'chat'" :key="conversation.id"
         :items="items" :characters="characters" :username="username" :available-characters="availableCharacters"
         :actor-runtimes="actorRuntimes" :model-apis="modelApis" :messages="messages" :turn-state="replyTurnState"
-        :can-edit="canEditPlan" :locked="planLocked || loading" :sending="sending" :loading="loading"
-        :closed="conversation.status !== 'active'" :dirty="showSavePlan"
+        :saving-actor-keys="savingActorKeys" :can-edit="canEditPlan" :locked="planLocked || loading" :sending="sending" :loading="loading"
+        :closed="conversation.status !== 'active'" :dirty="showSavePlan" :can-retry="canRetryGroupTurn"
+        @retry="emit('retryGroupTurn')"
         @save="emit('savePlan')" @move="(from, to) => emit('movePlanItem', from, to)"
         @remove="emit('deletePlanItem', $event)" @add="emit('addPlanItem', $event)"
         @save-model="emit('saveActorRuntime', $event)" />
@@ -510,7 +519,7 @@ function handleReasoningScroll(event: Event) {
         </section>
         <div class="reply-panel-title"><span><UsersRound :size="18" /><strong>{{ planTitle }}</strong></span><button class="icon-button subtle" @click="planOpen = !planOpen"><ChevronDown :size="17" :class="{ rotated: !planOpen }" /></button></div>
         <p>{{ planDescription }}</p>
-        <div v-show="planOpen" class="reply-plan-list">
+        <div v-if="planOpen" class="reply-plan-list">
           <template v-if="conversation.mode === 'trpg'">
             <section v-for="scene in trpgExecution.scenes" :key="scene.plan.id" class="trpg-execution-scene" :class="[scene.kind, scene.status]">
               <header class="trpg-scene-header">
@@ -547,12 +556,12 @@ function handleReasoningScroll(event: Event) {
     </BaseDialog>
     <BaseDialog v-if="isMobile" v-model="panelOpen" :title="conversation.mode === 'trpg' ? '场景与队伍' : '回复顺序'" mobile-presentation="page" content-class="mobile-chat-panel mobile-reply-page">
       <template v-if="conversation.mode === 'chat'">
-        <p v-if="planLocked" class="mobile-chat-notice">{{ sending ? '当前轮正在生成，顺序暂不可编辑。' : '会话已经结束，顺序不可编辑。' }}</p>
-        <section v-if="replyTurnState" class="mobile-current-replies"><h3>当前回复状态</h3><div v-for="actor in replyTurnActors" :key="`${actor.item.actorType}:${actor.item.actorId}`" class="mobile-chat-row"><span class="mobile-chat-avatar" :style="planCharacter(actor.item)?.characterImage ? {backgroundImage: `url(${planCharacter(actor.item)?.characterImage})`} : {}">{{ planCharacter(actor.item)?.characterImage ? '' : planActorName(actor.item).slice(0, 1) }}</span><span><strong>{{ planActorName(actor.item) }}</strong><small>{{ replyActorPhaseLabels[actor.phase] }}</small></span><span>{{ actor.phase === 'completed' ? '✓' : actor.phase === 'replying' ? '•••' : actor.phase === 'failed' ? '失败' : '等待' }}</span></div><p v-if="replyTurnState.error" class="mobile-chat-error">{{ replyTurnState.error }}</p></section>
+        <p v-if="planLocked" class="mobile-chat-notice">{{ sending ? '当前轮正在生成，顺序暂不可编辑。' : savingReplyPlan ? '正在保存顺序，请稍候。' : loading ? '正在加载会话，顺序暂不可编辑。' : !conversationReady ? '会话加载失败，请重新进入后编辑顺序。' : '会话已经结束，顺序不可编辑。' }}</p>
+        <section v-if="replyTurnState || canRetryGroupTurn" class="mobile-current-replies"><h3>当前回复状态</h3><div v-for="actor in replyTurnActors" :key="`${actor.item.actorType}:${actor.item.actorId}`" class="mobile-chat-row"><span class="mobile-chat-avatar" :style="planCharacter(actor.item)?.characterImage ? {backgroundImage: `url(${planCharacter(actor.item)?.characterImage})`} : {}">{{ planCharacter(actor.item)?.characterImage ? '' : planActorName(actor.item).slice(0, 1) }}</span><span><strong>{{ planActorName(actor.item) }}</strong><small>{{ replyActorPhaseLabels[actor.phase] }}</small></span><span>{{ actor.phase === 'completed' ? '✓' : actor.phase === 'replying' ? '•••' : actor.phase === 'failed' ? '失败' : '等待' }}</span></div><p v-if="replyTurnState?.error" class="mobile-chat-error">{{ replyTurnState.error }}</p><button v-if="canRetryGroupTurn" class="button secondary" :disabled="sending" @click="panelOpen = false; emit('retryGroupTurn')">重试本轮回复</button></section>
         <h3>下一轮回复顺序</h3>
         <div class="mobile-chat-card mobile-order-card"><div v-for="(item, index) in items" :key="`${item.actorType}:${item.actorId}`" class="mobile-order-item"><button class="mobile-order-name" :class="{ selected: mobileSelectedActor === item }" @click="selectedReplyActor = `${item.actorType}:${item.actorId}`"><small>{{ String(index + 1).padStart(2, '0') }}</small>{{ planActorName(item) }}</button><button v-if="canEditPlan" class="button secondary" :disabled="planLocked || index === 0" :aria-label="`上移${planActorName(item)}`" @click="emit('movePlanItem', index, index - 1)">上移</button><button v-if="canEditPlan" class="button secondary" :disabled="planLocked || index === items.length - 1" :aria-label="`下移${planActorName(item)}`" @click="emit('movePlanItem', index, index + 1)">下移</button></div><p v-if="!items.length" class="mobile-chat-muted">暂无回复角色</p></div>
         <template v-if="canEditPlan"><label class="field"><span>添加参与角色</span><select v-model="addActorId" :disabled="planLocked || !availableCharacters.length"><option value="">{{ availableCharacters.length ? '选择角色' : '没有可添加角色' }}</option><option v-for="actor in availableCharacters" :key="actor.characterId" :value="String(actor.characterId)">{{ actor.characterName }}</option></select></label><button class="button secondary" :disabled="planLocked || !addActorId" @click="addActor"><Plus :size="17" />添加到回复列表</button></template>
-        <label v-if="mobileSelectedActor" class="field"><span>{{ planActorName(mobileSelectedActor) }}的回复模型</span><select :value="actorModelValue(mobileSelectedActor)" :disabled="planLocked" @change="selectActorModel(mobileSelectedActor, $event)"><option value="">默认模型</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select><small>点选上方角色，可以分别设置回复模型。</small></label>
+        <label v-if="mobileSelectedActor" class="field"><span>{{ planActorName(mobileSelectedActor) }}的回复模型</span><select :value="actorModelValue(mobileSelectedActor)" :disabled="planLocked || actorRuntimeSaving(mobileSelectedActor)" @change="selectActorModel(mobileSelectedActor, $event)"><option value="">默认模型</option><option v-for="model in modelApis" :key="model.id" :value="String(model.id)">{{ model.name }}</option></select><small>{{ actorRuntimeSaving(mobileSelectedActor) ? '正在保存模型，请稍候。' : '点选上方角色，可以分别设置回复模型。' }}</small></label>
         <button v-if="canEditPlan && mobileSelectedActor" class="mobile-chat-row mobile-chat-danger" :disabled="planLocked" @click="emit('deletePlanItem', items.indexOf(mobileSelectedActor))"><span><strong>移除 {{ planActorName(mobileSelectedActor) }}</strong><small>保存顺序后生效</small></span><Trash2 :size="18" /></button>
       </template>
       <div v-else class="mobile-scene-page">
@@ -562,7 +571,7 @@ function handleReasoningScroll(event: Event) {
           <button class="mobile-time-link" :aria-expanded="timeEditing" @click="timeEditing = !timeEditing; timeEditing && beginTimeEdit()"><Clock3 :size="14" /><span>{{ conversation.gameTime?.displayText || '游戏时间尚未设定' }}</span><ChevronDown :size="14" /></button>
           <p class="mobile-scene-status" role="status"><CircleDot :size="14" />{{ mobileSceneStatus }}</p>
         </section>
-        <section v-if="timeEditing" class="mobile-chat-card"><h3>校正游戏时间</h3><p v-if="currentTurn" class="mobile-chat-muted">行动轮进行中，暂不能校正游戏时间。</p><template v-else-if="conversation.gameTime"><label class="field"><span>第几天</span><input v-model.number="timeForm.dayNo" min="1" step="1" type="number" /></label><label class="field"><span>时段</span><select v-model="timeForm.period"><option v-for="period in timePeriods" :key="period.value" :value="period.value">{{ period.label }}</option></select></label><button class="button primary" :disabled="sending || conversation.status !== 'active' || !Number.isInteger(timeForm.dayNo) || timeForm.dayNo <= 0" @click="submitTime">确认校时</button></template><p v-else class="mobile-chat-muted">由 KP 在首次选景时初始化。</p></section>
+        <section v-if="timeEditing" class="mobile-chat-card"><h3>校正游戏时间</h3><p v-if="currentTurn" class="mobile-chat-muted">行动轮进行中，暂不能校正游戏时间。</p><template v-else-if="conversation.gameTime"><label class="field"><span>第几天</span><input v-model.number="timeForm.dayNo" min="1" step="1" type="number" /></label><label class="field"><span>时段</span><select v-model="timeForm.period"><option v-for="period in timePeriods" :key="period.value" :value="period.value">{{ period.label }}</option></select></label><button class="button primary" :disabled="sending || withdrawing || conversation.status !== 'active' || !Number.isInteger(timeForm.dayNo) || timeForm.dayNo <= 0" @click="submitTime">确认校时</button></template><p v-else class="mobile-chat-muted">由 KP 在首次选景时初始化。</p></section>
         <div class="mobile-scene-section-title"><h3>行动顺序</h3><span>点按角色查看状态</span></div>
         <section v-for="scene in mobileScenes" :key="scene.plan.id" class="mobile-scene-roster">
           <header><strong>{{ scene.plan.displayName }}</strong><small :class="{ current: scene.status === 'current' }">{{ scene.status === 'current' ? '当前进行' : scene.status === 'waiting-child' ? '暂时挂起' : '等待进入' }}</small></header>
@@ -578,10 +587,10 @@ function handleReasoningScroll(event: Event) {
         <button v-if="effectiveComposerIntent === 'action' && currentTurn?.waitingForUser && currentTurn.inputType === 'message' && currentTurn.actionType !== 'trpg_interaction_response' && replyPlan.source === 'SCENE'" class="mobile-chat-row" :disabled="sending" @click="panelOpen = false; emit('endExploration')"><span><strong>结束当前探索</strong></span><Footprints :size="18" /></button>
         </div>
       </div>
-      <template v-if="conversation.mode === 'chat'" #footer><button class="button primary" :disabled="canEditPlan && (!showSavePlan || !items.length || planLocked)" @click="canEditPlan ? emit('savePlan') : panelOpen = false">{{ canEditPlan ? '保存顺序' : '返回群聊' }}</button></template>
+      <template v-if="conversation.mode === 'chat'" #footer><button class="button primary" :disabled="canEditPlan && (!showSavePlan || !items.length || planLocked)" @click="canEditPlan ? emit('savePlan') : panelOpen = false">{{ canEditPlan ? (savingReplyPlan ? '正在保存…' : '保存顺序') : '返回群聊' }}</button></template>
     </BaseDialog>
     <MobileActorModelDialog v-if="isMobile && modelActor && persistActorRuntime" v-model="modelDialogOpen" :actor="modelActor" :actor-runtimes="actorRuntimes" :model-apis="modelApis" :locked="sending || loading || conversation.status !== 'active'" :save-runtime="persistActorRuntime" />
-    <BaseDialog v-if="isMobile" v-model="withdrawOpen" title="撤回上一轮" mobile-presentation="page" content-class="mobile-chat-confirm"><p class="mobile-chat-notice mobile-withdraw-notice">撤回会删除上一轮用户消息及其触发的角色回复。</p><h3>当前操作范围</h3><p class="mobile-chat-muted">{{ conversation.title }} · 上一轮对话</p><template #footer><button class="button secondary" @click="withdrawOpen = false">取消</button><button class="button danger" :disabled="sending || conversation.status !== 'active'" @click="withdrawOpen = false; emit('withdraw')">确认撤回</button></template></BaseDialog>
+    <BaseDialog v-if="isMobile" v-model="withdrawOpen" title="撤回上一轮" mobile-presentation="page" content-class="mobile-chat-confirm"><p class="mobile-chat-notice mobile-withdraw-notice">撤回会删除上一轮用户消息及其触发的角色回复。</p><h3>当前操作范围</h3><p class="mobile-chat-muted">{{ conversation.title }} · 上一轮对话</p><template #footer><button class="button secondary" @click="withdrawOpen = false">取消</button><button class="button danger" :disabled="sending || withdrawing || conversation.status !== 'active'" @click="withdrawOpen = false; emit('withdraw')">确认撤回</button></template></BaseDialog>
   </main>
 </template>
 

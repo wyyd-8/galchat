@@ -19,7 +19,6 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.Assert;
@@ -124,7 +123,7 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 查询指定会话窗口内可见的 UserChatHistory 行。
+     * 查询指定会话窗口内可见的 UserChatHistory 行；缺少话题起点时最多取最近 30 条。
      *
      * @param conversationInfo 会话定位信息，start 表示最小历史 id
      * @return 按时间正序排列的历史行
@@ -138,7 +137,8 @@ public class UserChatMemory implements ChatMemory {
                 .and(wrapper -> wrapper.isNull(UserChatHistory::getType)
                         .or()
                         .notIn(UserChatHistory::getType, excludedTypes()))
-                .orderByDesc(UserChatHistory::getId);
+                .orderByDesc(UserChatHistory::getId)
+                .last(conversationInfo.getStart() == null, "limit 30");
         List<UserChatHistory> histories = userChatHistoryMapper.selectList(queryWrapper);
         Collections.reverse(histories);
         return histories;
@@ -185,7 +185,7 @@ public class UserChatMemory implements ChatMemory {
      * @param conversationInfo 会话定位信息
      * @param userMessageId 当前用户消息 id，用于绑定 step/reasoning/tool calls
      * @param messages assistant 消息列表
-     * 调用来源：TopicAwareMessageChatMemoryAdvisor.after 和 saveToolExecution。
+     * 调用来源：TopicAwareMessageChatMemoryAdvisor.after；整轮完成后保存一次。
      */
     public void saveAssistantMessages(ConversationInfo conversationInfo, Long userMessageId, List<Message> messages) {
         if (readOnly || messages == null || messages.isEmpty()) {
@@ -213,12 +213,12 @@ public class UserChatMemory implements ChatMemory {
         }
 
         if (toolCallResponse != null) {
-            List<Message> toolCallMessages = toolCallResponse.getResults()
-                    .stream()
-                    .map(Generation::getOutput)
-                    .map(message -> (Message) message)
-                    .toList();
-            saveAssistantMessages(conversationInfo, userMessageId, toolCallMessages);
+            for (var generation : toolCallResponse.getResults()) {
+                AssistantMessage message = generation.getOutput();
+                if (userChatToolCallMapper != null && hasNewToolCall(userMessageId, message)) {
+                    saveToolCallsIfPresent(userMessageId, nextStepNo(userMessageId), message);
+                }
+            }
         }
         if (toolExecutionResult != null) {
             saveToolResponses(userMessageId, toolExecutionResult.conversationHistory());
@@ -247,7 +247,7 @@ public class UserChatMemory implements ChatMemory {
 
     /**
      * 保存单条 assistant 消息。
-     * 有 userMessageId 时，会把 content/reasoning/tool calls 绑定到同一个 step；
+     * 有 userMessageId 时，把整轮 content/reasoning 绑定到工具步骤之后的同一个 step；
      * 没有 userMessageId 时，仅保存可见 content。
      *
      * @param conversationInfo 会话定位信息
@@ -263,14 +263,10 @@ public class UserChatMemory implements ChatMemory {
         }
 
         if (message instanceof AssistantMessage assistantMessage) {
-            if (userChatToolCallMapper != null && assistantMessage.hasToolCalls() && !hasNewToolCall(assistantMessage)) {
-                return;
-            }
             int stepNo = nextStepNo(userMessageId);
             saveThinkingIfPresent(userMessageId, stepNo, assistantMessage);
-            saveToolCallsIfPresent(userMessageId, stepNo, assistantMessage);
 
-            String visibleContent = trimAssistantVisiblePrefix(userMessageId, message.getText());
+            String visibleContent = message.getText();
             if (StringUtils.hasText(visibleContent)) {
                 userChatHistoryMapper.insert(toVisibleUserChatHistory(conversationInfo, userMessageId, stepNo,
                         message, visibleContent));
@@ -291,7 +287,6 @@ public class UserChatMemory implements ChatMemory {
         }
 
         String reasoningContent = AssistantReasoning.get(assistantMessage);
-        reasoningContent = trimAlreadySavedReasoning(userMessageId, reasoningContent);
         if (!StringUtils.hasText(reasoningContent)) {
             return;
         }
@@ -301,95 +296,6 @@ public class UserChatMemory implements ChatMemory {
                 .setStepNo(stepNo)
                 .setReasoningContent(reasoningContent);
         userChatThinkingHistoryMapper.insert(thinkingHistory);
-    }
-
-    /**
-     * 流式工具调用会先单独保存 tool_call 前的 reasoning，最后的聚合响应又会带上整轮 reasoning。
-     * 保存聚合响应时扣掉已落库的前缀，避免历史查询中重复展示同一段思考。
-     *
-     * @param userMessageId 用户消息 id
-     * @param reasoningContent 当前 assistant 消息携带的 reasoning_content
-     * @return 去掉已保存前缀后的新增 reasoning_content
-     */
-    private String trimAlreadySavedReasoning(Long userMessageId, String reasoningContent) {
-        if (!StringUtils.hasText(reasoningContent) || userMessageId == null || userChatThinkingHistoryMapper == null) {
-            return reasoningContent;
-        }
-
-        String savedReasoning = savedReasoningPrefix(userMessageId);
-        if (!StringUtils.hasText(savedReasoning) || !reasoningContent.startsWith(savedReasoning)) {
-            return reasoningContent;
-        }
-        return reasoningContent.substring(savedReasoning.length()).stripLeading();
-    }
-
-    /**
-     * 按保存顺序拼出当前用户消息下已落库的 reasoning 前缀。
-     *
-     * @param userMessageId 用户消息 id
-     * @return 已保存 reasoning_content 拼接结果
-     */
-    private String savedReasoningPrefix(Long userMessageId) {
-        List<UserChatThinkingHistory> thinkingHistories = userChatThinkingHistoryMapper.selectList(
-                new LambdaQueryWrapper<UserChatThinkingHistory>()
-                        .eq(UserChatThinkingHistory::getUserMessageId, userMessageId)
-                        .orderByAsc(UserChatThinkingHistory::getStepNo)
-                        .orderByAsc(UserChatThinkingHistory::getId));
-        StringBuilder builder = new StringBuilder();
-        for (UserChatThinkingHistory thinkingHistory : thinkingHistories) {
-            String content = thinkingHistory.getReasoningContent();
-            if (content != null) {
-                builder.append(content);
-            }
-        }
-        return builder.toString();
-    }
-
-    /**
-     * 流式工具调用会先单独保存 assistant 可见内容，最后的聚合响应又会带上整轮 assistant 可见内容。
-     * 保存聚合响应时扣掉已落库的前缀，避免历史查询中重复展示同一段回复。
-     *
-     * @param userMessageId 用户消息 id
-     * @param visibleContent assistant 可见文本
-     * @return 去掉已保存 assistant 可见前缀后的新增可见文本
-     */
-    private String trimAssistantVisiblePrefix(Long userMessageId, String visibleContent) {
-        if (!StringUtils.hasText(visibleContent) || userMessageId == null) {
-            return visibleContent;
-        }
-
-        String savedVisibleContent = savedAssistantVisiblePrefix(userMessageId);
-        if (!StringUtils.hasText(savedVisibleContent) || !visibleContent.startsWith(savedVisibleContent)) {
-            return visibleContent;
-        }
-        return visibleContent.substring(savedVisibleContent.length()).stripLeading();
-    }
-
-    /**
-     * 按保存顺序拼出当前用户消息下已落库的 assistant 可见内容前缀。
-     *
-     * @param userMessageId 用户消息 id
-     * @return 已保存 assistant 可见内容拼接结果
-     */
-    private String savedAssistantVisiblePrefix(Long userMessageId) {
-        List<UserChatHistory> assistantHistories = userChatHistoryMapper.selectList(
-                new LambdaQueryWrapper<UserChatHistory>()
-                        .eq(UserChatHistory::getUserMessageId, userMessageId)
-                        .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
-                        .orderByAsc(UserChatHistory::getStepNo)
-                        .orderByAsc(UserChatHistory::getId));
-        if (assistantHistories == null || assistantHistories.isEmpty()) {
-            return "";
-        }
-
-        StringBuilder builder = new StringBuilder();
-        for (UserChatHistory assistantHistory : assistantHistories) {
-            String content = assistantHistory.getContent();
-            if (content != null) {
-                builder.append(content);
-            }
-        }
-        return builder.toString();
     }
 
     /**
@@ -405,7 +311,7 @@ public class UserChatMemory implements ChatMemory {
         }
 
         for (AssistantMessage.ToolCall toolCall : assistantMessage.getToolCalls()) {
-            if (!StringUtils.hasText(toolCall.id()) || hasToolCall(toolCall.id())) {
+            if (!StringUtils.hasText(toolCall.id()) || hasToolCall(userMessageId, toolCall.id())) {
                 continue;
             }
             UserChatToolCall userChatToolCall = new UserChatToolCall()
@@ -846,23 +752,26 @@ public class UserChatMemory implements ChatMemory {
     }
 
     /**
-     * 判断指定 tool_call id 是否已经保存。
+     * 判断当前用户消息下指定 tool_call id 是否已经保存，模型提供的 ID 不保证跨轮次唯一。
      *
+     * @param userMessageId 当前用户消息 id
      * @param toolCallId 模型返回的 tool_call id
      * @return true 表示已存在
      */
-    private boolean hasToolCall(String toolCallId) {
+    private boolean hasToolCall(Long userMessageId, String toolCallId) {
         return userChatToolCallMapper.selectCount(new LambdaQueryWrapper<UserChatToolCall>()
+                .eq(UserChatToolCall::getUserMessageId, userMessageId)
                 .eq(UserChatToolCall::getToolCallId, toolCallId)) > 0;
     }
 
     /**
      * 判断 assistant 消息里是否包含尚未保存的新 tool_call。
      *
+     * @param userMessageId 当前用户消息 id
      * @param assistantMessage assistant 消息
      * @return true 表示至少有一个新 tool_call
      */
-    private boolean hasNewToolCall(AssistantMessage assistantMessage) {
+    private boolean hasNewToolCall(Long userMessageId, AssistantMessage assistantMessage) {
         if (userChatToolCallMapper == null || CollectionUtils.isEmpty(assistantMessage.getToolCalls())) {
             return false;
         }
@@ -870,7 +779,7 @@ public class UserChatMemory implements ChatMemory {
                 .stream()
                 .map(AssistantMessage.ToolCall::id)
                 .filter(StringUtils::hasText)
-                .anyMatch(toolCallId -> !hasToolCall(toolCallId));
+                .anyMatch(toolCallId -> !hasToolCall(userMessageId, toolCallId));
     }
 
     /**

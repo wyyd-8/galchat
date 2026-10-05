@@ -92,6 +92,7 @@ class SingleChatRuntimeServiceTest {
         ChatClient fallback = mock(ChatClient.class);
 
         assertThat(service.chatClient(5L, 12L, fallback)).isSameAs(fallback);
+        assertThat(service.careClient(5L, 12L, fallback)).isSameAs(fallback);
         verify(runtimeProvider, never()).resolveIfPresent(any(), any());
     }
 
@@ -104,6 +105,7 @@ class SingleChatRuntimeServiceTest {
         ChatClient fallback = mock(ChatClient.class);
 
         assertThat(service.chatClient(5L, 12L, fallback)).isSameAs(fallback);
+        assertThat(service.careClient(5L, 12L, fallback)).isSameAs(fallback);
         verify(clientFactory, never()).create(any());
     }
 
@@ -131,6 +133,9 @@ class SingleChatRuntimeServiceTest {
                 .thenThrow(new UserRequestException("模型 API 地址解析失败"));
 
         assertThatThrownBy(() -> service.chatClient(5L, 12L, mock(ChatClient.class)))
+                .isInstanceOf(UserRequestException.class)
+                .hasMessageContaining("地址解析失败");
+        assertThatThrownBy(() -> service.careClient(5L, 12L, mock(ChatClient.class)))
                 .isInstanceOf(UserRequestException.class)
                 .hasMessageContaining("地址解析失败");
         verify(clientFactory, never()).create(any());

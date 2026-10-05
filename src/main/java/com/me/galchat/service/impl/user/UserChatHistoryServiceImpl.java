@@ -13,6 +13,9 @@ import com.me.galchat.domain.po.UserCharacterInfo;
 import com.me.galchat.domain.po.UserChatHistory;
 import com.me.galchat.domain.po.UserChatThinkingHistory;
 import com.me.galchat.domain.po.UserChatToolCall;
+import com.me.galchat.domain.po.UserEventLog;
+import com.me.galchat.mapper.UserEventLogMapper;
+import com.me.galchat.domain.vo.CareMessagePage;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterFavorLogMapper;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
@@ -28,6 +31,8 @@ import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -61,10 +66,35 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
     private final SingleChatLockService singleChatLockService;
     private final SingleChatGenerationRegistry singleChatGenerations;
     private final StringRedisTemplate redisTemplate;
+    private final UserEventLogMapper userEventLogMapper;
+
+    @Override
+    public CareMessagePage listCareMessages(Long userWorldId, Long after) {
+        if (userWorldId == null || (after != null && after < 0)) {
+            throw new UserRequestException("用户世界和消息游标不合法");
+        }
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, true);
+        // Proactive messages are standalone assistant messages, not replies to a user turn.
+        var query = new LambdaQueryWrapper<UserChatHistory>()
+                .eq(UserChatHistory::getUserWorldId, userWorldId)
+                .eq(UserChatHistory::getType, MessageType.ASSISTANT.getValue())
+                .isNull(UserChatHistory::getUserMessageId);
+        if (after == null) {
+            var latest = baseMapper.selectList(query.select(UserChatHistory::getId)
+                    .orderByDesc(UserChatHistory::getId).last("limit 1"));
+            return new CareMessagePage(List.of(), latest.isEmpty() ? 0 : latest.getFirst().getId(), false);
+        }
+        var rows = baseMapper.selectList(query.gt(UserChatHistory::getId, after)
+                .orderByAsc(UserChatHistory::getId).last("limit 101"));
+        boolean hasMore = rows.size() > 100;
+        var messages = List.copyOf(rows.subList(0, Math.min(100, rows.size())));
+        long cursor = messages.isEmpty() ? after : messages.getLast().getId();
+        return new CareMessagePage(messages, cursor, hasMore);
+    }
 
     @Override
     public List<UserChatHistory> listHistory(Long userWorldId, Long characterId, Long id, Integer size) {
-        Boolean thinkStatus = userWorldPrefixService.checkUserWorldAuth(userWorldId, true).getThinkStatus();
+        userWorldPrefixService.checkUserWorldAuth(userWorldId, true);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
         }
@@ -74,19 +104,18 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
             return List.of();
         }
 
-        if (!Boolean.TRUE.equals(thinkStatus)) {
-            return listVisibleMessages(userWorldId, characterId, primaryMessages);
-        }
-
         return listThinkingMessages(userWorldId, characterId, primaryMessages);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void withdrawLatestUserMessage(Long userWorldId, Long characterId) {
+    public void withdrawLatestUserMessage(Long userWorldId, Long characterId, Long expectedMessageId) {
         userWorldPrefixService.checkUserWorldAuth(userWorldId, false);
         if (characterId == null) {
             throw new UserRequestException("角色id不能为空");
+        }
+        if (expectedMessageId == null || expectedMessageId <= 0) {
+            throw new UserRequestException("撤回消息id必须为正数");
         }
 
         RLock conversationLock = singleChatLockService.tryLock(userWorldId, characterId);
@@ -95,17 +124,33 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
         }
 
         try {
-            doWithdrawLatestUserMessage(userWorldId, characterId);
+            doWithdrawLatestUserMessage(userWorldId, characterId, expectedMessageId);
             singleChatGenerations.evict(userWorldId, characterId);
         } finally {
-            singleChatLockService.unlock(conversationLock);
+            // The transaction interceptor commits after this method returns. Keep
+            // concurrent chat requests out until both commit and rollback finish.
+            if (TransactionSynchronizationManager.isActualTransactionActive()
+                    && TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCompletion(int status) {
+                        singleChatLockService.unlock(conversationLock);
+                    }
+                });
+            } else {
+                singleChatLockService.unlock(conversationLock);
+            }
         }
     }
 
-    private void doWithdrawLatestUserMessage(Long userWorldId, Long characterId) {
+    private void doWithdrawLatestUserMessage(Long userWorldId, Long characterId, Long expectedMessageId) {
         WithdrawCandidate candidate = latestWithdrawCandidate(userWorldId, characterId);
         if (candidate.anchor() == null) {
             throw new UserRequestException("没有可撤回的消息");
+        }
+        // Compare under the conversation lock before deleting rows or reversing side effects.
+        if (!Objects.equals(candidate.anchor().getId(), expectedMessageId)) {
+            throw new UserRequestException("聊天记录已变化，请刷新后重试");
         }
         if (candidate.consecutiveWithdrawCount() >= ChatConstant.MAX_CONSECUTIVE_WITHDRAW_COUNT) {
             throw new UserRequestException("最多只能连续撤回3条消息");
@@ -121,6 +166,10 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
         if (userRound) {
             reverseFavorUpdates(userWorldId, characterId, anchorId);
+            userEventLogMapper.delete(new LambdaUpdateWrapper<UserEventLog>()
+                    .eq(UserEventLog::getUserWorldId, userWorldId)
+                    .eq(UserEventLog::getCharacterId, characterId)
+                    .eq(UserEventLog::getSourceUserMessageId, anchorId));
             deleteLinkedMessages(userWorldId, characterId, anchorId);
             deleteAutoSearchInfoAfter(userWorldId, characterId, anchorId);
             deleteStepNoKey(anchorId);
@@ -215,9 +264,7 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
             if (favorValue == null) {
                 throw new UserRequestException("角色不存在");
             }
-            redisTemplate.opsForHash().put(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
-                    buildFavorCacheKey(userWorldId, characterId), String.valueOf(favorValue));
-            redisTemplate.delete(buildPromptInfoCacheKey(userWorldId, characterId));
+            invalidateFavorCacheAfterCompletion(userWorldId, characterId);
         }
 
         userCharacterFavorLogMapper.delete(new LambdaUpdateWrapper<UserCharacterFavorLog>()
@@ -225,6 +272,29 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                 .eq(UserCharacterFavorLog::getCharacterId, characterId)
                 .eq(UserCharacterFavorLog::getBindingType, FavorBindingType.SINGLE_MESSAGE)
                 .eq(UserCharacterFavorLog::getBindingChat, userMessageId));
+    }
+
+    private void invalidateFavorCacheAfterCompletion(Long userWorldId, Long characterId) {
+        Runnable invalidate = () -> {
+            try {
+                redisTemplate.opsForHash().delete(RedisConstant.USER_CHARACTER_FAVOR_VALUE_KEY,
+                        buildFavorCacheKey(userWorldId, characterId));
+            } finally {
+                redisTemplate.delete(buildPromptInfoCacheKey(userWorldId, characterId));
+            }
+        };
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    // Neither a rolled-back value nor a pre-commit refill may survive.
+                    invalidate.run();
+                }
+            });
+        } else {
+            invalidate.run();
+        }
     }
 
     private void deleteLinkedMessages(Long userWorldId, Long characterId, Long userMessageId) {
@@ -304,25 +374,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
                         latestAssistant == null ? null : latestAssistant.getTimestamp())
                 .set(UserCharacterInfo::getLastChatContent,
                         latestAssistant == null ? null : latestAssistant.getContent()));
-
-        String lastAssistantKey = buildLastAssistantKey(userWorldId, characterId);
-        if (latestAssistant == null) {
-            redisTemplate.delete(lastAssistantKey);
-            return;
-        }
-        redisTemplate.opsForValue().set(lastAssistantKey, latestAssistant.getContent(),
-                RedisConstant.LAST_ASSISTANT_TTL);
-    }
-
-    private List<UserChatHistory> listVisibleMessages(Long userWorldId, Long characterId,
-                                                      List<UserChatHistory> primaryMessages) {
-        Set<Long> userMessageIds = userMessageIds(primaryMessages);
-        List<UserChatHistory> assistantMessages = listLinkedAssistantMessages(userWorldId, characterId, userMessageIds);
-        List<UserChatHistory> messages = new ArrayList<>(primaryMessages.size() + assistantMessages.size());
-        messages.addAll(primaryMessages);
-        messages.addAll(assistantMessages);
-        messages.sort(Comparator.comparing(UserChatHistory::getId));
-        return messages;
     }
 
     private List<UserChatHistory> listThinkingMessages(Long userWorldId, Long characterId,
@@ -445,10 +496,6 @@ public class UserChatHistoryServiceImpl extends ServiceImpl<UserChatHistoryMappe
 
     private String buildPromptInfoCacheKey(Long userWorldId, Long characterId) {
         return RedisConstant.USER_CHARACTER_PROMPT_INFO_KEY_PREFIX + userWorldId + ":" + characterId;
-    }
-
-    private String buildLastAssistantKey(Long userWorldId, Long characterId) {
-        return RedisConstant.CHAT_KEY_PREFIX + userWorldId + ":" + characterId + RedisConstant.LAST_ASSISTANT_SUFFIX;
     }
 
     private List<Integer> stepNos(Long userMessageId,

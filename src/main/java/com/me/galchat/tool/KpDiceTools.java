@@ -25,7 +25,7 @@ public class KpDiceTools {
     @Tool(
             name = "requestCheck",
             description = "发起单人属性/技能检定；可为该角色提供多个候选检定项，"
-                    + "后端取角色卡中数值最高的一项，只掷一次并直接给出成功或失败。",
+                    + "采用角色卡中数值最高的一项，只掷一次并给出成功或失败。",
             returnDirect = true)
     public KpDiceToolResult requestCheck(
             @ToolParam(description = "检定原因、难度和角色检定项")
@@ -43,8 +43,8 @@ public class KpDiceTools {
                     + "全部成功适用于潜行等所有人都必须通过的检定；"
                     + "分离表示分别展示、不计算群体结论，不确定时使用分离。"
                     + "每个角色只能出现一次；若同一角色可用多个检定项，"
-                    + "放入该角色的同一个候选列表，后端取最高值且只掷一次。"
-                    + "该规则仅供前端展示，不改变后端返回的各角色检定结果。",
+                    + "放入该角色的同一个候选列表，采用最高值且只掷一次。"
+                    + "群体规则不改变各角色自身的检定结果。",
             returnDirect = true)
     public KpDiceToolResult requestGroupCheck(
             @ToolParam(description = "群体检定原因、难度、展示规则和角色检定项")
@@ -57,7 +57,7 @@ public class KpDiceTools {
 
     @Tool(
             name = "requestOpposedCheck",
-            description = "发起至少两名角色的对抗检定；后端直接给出胜者、平局或全员失败结果。",
+            description = "发起至少两名角色的对抗检定，返回胜者、平局或全员失败结果。",
             returnDirect = true)
     public KpDiceToolResult requestOpposedCheck(
             @ToolParam(description = "对抗原因、角色检定项和可选平局胜者")
@@ -70,10 +70,10 @@ public class KpDiceTools {
 
     @Tool(
             name = "requestSanCheck",
-            description = "按角色当前SAN发起理智检定；本工具不自动扣除理智。",
+            description = "按表达式处理SAN损失：单一公式直接结算损失；成功/失败公式先按当前SAN检定，再由系统自动结算损失。大成功取成功分支最小值，大失败取失败分支最大值；需要时自动追加临时疯狂。",
             returnDirect = true)
     public KpDiceToolResult requestSanCheck(
-            @ToolParam(description = "理智检定原因和角色名")
+            @ToolParam(description = "原因、角色名和SAN损失表达式")
             KpDiceRequestDTOs.SanCheck request,
             ToolContext context) {
         KpExecutionContext kp = requireKpContext(context);
@@ -82,23 +82,10 @@ public class KpDiceTools {
     }
 
     @Tool(
-            name = "rollSanLoss",
-            description = "根据最近一次理智检定结果选择成功/失败公式，扣除SAN并按规则创建临时疯狂轮。",
-            returnDirect = true)
-    public KpDiceToolResult rollSanLoss(
-            @ToolParam(description = "损失原因以及SAN成功和失败时的表达式")
-            KpDiceRequestDTOs.SanLoss request,
-            ToolContext context) {
-        KpExecutionContext kp = requireKpContext(context);
-        return orchestrationService.rollSanLoss(
-                kp.conversationId(), kp.runId(), request);
-    }
-
-    @Tool(
             name = "rollDamage",
-            description = "在独立掷骰流程中结算已经成立的伤害。"
-                    + "公式可把眩晕作为独立加数；后端会另投1D6并与已有眩晕剩余回合取较大值，不计入HP伤害。"
-                    + "后端不会自动判断护甲，也不会自动扣除护甲；若KP手动判断护甲适用，必须只对HP伤害部分减甲，例如max(0,(1D3)-2)+眩晕。",
+            description = "伤害已经成立且尚未结算时调用。"
+                    + "公式可把眩晕作为独立加数；眩晕另投1D6并与已有眩晕剩余回合取较大值，不计入HP伤害。"
+                    + "KP须判断护甲是否适用，并在公式中仅对HP伤害部分减甲，例如max(0,(1D3)-2)+眩晕。",
             returnDirect = true)
     public KpDiceToolResult rollDamage(
             @ToolParam(description = "伤害原因、目标角色与表达式")
@@ -111,7 +98,7 @@ public class KpDiceTools {
 
     @Tool(
             name = "rollHealing",
-            description = "结算无来源回血，或为最近一次成功的单次检定追加回血轮。"
+            description = "结算无需前置检定的回血，或最近一次单次检定成功后的回血。"
                     + "急救可解除昏迷和重伤，医学可解除重伤。"
                     + "无特殊情况时，一个大场景内每种恢复生命方法对同一目标只能使用一次。",
             returnDirect = true)

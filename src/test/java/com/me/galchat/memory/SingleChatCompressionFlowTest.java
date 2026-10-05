@@ -58,8 +58,8 @@ class SingleChatCompressionFlowTest {
         var worlds = mock(IUserWorldPrefixService.class);
         when(worlds.checkUserWorldAuth(7L, 1L, true))
                 .thenReturn(new UserWorldPrefix().setId(1L).setUserId(7L).setWorldId(3L));
-        var service = new ChatServiceImpl(client, client, runtime, null, mock(UserChatHistoryMapper.class),
-                worlds, mock(IUserCharacterInfoService.class), null, null,
+        var service = new ChatServiceImpl(client, runtime, null, mock(UserChatHistoryMapper.class),
+                worlds, mock(IUserCharacterInfoService.class), null,
                 locks, mock(TrpgRunMemoryService.class));
         var queue = new LinkedBlockingQueue<Runnable>();
         ReflectionTestUtils.setField(service, "topicCompressionTaskExecutor", (TaskExecutor) queue::add);

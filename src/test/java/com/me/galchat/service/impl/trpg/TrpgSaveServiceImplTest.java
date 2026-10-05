@@ -1,7 +1,6 @@
 package com.me.galchat.service.impl.trpg;
 
 import com.me.galchat.service.impl.group.GroupConversationLockService;
-import com.me.galchat.service.impl.group.GroupTurnRecoveryService;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.TrpgSaveCreateDTO;
 import com.me.galchat.domain.dto.TrpgSaveSnapshotDTO;
@@ -21,17 +20,19 @@ import com.me.galchat.service.ITrpgSaveSnapshotService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RLock;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.function.Consumer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -59,16 +60,20 @@ class TrpgSaveServiceImplTest {
     @Mock
     private ITrpgSaveSnapshotService snapshotService;
     @Mock
-    private GroupTurnRecoveryService recoveryService;
-    @Mock
     private GroupConversationLockService lockService;
     @Mock
+    private PlatformTransactionManager transactionManager;
+
     private TransactionTemplate transactionTemplate;
 
     private TrpgSaveServiceImpl service;
 
     @BeforeEach
     void setUp() {
+        com.me.galchat.support.MybatisPlusTestSupport.initialize(GroupChatTurn.class);
+        transactionTemplate = new TransactionTemplate(transactionManager);
+        lenient().when(transactionManager.getTransaction(any()))
+                .thenReturn(new SimpleTransactionStatus());
         service = new TrpgSaveServiceImpl(
                 userWorldPrefixService,
                 conversationMapper,
@@ -76,18 +81,94 @@ class TrpgSaveServiceImplTest {
                 saveMapper,
                 autoSaveMapper,
                 snapshotService,
-                recoveryService,
                 lockService,
                 transactionTemplate);
-        lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
-            TransactionCallback<?> callback = invocation.getArgument(0);
-            return callback.doInTransaction(mock(TransactionStatus.class));
+
+    }
+
+    @Test
+    void saveReadsConversationAndCapturesInsideRepeatableReadTransaction() {
+        GroupConversation stale = conversation(51L, GroupChatConstant.MODE_TRPG).setSummary("旧摘要");
+        GroupConversation current = conversation(51L, GroupChatConstant.MODE_TRPG).setSummary("新摘要");
+        when(conversationMapper.selectById(51L)).thenReturn(stale, current);
+        when(lockService.tryLock(51L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        when(snapshotService.capture(any())).thenReturn(snapshot(51L));
+
+        service.save(7L, 51L, null);
+
+        var order = inOrder(transactionManager, conversationMapper, snapshotService, lockService);
+        order.verify(conversationMapper).selectById(51L);
+        order.verify(lockService).tryLock(51L);
+        ArgumentCaptor<TransactionDefinition> definition = ArgumentCaptor.forClass(TransactionDefinition.class);
+        order.verify(transactionManager).getTransaction(definition.capture());
+        order.verify(conversationMapper).selectById(51L);
+        order.verify(snapshotService).capture(current);
+        order.verify(transactionManager).commit(any());
+        order.verify(lockService).unlock(any());
+        assertThat(definition.getValue().getIsolationLevel())
+                .isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        assertThat(transactionTemplate.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"waiting_input", "waiting_dice", "paused", "failed", "blocked"})
+    void stablePausesAllowSaveLoadAndRollback(String turnStatus) {
+        stubCurrentTurnStatus(turnStatus);
+        GroupConversation conversation = conversation(51L, GroupChatConstant.MODE_TRPG);
+        when(conversationMapper.selectById(51L)).thenReturn(conversation);
+        when(lockService.tryLock(51L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        TrpgSaveSnapshotDTO snapshot = snapshot(51L);
+        when(snapshotService.capture(conversation)).thenReturn(snapshot);
+        TrpgSave save = new TrpgSave().setUserId(7L).setConversationId(51L)
+                .setFormatVersion(2).setSavedAt(LocalDateTime.now()).setSnapshot(snapshot);
+        when(saveMapper.selectByConversationId(51L)).thenReturn(save);
+        when(autoSaveMapper.selectByConversationAndType(51L, "TURN")).thenReturn(
+                new TrpgAutoSave().setConversationId(51L).setFormatVersion(2)
+                        .setSavedAt(save.getSavedAt()).setSnapshot(snapshot));
+
+        assertThat(service.save(7L, 51L, null)).isNotNull();
+        service.load(7L, 51L);
+        assertThat(service.rollbackTurn(7L, 51L).getCheckpointType()).isEqualTo("TURN");
+        verify(snapshotService, times(2)).restoreDatabase(conversation, snapshot);
+        verify(snapshotService, times(2)).restoreDerivedState(conversation, snapshot);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"pending", "running"})
+    void executingTurnsRejectSaveLoadAndRollback(String turnStatus) {
+        stubCurrentTurnStatus(turnStatus);
+        when(conversationMapper.selectById(51L))
+                .thenReturn(conversation(51L, GroupChatConstant.MODE_TRPG));
+        when(lockService.tryLock(51L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+        when(saveMapper.selectByConversationId(51L)).thenReturn(
+                new TrpgSave().setUserId(7L).setConversationId(51L)
+                        .setFormatVersion(2).setSnapshot(snapshot(51L)));
+        when(autoSaveMapper.selectByConversationAndType(51L, "TURN")).thenReturn(
+                new TrpgAutoSave().setConversationId(51L).setFormatVersion(2)
+                        .setSnapshot(snapshot(51L)));
+
+        assertThatThrownBy(() -> service.save(7L, 51L, null))
+                .isInstanceOf(UserRequestException.class);
+        assertThatThrownBy(() -> service.load(7L, 51L))
+                .isInstanceOf(UserRequestException.class);
+        assertThatThrownBy(() -> service.rollbackTurn(7L, 51L))
+                .isInstanceOf(UserRequestException.class);
+        verify(snapshotService, never()).capture(any());
+        verify(snapshotService, never()).restoreDatabase(any(), any());
+        verify(lockService, times(3)).unlock(any());
+    }
+
+    private void stubCurrentTurnStatus(String turnStatus) {
+        lenient().when(turnMapper.selectCount(any())).thenAnswer(invocation -> {
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<GroupChatTurn> query =
+                    invocation.getArgument(0);
+            query.getSqlSegment();
+            assertThat(query.getParamNameValuePairs()).containsValue(51L);
+            return query.getParamNameValuePairs().containsValue(turnStatus) ? 1L : 0L;
         });
-        lenient().doAnswer(invocation -> {
-            Consumer<TransactionStatus> callback = invocation.getArgument(0);
-            callback.accept(mock(TransactionStatus.class));
-            return null;
-        }).when(transactionTemplate).executeWithoutResult(any());
     }
 
     @Test
@@ -130,7 +211,6 @@ class TrpgSaveServiceImplTest {
                 .isEqualTo(TrpgSaveServiceImpl.FORMAT_VERSION);
         assertThat(saved.getSnapshot()).isSameAs(snapshot);
         assertThat(saved.getSavedAt()).isNotNull();
-        verify(recoveryService).assertConversationHasNoNonTerminalTurns(51L);
     }
 
     @Test
@@ -228,7 +308,45 @@ class TrpgSaveServiceImplTest {
         order.verify(snapshotService).restoreDerivedState(conversation, snapshot);
         verify(autoSaveMapper).deleteAfter(
                 51L, LocalDateTime.of(2026, 8, 20, 12, 0));
-        verify(recoveryService).assertConversationHasNoNonTerminalTurns(51L);
+        verify(autoSaveMapper, never()).deleteByConversationId(any());
+        verify(autoSaveMapper, never()).upsert(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"wrongRun", "wrongWorld", "wrongFormat", "unknownType", "duplicate", "future", "nested"})
+    void loadRejectsInvalidBundledCheckpointsBeforeRestoringAnything(String invalid) {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        LocalDateTime savedAt = LocalDateTime.of(2026, 8, 20, 12, 0);
+        TrpgAutoSave checkpoint = new TrpgAutoSave().setConversationId(51L).setCheckpointType("TURN")
+                .setSavedAt(savedAt.minusMinutes(1)).setFormatVersion(2).setSnapshot(snapshot(51L));
+        switch (invalid) {
+            case "wrongRun" -> checkpoint.setConversationId(99L);
+            case "wrongWorld" -> checkpoint.getSnapshot().setWorldId(99L);
+            case "wrongFormat" -> checkpoint.setFormatVersion(999);
+            case "unknownType" -> checkpoint.setCheckpointType("UNKNOWN");
+            case "future" -> checkpoint.setSavedAt(savedAt.plusMinutes(1));
+        }
+        var json = mapper.valueToTree(snapshot(51L));
+        var checkpoints = mapper.createArrayNode().add(mapper.valueToTree(checkpoint));
+        if ("duplicate".equals(invalid)) checkpoints.add(mapper.valueToTree(checkpoint));
+        if ("nested".equals(invalid)) {
+            ((tools.jackson.databind.node.ObjectNode) checkpoints.get(0).get("snapshot"))
+                    .set("autoSaves", mapper.createArrayNode().add(mapper.valueToTree(checkpoint)));
+        }
+        ((tools.jackson.databind.node.ObjectNode) json).set("autoSaves", checkpoints);
+        var snapshot = mapper.treeToValue(json, TrpgSaveSnapshotDTO.class);
+        when(conversationMapper.selectById(51L))
+                .thenReturn(conversation(51L, GroupChatConstant.MODE_TRPG));
+        when(saveMapper.selectByConversationId(51L)).thenReturn(new TrpgSave()
+                .setUserId(7L).setConversationId(51L).setSavedAt(savedAt).setFormatVersion(2)
+                .setSnapshot(snapshot));
+        lenient().when(lockService.tryLock(51L)).thenReturn(
+                new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L));
+
+        assertThatThrownBy(() -> service.load(7L, 51L))
+                .isInstanceOf(UserRequestException.class).hasMessageContaining("自动恢复点");
+        verify(snapshotService, never()).restoreDatabase(any(), any());
+        verify(autoSaveMapper, never()).upsert(any());
     }
 
     @Test
@@ -405,8 +523,6 @@ class TrpgSaveServiceImplTest {
         assertThat(result.getCheckpointType()).isEqualTo("TURN");
         verify(saveMapper).deleteById(91L);
         verify(autoSaveMapper).deleteAfter(51L, checkpointTime);
-        verify(recoveryService)
-                .assertConversationHasNoNonTerminalTurns(51L);
     }
 
     @Test

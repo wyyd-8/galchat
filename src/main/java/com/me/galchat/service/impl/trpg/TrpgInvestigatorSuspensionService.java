@@ -2,7 +2,10 @@ package com.me.galchat.service.impl.trpg;
 
 import com.me.galchat.service.impl.group.GroupConversationService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.KpInvestigatorSuspensionDTOs;
+import com.me.galchat.utils.RedisAfterCommitCleanup;
 import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupConversation;
@@ -49,7 +52,7 @@ public class TrpgInvestigatorSuspensionService {
     private final TrpgSceneProgressStore progressStore;
 
     @Transactional(rollbackFor = Exception.class)
-    public String suspendInvestigators(
+    public KpInvestigatorSuspensionDTOs.SuspendResult suspendInvestigators(
             Long conversationId,
             Long replyStepId,
             List<String> investigatorNames,
@@ -80,26 +83,74 @@ public class TrpgInvestigatorSuspensionService {
             throw new UserRequestException(
                     "切换镜头后至少保留一名未悬置调查员");
         }
+        Set<Long> readyBefore = progressStore.readyCharacterIds(
+                conversationId, execution.scene().getId());
+        List<KpInvestigatorSuspensionDTOs.SuspensionUndo> undo = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         for (TrpgParticipantService.Participant participant : selected) {
-            suspensionMapper.insert(new TrpgInvestigatorSuspension()
+            TrpgInvestigatorSuspension suspension = new TrpgInvestigatorSuspension()
                     .setConversationId(conversationId)
                     .setSubjectCharacterId(participant.cardId())
                     .setState(TrpgInvestigatorSuspension.STATE_SUSPENDED)
                     .setSuspensionContext(context)
                     .setOriginContextId(execution.scene().getContextId())
-                    .setCreatedAt(now).setUpdatedAt(now));
+                    .setCreatedAt(now).setUpdatedAt(now);
+            if (suspensionMapper.insert(suspension) != 1 || suspension.getId() == null) {
+                throw new IllegalStateException("调查员悬置状态保存失败");
+            }
+            undo.add(new KpInvestigatorSuspensionDTOs.SuspensionUndo(
+                    suspension.getId(), participant.cardId(), readyBefore.contains(participant.cardId())));
             progressStore.clearReady(conversationId,
                     execution.scene().getId(), participant.cardId());
         }
-        return "已悬置调查员"
+        String message = "已悬置调查员"
                 + String.join("、", names(selected))
                 + "的剧情线。请在本次公开回复中自然交代停镜位置，"
                 + "然后切换镜头至其他调查员。";
+        return new KpInvestigatorSuspensionDTOs.SuspendResult(
+                message, execution.scene().getId(), List.copyOf(undo));
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public String resumeSuspendedInvestigators(
+    public void rollbackSuspension(Long conversationId,
+            KpInvestigatorSuspensionDTOs.SuspendResult result) {
+        if (result == null || result.scenePlanId() == null
+                || result.undo() == null || result.undo().isEmpty()) {
+            throw new IllegalStateException("悬置记录缺少撤销数据，无法回滚");
+        }
+        GroupReplyPlan scene = planMapper.selectById(result.scenePlanId());
+        if (scene == null || !Objects.equals(conversationId, scene.getConversationId())) {
+            throw new IllegalStateException("悬置记录的场景已变化，无法回滚");
+        }
+        for (var undo : result.undo()) {
+            if (undo == null || undo.suspensionId() == null || undo.characterId() == null) {
+                throw new IllegalStateException("悬置记录缺少撤销数据，无法回滚");
+            }
+            TrpgInvestigatorSuspension current = suspensionMapper.selectById(undo.suspensionId());
+            if (current == null || !Objects.equals(conversationId, current.getConversationId())
+                    || !Objects.equals(undo.characterId(), current.getSubjectCharacterId())
+                    || !TrpgInvestigatorSuspension.STATE_SUSPENDED.equals(current.getState())) {
+                throw new IllegalStateException("调查员悬置状态已发生后续变化，无法安全回滚");
+            }
+        }
+        for (var undo : result.undo()) {
+            int deleted = suspensionMapper.delete(new LambdaQueryWrapper<TrpgInvestigatorSuspension>()
+                    .eq(TrpgInvestigatorSuspension::getId, undo.suspensionId())
+                    .eq(TrpgInvestigatorSuspension::getConversationId, conversationId)
+                    .eq(TrpgInvestigatorSuspension::getSubjectCharacterId, undo.characterId())
+                    .eq(TrpgInvestigatorSuspension::getState, TrpgInvestigatorSuspension.STATE_SUSPENDED));
+            if (deleted != 1) {
+                throw new IllegalStateException("调查员悬置状态回滚失败");
+            }
+            if (undo.readyBefore()) {
+                RedisAfterCommitCleanup.run("恢复调查员结束探索标记", () ->
+                        progressStore.markReady(conversationId, result.scenePlanId(), undo.characterId()));
+            }
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public KpInvestigatorSuspensionDTOs.ResumeResult resumeSuspendedInvestigators(
             Long conversationId,
             Long replyStepId,
             List<String> investigatorNames,
@@ -126,11 +177,20 @@ public class TrpgInvestigatorSuspensionService {
         Map<Long, TrpgInvestigatorSuspension> existing =
                 suspensions(conversationId);
         LocalDateTime now = LocalDateTime.now();
+        List<KpInvestigatorSuspensionDTOs.ResumeUndo> undo = new ArrayList<>();
         for (TrpgParticipantService.Participant participant : selected) {
             TrpgInvestigatorSuspension suspension = existing.get(
                     participant.cardId());
             requireSuspended(suspension, participant.investigatorName());
-            ensureSceneItem(execution.scene(), participant, now);
+            TrpgInvestigatorSuspension before = copySuspension(suspension);
+            GroupReplyPlanItem oldItem = orderedItems(execution.scene().getId()).stream()
+                    .filter(item -> Objects.equals(item.getSubjectCharacterId(), participant.cardId()))
+                    .findFirst().orElse(null);
+            String oldStatus = oldItem == null ? null : oldItem.getParticipantStatus();
+            LocalDateTime oldUpdated = oldItem == null ? null : oldItem.getUpdatedAt();
+            GroupReplyPlanItem item = ensureSceneItem(execution.scene(), participant, now);
+            undo.add(new KpInvestigatorSuspensionDTOs.ResumeUndo(before, item.getId(),
+                    oldItem == null, oldStatus, oldUpdated));
             suspension.setState(
                             TrpgInvestigatorSuspension
                                     .STATE_REENTRY_PENDING)
@@ -140,9 +200,10 @@ public class TrpgInvestigatorSuspensionService {
                     .setUpdatedAt(now);
             suspensionMapper.updateById(suspension);
         }
-        return "调查员" + String.join("、", names(selected))
-                + "已并入当前场景。请在本次回复中叙述其重新出现；"
-                + "他们将从下一轮开始行动。";
+        return new KpInvestigatorSuspensionDTOs.ResumeResult(
+                "调查员" + String.join("、", names(selected))
+                + "已并入当前场景。请在本次回复中叙述其重新出现；他们将从下一轮开始行动。",
+                execution.scene().getId(), null, null, List.copyOf(undo));
     }
 
     public boolean isUnavailable(
@@ -239,8 +300,8 @@ public class TrpgInvestigatorSuspensionService {
                 .distinct()
                 .map(rows::get)
                 .filter(Objects::nonNull)
-                .filter(row -> Objects.equals(
-                        turn.getPlanId(), row.getRecoveryPlanId()))
+                .filter(row -> TrpgInvestigatorSuspension.STATE_REENTRY_PENDING.equals(row.getState())
+                        || Objects.equals(turn.getPlanId(), row.getRecoveryPlanId()))
                 .filter(row -> TrpgInvestigatorSuspension
                         .STATE_REENTRY_PENDING.equals(row.getState())
                         || TrpgInvestigatorSuspension
@@ -248,7 +309,7 @@ public class TrpgInvestigatorSuspensionService {
                 .forEach(row -> suspensionMapper.deleteById(row.getId()));
     }
 
-    private String queueIndependentScene(
+    private KpInvestigatorSuspensionDTOs.ResumeResult queueIndependentScene(
             NarrativeExecution execution,
             List<TrpgParticipantService.Participant> selected,
             String reentryContext,
@@ -273,6 +334,10 @@ public class TrpgInvestigatorSuspensionService {
             selectedSuspensions.add(suspension);
         }
         GroupReplyPlan tail = mainSceneTail(execution.scene());
+        LocalDateTime tailUpdatedBefore = tail.getUpdatedAt();
+        List<KpInvestigatorSuspensionDTOs.ResumeUndo> undo = selectedSuspensions.stream()
+                .map(row -> new KpInvestigatorSuspensionDTOs.ResumeUndo(copySuspension(row), null, false, null, null))
+                .toList();
         LocalDateTime now = LocalDateTime.now();
         GroupReplyPlan recovery = new GroupReplyPlan()
                 .setConversationId(execution.conversation().getId())
@@ -314,9 +379,10 @@ public class TrpgInvestigatorSuspensionService {
                     .setUpdatedAt(now);
             suspensionMapper.updateById(suspension);
         }
-        return "已将调查员" + String.join("、", names(selected))
-                + "的独立恢复场景“" + normalizedSceneName
-                + "”排入后续主场景队列。";
+        return new KpInvestigatorSuspensionDTOs.ResumeResult(
+                "已将调查员" + String.join("、", names(selected))
+                + "的独立恢复场景“" + normalizedSceneName + "”排入后续主场景队列。",
+                recovery.getId(), tail.getId(), tailUpdatedBefore, undo);
     }
 
     private GroupReplyPlan mainSceneTail(GroupReplyPlan scene) {
@@ -364,36 +430,129 @@ public class TrpgInvestigatorSuspensionService {
         return normalized;
     }
 
-    private void ensureSceneItem(
-            GroupReplyPlan scene,
-            TrpgParticipantService.Participant participant,
-            LocalDateTime now) {
-        boolean exists = orderedItems(scene.getId()).stream()
-                .filter(item -> Objects.equals(
-                        item.getSubjectCharacterId(), participant.cardId()))
-                .findFirst()
-                .map(item -> {
-                    item.setParticipantStatus(
-                                    GroupChatConstant.PARTICIPANT_ACTIVE)
-                            .setUpdatedAt(now);
-                    itemMapper.updateById(item);
-                    return true;
-                }).orElse(false);
-        if (exists) {
-            return;
+    private GroupReplyPlanItem ensureSceneItem(
+            GroupReplyPlan scene, TrpgParticipantService.Participant participant, LocalDateTime now) {
+        List<GroupReplyPlanItem> items = orderedItems(scene.getId());
+        GroupReplyPlanItem existing = items.stream()
+                .filter(item -> Objects.equals(item.getSubjectCharacterId(), participant.cardId()))
+                .findFirst().orElse(null);
+        if (existing != null) {
+            existing.setParticipantStatus(GroupChatConstant.PARTICIPANT_ACTIVE).setUpdatedAt(now);
+            if (itemMapper.updateById(existing) != 1) throw new IllegalStateException("恢复场景成员失败");
+            return existing;
         }
-        int nextOrder = orderedItems(scene.getId()).stream()
-                .map(GroupReplyPlanItem::getItemOrder)
-                .filter(Objects::nonNull)
-                .max(Integer::compareTo).orElse(0) + 1;
-        itemMapper.insert(new GroupReplyPlanItem()
+        int nextOrder = items.stream().map(GroupReplyPlanItem::getItemOrder)
+                .filter(Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
+        GroupReplyPlanItem item = new GroupReplyPlanItem()
                 .setPlanId(scene.getId()).setItemOrder(nextOrder)
-                .setActorType(participant.actor().type())
-                .setActorId(participant.actor().id())
-                .setSubjectCharacterId(participant.cardId())
-                .setSubjectCharacterName(participant.investigatorName())
-                .setParticipantStatus(GroupChatConstant.PARTICIPANT_ACTIVE)
-                .setCreatedAt(now).setUpdatedAt(now));
+                .setActorType(participant.actor().type()).setActorId(participant.actor().id())
+                .setSubjectCharacterId(participant.cardId()).setSubjectCharacterName(participant.investigatorName())
+                .setParticipantStatus(GroupChatConstant.PARTICIPANT_ACTIVE).setCreatedAt(now).setUpdatedAt(now);
+        if (itemMapper.insert(item) != 1 || item.getId() == null) throw new IllegalStateException("恢复场景成员失败");
+        return item;
+    }
+
+    private TrpgInvestigatorSuspension copySuspension(TrpgInvestigatorSuspension source) {
+        var copy = new TrpgInvestigatorSuspension();
+        org.springframework.beans.BeanUtils.copyProperties(source, copy);
+        return copy;
+    }
+
+    /** A finished run has no future reentry action, including in queued scenes. */
+    @Transactional(rollbackFor = Exception.class)
+    public void completeReentriesForRun(Long conversationId) {
+        suspensions(conversationId).values().stream()
+                .filter(row -> TrpgInvestigatorSuspension.STATE_REENTRY_PENDING.equals(row.getState())
+                        || TrpgInvestigatorSuspension.STATE_RECOVERY_QUEUED.equals(row.getState()))
+                .forEach(row -> {
+                    if (suspensionMapper.deleteById(row.getId()) != 1) {
+                        throw new IllegalStateException("清理跑团待归队状态失败");
+                    }
+                });
+    }
+
+    /** A completed scene cannot supply a future first reentry action. */
+    @Transactional(rollbackFor = Exception.class)
+    public void completeReentriesForScene(Long conversationId, Long scenePlanId) {
+        suspensions(conversationId).values().stream()
+                .filter(row -> Objects.equals(scenePlanId, row.getRecoveryPlanId()))
+                .filter(row -> TrpgInvestigatorSuspension.STATE_REENTRY_PENDING.equals(row.getState())
+                        || TrpgInvestigatorSuspension.STATE_RECOVERY_QUEUED.equals(row.getState()))
+                .forEach(row -> suspensionMapper.deleteById(row.getId()));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void rollbackResume(Long conversationId, KpInvestigatorSuspensionDTOs.ResumeResult result) {
+        if (result == null || result.scenePlanId() == null || result.undo() == null || result.undo().isEmpty()) {
+            throw new IllegalStateException("恢复调查员记录缺少撤销数据，无法回滚");
+        }
+        GroupReplyPlan scene = planMapper.selectById(result.scenePlanId());
+        boolean independent = result.tailPlanId() != null;
+        if (scene == null || !Objects.equals(scene.getConversationId(), conversationId)) {
+            throw new IllegalStateException("恢复调查员的场景已变化，无法回滚");
+        }
+        if (independent) {
+            GroupReplyPlan tail = planMapper.selectById(result.tailPlanId());
+            if (tail == null || !Objects.equals(tail.getConversationId(), conversationId)
+                    || !Objects.equals(tail.getNextPlanId(), scene.getId()) || scene.getNextPlanId() != null
+                    || Objects.equals(conversationService.requireActive(conversationId).getActiveReplyPlanId(), scene.getId())) {
+                throw new IllegalStateException("独立恢复场景已发生后续变化，无法安全回滚");
+            }
+        }
+        String expectedState = independent ? TrpgInvestigatorSuspension.STATE_RECOVERY_QUEUED
+                : TrpgInvestigatorSuspension.STATE_REENTRY_PENDING;
+        for (var undo : result.undo()) {
+            var before = undo == null ? null : undo.before();
+            if (before == null || before.getId() == null || !Objects.equals(before.getConversationId(), conversationId)
+                    || !TrpgInvestigatorSuspension.STATE_SUSPENDED.equals(before.getState())) {
+                throw new IllegalStateException("恢复调查员记录缺少撤销数据，无法回滚");
+            }
+            var current = suspensionMapper.selectById(before.getId());
+            if (current == null || !Objects.equals(current.getConversationId(), conversationId)
+                    || !Objects.equals(current.getSubjectCharacterId(), before.getSubjectCharacterId())
+                    || !expectedState.equals(current.getState())
+                    || !Objects.equals(current.getRecoveryPlanId(), scene.getId())) {
+                throw new IllegalStateException("调查员恢复状态已发生后续变化，无法安全回滚");
+            }
+            if (!independent) {
+                var item = undo.sceneItemId() == null ? null : itemMapper.selectById(undo.sceneItemId());
+                if (item == null || !Objects.equals(item.getPlanId(), scene.getId())
+                        || !Objects.equals(item.getSubjectCharacterId(), before.getSubjectCharacterId())
+                        || !GroupChatConstant.PARTICIPANT_ACTIVE.equals(item.getParticipantStatus())) {
+                    throw new IllegalStateException("恢复场景成员已变化，无法安全回滚");
+                }
+            }
+        }
+        for (var undo : result.undo()) {
+            var before = undo.before();
+            requireRestored(suspensionMapper.update(null, new LambdaUpdateWrapper<TrpgInvestigatorSuspension>()
+                    .eq(TrpgInvestigatorSuspension::getId, before.getId())
+                    .eq(TrpgInvestigatorSuspension::getConversationId, conversationId)
+                    .eq(TrpgInvestigatorSuspension::getState, expectedState)
+                    .set(TrpgInvestigatorSuspension::getState, before.getState())
+                    .set(TrpgInvestigatorSuspension::getReentryContext, before.getReentryContext())
+                    .set(TrpgInvestigatorSuspension::getRecoverySceneName, before.getRecoverySceneName())
+                    .set(TrpgInvestigatorSuspension::getRecoveryPlanId, before.getRecoveryPlanId())
+                    .set(TrpgInvestigatorSuspension::getUpdatedAt, before.getUpdatedAt())));
+            if (!independent) {
+                if (undo.itemCreated()) requireRestored(itemMapper.deleteById(undo.sceneItemId()));
+                else requireRestored(itemMapper.update(null, new LambdaUpdateWrapper<GroupReplyPlanItem>()
+                        .eq(GroupReplyPlanItem::getId, undo.sceneItemId())
+                        .set(GroupReplyPlanItem::getParticipantStatus, undo.participantStatusBefore())
+                        .set(GroupReplyPlanItem::getUpdatedAt, undo.itemUpdatedBefore())));
+            }
+        }
+        if (independent) {
+            requireRestored(planMapper.update(null, new LambdaUpdateWrapper<GroupReplyPlan>()
+                    .eq(GroupReplyPlan::getId, result.tailPlanId()).eq(GroupReplyPlan::getNextPlanId, scene.getId())
+                    .set(GroupReplyPlan::getNextPlanId, null).set(GroupReplyPlan::getUpdatedAt, result.tailUpdatedBefore())));
+            itemMapper.delete(new LambdaQueryWrapper<GroupReplyPlanItem>().eq(GroupReplyPlanItem::getPlanId, scene.getId()));
+            requireRestored(planMapper.deleteById(scene.getId()));
+        }
+    }
+
+    private void requireRestored(int affected) {
+        if (affected != 1) throw new IllegalStateException("调查员恢复状态回滚失败");
     }
 
     private NarrativeExecution requireNarrativeExecution(

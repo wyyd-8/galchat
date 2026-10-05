@@ -1,5 +1,9 @@
 package com.me.galchat.service.impl.group;
 
+import com.me.galchat.domain.dto.KpSceneFinishDTOs;
+import com.me.galchat.service.impl.trpg.TrpgStepInteractionService.InteractionRequest;
+import com.me.galchat.domain.dto.InvestigatorSceneFinishResult;
+import com.me.galchat.service.impl.trpg.TrpgSceneFinishRecoveryService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.DiceRollConstant;
@@ -10,8 +14,16 @@ import com.me.galchat.domain.po.GroupChatReplyStep;
 import com.me.galchat.domain.po.GroupChatToolCall;
 import com.me.galchat.domain.po.GroupChatTurn;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
+import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.exception.GroupCheckpointUnavailableException;
 import com.me.galchat.domain.dto.KpCharacterAttributeDTOs;
+import com.me.galchat.domain.dto.KpEquipmentDTOs;
+import com.me.galchat.domain.dto.KpInvestigatorSuspensionDTOs;
+import com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService;
+import com.me.galchat.service.impl.trpg.TrpgEquipmentService;
+import com.me.galchat.service.impl.trpg.TrpgMaterialRecoveryService;
 import com.me.galchat.domain.vo.KpDiceToolResult;
+import com.me.galchat.exception.TurnCheckpointUnavailableException;
 import com.me.galchat.mapper.DiceRollSummaryMapper;
 import com.me.galchat.mapper.GroupChatMessageMapper;
 import com.me.galchat.mapper.GroupChatReplyStepMapper;
@@ -33,11 +45,13 @@ import java.util.Objects;
 public class GroupTurnCheckpointService {
 
     public static final String STEP_START = "STEP_START";
+    public static final String INTERACTION_COMMITTED = "INTERACTION_COMMITTED";
     public static final String TOOL_COMMITTED = "TOOL_COMMITTED";
     public static final String WAITING_DICE = "WAITING_DICE";
     public static final String PAUSED = "PAUSED";
     public static final String COMPLETED = "COMPLETED";
 
+    private final GroupConversationService conversationService;
     private final GroupTurnCheckpointMapper checkpointMapper;
     private final GroupChatMessageMapper messageMapper;
     private final GroupChatToolCallMapper toolCallMapper;
@@ -48,6 +62,14 @@ public class GroupTurnCheckpointService {
             diceMessageCodec;
     private final ICharacterCardService characterCardService;
     private final ObjectMapper objectMapper;
+    private final GroupChatFavorRollbackService chatFavorRollbackService;
+    private final TrpgEquipmentService equipmentService;
+    private final TrpgMaterialRecoveryService materialRecoveryService;
+    private final TrpgInvestigatorSuspensionService suspensionService;
+    private final TrpgSceneFinishRecoveryService sceneFinishRecoveryService;
+    private final com.me.galchat.service.impl.trpg.TrpgChildSceneCommandService childSceneCommandService;
+    private final com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService toolStateRecoveryService;
+    private final com.me.galchat.service.impl.trpg.TrpgSelectionRecoveryService selectionRecoveryService;
     private com.me.galchat.mapper.TrpgCompletionMapper completionMapper;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -118,12 +140,124 @@ public class GroupTurnCheckpointService {
                 zero(messageId), toolCallId);
     }
 
-    /**
-     * @return {@code true} when the matching checkpoint was restored;
-     *         {@code false} when the whole turn was reset as a fallback
-     */
+    /** Called inside the transaction that creates the child and records its tool call. */
     @Transactional(rollbackFor = Exception.class)
-    public boolean restore(
+    public void recordInteractionCommitted(GroupChatToolCall call) {
+        if (call.getToolResult() == null || !call.getToolResult().stripLeading().startsWith("{")) {
+            return; // Tool validation failures are plain text and create no interaction.
+        }
+        InteractionRequest interaction = readInteraction(call);
+        GroupChatReplyStep source = stepMapper.selectById(call.getReplyStepId());
+        GroupChatTurn turn = source == null ? null : turnMapper.selectById(source.getTurnId());
+        requireBoundaryContext(turn, source);
+        GroupChatReplyStep child = requireInteractionChild(turn, source, interaction);
+        GroupChatMessage message = source.getOutputMessageId() == null ? null
+                : messageMapper.selectById(source.getOutputMessageId());
+        LocalDateTime now = LocalDateTime.now();
+        if (message == null) {
+            message = new GroupChatMessage().setConversationId(turn.getConversationId())
+                    .setTurnId(turn.getId()).setReplyStepId(source.getId())
+                    .setSceneId(GroupChatConstant.PLAN_SOURCE_SCENE.equals(turn.getPlanSource())
+                            ? turn.getPlanContextId() : null)
+                    .setSpeakerType(source.getSpeakerType()).setSpeakerId(source.getSpeakerId())
+                    .setSequenceNo(conversationService.nextSequence(turn.getConversationId()))
+                    .setCreatedAt(now);
+            setQuestion(message, interaction, now);
+            messageMapper.insert(message);
+        } else {
+            requireQuestionMessage(turn, source, message);
+            setQuestion(message, interaction, now);
+            messageMapper.updateById(message);
+        }
+        child.setPromptMessageId(message.getId()).setUpdatedAt(now);
+        stepMapper.updateById(child);
+        // Until stream finalization, crash recovery must still find this source as running.
+        source.setOutputMessageId(message.getId()).setStatus(GroupChatConstant.STATUS_RUNNING)
+                .setUpdatedAt(now);
+        stepMapper.updateById(source);
+        Long lastMessageId = messageMapper.selectMaxIdByReplyStepId(source.getId());
+        upsert(turn, source, INTERACTION_COMMITTED,
+                Math.max(message.getId(), zero(lastMessageId)), call.getId());
+    }
+
+    private InteractionRequest readInteraction(GroupChatToolCall call) {
+        if (call == null || !("askForClarification".equals(call.getToolName())
+                || "askKp".equals(call.getToolName()))) {
+            throw new IllegalStateException("交互检查点缺少询问工具记录");
+        }
+        try {
+            InteractionRequest result = objectMapper.readValue(call.getToolResult(), InteractionRequest.class);
+            if (result == null || result.childStepId() == null || result.rootStepId() == null
+                    || result.question() == null || result.question().isBlank()) {
+                throw new IllegalStateException("询问工具结果缺少问题或子步骤");
+            }
+            return result;
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("询问工具结果无法解析", exception);
+        }
+    }
+
+    private GroupChatReplyStep requireInteractionChild(GroupChatTurn turn,
+            GroupChatReplyStep source, InteractionRequest interaction) {
+        Long rootId = source.getParentStepId() == null ? source.getId() : source.getParentStepId();
+        GroupChatReplyStep child = stepMapper.selectById(interaction.childStepId());
+        if (!Objects.equals(rootId, interaction.rootStepId()) || child == null
+                || !Objects.equals(child.getTurnId(), turn.getId())
+                || !Objects.equals(child.getParentStepId(), rootId)
+                || !GroupChatConstant.ACTION_TRPG_INTERACTION_RESPONSE.equals(child.getActionType())) {
+            throw new IllegalStateException("交互检查点引用的回答子步骤不匹配");
+        }
+        return child;
+    }
+
+    private void requireQuestionMessage(GroupChatTurn turn, GroupChatReplyStep source, GroupChatMessage message) {
+        if (message == null || !Objects.equals(message.getReplyStepId(), source.getId())
+                || !Objects.equals(message.getTurnId(), turn.getId())
+                || !Objects.equals(message.getConversationId(), turn.getConversationId())) {
+            throw new IllegalStateException("交互检查点引用的问题消息不匹配");
+        }
+    }
+
+    private void setQuestion(GroupChatMessage message, InteractionRequest interaction, LocalDateTime now) {
+        message.setContent(interaction.question()).setMessageKind(GroupChatConstant.MESSAGE_DIALOGUE)
+                .setVisibility("public").setStatus(GroupChatConstant.STATUS_COMPLETED).setUpdatedAt(now);
+    }
+
+    private void restoreInteraction(GroupChatTurn turn, GroupChatReplyStep source,
+            GroupTurnCheckpoint checkpoint) {
+        GroupChatToolCall call = toolCallMapper.selectById(checkpoint.getToolCallId());
+        if (call == null || !Objects.equals(call.getReplyStepId(), source.getId())) {
+            throw new IllegalStateException("交互检查点缺少询问工具记录");
+        }
+        InteractionRequest interaction = readInteraction(call);
+        GroupChatReplyStep child = requireInteractionChild(turn, source, interaction);
+        GroupChatMessage message = child.getPromptMessageId() == null ? null
+                : messageMapper.selectById(child.getPromptMessageId());
+        requireQuestionMessage(turn, source, message);
+        LocalDateTime now = LocalDateTime.now();
+        setQuestion(message, interaction, now);
+        messageMapper.updateById(message);
+        child.setPromptMessageId(message.getId()).setUpdatedAt(now);
+        stepMapper.updateById(child);
+        source.setOutputMessageId(message.getId())
+                .setStatus(source.getParentStepId() == null ? GroupChatConstant.STATUS_WAITING_INTERACTION
+                        : GroupChatConstant.STATUS_COMPLETED)
+                .setErrorMessage(null).setUpdatedAt(now);
+        persistResetStep(source);
+        if (source.getParentStepId() != null) {
+            GroupChatReplyStep root = stepMapper.selectById(source.getParentStepId());
+            if (root == null || !Objects.equals(root.getTurnId(), turn.getId())) {
+                throw new IllegalStateException("交互检查点缺少根步骤");
+            }
+            root.setStatus(GroupChatConstant.STATUS_WAITING_INTERACTION).setErrorMessage(null).setUpdatedAt(now);
+            persistResetStep(root);
+        }
+        turn.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(now);
+        turnMapper.updateById(turn);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void restore(
             GroupChatTurn turn, GroupChatReplyStep step) {
         requireBoundaryContext(turn, step);
         GroupTurnCheckpoint checkpoint = checkpointMapper.selectById(
@@ -132,17 +266,16 @@ public class GroupTurnCheckpointService {
                 || !Objects.equals(turn.getId(), checkpoint.getTurnId())
                 || !Objects.equals(step.getId(),
                 checkpoint.getReplyStepId())) {
-            restartWholeTurn(turn);
-            return false;
+            throw new TurnCheckpointUnavailableException();
         }
         String checkpointType = checkpoint.getCheckpointType();
         boolean diceBoundary = TOOL_COMMITTED.equals(checkpointType)
                 || WAITING_DICE.equals(checkpointType);
-        if (!diceBoundary
+        boolean interactionBoundary = INTERACTION_COMMITTED.equals(checkpointType);
+        if (!diceBoundary && !interactionBoundary
                 && !PAUSED.equals(checkpointType)
                 && !STEP_START.equals(checkpointType)) {
-            restartWholeTurn(turn);
-            return false;
+            throw new TurnCheckpointUnavailableException();
         }
         GroupChatToolCall diceCall = diceBoundary
                 ? latestDiceCall(step.getId(), checkpoint.getToolCallId())
@@ -151,23 +284,30 @@ public class GroupTurnCheckpointService {
             throw new IllegalStateException(
                     "骰点检查点缺少已提交的工具调用");
         }
-        rollbackAttributeAdjustments(
-                turn.getConversationId(),
+        rollbackToolEffects(
+                turn.getConversationId(), turn.getId(),
                 toolCallMapper.selectList(
                         new LambdaQueryWrapper<GroupChatToolCall>()
                                 .eq(GroupChatToolCall::getReplyStepId,
                                         step.getId())
                                 .gt(GroupChatToolCall::getId,
                                         zero(checkpoint.getToolCallId()))
-                                .eq(GroupChatToolCall::getToolName,
-                                        "adjustBasicAttributes")
+                                .in(GroupChatToolCall::getToolName,
+                                        "adjustBasicAttributes", "purchaseEquipment", "suspendInvestigators",
+                                        "resumeSuspendedInvestigators", "finishSceneExploration", "endSceneExploration", "resumeWaitingInvestigators", "updateQuickNotes", "updateWeaponState", "stashWeapon", "equipWeaponFromStash", "updateCombatStates", "publishExplorationScenes")
                                 .isNotNull(GroupChatToolCall::getToolResult)
                                 .orderByDesc(GroupChatToolCall::getId)));
+        materialRecoveryService.restoreAfterCheckpoint(turn.getConversationId(),
+                step.getId(), zero(checkpoint.getMessageId()));
         messageMapper.deleteAfterCheckpoint(
                 step.getId(), zero(checkpoint.getMessageId()));
         toolCallMapper.deleteAfterCheckpoint(
                 step.getId(), zero(checkpoint.getToolCallId()));
         reconcileFinishRequest(turn);
+        if (interactionBoundary) {
+            restoreInteraction(turn, step, checkpoint);
+            return;
+        }
         if (TOOL_COMMITTED.equals(checkpointType)) {
             restoreDiceMessage(step, diceCall);
         }
@@ -186,56 +326,71 @@ public class GroupTurnCheckpointService {
                         : GroupChatConstant.STATUS_RUNNING)
                 .setUpdatedAt(now);
         turnMapper.updateById(turn);
-        return true;
     }
 
-    private void restartWholeTurn(GroupChatTurn turn) {
+    /** Restores the unfinished suffix after the last fully completed chat reply. */
+    @Transactional(rollbackFor = Exception.class)
+    public List<GroupChatReplyStep> restoreChat(GroupConversation conversation, GroupChatTurn turn) {
+        GroupTurnCheckpoint checkpoint = checkpointMapper.selectById(conversation.getId());
         List<GroupChatReplyStep> steps = stepMapper.selectList(
                 new LambdaQueryWrapper<GroupChatReplyStep>()
                         .eq(GroupChatReplyStep::getTurnId, turn.getId())
                         .orderByAsc(GroupChatReplyStep::getStepNo));
-        List<Long> stepIds = steps == null ? List.of()
-                : steps.stream()
-                        .map(GroupChatReplyStep::getId)
-                        .filter(Objects::nonNull)
-                        .toList();
-        if (!stepIds.isEmpty()) {
-            rollbackAttributeAdjustments(
-                    turn.getConversationId(),
-                    toolCallMapper.selectList(
-                            new LambdaQueryWrapper<GroupChatToolCall>()
-                                    .in(GroupChatToolCall::getReplyStepId,
-                                            stepIds)
-                                    .eq(GroupChatToolCall::getToolName,
-                                            "adjustBasicAttributes")
-                                    .isNotNull(
-                                            GroupChatToolCall::getToolResult)
-                                    .orderByDesc(GroupChatToolCall::getId)));
-            toolCallMapper.delete(
-                    new LambdaQueryWrapper<GroupChatToolCall>()
-                            .in(GroupChatToolCall::getReplyStepId,
-                                    stepIds));
+        if (!GroupChatConstant.MODE_CHAT.equals(conversation.getMode())
+                || !Objects.equals(conversation.getId(), turn.getConversationId())
+                || checkpoint == null || !Objects.equals(checkpoint.getTurnId(), turn.getId())
+                || steps == null || steps.isEmpty()) {
+            throw new GroupCheckpointUnavailableException();
         }
-        messageMapper.delete(
-                new LambdaQueryWrapper<GroupChatMessage>()
-                        .eq(GroupChatMessage::getTurnId, turn.getId()));
-        LocalDateTime now = LocalDateTime.now();
-        if (steps != null) {
-            for (GroupChatReplyStep current : steps) {
-                current.setStatus(current.getParentStepId() == null
-                                ? GroupChatConstant.STATUS_PENDING
-                                : GroupChatConstant.STATUS_CANCELLED)
-                        .setOutputMessageId(null)
-                        .setErrorMessage(null)
-                        .setUpdatedAt(now);
-                persistResetStep(current);
+        int boundary = -1;
+        for (int i = 0; i < steps.size(); i++) {
+            if (Objects.equals(steps.get(i).getId(), checkpoint.getReplyStepId())) {
+                boundary = i;
+                break;
             }
         }
-        turn.setStatus(GroupChatConstant.STATUS_RUNNING)
-                .setUpdatedAt(now);
+        int next;
+        if (STEP_START.equals(checkpoint.getCheckpointType()) && boundary == 0) {
+            next = 0;
+        } else if (COMPLETED.equals(checkpoint.getCheckpointType()) && boundary >= 0) {
+            next = boundary + 1;
+        } else {
+            throw new GroupCheckpointUnavailableException();
+        }
+        for (int i = 0; i < steps.size(); i++) {
+            GroupChatReplyStep step = steps.get(i);
+            if (step.getParentStepId() != null
+                    || !Objects.equals(step.getTurnId(), turn.getId())
+                    || (i < next) != GroupChatConstant.STATUS_COMPLETED.equals(step.getStatus())) {
+                throw new GroupCheckpointUnavailableException();
+            }
+        }
+        List<GroupChatReplyStep> remaining = steps.subList(next, steps.size());
+        if (!remaining.isEmpty()) {
+            List<Long> stepIds = remaining.stream().map(GroupChatReplyStep::getId).toList();
+            chatFavorRollbackService.rollback(conversation.getUserWorldId(), stepIds);
+            messageMapper.delete(new LambdaQueryWrapper<GroupChatMessage>()
+                    .in(GroupChatMessage::getReplyStepId, stepIds));
+            toolCallMapper.delete(new LambdaQueryWrapper<GroupChatToolCall>()
+                    .in(GroupChatToolCall::getReplyStepId, stepIds));
+            for (GroupChatReplyStep step : remaining) {
+                // A new attempt uses the actor's current model selection.
+                step.setStatus(GroupChatConstant.STATUS_PENDING).setOutputMessageId(null)
+                        .setExecutionMode(null).setModelApiId(null)
+                        .setErrorMessage(null).setUpdatedAt(LocalDateTime.now());
+                stepMapper.update(null, new LambdaUpdateWrapper<GroupChatReplyStep>()
+                        .eq(GroupChatReplyStep::getId, step.getId())
+                        .set(GroupChatReplyStep::getStatus, step.getStatus())
+                        .set(GroupChatReplyStep::getOutputMessageId, null)
+                        .set(GroupChatReplyStep::getExecutionMode, null)
+                        .set(GroupChatReplyStep::getModelApiId, null)
+                        .set(GroupChatReplyStep::getErrorMessage, null)
+                        .set(GroupChatReplyStep::getUpdatedAt, step.getUpdatedAt()));
+            }
+        }
+        turn.setStatus(GroupChatConstant.STATUS_RUNNING).setUpdatedAt(LocalDateTime.now());
         turnMapper.updateById(turn);
-        reconcileFinishRequest(turn);
-        checkpointMapper.deleteById(turn.getConversationId());
+        return List.copyOf(remaining);
     }
 
     private void reconcileFinishRequest(GroupChatTurn turn) {
@@ -257,22 +412,84 @@ public class GroupTurnCheckpointService {
                         .set(GroupChatReplyStep::getStatus,
                                 step.getStatus())
                         .set(GroupChatReplyStep::getOutputMessageId,
-                                null)
+                                step.getOutputMessageId())
                         .set(GroupChatReplyStep::getErrorMessage, null)
                         .set(GroupChatReplyStep::getUpdatedAt,
                                 step.getUpdatedAt()));
     }
 
-    private void rollbackAttributeAdjustments(
-            Long runId, List<GroupChatToolCall> calls) {
+    private void rollbackToolEffects(
+            Long runId, Long turnId, List<GroupChatToolCall> calls) {
         if (calls == null || calls.isEmpty()) {
             return;
         }
         for (GroupChatToolCall call : calls) {
             String toolResult = call.getToolResult();
-            // Successful adjustments are JSON objects; tool failures are text.
+            if ("publishExplorationScenes".equals(call.getToolName())) {
+                selectionRecoveryService.rollback(runId, turnId, toolResult);
+                continue;
+            }
+            if (com.me.galchat.service.impl.trpg.TrpgToolStateRecoveryService.TOOLS.contains(call.getToolName())) {
+                toolStateRecoveryService.rollback(runId, call.getToolName(), toolResult);
+                continue;
+            }
+            if ("suspendInvestigators".equals(call.getToolName()) && toolResult != null) {
+                String trimmed = toolResult.stripLeading();
+                if (trimmed.startsWith("已悬置调查员") || trimmed.startsWith("\"已悬置调查员")) {
+                    throw new IllegalStateException("悬置记录缺少撤销数据，无法回滚");
+                }
+                if (trimmed.startsWith("{")) {
+                    try {
+                        suspensionService.rollbackSuspension(runId,
+                                objectMapper.readValue(toolResult, KpInvestigatorSuspensionDTOs.SuspendResult.class));
+                    } catch (JacksonException exception) {
+                        throw new IllegalStateException("悬置记录无法解析，已中止重试", exception);
+                    }
+                }
+                continue;
+            }
+            if ("resumeSuspendedInvestigators".equals(call.getToolName())
+                    || "finishSceneExploration".equals(call.getToolName())
+                    || "endSceneExploration".equals(call.getToolName())
+                    || "resumeWaitingInvestigators".equals(call.getToolName())) {
+                String trimmed = toolResult == null ? "" : toolResult.stripLeading();
+                if (trimmed.startsWith("{")) {
+                    try {
+                        if ("resumeSuspendedInvestigators".equals(call.getToolName())) {
+                            suspensionService.rollbackResume(runId, objectMapper.readValue(toolResult,
+                                    KpInvestigatorSuspensionDTOs.ResumeResult.class));
+                        } else if ("resumeWaitingInvestigators".equals(call.getToolName())) {
+                            childSceneCommandService.rollbackWaitingResume(runId, objectMapper.readValue(toolResult,
+                                    com.me.galchat.domain.dto.KpWaitingInvestigatorDTOs.Result.class));
+                        } else if ("endSceneExploration".equals(call.getToolName())) {
+                            sceneFinishRecoveryService.rollbackInvestigatorFinish(runId, objectMapper.readValue(toolResult,
+                                    InvestigatorSceneFinishResult.class));
+                        } else {
+                            sceneFinishRecoveryService.rollbackKpFinish(runId, objectMapper.readValue(toolResult,
+                                    KpSceneFinishDTOs.FinishResult.class));
+                        }
+                    } catch (JacksonException exception) {
+                        throw new IllegalStateException("场景工具记录无法解析，已中止重试", exception);
+                    }
+                } else if (trimmed.contains("已并入当前场景") || trimmed.contains("排入后续主场景队列")
+                        || trimmed.contains("当前场景已请求结算") || trimmed.contains("你的结束探索意向已记录")
+                        || trimmed.contains("所有调查员均已结束探索") || trimmed.contains("已结束等待，将从下一轮开始正常参与行动")) {
+                    throw new IllegalStateException("场景工具记录缺少撤销数据，无法安全回滚");
+                }
+                continue;
+            }
+            // Successful tool effects are JSON objects; tool failures are text.
             if (toolResult == null
                     || !toolResult.stripLeading().startsWith("{")) {
+                continue;
+            }
+            if ("purchaseEquipment".equals(call.getToolName())) {
+                try {
+                    equipmentService.rollbackPurchase(runId,
+                            objectMapper.readValue(toolResult, KpEquipmentDTOs.PurchaseResult.class));
+                } catch (JacksonException exception) {
+                    throw new IllegalStateException("购买记录无法解析，已中止重试", exception);
+                }
                 continue;
             }
             KpCharacterAttributeDTOs.Result result;
@@ -321,16 +538,16 @@ public class GroupTurnCheckpointService {
             GroupChatReplyStep step,
             GroupChatToolCall diceCall) {
         if (step.getOutputMessageId() == null) {
-            throw new IllegalStateException(
-                    "骰点检查点缺少输出消息");
+            throw new TurnCheckpointUnavailableException(
+                    "骰点消息无法从检查点恢复，无法继续重试。");
         }
         GroupChatMessage message = messageMapper.selectById(
                 step.getOutputMessageId());
         if (message == null
                 || !Objects.equals(message.getReplyStepId(),
                 step.getId())) {
-            throw new IllegalStateException(
-                    "骰点检查点引用的消息不存在");
+            throw new TurnCheckpointUnavailableException(
+                    "骰点消息无法从检查点恢复，无法继续重试。");
         }
         KpDiceToolResult result;
         try {

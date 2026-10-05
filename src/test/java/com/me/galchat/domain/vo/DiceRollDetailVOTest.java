@@ -42,6 +42,33 @@ class DiceRollDetailVOTest {
     }
 
     @Test
+    void firearmDisplayFieldsAreAvailableBeforeRollingAndSurviveSavedDataRoundTrip()
+            throws Exception {
+        JsonMapper mapper = JsonMapper.builder().build();
+        DiceResolutionDataVO saved = DiceResolutionDataVO.pending(
+                "FIREARM_ATTACK", null,
+                Map.of("characterName", "林恩", "skillName", "射击:步枪/霰弹枪",
+                        "targetCharacterName", "邪教徒", "attackerCardId", 11L,
+                        "targetCardId", 21L, "difficultyIncrease", 1, "targetValue", 60));
+        DiceResolutionDataVO resolution = mapper.readValue(
+                mapper.writeValueAsString(saved), DiceResolutionDataVO.class);
+        DiceRollResult entity = new DiceRollResult().setId(1L).setResolutionData(resolution);
+        var pending = mapper.valueToTree(DiceRollDetailVO.from(entity)).get("resolution");
+        assertThat(pending.get("checkName").asText()).isEqualTo("射击:步枪/霰弹枪");
+        assertThat(pending.path("targetCharacterName").asText()).isEqualTo("邪教徒");
+        assertThat(pending.get("targetValue").asInt()).isEqualTo(30);
+        assertThat(pending.toString()).doesNotContain("attackerCardId", "targetCardId", "\"rule\"");
+
+        resolution.setOutcome(Map.of("characterName", "林恩", "targetCharacterName", "邪教徒",
+                "category", "SUCCESS"));
+        entity.setResolvedAt(LocalDateTime.parse("2026-09-30T10:00:00"));
+        var resolved = mapper.valueToTree(DiceRollDetailVO.from(entity)).get("resolution");
+        for (String field : List.of("characterName", "checkName", "targetCharacterName", "targetValue")) {
+            assertThat(resolved.get(field)).isEqualTo(pending.get(field));
+        }
+    }
+
+    @Test
     void publicTargetValueReflectsTheEffectiveCheckRequirement() {
         assertThat(DiceResolutionDataVO.pending(
                 "CHECK", null, Map.of("targetValue", 70, "difficulty", "REGULAR"))

@@ -39,13 +39,19 @@ public final class KpEquipmentDTOs {
             String weaponName,
             String sourceCharacterName,
             String locationName,
-            StashReason reason) {
+            StashReason reason, KpToolStateUndo undo) {
+        public StashResult(Long weaponId, String weaponName, String sourceCharacterName, String locationName, StashReason reason) {
+            this(weaponId, weaponName, sourceCharacterName, locationName, reason, null);
+        }
     }
 
     public record EquipResult(
             Long weaponId,
             String weaponName,
-            String targetCharacterName) {
+            String targetCharacterName, KpToolStateUndo undo) {
+        public EquipResult(Long weaponId, String weaponName, String targetCharacterName) {
+            this(weaponId, weaponName, targetCharacterName, null);
+        }
     }
 
     public record PurchaseLineResult(
@@ -54,6 +60,11 @@ public final class KpEquipmentDTOs {
             String name) {
     }
 
-    public record PurchaseResult(List<PurchaseLineResult> entries) {
+    /** Stored with the tool result so retry can undo only this purchase. */
+    public record PurchaseUndo(Long characterId, Long profileId,
+                               String equipmentBefore, String equipmentAfter, Long weaponId) {
+    }
+
+    public record PurchaseResult(List<PurchaseLineResult> entries, List<PurchaseUndo> undo) {
     }
 }

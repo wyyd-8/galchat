@@ -22,7 +22,7 @@ const emit = defineEmits<{ account: []; models: []; password: []; logout: [] }>(
 
 <style scoped>
 .mobile-profile-page { width: 100%; max-width: none; margin: 0; padding: 0; min-height: 0; display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.profile-top { min-height: 64px; padding: 6px 12px 10px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.profile-top { min-height: 64px; padding: max(6px, env(safe-area-inset-top)) 12px 10px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .profile-top strong { font-size: 17px; font-weight: 600; }
 .profile-brand { width: 38px; height: 38px; margin: 0 9px; display: grid; place-items: center; border-radius: 11px; color: #fff; background: var(--pine); font-size: 22px; }
 .profile-content { padding: 18px 18px 24px; flex: 1; min-height: 0; overflow-y: auto; }

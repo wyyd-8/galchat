@@ -92,14 +92,24 @@ public class WorldTemplateServiceImpl extends ServiceImpl<WorldTemplateMapper, W
             throw new UserRequestException("请求参数不能为空");
         }
         WorldTemplate oldWorldTemplate = getOwnWorldTemplate(userId, id);
+        boolean visible = worldTemplate.getVisible() == null
+                ? !Boolean.FALSE.equals(oldWorldTemplate.getVisible()) : worldTemplate.getVisible();
+        if (!visible && !Boolean.FALSE.equals(oldWorldTemplate.getVisible())) {
+            throw new UserRequestException("世界模板公开后不能再改为私有");
+        }
         String image = worldTemplate.getImage() == null ? null : ImageSecurityUtils.normalizeLocalImageUrl(worldTemplate.getImage());
-        baseMapper.update(null, new LambdaUpdateWrapper<WorldTemplate>()
+        int updated = baseMapper.update(null, new LambdaUpdateWrapper<WorldTemplate>()
                 .eq(WorldTemplate::getId, oldWorldTemplate.getId())
+                // A stale private editor must not undo a concurrent publication.
+                .eq(!visible, WorldTemplate::getVisible, false)
                 .set(WorldTemplate::getName, worldTemplate.getName())
                 .set(WorldTemplate::getImage, image)
                 .set(WorldTemplate::getAuthor, worldTemplate.getAuthor())
                 .set(WorldTemplate::getBackground,
                         worldTemplate.getBackground())
-                .set(WorldTemplate::getVisible, worldTemplate.getVisible()));
+                .set(WorldTemplate::getVisible, visible));
+        if (!visible && updated == 0) {
+            throw new UserRequestException("世界模板已公开或状态已变更，请刷新后重试；公开后不能再改为私有");
+        }
     }
 }

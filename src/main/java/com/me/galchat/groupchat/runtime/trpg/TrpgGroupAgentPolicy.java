@@ -325,7 +325,8 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                 + "工具返回后本次响应会暂停；恢复同一步骤时根据骰点结果直接回答，不得再次调用。"
                 : combatRoute
                 ? "当前步骤只进行战斗反应路由，不裁定成败，也不掷骰。"
-                + "除缺少关键信息时使用公开追问工具外，不调用其他工具。"
+                + "仅在已有行动声明缺少影响路由的目标、方法等关键信息时使用公开追问工具，不调用其他工具。"
+                + "不得用追问要求目标选择闪避、反击、寻找掩护或其他防守方式；这些选择由后续正式防守步骤处理。"
                 : "你负责描述场景、裁定规则并在需要时发起掷骰；不得替用户决定调查员行动。\n"
                 + "每次响应最多调用一个会改变状态的掷骰工具，且不得与其他工具并行调用。\n"
                 + "调用掷骰工具后本次响应会暂停；稍后恢复同一步骤时，再根据骰点结果继续裁定。";
@@ -380,25 +381,28 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     .map(card -> characterCardService.getById(card.cardId()))
                     .filter(java.util.Objects::nonNull)
                     .toList();
-            messages.add(new SystemMessage(contextAssembler.baseSystemPrompt(conversation, actor) + "\n"
-                    + investigatorCardContext + "\n"
-                    + investigatorWeaponContext + "\n"
-                    + abnormalWeaponRules + "\n"
-                    + characterCardFormatter.formatNpcs(npcCards)
-                    + "\n" + characterCardFormatter.formatActiveNpcs(
-                            activeNpcCards)
-                    + (combatPhase
-                    ? TrpgRulePrompts.combatActionReference() : "")
-                    + TrpgRulePrompts.residentRules()
-                    + TrpgRulePrompts.skillIndex()
-                    + (combatAdjudicate
-                    ? TrpgRulePrompts.combatRules() : "")
-                    + """
-
+            messages.add(new SystemMessage("""
                     你是当前 TRPG 群聊唯一的KP，当前阶段是%s。KP不是可见的调查员。
                     %s
+                    上下文中的<dice-roll>消息统一视为你先前发起的检定及其结果，包括同一裁定流程中由系统自动触发的后续检定。
+                    即使这些结果以user消息传入，也不是玩家自行发起的检定。恢复后根据已完成的结果继续裁定，不要重复要求或调用同一检定；尚未完成的检定等待玩家掷骰。
+                    所有工具调用和掷骰的执行结果、数值计算及状态变更均由系统处理，必须以系统返回的内容和最新人物卡状态为准。
+                    你负责按工具要求提供参数，并根据返回结果描述剧情；不得自行计算、重算或改写检定成败、命中数、伤害、护甲减免、弹药消耗、生命或理智变化等结果，也不得再次调用状态修改工具重复施加已结算的效果。
+                    工具报错或结果尚未返回时，不得自行补算、假定成功或编造结果；系统明确留给KP处理的事项，只在其指定范围内进行叙事裁定。
                     不得输出隐藏思考过程。
-                    """.formatted(phase, kpPhaseExecutionRules)));
+                    """.formatted(phase, kpPhaseExecutionRules)
+                    + TrpgRulePrompts.residentRules()
+                    + TrpgRulePrompts.skillIndex()
+                    + (combatPhase
+                    ? TrpgRulePrompts.combatActionReference() : "")
+                    + (combatAdjudicate
+                    ? TrpgRulePrompts.combatRules() : "")
+                    + abnormalWeaponRules + "\n"
+                    + investigatorCardContext + "\n"
+                    + investigatorWeaponContext + "\n"
+                    + characterCardFormatter.formatNpcs(npcCards)
+                    + "\n" + characterCardFormatter.formatActiveNpcs(
+                            activeNpcCards)));
         } else {
             List<CharacterCardVO> otherInvestigatorCards =
                     investigatorCards.stream()
@@ -411,17 +415,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             String combatNpcOverview = combatPhase
                     ? investigatorCombatNpcOverview(conversation, cards)
                     : "";
-            messages.add(new SystemMessage(
-                    investigatorContextAssembler.format(
-                            conversation, action) + "\n"
-                    + characterCardFormatter.formatOtherInvestigators(
-                            otherInvestigatorCards)
-                    + (combatPhase
-                    ? TrpgRulePrompts.investigatorCombatReference() : "")
-                    + combatNpcOverview
-                    + TrpgRulePrompts.investigatorResidentRules()
-                    + """
-
+            messages.add(new SystemMessage("""
                     你是调查员操控 Agent。Agent身份名是“%s”，操控的调查员名是“%s”。
                     “%s”不是调查员姓名，只提供性格和决策倾向；你正在 TRPG 群聊中扮演“%s”。
                     对外发言、自称和行动一律使用“%s”，不得使用Agent身份名代替。当前阶段是%s。
@@ -429,7 +423,16 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     """.formatted(
                             agentName, investigatorName, agentName,
                             investigatorName, investigatorName, phase)
-                    + TrpgRulePrompts.investigatorThinkingModeRules()));
+                    + TrpgRulePrompts.investigatorResidentRules()
+                    + TrpgRulePrompts.investigatorThinkingModeRules()
+                    + "\n"
+                    + (combatPhase
+                    ? TrpgRulePrompts.investigatorCombatReference() : "")
+                    + investigatorContextAssembler.format(
+                            conversation, action) + "\n"
+                    + characterCardFormatter.formatOtherInvestigators(
+                            otherInvestigatorCards)
+                    + combatNpcOverview));
         }
         messages.addAll(context.messages());
         if (GroupChatConstant.ACTOR_CHARACTER.equals(actor.type())
@@ -490,9 +493,13 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
             } else if (combatRoute) {
                 messages.add(new UserMessage("""
                         读取紧邻的行动，先按实际内容区分叙事行为与需要机械结算的战斗行动，不能仅因当前处于战斗轮或提到他人就使用TARGETED。
+                        当且仅当攻击方没有声明一次攻击时，才允许不路由目标；此时按实际行动使用SELF_OR_UTILITY或NARRATIVE，省略targetName和targets。只装填、说话、等待或明确不行动都可以不路由目标，不得为其虚构攻击。
+                        一旦声明了攻击（包括“装填后立即射击”等混合行动），必须使用TARGETED并列出全部攻击目标；缺少或无法确定目标时调用askForClarification，不得通过省略目标、返回空targets或改成非攻击类型跳过。目标不能防守时仍须保留目标，仅将insertDefense设为false。
                         对话、呼喊、传递信息、伸手接应同伴翻窗等无对抗的叙事协助使用NARRATIVE；互动对象可以是未参战的在场NPC，不要求其加入参战名单，不填写targetName或targets，insertDefense=false且defenseOptions为空。只有声明了真实攻击、强制移动、伤害、治疗或其他战斗机械效果时才进入相应战斗路由，不得把这些效果伪装成叙事以绕过校验。
                         攻击、强行阻拦、急救治疗等需要对另一名参战者进行机械结算的行动使用TARGETED；装填等只影响行动者或其装备的行动使用SELF_OR_UTILITY。带有对话或协助描述的混合行动若同时包含攻击或其他战斗机械效果，仍须按实际机械效果路由。
-                        TARGETED必须识别准确目标，并判断目标是否需要获得寻找掩护、闪避、反击或其他即时防守行动。枪械行动在一回合声明多个目标时，必须按声明顺序一次列出全部目标。
+                        TARGETED必须识别准确目标，并判断目标是否需要获得寻找掩护、闪避、反击或其他即时防守行动。枪械行动在一回合声明多个目标时，必须按声明顺序一次列出全部目标，每个目标只出现一次；对同一目标的多发射击不得拆成重复目标。
+                        defenseOptions表示目标在后续正式防守步骤中可以选择的方式，不要求目标现在做出选择。目标尚未声明防守方式是正常流程，不属于行动声明缺失信息，不得因此调用askForClarification。
+                        例如“弗莱德挥棒攻击巴里的膝盖”，若巴里可以防守，直接返回targetName="巴里"、insertDefense=true、defenseOptions=["闪避","反击"]；不得先追问巴里“闪避还是反击”，也不得替巴里选择。
                         目标已死亡、濒死、昏迷或被眩晕（剩余眩晕回合数大于0）时，必须令insertDefense=false且defenseOptions为空；不得为其插入寻找掩护、闪避或反击。
                         只输出一个JSON对象，不要Markdown，不要叙事：
                         {"actionKind":"TARGETED","targetName":"准确人物卡名称","insertDefense":true,"defenseOptions":["闪避","反击"],"reason":"简短原因"}
@@ -503,9 +510,9 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                         或叙事行为：
                         {"actionKind":"NARRATIVE","insertDefense":false,"defenseOptions":[],"reason":"伸手接应在场同伴翻窗，无需战斗防守"}
                         NARRATIVE只跳过战斗目标校验与防守，不在路由阶段宣布成功；交给后续KP根据现场事实叙述，确有跌落等风险时再判断是否需要普通检定。
-                        确认属于TARGETED后，目标缺失、歧义、不在参战者中或行动不合法时不要猜测，改为：
+                        确认属于TARGETED且行动声明信息完整后，若目标不在参战者中或行动不合法，不要猜测或借追问要求防守，改为：
                         {"error":"明确说明问题"}
-                        如果缺少的信息会实质改变行动路由，调用askForClarification公开追问一个问题；无法唯一确定时调用askForClarification，不要输出error。
+                        只有已有行动声明中的目标、方法等信息缺失或歧义，且会实质改变行动路由时，才调用askForClarification公开澄清一个问题；这种可澄清的信息缺失不要输出error。防守方尚未选择如何应对不属于此类问题。
                         工具是returnDirect，调用后立即结束响应。仅在确有必要时追问；不确定是否需要追问时不要调用。
                         """));
             } else if (interactionResponse) {
@@ -707,7 +714,7 @@ public class TrpgGroupAgentPolicy implements GroupAgentPolicy {
                     : combatAdjudicate
                     ? tools(kpDiceTools, kpFirearmTools, kpMeleeTools,
                             kpModuleTools, kpSkillRuleTools,
-                            kpCombatTools)
+                            kpCombatTools, kpClarificationTools)
                     : combatRoute
                     ? tools(kpClarificationTools)
                     : investigatorKpInquiry

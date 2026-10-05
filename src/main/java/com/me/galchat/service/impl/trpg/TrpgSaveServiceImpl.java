@@ -1,7 +1,6 @@
 package com.me.galchat.service.impl.trpg;
 
 import com.me.galchat.service.impl.group.GroupConversationLockService;
-import com.me.galchat.service.impl.group.GroupTurnRecoveryService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.me.galchat.constant.GroupChatConstant;
 import com.me.galchat.domain.dto.TrpgSaveCreateDTO;
@@ -25,12 +24,15 @@ import com.me.galchat.service.ITrpgSaveSnapshotService;
 import com.me.galchat.service.IUserWorldPrefixService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -49,7 +51,6 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
     private final TrpgSaveMapper saveMapper;
     private final TrpgAutoSaveMapper autoSaveMapper;
     private final ITrpgSaveSnapshotService snapshotService;
-    private final GroupTurnRecoveryService recoveryService;
     private final GroupConversationLockService lockService;
     private final TransactionTemplate transactionTemplate;
 
@@ -66,18 +67,22 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
             Long userId,
             Long conversationId,
             TrpgSaveCreateDTO createDTO) {
-        GroupConversation conversation = requireTrpgConversation(
-                userId, conversationId, true);
+        requireTrpgConversation(userId, conversationId, true);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
-            recoveryService.assertConversationHasNoNonTerminalTurns(
-                    conversationId);
-            TrpgSave saved = transactionTemplate.execute(status ->
-                    doSave(userId, conversation, createDTO));
+            TransactionTemplate saveTransaction = new TransactionTemplate(
+                    transactionTemplate.getTransactionManager(), transactionTemplate);
+            saveTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+            TrpgSaveOverviewVO saved = saveTransaction.execute(status -> {
+                GroupConversation conversation = requireTrpgConversation(
+                        userId, conversationId, true);
+                assertNoExecutingTurns(conversationId);
+                return toOverview(doSave(userId, conversation, createDTO), conversation);
+            });
             if (saved == null) {
                 throw new IllegalStateException("跑团存档事务未返回结果");
             }
-            return toOverview(saved, conversation);
+            return saved;
         } finally {
             lockService.unlock(lock);
         }
@@ -90,13 +95,19 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
         TrpgSave save = requireSave(userId, conversationId);
         TrpgSaveSnapshotDTO snapshot = save.getSnapshot();
         validateSnapshot(conversation, snapshot);
+        validateAutoSaves(conversation, snapshot, save.getSavedAt());
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
-            recoveryService.assertConversationHasNoNonTerminalTurns(
-                    conversationId);
+            assertNoExecutingTurns(conversationId);
             transactionTemplate.executeWithoutResult(status -> {
                 snapshotService.restoreDatabase(conversation, snapshot);
-                autoSaveMapper.deleteAfter(conversationId, save.getSavedAt());
+                if (snapshot.getAutoSaves() == null) {
+                    // Legacy saves cannot reconstruct checkpoints that have already been overwritten.
+                    autoSaveMapper.deleteAfter(conversationId, save.getSavedAt());
+                } else {
+                    autoSaveMapper.deleteByConversationId(conversationId);
+                    snapshot.getAutoSaves().forEach(autoSaveMapper::upsert);
+                }
             });
             snapshotService.restoreDerivedState(conversation, snapshot);
         } finally {
@@ -187,8 +198,7 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
         validateSnapshot(conversation, snapshot);
         GroupConversationLockService.OwnedLock lock = requireLock(conversationId);
         try {
-            recoveryService.assertConversationHasNoNonTerminalTurns(
-                    conversationId);
+            assertNoExecutingTurns(conversationId);
             Boolean manualSaveDeleted = transactionTemplate.execute(status -> {
                 TrpgSave manualSave = saveMapper.selectByConversationId(
                         conversationId);
@@ -211,6 +221,18 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
                             manualSaveDeleted));
         } finally {
             lockService.unlock(lock);
+        }
+    }
+
+    /** Caller holds the conversation lock; stable pauses remain saveable and loadable. */
+    private void assertNoExecutingTurns(Long conversationId) {
+        Long count = turnMapper.selectCount(new LambdaQueryWrapper<GroupChatTurn>()
+                .eq(GroupChatTurn::getConversationId, conversationId)
+                .in(GroupChatTurn::getStatus,
+                        GroupChatConstant.STATUS_PENDING,
+                        GroupChatConstant.STATUS_RUNNING));
+        if (count != null && count > 0) {
+            throw new UserRequestException("当前跑团存在正在执行的轮次，请稍后再存档或读档");
         }
     }
 
@@ -280,13 +302,17 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
                 || !Objects.equals(snapshot.getFormatVersion(), FORMAT_VERSION)) {
             throw new IllegalStateException("跑团存档快照格式不正确");
         }
+        // Capture only here: automatic snapshots must never embed other saves.
+        snapshot.setAutoSaves(autoSaveMapper.selectByConversationId(conversation.getId()));
+        LocalDateTime savedAt = LocalDateTime.now();
+        validateAutoSaves(conversation, snapshot, savedAt);
         TrpgSave existing = saveMapper.selectByConversationId(
                 conversation.getId());
         TrpgSave save = new TrpgSave()
                 .setUserId(userId)
                 .setConversationId(conversation.getId())
                 .setRemark(normalizeRemark(createDTO))
-                .setSavedAt(LocalDateTime.now())
+                .setSavedAt(savedAt)
                 .setFormatVersion(FORMAT_VERSION)
                 .setSnapshot(snapshot);
         if (existing == null) {
@@ -296,6 +322,28 @@ public class TrpgSaveServiceImpl implements ITrpgSaveService {
             saveMapper.updateById(save);
         }
         return save;
+    }
+
+    private void validateAutoSaves(
+            GroupConversation conversation, TrpgSaveSnapshotDTO snapshot, LocalDateTime savedAt) {
+        if (snapshot.getAutoSaves() == null) {
+            return;
+        }
+        Set<String> types = new HashSet<>();
+        for (TrpgAutoSave autoSave : snapshot.getAutoSaves()) {
+            if (autoSave == null
+                    || !Objects.equals(autoSave.getConversationId(), conversation.getId())
+                    || autoSave.getCheckpointType() == null
+                    || !Set.of(CHECKPOINT_TURN, CHECKPOINT_SCENE, CHECKPOINT_INITIAL)
+                            .contains(autoSave.getCheckpointType())
+                    || !types.add(autoSave.getCheckpointType())
+                    || autoSave.getSavedAt() == null
+                    || savedAt == null || autoSave.getSavedAt().isAfter(savedAt)
+                    || !validSnapshot(conversation, autoSave)
+                    || autoSave.getSnapshot().getAutoSaves() != null) {
+                throw new UserRequestException("跑团自动恢复点存档不合法");
+            }
+        }
     }
 
     private GroupConversation requireTrpgConversation(

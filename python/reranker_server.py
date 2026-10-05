@@ -45,6 +45,19 @@ class LocalReranker:
             torch_dtype=_torch_dtype(torch_dtype),
         )
         self.model.to(self.device)
+        if (self.model.config.model_type == "new"
+                and self.model.config.position_embedding_type == "rope"):
+            # GTE's remote implementation initializes these non-persistent buffers
+            # only in __init__. Transformers 5 loads on meta and materializes them
+            # without those values; they are absent from the checkpoint as well.
+            embeddings = self.model.new.embeddings
+            embeddings.register_buffer(
+                "position_ids",
+                torch.arange(self.model.config.max_position_embeddings, device=self.device),
+                persistent=False,
+            )
+            embeddings._init_rope(self.model.config)
+            embeddings.rotary_emb.to(device=self.device, dtype=self.model.dtype)
         self.model.eval()
 
     def rerank(self, query: str, documents: list[str], top_n: int = 3) -> list[RerankResult]:

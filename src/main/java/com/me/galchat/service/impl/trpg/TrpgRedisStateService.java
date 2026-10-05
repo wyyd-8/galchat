@@ -81,13 +81,17 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
     @Override
     public void clear(Long conversationId) {
         List<String> dynamicKeys = new ArrayList<>();
-        ScanOptions options = ScanOptions.scanOptions()
-                .match("trpg:group:*:" + conversationId + ":*")
-                .count(RedisConstant.REDIS_SCAN_COUNT)
-                .build();
-        try (Cursor<String> cursor = redisTemplate.scan(options)) {
-            while (cursor.hasNext()) {
-                dynamicKeys.add(cursor.next());
+        for (String prefix : List.of(RedisConstant.TRPG_SCENE_SELECTION_PREFIX,
+                RedisConstant.TRPG_SCENE_PROGRESS_PREFIX, RedisConstant.TRPG_PROPOSAL_ORDER_PREFIX)) {
+            // A wildcard before the run id could also match another run's scene/turn id.
+            ScanOptions options = ScanOptions.scanOptions()
+                    .match(prefix + conversationId + ":*")
+                    .count(RedisConstant.REDIS_SCAN_COUNT)
+                    .build();
+            try (Cursor<String> cursor = redisTemplate.scan(options)) {
+                while (cursor.hasNext()) {
+                    dynamicKeys.add(cursor.next());
+                }
             }
         }
         if (!dynamicKeys.isEmpty()) {
@@ -128,10 +132,6 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
                         choicesKey, entry.getKey(), entry.getValue().toString());
             }
         }
-        if (snapshot.getSceneSelections() != null
-                && !snapshot.getSceneSelections().isEmpty()) {
-            redisTemplate.expire(choicesKey, TRANSIENT_TTL);
-        }
         String optionsKey = selectionOptionsKey(conversationId, turnId);
         for (Map.Entry<String, TrpgSaveSnapshotDTO.LocationOptionSnapshot> entry
                 : safeMap(snapshot.getSceneOptions()).entrySet()) {
@@ -144,13 +144,9 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
                         option.getLocationId() + "\t" + option.getName());
             }
         }
-        if (snapshot.getSceneOptions() != null
-                && !snapshot.getSceneOptions().isEmpty()) {
-            redisTemplate.expire(optionsKey, TRANSIENT_TTL);
-        }
         redisTemplate.opsForValue().set(
                 selectionActiveKey(conversationId),
-                turnId.toString(), TRANSIENT_TTL);
+                turnId.toString());
     }
 
     private void restoreSceneProgress(
@@ -168,14 +164,10 @@ public class TrpgRedisStateService implements ITrpgRedisStateService {
                     redisTemplate.opsForSet().add(readyKey, actor);
                 }
             }
-            if (progress.getReadyActors() != null
-                    && !progress.getReadyActors().isEmpty()) {
-                redisTemplate.expire(readyKey, TRANSIENT_TTL);
-            }
             if (Boolean.TRUE.equals(progress.getFinishRequested())) {
                 redisTemplate.opsForValue().set(
                         sceneFinishKey(conversationId, progress.getSceneId()),
-                        "1", TRANSIENT_TTL);
+                        "1");
             }
         }
     }

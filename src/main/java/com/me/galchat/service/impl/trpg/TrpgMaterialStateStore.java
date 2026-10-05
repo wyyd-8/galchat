@@ -40,6 +40,10 @@ public class TrpgMaterialStateStore {
         redisTemplate.expire(key, TTL);
     }
 
+    public void unmarkShown(Long conversationId, Long materialId) {
+        redisTemplate.opsForSet().remove(key(conversationId), materialId.toString());
+    }
+
     private String key(Long conversationId) {
         return RedisConstant.TRPG_SHOWN_MATERIALS_PREFIX + conversationId;
     }

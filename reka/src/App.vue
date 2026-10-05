@@ -7,6 +7,7 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import MobileNavigation from '@/components/MobileNavigation.vue'
 import MobileProfile from '@/components/MobileProfile.vue'
 import { useMobileViewport, useVisualViewport } from '@/composables/useMobileViewport'
+import { useMobileDialogHistory } from '@/composables/useMobileDialogHistory'
 import CocModuleLibrary from '@/components/CocModuleLibrary.vue'
 import AuthDialog from '@/components/AuthDialog.vue'
 import AccountDiceSettings from '@/components/AccountDiceSettings.vue'
@@ -19,6 +20,7 @@ import TrpgCharacterBindingDialog from '@/components/TrpgCharacterBindingDialog.
 import TrpgParticipantPicker from '@/components/TrpgParticipantPicker.vue'
 import TrpgToolsDialog from '@/components/TrpgToolsDialog.vue'
 import DicePlayerDialog from '@/dice/components/DicePlayerDialog.vue'
+import { useDiceRoundNavigation } from '@/dice/composables/useDiceRoundNavigation'
 import WorldHome from '@/components/WorldHome.vue'
 import WorldLibrary from '@/components/WorldLibrary.vue'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
@@ -31,12 +33,12 @@ import type {
   WorldTemplate, WorldTemplateUsage,
 } from '@/api/types'
 import { useDirectChat } from '@/composables/useDirectChat'
-import { errorMessage, notify } from '@/composables/useNotice'
+import { errorMessage, notify, refreshAfterSave } from '@/composables/useNotice'
 import { useWorkspace } from '@/composables/useWorkspace'
-import { canCreateTrpgRun, hasMissingBindings } from '@/components/trpgSetupState'
+import { MAX_GROUP_CHARACTERS, canCreateTrpgRun, hasMissingBindings, toggleParticipantSelection } from '@/components/trpgSetupState'
 import type { CharacterCardCreationMethod } from '@/components/trpgSetupState'
 import { mergeAutoAdvanceDiceSummaryIds } from '@/components/trpgTurnExperiments'
-import { mergeGenerationResponseEvents } from '@/components/generationErrorFormatting'
+import GenerationErrorDialog from '@/components/GenerationErrorDialog.vue'
 import {
   createDicePostRollPlaybackPlan,
   createDiceInitialAnimationPlan,
@@ -57,15 +59,42 @@ import {
 interface FavorabilityRow { id: string; threshold?: number; prompt: string }
 
 const workspace = useWorkspace()
-const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters })
+const directSettingsSaving = ref(false)
+const direct = useDirectChat({ world: workspace.selectedWorld, characters: workspace.characters, reloadCharacters: workspace.reloadCharacters, saveCharacterModel: workspace.saveCharacterModel, settingsSaving: directSettingsSaving })
 const authOpen = ref(!workspace.isLoggedIn.value)
 const view = ref<'library' | 'modules' | 'world' | 'group' | 'direct' | 'profile'>('library')
+let viewRevision = 0
+watch([view, () => direct.selectedCharacter.value?.characterId], () => { viewRevision++ }, { flush: 'sync' })
+// Page callbacks also belong to a particular world/chat, even when the view
+// name stays unchanged. The revision rejects leaving and returning to that page.
+let pageRevision = 0
+watch([view, workspace.selectedWorldId, workspace.selectedConversationId,
+  () => direct.selectedCharacter.value?.characterId,
+  () => `${workspace.session.id ?? ''}:${workspace.session.token ?? ''}`,
+], () => { pageRevision++ }, { flush: 'sync' })
+function capturePage() {
+  const revision = pageRevision
+  return () => revision === pageRevision
+}
 const { isMobile } = useMobileViewport()
 const { online } = useVisualViewport()
+// Register before child dialogs so Back dismisses their top layer first.
+useMobileDialogHistory(computed(() => ['world', 'direct', 'group'].includes(view.value)), isMobile, () => {
+  if (view.value === 'direct') closeDirectChat()
+  else if (view.value === 'group') {
+    if (!completionTranscript.value) completionTranscript.value = true
+    else view.value = 'world'
+  } else home()
+})
 const moduleDetailOpen = ref(false)
+const moduleLibrary = ref<InstanceType<typeof CocModuleLibrary> | null>(null)
+async function leaveModuleLibrary() {
+  if (view.value !== 'modules') return true
+  const current = capturePage()
+  return Boolean(await moduleLibrary.value?.prepareToLeave()) && current()
+}
 const groupStage = ref<{ openTurnSettings: () => void; openScene: () => void } | null>(null)
 const directStage = ref<{ closeProfile: () => void } | null>(null)
-const directSettingsSaving = ref(false)
 const directCharacterRemoving = ref(false)
 const directSettingsError = ref('')
 const mobileTemplateMenu = ref(false)
@@ -86,9 +115,7 @@ async function saveDirectSettings(payload: { userInfoPrompt: string; modelApiId?
   if (!world || !character || directSettingsSaving.value || direct.loading.sending) return
   directSettingsSaving.value = true; directSettingsError.value = ''
   try {
-    await api.updatePrompt(world.id, character.characterId, payload.userInfoPrompt.trim())
-    if (character.modelApiId !== payload.modelApiId) await api.updateCharacterModel(world.id, character.characterId, payload.modelApiId)
-    await workspace.reloadCharacters()
+    if (!await workspace.updateCharacterSettings(world.id, character.characterId, payload)) return
     if (workspace.selectedWorld.value?.id === world.id && direct.selectedCharacter.value?.characterId === character.characterId) directStage.value?.closeProfile()
     notify('角色设置已保存', '', 'success')
   } catch (error) { if (workspace.selectedWorld.value?.id === world.id && direct.selectedCharacter.value?.characterId === character.characterId) directSettingsError.value = errorMessage(error) }
@@ -101,21 +128,25 @@ function openFavorStage(row?: FavorabilityRow) {
   mobileFavorEditOpen.value = true
 }
 function saveFavorStage() {
-  if (mobileFavorDraft.threshold == null || !mobileFavorDraft.prompt.trim()) return
+  if (!validMobileFavorStage.value) return
   const existing = favorabilityRows.value.find(row => row.id === mobileFavorDraft.id)
   if (existing) Object.assign(existing, mobileFavorDraft)
   else favorabilityRows.value.push({ ...mobileFavorDraft, id: crypto.randomUUID() })
   mobileFavorEditOpen.value = false
 }
+const validMobileFavorStage = computed(() => Number.isInteger(mobileFavorDraft.threshold)
+  && typeof mobileFavorDraft.threshold === 'number'
+  && mobileFavorDraft.threshold >= 0 && mobileFavorDraft.threshold <= 100
+  && Boolean(mobileFavorDraft.prompt.trim()))
 
 const companionDetailOpen = ref(false)
 const participantPicker = ref<{ returnToList: () => void } | null>(null)
 const mobilePartyOpen = ref(false)
 const rootNavigationVisible = computed(() => ['library', 'modules', 'profile', 'world'].includes(view.value) && !(view.value === 'modules' && moduleDetailOpen.value))
-function navigateMobile(destination: 'library' | 'modules' | 'profile') {
-  if (destination === 'library') home()
+async function navigateMobile(destination: 'library' | 'modules' | 'profile') {
+  if (destination === 'library') await home()
   else if (destination === 'modules') openModuleLibrary()
-  else { direct.close(); view.value = 'profile' }
+  else if (await leaveModuleLibrary()) { direct.close(); view.value = 'profile' }
 }
 const completionTranscript = ref(true)
 const completionReport = ref<TrpgCompletionReport | null>(null)
@@ -154,31 +185,48 @@ function archiveCompletion() { view.value = 'world' }
 async function skipCompletion() {
   if (completionBusy.value || workspace.loading.sending) return
   completionBusy.value = true
-  try { await workspace.closeConversation(); view.value = 'world' }
+  const revision = viewRevision
+  try { if (await workspace.closeConversation() && revision === viewRevision) view.value = 'world' }
   catch (error) { completionError.value = errorMessage(error) }
   finally { completionBusy.value = false }
 }
 const dialogs = reactive({ world: false, template: false, templatePreview: false, templateDelete: false, templateReplaceConfirm: false, conversation: false, trpgBinding: false, character: false, characterTemplate: false, characterEdit: false, settings: false, save: false, worldLoad: false, account: false, password: false, modelApis: false, end: false, deleteConversation: false, trpgTools: false })
+let settingsRevision = 0
+watch(() => dialogs.settings, () => { settingsRevision++ }, { flush: 'sync' })
 const busy = ref(false)
 const archiveOperation = ref('')
+const canDeleteWorld = computed(() => workspace.selectedWorldId.value != null
+  && !busy.value && !workspace.loading.workspace && workspace.characters.value.length === 0)
+const canRollbackGenerationFailure = computed(() => {
+  const failure = workspace.generationFailure.value
+  const conversation = workspace.selectedConversation.value
+  return failure?.detail.code === 'TURN_CHECKPOINT_UNAVAILABLE'
+    && failure.conversationId === conversation?.id
+    && conversation?.mode === 'trpg'
+})
+const canWithdrawGenerationFailure = computed(() => {
+  const failure = workspace.generationFailure.value
+  const conversation = workspace.selectedConversation.value
+  return failure?.detail.code === 'GROUP_CHECKPOINT_UNAVAILABLE'
+    && failure.conversationId === conversation?.id
+    && conversation?.mode === 'chat'
+})
 const canRetryGenerationFailure = computed(() => {
   const failure = workspace.generationFailure.value
   const conversation = workspace.selectedConversation.value
   const turn = workspace.currentTurn.value
   return Boolean(failure?.detail.retryable
     && failure.conversationId === conversation?.id
-    && conversation?.mode === 'trpg'
+    && (conversation?.mode === 'trpg' || conversation?.mode === 'chat')
     && (turn?.status === 'failed' || turn?.status === 'blocked'))
 })
-function formatDebugValue(value: unknown) {
-  if (typeof value === 'string') return value
-  try { return JSON.stringify(value, null, 2) } catch { return String(value) }
-}
 const uploading = reactive({ world: false, character: false })
 const templateMode = ref<'create' | 'edit'>('create')
+const templatePublished = ref(false)
 const characterTemplateMode = ref<'create' | 'edit'>('create')
 const editingCharacterTemplateId = ref<number | null>(null)
-const worldForm = reactive({ worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
+const worldForm = reactive({ worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', addSpecialPrompt: false })
+let templateEditContext: { worldId: number; current: () => boolean } | null = null
 const templateForm = reactive<WorldTemplate>({ name: '', author: '', image: '', background: '', visible: true })
 const conversationForm = reactive({ title: '', mode: 'chat' as 'chat' | 'trpg', moduleId: '', characterIds: [] as number[] })
 const conversationStep = ref<1 | 2>(1)
@@ -191,6 +239,13 @@ const dicePlaybackRequest = ref<DicePlaybackRequest | null>(null)
 const diceMessageAggregate = ref<DiceRollAggregate | null>(null)
 const queuedDiceAggregates = ref<DiceRollAggregate[]>([])
 const diceShowContinue = ref(false)
+const diceRoundNavigation = useDiceRoundNavigation({
+  aggregate: diceMessageAggregate,
+  open: dicePlayerOpen,
+  context: () => `${workspace.selectedWorldId.value}/${workspace.selectedConversationId.value}`,
+  load: workspace.loadDiceAggregate,
+  onError: error => notify('无法加载掷骰轮次', errorMessage(error), 'danger'),
+})
 const trpgAutoAdvance = ref(false)
 const trpgDirectionEnabled = ref(false)
 const trpgInvestigatorDirection = ref('')
@@ -202,6 +257,14 @@ const diceAutoContinue = computed(() => {
     && autoAdvanceDiceSummaryIds.value.has(summaryId)
 })
 const trpgToolsCardId = ref<number | null>(null)
+const trpgToolsRequestedTool = ref<'dice' | undefined>()
+const trpgToolsRollback = ref<'turn' | null>(null)
+watch(() => dialogs.trpgTools, (visible) => {
+  if (!visible) {
+    trpgToolsRollback.value = null
+    trpgToolsRequestedTool.value = undefined
+  }
+})
 const trpgBindingTargetKey = ref<string | null>(null)
 const trpgBindingCreationMethod = ref<CharacterCardCreationMethod | null>(null)
 const returnToTrpgToolsAfterBinding = ref(false)
@@ -236,6 +299,21 @@ function openDiceMessage(aggregate: DiceRollAggregate) {
     dicePlayerOpen.value = true
   } catch (error) {
     notify('无法打开骰子结果', errorMessage(error), 'danger')
+  }
+}
+
+function navigateDiceRound(direction: -1 | 1) {
+  if (!dicePlayerOpen.value || diceShowContinue.value) return
+  const target = direction < 0 ? diceRoundNavigation.previous.value : diceRoundNavigation.next.value
+  if (!target) return
+  try {
+    const pending = isDiceAggregatePending(target)
+    const request = createMessagePlaybackRequest(target, pending ? 'pending' : 'settled', false, pending)
+    diceMessageAggregate.value = target
+    dicePlaybackRequest.value = request
+    diceShowContinue.value = false
+  } catch (error) {
+    notify('无法切换掷骰轮次', errorMessage(error), 'danger')
   }
 }
 
@@ -300,8 +378,17 @@ async function locateDiceMessage(messageId: number) {
   target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
-function openTrpgTools() {
+function rollbackGenerationFailure() {
+  if (!canRollbackGenerationFailure.value) return
+  workspace.generationFailureOpen.value = false
   trpgToolsCardId.value = null
+  trpgToolsRollback.value = 'turn'
+  dialogs.trpgTools = true
+}
+
+function openTrpgTools(tool?: 'dice') {
+  trpgToolsCardId.value = null
+  trpgToolsRequestedTool.value = tool
   dialogs.trpgTools = true
 }
 
@@ -331,7 +418,7 @@ function openTrpgCharacterCard(cardId: number) {
 
 async function rollDiceMessage() {
   const aggregate = diceMessageAggregate.value
-  if (!aggregate) return
+  if (!aggregate || !dicePlayerOpen.value) return
   const latestRound = Math.max(1, ...aggregate.results.map((detail) => detail.roundNo || 1))
   const pendingResult = aggregate.results.find((detail) => (
     (detail.roundNo || 1) === latestRound
@@ -339,10 +426,39 @@ async function rollDiceMessage() {
     && detail.characterId == null
   ))
   if (!pendingResult) return
+  const conversationId = workspace.selectedConversationId.value
+  const worldId = workspace.selectedWorldId.value
+  const isCurrentConversation = () => workspace.selectedConversationId.value === conversationId
+    && workspace.selectedWorldId.value === worldId
+  let active = true
+  // A closed/replaced window stays invalid even if it is reopened before HTTP returns.
+  const stopTracking = watch([
+    dicePlayerOpen,
+    () => dicePlaybackRequest.value?.id,
+    workspace.selectedConversationId,
+    workspace.selectedWorldId,
+  ], () => { active = false }, { flush: 'sync' })
   const offerContinueAfterComplete = dicePlaybackRequest.value?.offerContinueAfterComplete === true
   try {
     const progress = await api.rollDiceResult(pendingResult.id)
-    const refreshed = await workspace.refreshDiceRoll(aggregate.summary.id)
+    if (!isCurrentConversation()) return
+    let refreshed = await workspace.refreshDiceRoll(aggregate.summary.id)
+    if (!active) return
+    // Damage may use one server bundle per target. Finish this round before
+    // presenting it, while leaving automatic follow-up rounds for Continue.
+    const requested = new Set([pendingResult.id])
+    while (true) {
+      const remaining = refreshed.results.find(detail => (
+        (detail.roundNo || 1) === latestRound && !detail.resolvedAt && detail.characterId == null
+      ))
+      if (!remaining) break
+      if (requested.has(remaining.id)) throw new Error('当前轮掷骰尚未完成，请重试')
+      requested.add(remaining.id)
+      await api.rollDiceResult(remaining.id)
+      if (!isCurrentConversation()) return
+      refreshed = await workspace.refreshDiceRoll(aggregate.summary.id)
+      if (!active) return
+    }
     const plan = createDicePostRollPlaybackPlan(refreshed, progress.rolledResult.id)
     const queuedOtherMessages = queuedDiceAggregates.value.filter(
       (queued) => queued.summary.id !== aggregate.summary.id,
@@ -362,6 +478,7 @@ async function rollDiceMessage() {
       initialAnimation: createDiceInitialAnimationPlan(playbackRequest, plan.rolledGroupIndex),
     }
   } catch (error) {
+    if (!active) return
     notify('投掷失败', errorMessage(error), 'danger')
     dicePlaybackRequest.value = createMessagePlaybackRequest(
       aggregate,
@@ -369,6 +486,8 @@ async function rollDiceMessage() {
       false,
       offerContinueAfterComplete,
     )
+  } finally {
+    stopTracking()
   }
 }
 
@@ -385,7 +504,8 @@ function completeDiceMessageRoll() {
 
 async function continueAfterDice() {
   const completedSummaryId = diceMessageAggregate.value?.summary.id
-  if (completedSummaryId != null) {
+  if (completedSummaryId != null
+    && !queuedDiceAggregates.value.some(aggregate => aggregate.summary.id === completedSummaryId)) {
     const remainingAutoDice = new Set(autoAdvanceDiceSummaryIds.value)
     remainingAutoDice.delete(completedSummaryId)
     autoAdvanceDiceSummaryIds.value = remainingAutoDice
@@ -418,12 +538,17 @@ function cancelDiceAutoAdvance() {
   trpgAutoAdvance.value = false
   autoAdvanceDiceSummaryIds.value = new Set()
 }
+watch(() => workspace.generationFailed.value, failed => {
+  if (failed) cancelDiceAutoAdvance()
+}, { flush: 'sync' })
 async function startTrpgTurnWithExperiments(direction?: string) {
+  const current = capturePage()
   const startedBetweenTurns = workspace.currentTurn.value == null
     || workspace.currentTurn.value.status === 'completed'
   const succeeded = await workspace.startTrpgTurn(direction)
+  if (!current()) return
   if (!succeeded) {
-    trpgAutoAdvance.value = false
+    cancelDiceAutoAdvance()
     return
   }
   if (startedBetweenTurns) {
@@ -442,7 +567,7 @@ const characterPickerPhase = ref<'closed' | 'moving' | 'expanded'>('closed')
 const characterTemplateForm = reactive<CharacterTemplate>({ name: '', image: '', background: '', personality: '', cocPlayStyle: '', initFavor: 0, favorability: {} })
 const favorabilityRows = ref<FavorabilityRow[]>([])
 const selectedCharacterId = ref<number | null>(null)
-const settingsForm = reactive({ name: '', acitvePushStatus: false, favorSystemStatus: 'NORMAL', eotDetectionStatus: true })
+const settingsForm = reactive({ name: '', acitvePushStatus: false, favorSystemStatus: 'NORMAL' })
 const detailForm = reactive<WorldDetail>({ about: '', details: '' })
 const settingsTab = ref<'general' | 'lore' | 'data'>('general')
 const detailComposerOpen = ref(false)
@@ -480,7 +605,23 @@ let characterPickerTransition = 0
 watch(isMobile, mobile => { if (!mobile && view.value === 'profile') home() })
 watch(() => [workspace.selectedWorldId.value, direct.selectedCharacter.value?.characterId], () => { directSettingsError.value = '' })
 watch(() => workspace.isLoggedIn.value, (loggedIn) => { authOpen.value = !loggedIn; if (!loggedIn) { direct.close(); direct.clearDrafts(); view.value = 'library' } })
-watch(() => worldForm.thinkStatus, (thinking) => { if (thinking) worldForm.eotDetectionStatus = false; else worldForm.addSpecialPrompt = false })
+watch(() => [workspace.session.id, workspace.session.token], () => {
+  // Closing a template normally reopens settings. A session change must not.
+  templateReturnToSettings.value = false
+  for (const name of Object.keys(dialogs) as (keyof typeof dialogs)[]) dialogs[name] = false
+  for (const open of [mobileTemplateMenu, mobileTemplateCharacterOpen, mobileModulePicker,
+    mobileLoreOpen, mobileLoreDetailOpen, mobileFavorListOpen, mobileFavorEditOpen,
+    mobileDeleteWorldOpen, companionDetailOpen, mobilePartyOpen, dicePlayerOpen]) open.value = false
+  Object.assign(accountForm, { username: '', email: '', birthday: '', diceSkin: 'classic' })
+  Object.assign(passwordForm, { email: '', newPassword: '', confirmPassword: '', code: '' })
+  selectedTemplatePreview.value = null
+  selectedTemplateUsage.value = null
+  pendingTemplateReplacement.value = null
+  templateReplacementReport.value = null
+  mobileTemplateCharacters.value = []
+  mobileTemplateCharacter.value = null
+  mobileLoreDetail.value = null
+}, { flush: 'sync' })
 watch(settingsTab, (tab) => { if (tab !== 'lore') resetDetailComposer() })
 watch(
   () => workspace.incomingDiceRolls.value.length,
@@ -499,8 +640,15 @@ watch(() => dialogs.template, async (open, wasOpen) => {
 })
 
 async function run(action: () => Promise<unknown>, close?: keyof typeof dialogs) {
+  if (busy.value) return false
   busy.value = true
-  try { await action(); if (close) dialogs[close] = false; return true }
+  const revision = viewRevision
+  try {
+    const result = await action()
+    if (result === false || revision !== viewRevision) return false
+    if (close) dialogs[close] = false
+    return true
+  }
   catch (error) { notify('操作失败', errorMessage(error), 'danger'); return false }
   finally { busy.value = false }
 }
@@ -508,19 +656,27 @@ function openConversationDelete() {
   dialogs.end = false
   dialogs.deleteConversation = true
 }
+async function confirmWorldDeletion() {
+  if (!mobileDeleteWorldOpen.value || !canDeleteWorld.value) return
+  if (await run(workspace.removeWorld, 'settings')) {
+    mobileDeleteWorldOpen.value = false
+    view.value = 'library'
+  }
+}
 async function permanentlyDeleteConversation() {
-  const deleted = await run(workspace.deleteConversation, 'deleteConversation')
-  if (deleted) view.value = 'world'
+  if (await run(workspace.deleteConversation, 'deleteConversation')) view.value = 'world'
 }
 async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) {
-  const authenticated = await run(async () => { await workspace.authenticate(payload); authOpen.value = false })
+  const authenticated = await run(async () => { if (!await workspace.authenticate(payload)) return false; authOpen.value = false })
   if (authenticated && payload.mode === 'register') await openAccount()
 }
-function logout() { direct.close(); direct.clearDrafts(); workspace.logout() }
-function home() { direct.close(); workspace.selectedWorldId.value = null; workspace.selectedConversationId.value = null; view.value = 'library' }
+async function logout() { if (!await leaveModuleLibrary()) return; direct.close(); direct.clearDrafts(); workspace.logout() }
+async function home() { if (!await leaveModuleLibrary()) return; direct.close(); workspace.selectedWorldId.value = null; workspace.selectedConversationId.value = null; view.value = 'library' }
 function openModuleLibrary() { direct.close(); workspace.selectedConversationId.value = null; view.value = 'modules' }
-async function selectWorld(id: number) { direct.close(); await workspace.selectWorld(id); view.value = 'world' }
+async function selectWorld(id: number) { if (!await leaveModuleLibrary()) return; direct.close(); if (await workspace.selectWorld(id)) view.value = 'world' }
 async function selectConversation(id: number) {
+  if (!await leaveModuleLibrary()) return
+  pageRevision++
   completionTranscript.value = true
   direct.close()
   dialogs.trpgBinding = false
@@ -529,19 +685,24 @@ async function selectConversation(id: number) {
   returnToTrpgToolsAfterBinding.value = false
   const loadingConversation = workspace.selectConversation(id)
   view.value = 'group'
-  await loadingConversation
+  const current = capturePage()
+  const loaded = await loadingConversation
+  if (!loaded || !current()) return
   if (workspace.selectedConversationId.value === id) completionTranscript.value = true
   const conversation = workspace.selectedConversation.value
   if (conversation?.mode === 'trpg' && conversation.status === 'active' && !conversation.completionStatus) {
     try {
       const cards = await api.investigatorCards(conversation.id)
+      if (!current()) return
       if (hasMissingBindings(workspace.participantIds.value, cards)) dialogs.trpgBinding = true
     } catch (error) {
+      if (!current()) return
       notify('人物卡状态读取失败', errorMessage(error), 'danger')
     }
   }
 }
 async function openDirectChat(id: number) {
+  if (!await leaveModuleLibrary()) return
   const loadingConversation = direct.selectCharacter(id)
   view.value = 'direct'
   await loadingConversation
@@ -549,8 +710,9 @@ async function openDirectChat(id: number) {
 function closeDirectChat() { direct.close(); view.value = 'world' }
 async function loadWorldSnapshot() {
   const worldId = workspace.selectedWorldId.value
-  await workspace.loadSnapshot()
+  const current = await workspace.loadSnapshot()
   if (worldId != null) direct.invalidateWorld(worldId)
+  return current
 }
 async function restoreTrpg() { const id = workspace.selectedConversationId.value; if (id) await workspace.selectConversation(id) }
 async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
@@ -558,15 +720,28 @@ async function correctGameTime(dayNo: number, period: TrpgGameTimePeriod) {
 }
 
 function openNewWorld() {
-  Object.assign(worldForm, { worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', thinkStatus: true, addSpecialPrompt: false, eotDetectionStatus: false })
+  Object.assign(worldForm, { worldId: '', name: '', acitvePushStatus: false, dailyCompanionMode: false, favorSystemStatus: 'NORMAL', addSpecialPrompt: false })
   dialogs.world = true
 }
 async function openTemplatePreview(id: number) {
+  const current = capturePage()
   await run(async () => {
-    selectedTemplatePreview.value = await api.worldTemplate(id)
-    mobileTemplateCharacters.value = isMobile.value ? await api.characterTemplates(id) : []
-    selectedTemplateUsage.value = ownsSelectedTemplate.value ? await api.worldTemplateUsage(id) : null
-    dialogs.templatePreview = true
+    try {
+      const preview = await api.worldTemplate(id)
+      if (!current()) return false
+      const characters = isMobile.value ? await api.characterTemplates(id) : []
+      if (!current()) return false
+      const usage = preview.authorId && preview.authorId === workspace.session.id
+        ? await api.worldTemplateUsage(id) : null
+      if (!current()) return false
+      selectedTemplatePreview.value = preview
+      mobileTemplateCharacters.value = characters
+      selectedTemplateUsage.value = usage
+      dialogs.templatePreview = true
+    } catch (error) {
+      if (!current()) return false
+      throw error
+    }
   })
 }
 function createFromPreview() {
@@ -584,28 +759,29 @@ function setConversationMode(mode: 'chat' | 'trpg') {
   conversationForm.characterIds = []
 }
 async function createNormalConversation() {
-  const success = await run(() => workspace.createConversation({
+  const success = await run(async () => Boolean(await workspace.createConversation({
     title: conversationForm.title,
     mode: 'chat',
     characterIds: conversationForm.characterIds,
-  }))
+  })))
   if (!success) return
   dialogs.conversation = false
   view.value = 'group'
 }
 async function createTrpgConversation() {
-  const success = await run(() => workspace.createConversation({
+  const success = await run(async () => Boolean(await workspace.createConversation({
     title: conversationForm.title,
     mode: 'trpg',
     moduleId: Number(conversationForm.moduleId),
     characterIds: conversationForm.characterIds,
-  }))
+  })))
   if (!success) return
   dialogs.conversation = false
   trpgBindingTargetKey.value = null
   trpgBindingCreationMethod.value = null
   returnToTrpgToolsAfterBinding.value = false
-  dialogs.trpgBinding = true
+  dialogs.trpgBinding = workspace.conversationReady.value
+  if (!workspace.conversationReady.value) view.value = 'group'
 }
 function completeTrpgBinding() {
   dialogs.trpgBinding = false
@@ -659,7 +835,7 @@ async function toggleCharacterChoice(template: CharacterTemplate) {
   characterPreviewLoading.value = true
   try {
     const detail = await workspace.loadEditableCharacterTemplate(template.id)
-    if (characterChoice.value === id) characterChoicePreview.value = { ...template, ...detail }
+    if (detail && characterChoice.value === id) characterChoicePreview.value = { ...template, ...detail }
   } catch (error) {
     if (characterChoice.value === id) notify('角色资料加载失败', errorMessage(error), 'danger')
   } finally {
@@ -672,15 +848,35 @@ function openCharacter(id: number) {
 }
 function openSettings() {
   const world = workspace.selectedWorld.value; if (!world) return
-  Object.assign(settingsForm, { name: world.name, acitvePushStatus: world.acitvePushStatus ?? true, favorSystemStatus: world.favorSystemStatus || 'NORMAL', eotDetectionStatus: world.eotDetectionStatus !== false })
+  Object.assign(settingsForm, { name: world.name, acitvePushStatus: world.acitvePushStatus ?? true, favorSystemStatus: world.favorSystemStatus || 'NORMAL' })
   settingsTab.value = 'general'
   resetDetailComposer()
   dialogs.settings = true
 }
 function resetTemplateForm() { Object.assign(templateForm, { name: '', author: workspace.session.username || '', image: '', background: '', visible: true }) }
-function openCreateTemplate() { templateReturnToSettings.value = false; templateMode.value = 'create'; resetTemplateForm(); dialogs.template = true }
+function openCreateTemplate() { templatePublished.value = false; templateEditContext = null; templateReturnToSettings.value = false; templateMode.value = 'create'; resetTemplateForm(); dialogs.template = true }
 async function openEditTemplate() {
-  await run(async () => { templateMode.value = 'edit'; Object.assign(templateForm, await workspace.loadEditableWorldTemplate()); templateReturnToSettings.value = true; dialogs.settings = false; dialogs.template = true })
+  const pageCurrent = capturePage()
+  const revision = settingsRevision
+  const worldId = workspace.selectedWorldId.value
+  const current = () => pageCurrent() && revision === settingsRevision
+  if (worldId == null) return
+  await run(async () => {
+    try {
+      const template = await workspace.loadEditableWorldTemplate()
+      if (!current() || !template) return false
+      templateMode.value = 'edit'
+      templatePublished.value = template.visible !== false
+      Object.assign(templateForm, template, { visible: templatePublished.value })
+      templateEditContext = { worldId, current: pageCurrent }
+      templateReturnToSettings.value = true
+      dialogs.settings = false
+      dialogs.template = true
+    } catch (error) {
+      if (!current()) return false
+      throw error
+    }
+  })
 }
 function resetCharacterTemplateForm() {
   Object.assign(characterTemplateForm, { name: '', image: '', background: '', personality: '', cocPlayStyle: '', initFavor: 0, favorability: {} }); favorabilityRows.value = []
@@ -692,7 +888,12 @@ function fillCharacterTemplateForm(template: CharacterTemplate) {
 }
 function openCreateCharacterTemplate() { characterTemplateMode.value = 'create'; editingCharacterTemplateId.value = null; resetCharacterTemplateForm(); dialogs.character = false; dialogs.characterTemplate = true }
 async function openEditCharacterTemplate(id: number) {
-  await run(async () => { characterTemplateMode.value = 'edit'; editingCharacterTemplateId.value = id; fillCharacterTemplateForm(await workspace.loadEditableCharacterTemplate(id)); dialogs.characterTemplate = true; dialogs.characterEdit = false })
+  await run(async () => {
+    const template = await workspace.loadEditableCharacterTemplate(id)
+    if (!template) return
+    characterTemplateMode.value = 'edit'; editingCharacterTemplateId.value = id
+    fillCharacterTemplateForm(template); dialogs.characterTemplate = true; dialogs.characterEdit = false
+  })
 }
 function addFavorabilityRow() { favorabilityRows.value.push({ id: crypto.randomUUID?.() || String(Date.now() + Math.random()), threshold: undefined, prompt: '' }) }
 function removeFavorabilityRow(id: string) { favorabilityRows.value = favorabilityRows.value.filter((item) => item.id !== id) }
@@ -723,7 +924,7 @@ async function removeDirectCharacter() {
   } catch (error) { notify('移出角色失败', errorMessage(error), 'danger') }
   finally { directCharacterRemoving.value = false }
 }
-async function removeDetail(id?: number) { if (id) await workspace.removeDetail(id) }
+async function removeDetail(id?: number) { return id ? workspace.removeDetail(id) : false }
 function clearDetailForm() {
   detailForm.about = ''
   detailForm.details = ''
@@ -757,20 +958,30 @@ async function addWorldDetail() {
 async function saveTemplate() {
   if (uploading.world) return
   const payload = { ...templateForm, name: templateForm.name.trim(), background: templateForm.background?.trim() }
-  if (templateMode.value === 'edit') await workspace.updateTemplate(payload); else await workspace.createTemplate(payload)
+  if (templateMode.value === 'edit') {
+    if (!templateEditContext?.current()) return false
+    return workspace.updateTemplate(payload, templateEditContext.worldId)
+  }
+  return workspace.createTemplate(payload)
+}
+async function importWorld(file: File) {
+  const sessionId = workspace.session.id, token = workspace.session.token
+  const current = () => workspace.session.id === sessionId && workspace.session.token === token
+  await runArchive('正在导入世界和图片…', async () => {
+    const result = await api.importWorldFile(file)
+    if (current()) await refreshAfterSave('模板导入完成', workspace.loadTemplates, current, `${result.name} · ${result.characterCount} 位角色`)
+  })
+}
+async function refreshModelApis() {
+  const results = await Promise.allSettled([workspace.loadModelApis(), direct.refreshModelApis()])
+  const failure = results.find(result => result.status === 'rejected')
+  if (failure?.status === 'rejected') notify('模型配置已保存', `模型列表刷新失败：${errorMessage(failure.reason)}`)
 }
 async function runArchive(label: string, action: () => Promise<unknown>) {
   if (archiveOperation.value || busy.value) return false
   archiveOperation.value = label
   try { return await run(action) }
   finally { archiveOperation.value = '' }
-}
-async function importWorld(file: File) {
-  await runArchive('正在导入世界和图片…', async () => {
-    const result = await api.importWorldFile(file)
-    await workspace.loadTemplates()
-    notify('模板导入完成', `${result.name} · ${result.characterCount} 位角色`, 'success')
-  })
 }
 function pickWorldArchive(event: Event) {
   const input = event.target as HTMLInputElement
@@ -860,8 +1071,8 @@ async function exportWorld() {
     notify('ZIP 已生成', '已发起下载，包含世界设定、角色和图片', 'success')
   })
 }
-async function openAccount() { await run(async () => { await workspace.loadUserInfo(); const info = workspace.userInfo.value; Object.assign(accountForm, { username: info?.username || '', email: info?.email || '', birthday: info?.birthday || '', diceSkin: resolveDiceSkin(info?.diceSkin) }); dialogs.account = true }) }
-async function openPassword() { await run(async () => { await workspace.loadUserInfo(); Object.assign(passwordForm, { email: workspace.userInfo.value?.email || '', newPassword: '', confirmPassword: '', code: '' }); dialogs.password = true }) }
+async function openAccount() { await run(async () => { if (!await workspace.loadUserInfo()) return false; const info = workspace.userInfo.value; Object.assign(accountForm, { username: info?.username || '', email: info?.email || '', birthday: info?.birthday || '', diceSkin: resolveDiceSkin(info?.diceSkin) }); dialogs.account = true }) }
+async function openPassword() { await run(async () => { if (!await workspace.loadUserInfo()) return false; Object.assign(passwordForm, { email: workspace.userInfo.value?.email || '', newPassword: '', confirmPassword: '', code: '' }); dialogs.password = true }) }
 async function sendPasswordCode() { await run(async () => { passwordForm.code = await api.sendPasswordCode(passwordForm.email); notify('验证码已自动填写', '', 'success') }) }
 async function changePassword() {
   if (passwordForm.newPassword !== passwordForm.confirmPassword) throw new Error('两次输入的新密码不一致')
@@ -877,11 +1088,11 @@ async function changePassword() {
 
       <MobileProfile v-if="view === 'profile'" :username="workspace.session.username" @account="openAccount" @models="dialogs.modelApis = true" @password="openPassword" @logout="logout" />
       <WorldLibrary v-else-if="view === 'library'" :worlds="workspace.worlds.value" :templates="workspace.templates.value" :loading="workspace.loading.boot" :archive-busy="Boolean(archiveOperation)" @select="selectWorld" @preview-template="openTemplatePreview" @create-template="openCreateTemplate" @import-world="importWorld" />
-      <CocModuleLibrary v-else-if="view === 'modules'" @changed="workspace.loadModules" @detail-open-change="moduleDetailOpen = $event" />
-      <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" @back="home" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
-      <DirectChatStage ref="directStage" :removing="directCharacterRemoving" @remove="removeDirectCharacter" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" @focus="direct.focus" @composition="direct.setComposing" />
+      <CocModuleLibrary ref="moduleLibrary" v-else-if="view === 'modules'" @changed="workspace.loadModules" @detail-open-change="moduleDetailOpen = $event" />
+      <WorldHome v-else-if="view === 'world' && workspace.selectedWorld.value" :world="workspace.selectedWorld.value" :characters="workspace.characters.value" :conversations="workspace.conversations.value" :world-save="workspace.worldSave.value" :ready="workspace.worldReady.value && !workspace.loading.workspace" @back="home" @open-character="openDirectChat" @edit-character="openCharacter" @open-conversation="selectConversation" @new-conversation="openNewConversation" @add-character="openAddCharacter" @save="dialogs.save = true" @load="dialogs.worldLoad = true" @settings="openSettings" />
+      <DirectChatStage ref="directStage" :removing="directCharacterRemoving" @remove="removeDirectCharacter" :settings-saving="directSettingsSaving" :settings-error="directSettingsError" :can-edit-template="workspace.canEditSelectedWorld.value" @save-settings="saveDirectSettings" @edit-template="direct.selectedCharacter.value && openEditCharacterTemplate(direct.selectedCharacter.value.characterId)" v-else-if="view === 'direct' && workspace.selectedWorld.value && direct.selectedCharacter.value" v-model:input="direct.input.value" v-model:scroller="direct.scroller.value" :world="workspace.selectedWorld.value" :character="direct.selectedCharacter.value" :messages="direct.messages.value" :model-apis="direct.modelApis.value" :loading="direct.loading" :can-withdraw="direct.canWithdraw.value" :has-older-messages="direct.hasOlderMessages.value" @back="closeDirectChat" @send="direct.send" @withdraw="direct.withdraw" @load-earlier="direct.loadEarlier" @select-model="direct.selectModel" @edit="openCharacter(direct.selectedCharacter.value.characterId)" />
       <TrpgCompletionStage v-else-if="view === 'group' && completionAvailable && !completionTranscript" :key="workspace.selectedConversationId.value || 0" :report="completionReport" :loading="completionLoading" :busy="completionBusy || workspace.loading.sending" :error="completionError" @reload="loadCompletion" @archive="archiveCompletion" @back="completionTranscript = true" />
-      <GroupChatStage ref="groupStage" v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :loading="workspace.loading.chat" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" :persist-actor-runtime="workspace.saveActorRuntime" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
+      <GroupChatStage ref="groupStage" v-else-if="view === 'group' && workspace.selectedConversation.value" v-model:input="workspace.messageInput.value" v-model:inquiry-input="workspace.inquiryInput.value" v-model:composer-intent="workspace.composerIntent.value" v-model:scroller="workspace.messageScroller.value" v-model:auto-advance="trpgAutoAdvance" v-model:direction-enabled="trpgDirectionEnabled" v-model:investigator-direction="trpgInvestigatorDirection" :conversation="workspace.selectedConversation.value" :username="workspace.session.username" :messages="workspace.messages.value" :reasoning="workspace.reasoning" :characters="workspace.characters.value" :reply-plan="workspace.replyPlan.value" :reply-plans="workspace.replyPlans.value" :available-characters="workspace.availablePlanCharacters.value" :current-turn="workspace.currentTurn.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :combat-overview="workspace.combatOverview.value" :investigator-cards="workspace.investigatorCards.value" :reply-turn-state="workspace.replyTurnState.value" :sending="workspace.loading.sending" :withdrawing="workspace.loading.withdrawing" :loading="workspace.loading.chat" :conversation-ready="workspace.conversationReady.value" :saving-reply-plan="workspace.savingReplyPlan.value" :saving-actor-keys="workspace.savingActorKeys.value" :has-older-messages="workspace.hasOlderGroupMessages.value" :completion-busy="completionBusy" :completion-error="completionError" @generate-completion="retryCompletion" @skip-completion="skipCompletion" @open-completion="completionTranscript = false; loadCompletion()" @back="view = 'world'" @save-plan="run(workspace.savePlan)" @move-plan-item="workspace.movePlanItem" @delete-plan-item="workspace.deletePlanItem" @add-plan-item="workspace.addPlanItem" :persist-actor-runtime="workspace.saveActorRuntime" @save-actor-runtime="workspace.saveActorRuntime" @load-earlier="workspace.loadOlderGroupMessages" @withdraw="run(workspace.withdrawGroupTurn)" @open-tools="openTrpgTools" @open-character-card="openTrpgCharacterCard" @open-dice="openDiceMessage" @send="workspace.sendMessage" @ask-kp="workspace.askKp" @retry-group-turn="workspace.retryGroupTurn" @start-turn="startTrpgTurnWithExperiments" @select-scene="workspace.selectSceneOption" @end-exploration="workspace.endExploration" @correct-time="correctGameTime" @end="dialogs.end = true" />
     </div>
     <MobileNavigation v-if="rootNavigationVisible" :current="view === 'modules' ? 'modules' : view === 'profile' ? 'profile' : 'library'" @navigate="navigateMobile" />
   </div>
@@ -889,30 +1100,30 @@ async function changePassword() {
 
   <div v-if="archiveOperation" class="archive-operation-status" role="status" aria-live="polite">{{ archiveOperation }} 请稍候。</div>
 
-  <AuthDialog v-model="authOpen" @submit="authenticate" />
+  <AuthDialog v-model="authOpen" :submitting="busy" @submit="authenticate" />
 
   <BaseDialog v-model="dialogs.world" mobile-presentation="page" title="创建世界" :description="isMobile ? '' : '选择世界模板，设置聊天方式和角色表达。'" size="lg">
     <div class="form-stack"><label class="field"><span>世界模板</span><select v-model="worldForm.worldId"><option value="">请选择</option><option v-for="item in workspace.templates.value" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label><label class="field"><span>世界名称</span><input v-model.trim="worldForm.name" placeholder="留空则使用模板名称" /></label><label v-if="isMobile" class="field"><span>好感变化幅度</span><select v-model="worldForm.favorSystemStatus"><option value="NORMAL">标准</option><option value="EASY">较易提升</option><option value="HARD">较难提升</option></select></label><div v-else class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: worldForm.favorSystemStatus === item }" @click="worldForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div>
       <fieldset class="world-option-group">
         <legend>系统</legend>
-        <p class="world-option-description">设置角色何时发消息，以及聊天时如何收发消息。</p>
+        <p class="world-option-description">设置角色是否主动发来消息。</p>
         <label class="switch-row"><span><strong>主动发消息</strong><small>开启后，角色可能主动发来事件提醒、关心问候或晚间话题；关闭后，不再发送这些主动消息。</small></span><input v-model="worldForm.acitvePushStatus" type="checkbox" /></label>
-        <label class="switch-row"><span><strong>逐字显示思考和回复</strong><small>开启后，每次发送都会开始一轮回复，逐步显示思考和回答，回复结束后才能继续发送；关闭后，你可以连续发送多条消息，角色会等你说完再一起回复。</small></span><input v-model="worldForm.thinkStatus" type="checkbox" /></label>
-        <label v-if="!worldForm.thinkStatus" class="switch-row"><span><strong>智能判断是否说完</strong><small>开启后，系统会判断你发送的话是否说完，完整时更快开始回复；关闭后，通常会等你停止输入约 3 秒再开始回复。</small></span><input v-model="worldForm.eotDetectionStatus" type="checkbox" /></label>
       </fieldset>
       <fieldset class="world-option-group">
         <legend>提示词</legend>
         <p class="world-option-description">引导角色如何与你相处、如何表达。</p>
         <label class="switch-row"><span><strong>现实日常陪伴</strong><small>开启后，角色会把你当作来自现实世界的朋友，陪你聊生活、学习和心情；关闭后，更侧重故事中的互动，回应你的动作和当前场景。</small></span><input v-model="worldForm.dailyCompanionMode" type="checkbox" /></label>
-        <label v-if="worldForm.thinkStatus" class="switch-row"><span><strong>用角色口吻写内心独白</strong><small>开启后，会引导角色用“我……”写内心独白，例如“（心想：我想再听听你的看法。）”；关闭后，不额外要求思考的写法。实际效果取决于所用模型。</small></span><input v-model="worldForm.addSpecialPrompt" type="checkbox" /></label>
+        <label class="switch-row"><span><strong>用角色口吻写内心独白</strong><small>开启后，会引导角色用“我……”写内心独白，例如“（心想：我想再听听你的看法。）”；关闭后，不额外要求思考的写法。实际效果取决于所用模型。</small></span><input v-model="worldForm.addSpecialPrompt" type="checkbox" /></label>
       </fieldset>
     </div>
-    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.world = false">取消</button><button class="button primary" :disabled="!worldForm.worldId || busy" @click="run(() => workspace.createWorld({ ...worldForm, worldId: Number(worldForm.worldId), eotDetectionStatus: worldForm.thinkStatus ? false : worldForm.eotDetectionStatus, addSpecialPrompt: worldForm.thinkStatus && worldForm.addSpecialPrompt }), 'world')">创建</button></template>
+    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.world = false">取消</button><button class="button primary" :disabled="!worldForm.worldId || busy" @click="run(() => workspace.createWorld({ ...worldForm, worldId: Number(worldForm.worldId) }), 'world')">创建</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.template" mobile-presentation="page" :title="templateDialogTitle" :description="isMobile ? '' : templateDialogDescription" size="lg">
-    <div class="form-grid"><label class="field"><span>模板名称</span><input v-model.trim="templateForm.name" /></label><label class="field"><span>作者</span><input v-model.trim="templateForm.author" /></label><MobileTemplateImageUpload v-if="isMobile" v-model="templateForm.image" kind="world" :name="templateForm.name" :disabled="busy" @busy-change="uploading.world = $event" /><DesktopTemplateImageUpload v-else v-model="templateForm.image" class="full" kind="world" :name="templateForm.name" :disabled="busy" @busy-change="uploading.world = $event" /><label class="field full"><span>世界背景</span><textarea v-model.trim="templateForm.background" rows="7" /></label><label class="switch-row full"><span><strong>公开模板</strong><small>其他用户可以发现并使用</small></span><input v-model="templateForm.visible" type="checkbox" /></label></div>
-    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.template = false">取消</button><button class="button primary" :disabled="!templateForm.name || !templateForm.background || busy || uploading.world" @click="run(saveTemplate, 'template')">{{ templateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
+  <BaseDialog v-model="dialogs.template" :close-disabled="busy" mobile-presentation="page" :title="templateDialogTitle" :description="isMobile ? '' : templateDialogDescription" size="lg">
+    <fieldset class="template-editor-fields" :disabled="busy" :inert="busy" :aria-busy="busy">
+    <div class="form-grid"><label class="field"><span>模板名称</span><input v-model.trim="templateForm.name" /></label><label class="field"><span>作者</span><input v-model.trim="templateForm.author" /></label><MobileTemplateImageUpload v-if="isMobile" v-model="templateForm.image" kind="world" :name="templateForm.name" :disabled="busy" @busy-change="uploading.world = $event" /><DesktopTemplateImageUpload v-else v-model="templateForm.image" class="full" kind="world" :name="templateForm.name" :disabled="busy" @busy-change="uploading.world = $event" /><label class="field full"><span>世界背景</span><textarea v-model.trim="templateForm.background" rows="7" /></label><label class="switch-row full"><span><strong>公开模板</strong><small>{{ templatePublished ? '已公开，不能再改为私有' : '其他用户可以发现并使用；公开后不能再改为私有' }}</small></span><input v-model="templateForm.visible" type="checkbox" :disabled="templatePublished" /></label></div>
+    </fieldset>
+    <template #footer><button v-if="!isMobile" class="button ghost" :disabled="busy" @click="dialogs.template = false">取消</button><button class="button primary" :disabled="!templateForm.name || !templateForm.background || busy || uploading.world" @click="run(saveTemplate, 'template')">{{ templateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
   <BaseDialog v-model="dialogs.templatePreview" mobile-presentation="page" :title="isMobile ? '世界模板' : selectedTemplatePreview?.name || '世界模板'" :description="isMobile ? '' : selectedTemplatePreview?.author ? `作者：${selectedTemplatePreview.author}` : '匿名创作者'" size="lg">
@@ -1018,7 +1229,11 @@ async function changePassword() {
       <label class="field"><span>标题</span><input v-model.trim="conversationForm.title" placeholder="例如：深夜图书馆" /></label>
       <section v-if="isMobile && conversationForm.mode === 'trpg'" class="mobile-selected-module"><div class="mobile-v1-section"><h3>选择模组</h3></div><div class="mobile-v1-card"><span class="eyebrow">{{ selectedConversationFormModule ? '已选模组' : '跑团模组' }}</span><h2>{{ selectedConversationFormModule?.name || '选择一个故事' }}</h2><p v-if="selectedConversationFormModule" class="mobile-module-summary">{{ selectedConversationFormModule.introduction }}</p><button class="button secondary mobile-v1-wide" @click="mobileModulePicker = true">{{ selectedConversationFormModule ? '更换模组' : '选择模组' }}</button></div><p class="mobile-v1-notice">下一步选择参与角色。创建后，为调查员绑定人物卡。</p></section>
       <label v-else-if="conversationForm.mode === 'trpg'" class="field"><span>跑团模组</span><select v-model="conversationForm.moduleId"><option value="">请选择可用模组</option><option v-for="item in workspace.modules.value" :key="item.id" :value="String(item.id)">{{ item.name }}{{ item.era ? ` · ${item.era}` : '' }}</option></select><small v-if="selectedConversationFormModule">{{ selectedConversationFormModule.author || '作者未标注' }} · {{ selectedConversationFormModule.playerCount || '人数未标注' }} · {{ selectedConversationFormModule.estimatedDuration || '时长未标注' }}<br />{{ selectedConversationFormModule.introduction }}</small><small v-else-if="!workspace.modules.value.length">当前没有可选的公开模组。</small></label>
-      <div v-if="conversationForm.mode === 'chat'" class="field"><span>参与角色</span><div class="check-grid"><label v-for="item in workspace.characters.value" :key="item.characterId" class="check-card"><input v-model="conversationForm.characterIds" type="checkbox" :value="item.characterId" /><span class="reply-avatar" :style="item.characterImage ? { backgroundImage: `url(${item.characterImage})` } : {}">{{ item.characterImage ? '' : item.characterName.slice(0,1) }}</span><strong>{{ item.characterName }}</strong></label></div></div>
+      <div v-if="conversationForm.mode === 'chat'" class="field">
+        <span>参与角色 · 已选 {{ conversationForm.characterIds.length }} / {{ MAX_GROUP_CHARACTERS }} 位</span>
+        <small role="status">{{ conversationForm.characterIds.length >= MAX_GROUP_CHARACTERS ? '已达上限，请先取消一位角色再选择其他角色。' : `最多选择 ${MAX_GROUP_CHARACTERS} 位角色。` }}</small>
+        <div class="check-grid"><label v-for="item in workspace.characters.value" :key="item.characterId" class="check-card"><input type="checkbox" :checked="conversationForm.characterIds.includes(item.characterId)" :disabled="busy || (conversationForm.characterIds.length >= MAX_GROUP_CHARACTERS && !conversationForm.characterIds.includes(item.characterId))" @change="conversationForm.characterIds = toggleParticipantSelection(conversationForm.characterIds, null, item.characterId).selectedIds" /><span class="reply-avatar" :style="item.characterImage ? { backgroundImage: `url(${item.characterImage})` } : {}">{{ item.characterImage ? '' : item.characterName.slice(0,1) }}</span><strong>{{ item.characterName }}</strong></label></div>
+      </div>
     </div>
 
     <TrpgParticipantPicker
@@ -1086,7 +1301,8 @@ async function changePassword() {
     <template #footer><button v-if="workspace.canEditSelectedWorld.value && !characterChoice" class="button ghost" @click="openCreateCharacterTemplate">新建角色模板</button><button v-if="!isMobile" class="button primary" :disabled="!characterChoice || characterPickerPhase === 'moving' || busy" @click="run(() => workspace.addCharacter(Number(characterChoice), characterPrompt), 'character')">添加</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.characterTemplate" mobile-presentation="page" :title="characterTemplateDialogTitle" size="lg">
+  <BaseDialog v-model="dialogs.characterTemplate" :close-disabled="busy" mobile-presentation="page" :title="characterTemplateDialogTitle" size="lg">
+    <fieldset class="template-editor-fields" :disabled="busy" :inert="busy" :aria-busy="busy">
     <div v-if="isMobile" class="form-stack">
       <label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label>
       <MobileTemplateImageUpload v-model="characterTemplateForm.image" kind="character" :name="characterTemplateForm.name" :disabled="busy" @busy-change="uploading.character = $event" />
@@ -1096,7 +1312,8 @@ async function changePassword() {
       <button class="mobile-v1-row" @click="mobileFavorListOpen = true"><span><strong>好感阶段提示词</strong><small>{{ favorabilityRows.length }} 个阶段 · 按阈值逐条编辑</small></span><ChevronRight :size="16" /></button>
     </div>
     <div v-else class="form-grid"><label class="field"><span>角色名</span><input v-model.trim="characterTemplateForm.name" /></label><label class="field"><span>初始好感</span><input v-model.number="characterTemplateForm.initFavor" type="number" min="0" max="100" /></label><DesktopTemplateImageUpload v-model="characterTemplateForm.image" class="full" kind="character" :name="characterTemplateForm.name" :disabled="busy" @busy-change="uploading.character = $event" /><label class="field full"><span>背景</span><textarea v-model.trim="characterTemplateForm.background" rows="4" /></label><label class="field full"><span>性格</span><textarea v-model.trim="characterTemplateForm.personality" rows="4" /></label><label class="field full"><span>CoC 跑团偏好</span><textarea v-model.trim="characterTemplateForm.cocPlayStyle" rows="4" placeholder="例如：倾向优先调查无人探索的地点；遇到明显危险时更愿意与同伴结伴。" /></label><div class="field full"><span>好感阶段的角色表现</span><div class="favorability-list"><div v-for="row in favorabilityRows" :key="row.id" class="favorability-row"><input v-model.number="row.threshold" type="number" min="0" max="100" placeholder="好感度" /><input v-model.trim="row.prompt" placeholder="达到该好感度时的角色表现" /><button class="icon-button" title="删除阶段" @click="removeFavorabilityRow(row.id)"><Trash2 :size="15" /></button></div></div><button class="button ghost add-row-button" @click="addFavorabilityRow"><Plus :size="15" />添加阶段</button></div></div>
-    <template #footer><button v-if="!isMobile" class="button ghost" @click="dialogs.characterTemplate = false">取消</button><button class="button primary" :disabled="!characterTemplateForm.name || busy || uploading.character" @click="run(saveCharacterTemplate, 'characterTemplate')">{{ characterTemplateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
+    </fieldset>
+    <template #footer><button v-if="!isMobile" class="button ghost" :disabled="busy" @click="dialogs.characterTemplate = false">取消</button><button class="button primary" :disabled="!characterTemplateForm.name || busy || uploading.character" @click="run(saveCharacterTemplate, 'characterTemplate')">{{ characterTemplateMode === 'edit' ? '保存模板' : '创建模板' }}</button></template>
   </BaseDialog>
 
   <CharacterFavorDialog v-model="dialogs.characterEdit" :character="selectedCharacter" :world-name="workspace.selectedWorld.value?.name" :can-edit="workspace.canEditSelectedWorld.value" :saving="busy" @save="saveSelectedCharacterFavor" />
@@ -1120,7 +1337,6 @@ async function changePassword() {
           <label class="field"><span>世界名称</span><input v-model.trim="settingsForm.name" /></label>
           <label v-if="isMobile" class="field"><span>好感变化幅度</span><select v-model="settingsForm.favorSystemStatus"><option value="NORMAL">标准</option><option value="EASY">较易提升</option><option value="HARD">较难提升</option></select></label><div v-else class="field"><span>好感变化幅度</span><div class="segmented"><button v-for="item in ['EASY','NORMAL','HARD']" :key="item" :class="{ active: settingsForm.favorSystemStatus === item }" @click="settingsForm.favorSystemStatus = item">{{ {EASY:'较易提升',NORMAL:'标准',HARD:'较难提升'}[item as 'EASY'] }}</button></div></div>
           <label class="switch-row"><span><strong>主动发消息</strong><small>开启后，角色可能主动发来事件提醒、关心问候或晚间话题；关闭后，不再发送这些主动消息。</small></span><input v-model="settingsForm.acitvePushStatus" type="checkbox" /></label>
-          <label v-if="workspace.selectedWorld.value?.thinkStatus === false" class="switch-row"><span><strong>智能判断是否说完</strong><small>开启后，系统会判断你发送的话是否说完，完整时更快开始回复；关闭后，通常会等你停止输入约 3 秒再开始回复。</small></span><input v-model="settingsForm.eotDetectionStatus" type="checkbox" /></label>
         </div>
         <template v-if="isMobile"><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="settingsTab = 'lore'"><span><strong>世界设定</strong><small>主题与内容 · 仅模板作者维护</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" @click="settingsTab = 'data'"><span><strong>数据管理</strong><small>导入、导出与清理</small></span><ChevronRight :size="16" /></button></template>
         <div v-if="!isMobile" class="dialog-inline-actions settings-general-actions"><button v-if="workspace.canEditSelectedWorld.value" class="button secondary" @click="openEditTemplate"><Pencil :size="16" />编辑世界模板</button><button class="button primary" @click="run(() => workspace.updateWorld({ ...settingsForm }))">保存设置</button></div>
@@ -1163,7 +1379,7 @@ async function changePassword() {
       </TabsContent>
 
       <TabsContent value="data" class="tabs-content">
-        <div v-if="isMobile"><p class="mobile-v1-notice">当前世界：{{ workspace.selectedWorld.value?.name }}</p><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="openEditTemplate"><span><strong>编辑世界模板</strong><small>名称、封面与背景</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" :disabled="!workspace.canEditSelectedWorld.value || busy" @click="exportWorld"><span><strong>导出世界模板</strong><small>{{ workspace.canEditSelectedWorld.value ? '下载 ZIP，包含设定、角色和图片' : '只有模板作者可以导出' }}</small></span><Download :size="18" /></button><label class="mobile-v1-row file-button"><span><strong>导入世界模板</strong><small>选择 ZIP（含图片）或旧 JSON</small></span><Plus :size="18" /><input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="pickWorldArchive" /></label><div class="mobile-v1-section"><h3>危险操作</h3></div><button class="mobile-v1-row danger-text" @click="mobileDeleteWorldOpen = true"><span><strong>删除当前世界</strong><small>需要先移出世界内的所有角色</small></span><ChevronRight :size="16" /></button></div>
+        <div v-if="isMobile"><p class="mobile-v1-notice">当前世界：{{ workspace.selectedWorld.value?.name }}</p><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="openEditTemplate"><span><strong>编辑世界模板</strong><small>名称、封面与背景</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" :disabled="!workspace.canEditSelectedWorld.value || busy" @click="exportWorld"><span><strong>导出世界模板</strong><small>{{ workspace.canEditSelectedWorld.value ? '下载 ZIP，包含设定、角色和图片' : '只有模板作者可以导出' }}</small></span><Download :size="18" /></button><label class="mobile-v1-row file-button"><span><strong>导入世界模板</strong><small>选择 ZIP（含图片）或旧 JSON</small></span><Plus :size="18" /><input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="pickWorldArchive" /></label><div class="mobile-v1-section"><h3>危险操作</h3></div><button class="mobile-v1-row danger-text" @click="mobileDeleteWorldOpen = true"><span><strong>删除当前世界</strong><small>先移出全部角色；剩余群聊、跑团和存档将一起删除</small></span><ChevronRight :size="16" /></button></div>
         <div v-else class="settings-data">
           <section class="data-world-summary">
             <span class="data-summary-icon"><Database :size="20" /></span>
@@ -1180,8 +1396,8 @@ async function changePassword() {
 
           <section class="data-action-card destructive">
             <span class="data-card-icon"><Trash2 :size="18" /></span>
-            <span class="data-card-copy"><strong>删除当前世界</strong><small>需要先移出当前世界中的所有角色。删除后，该世界将从你的世界列表中移除。</small></span>
-            <button class="button danger" @click="run(workspace.removeWorld, 'settings').then((success) => { if (success) view = 'library' })">删除世界</button>
+            <span class="data-card-copy"><strong>删除当前世界</strong><small>需要先移出当前世界中的所有角色。删除世界时，剩余群聊、跑团及其人物卡、记录和存档会一并永久删除。</small></span>
+            <button class="button danger" @click="mobileDeleteWorldOpen = true">删除世界</button>
           </section>
         </div>
       </TabsContent>
@@ -1189,10 +1405,10 @@ async function changePassword() {
     <template v-if="isMobile && settingsTab === 'general'" #footer><button class="button primary" :disabled="busy" @click="run(() => workspace.updateWorld({ ...settingsForm }), 'settings')">保存设置</button></template>
   </BaseDialog>
 
-  <BaseDialog v-model="dialogs.save" mobile-presentation="page" :layer="isMobile ? 'foreground' : 'default'" :title="workspace.worldSave.value ? '覆盖世界存档' : '创建世界存档'" description="每个世界只保留一个存档；再次保存会覆盖现有存档。"><label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="4" maxlength="200" placeholder="记录此刻发生了什么（最多 200 字）" /></label><template #footer><button class="button ghost" @click="dialogs.save = false">取消</button><button class="button primary" @click="run(() => workspace.saveSnapshot(saveRemark), 'save')">{{ workspace.worldSave.value ? '确认覆盖' : '创建存档' }}</button></template></BaseDialog>
+  <BaseDialog v-model="dialogs.save" mobile-presentation="page" :layer="isMobile ? 'foreground' : 'default'" :title="workspace.worldSave.value ? '覆盖世界存档' : '创建世界存档'" description="每个世界只保留一个存档；再次保存会覆盖现有存档。"><label class="field"><span>存档备注</span><textarea v-model.trim="saveRemark" rows="4" maxlength="200" placeholder="记录此刻发生了什么（最多 200 字）" /></label><template #footer><button class="button ghost" @click="dialogs.save = false">取消</button><button class="button primary" :disabled="busy || !workspace.worldReady.value || workspace.loading.workspace" @click="run(() => workspace.saveSnapshot(saveRemark), 'save')">{{ workspace.worldSave.value ? '确认覆盖' : '创建存档' }}</button></template></BaseDialog>
   <BaseDialog v-model="dialogs.worldLoad" mobile-presentation="page" :layer="isMobile ? 'foreground' : 'default'" title="确认读取世界存档" description="读档会回滚角色、聊天、好感和世界事件，并删除存档点之后的进度。">
     <div class="restore-summary"><strong>{{ workspace.worldSave.value?.remark || '未填写存档备注' }}</strong><span>{{ workspace.worldSave.value?.savedAt || '未知存档时间' }}</span><p>这项操作不可撤销，请确认当前进度已不再需要。</p></div><section class="world-save-favors"><h3>存档中的角色好感</h3><dl v-if="workspace.worldSave.value?.characterFavors?.length"><div v-for="character in workspace.worldSave.value.characterFavors" :key="character.characterId"><dt>{{ character.characterName }}</dt><dd>{{ character.favorValue ?? '—' }}</dd></div></dl><p v-else>这份存档没有记录角色好感快照。</p></section>
-    <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy" @click="run(loadWorldSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
+    <template #footer><button class="button ghost" @click="dialogs.worldLoad = false">取消</button><button class="button danger" :disabled="busy || !workspace.worldReady.value || workspace.loading.workspace || !workspace.worldSave.value" @click="run(loadWorldSnapshot, 'worldLoad')"><RotateCcw :size="16" />确认读档</button></template>
   </BaseDialog>
   <BaseDialog v-model="dialogs.account" mobile-presentation="page" size="lg" content-class="account-settings-dialog" title="账号资料" description="个人信息与掷骰偏好">
     <AccountDiceSettings v-if="dialogs.account" v-model="accountForm.diceSkin">
@@ -1205,7 +1421,7 @@ async function changePassword() {
     <template #footer><button class="button primary" @click="run(() => workspace.saveUserInfo(accountForm as Partial<UserInfo>), 'account')">保存</button></template>
   </BaseDialog>
   <BaseDialog v-model="dialogs.password" mobile-presentation="page" title="修改密码" description="获取验证码后将自动填写，5 分钟内有效。"><form id="change-password-form" class="form-stack" @submit.prevent="run(changePassword, 'password')"><label class="field"><span>账户邮箱</span><input v-model="passwordForm.email" disabled /></label><label class="field"><span>6 位邮箱验证码</span><div class="field-inline"><input v-model.trim="passwordForm.code" inputmode="numeric" maxlength="6" /><button class="button secondary" type="button" @click="sendPasswordCode">获取验证码</button></div></label><label class="field"><span>新密码</span><input v-model="passwordForm.newPassword" type="password" placeholder="请输入非空新密码" /></label><label class="field"><span>确认新密码</span><input v-model="passwordForm.confirmPassword" type="password" /></label></form><template #footer><button class="button primary" type="submit" form="change-password-form" :disabled="busy || !passwordForm.code || !passwordForm.newPassword || !passwordForm.confirmPassword">更新密码</button></template></BaseDialog>
-  <ModelApiManagerDialog v-model="dialogs.modelApis" />
+  <ModelApiManagerDialog v-if="workspace.isLoggedIn.value" :key="`${workspace.session.id}:${workspace.session.token}`" v-model="dialogs.modelApis" @changed="refreshModelApis" />
   <BaseDialog
     v-model="dialogs.end" mobile-presentation="page"
     :title="workspace.selectedConversation.value?.status === 'active' ? (workspace.selectedConversation.value?.mode === 'trpg' ? '结束跑团' : '结束群聊') : '会话操作'"
@@ -1219,42 +1435,31 @@ async function changePassword() {
     <div class="destructive-confirmation"><strong>确认删除“{{ workspace.selectedConversation.value?.title || '当前会话' }}”？</strong><p>删除普通群聊不会撤销已经产生的好感度变化，但聊天记录会被清除。</p></div>
     <template #footer><button class="button ghost" :disabled="busy" @click="dialogs.deleteConversation = false">取消</button><button class="button danger" :disabled="busy" @click="permanentlyDeleteConversation"><Trash2 :size="16" />确认永久删除</button></template>
   </BaseDialog>
-  <BaseDialog
+  <GenerationErrorDialog
     v-if="workspace.generationFailure.value"
     v-model="workspace.generationFailureOpen.value"
     :title="workspace.selectedConversation.value?.mode === 'trpg' ? '行动轮执行失败' : '回复生成失败'"
-    :description="workspace.generationFailure.value.message"
-    size="lg"
-    content-class="generation-error-dialog" mobile-presentation="page"
+    :message="workspace.generationFailure.value.message"
+    :detail="workspace.generationFailure.value.detail"
   >
-    <div class="generation-error-overview">
-      <dl>
-        <div><dt>错误编号</dt><dd>{{ workspace.generationFailure.value.detail.errorId }}</dd></div>
-        <div><dt>错误代码</dt><dd>{{ workspace.generationFailure.value.detail.code }}</dd></div>
-        <div><dt>发生时间</dt><dd>{{ workspace.generationFailure.value.detail.occurredAt }}</dd></div>
-        <div><dt>操作</dt><dd>{{ workspace.generationFailure.value.detail.operation }}</dd></div>
-      </dl>
-      <p>详细信息仅保留在当前页面中，刷新后会清除。</p>
-    </div>
-    <div class="generation-error-details">
-      <details open>
-        <summary>Request</summary>
-        <pre>{{ formatDebugValue(workspace.generationFailure.value.detail.request) }}</pre>
-      </details>
-      <details>
-        <summary>Response</summary>
-        <pre>{{ formatDebugValue(mergeGenerationResponseEvents(workspace.generationFailure.value.detail.response)) }}</pre>
-      </details>
-      <details>
-        <summary>Stack trace</summary>
-        <pre>{{ formatDebugValue(workspace.generationFailure.value.detail.stack) }}</pre>
-      </details>
-    </div>
-    <template #footer>
-      <button class="button ghost" @click="workspace.generationFailureOpen.value = false">关闭</button>
-      <button v-if="canRetryGenerationFailure" class="button primary" :disabled="workspace.loading.sending" @click="workspace.retryGenerationFailure">重试此行动轮</button>
+    <template #actions>
+      <button v-if="canRollbackGenerationFailure" class="button primary" :disabled="workspace.loading.sending" @click="rollbackGenerationFailure">回退至上一轮</button>
+      <button v-else-if="canWithdrawGenerationFailure" class="button primary" :disabled="busy || workspace.loading.sending" @click="run(workspace.withdrawGenerationFailure)">撤回本轮对话</button>
+      <button v-else-if="canRetryGenerationFailure" class="button primary" :disabled="workspace.loading.sending" @click="workspace.retryGenerationFailure">{{ workspace.selectedConversation.value?.mode === 'trpg' ? '重试此行动轮' : '重试本轮回复' }}</button>
     </template>
-  </BaseDialog>
+  </GenerationErrorDialog>
+  <GenerationErrorDialog
+    v-if="view === 'direct' && direct.generationFailure.value"
+    v-model="direct.generationFailureOpen.value"
+    title="回复生成失败"
+    :message="direct.generationFailure.value.message"
+    :detail="direct.generationFailure.value.detail"
+  >
+    <template #actions>
+      <button v-if="direct.generationFailure.value.retry === 'withdraw'" class="button secondary" :disabled="!direct.canRetryGenerationFailure.value" @click="direct.withdraw">撤回本轮对话</button>
+      <button v-if="direct.generationFailure.value.detail.retryable" class="button primary" :disabled="!direct.canRetryGenerationFailure.value" @click="direct.retryGenerationFailure">重试本轮回复</button>
+    </template>
+  </GenerationErrorDialog>
   <TrpgCharacterBindingDialog
     v-if="workspace.selectedConversation.value?.mode === 'trpg'"
     v-model="dialogs.trpgBinding"
@@ -1268,17 +1473,28 @@ async function changePassword() {
     @update:model-value="handleTrpgBindingVisibility"
     @complete="completeTrpgBinding"
   />
-  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-card-id="trpgToolsCardId" @turn-settings="openMobileTurnSettings" @open-scene="openMobileScene" @end-trpg="dialogs.end = true" @restored="restoreTrpg" @open-dice="openDiceMessage" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
-  <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" :auto-continue="diceAutoContinue" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" @cancel-auto-continue="cancelDiceAutoAdvance" />
+  <TrpgToolsDialog v-if="workspace.selectedConversation.value?.mode === 'trpg'" v-model="dialogs.trpgTools" :conversation="workspace.selectedConversation.value" :module="selectedConversationModule" :username="workspace.session.username" :characters="workspace.characters.value" :participant-ids="workspace.participantIds.value" :messages="workspace.messages.value" :actor-runtimes="workspace.actorRuntimes.value" :model-apis="workspace.modelApis.value" :save-actor-runtime="workspace.saveActorRuntime" :has-older-messages="workspace.hasOlderGroupMessages.value" :loading-older-messages="workspace.loading.chat" :requested-tool="trpgToolsRequestedTool" :requested-card-id="trpgToolsCardId" :requested-rollback="trpgToolsRollback" @turn-settings="openMobileTurnSettings" @open-scene="openMobileScene" @end-trpg="dialogs.end = true" @restored="restoreTrpg" @open-dice="openDiceMessage" @locate-dice="locateDiceMessage" @load-earlier="workspace.loadOlderGroupMessages" @create-character-card="openTrpgCharacterCardCreation" />
+  <DicePlayerDialog v-model="dicePlayerOpen" :request="dicePlaybackRequest" :show-continue="diceShowContinue" :auto-continue="diceAutoContinue" :has-previous-round="!!diceRoundNavigation.previous.value" :has-next-round="!!diceRoundNavigation.next.value" :round-position="diceRoundNavigation.roundPosition.value" :round-count="diceRoundNavigation.roundCount.value" @previous-round="navigateDiceRound(-1)" @next-round="navigateDiceRound(1)" @roll="rollDiceMessage" @complete="completeDiceMessageRoll" @continue="continueAfterDice" @cancel-auto-continue="cancelDiceAutoAdvance" />
   <BaseDialog v-if="isMobile" v-model="mobileTemplateMenu" title="模板操作" content-class="mobile-v1-menu"><template v-if="ownsSelectedTemplate"><label class="mobile-v1-row file-button"><RotateCcw :size="20" /><span><strong>上传并替换模板</strong><small>选择 ZIP 或 JSON，按角色名称匹配</small></span><input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="mobileTemplateMenu = false; replaceTemplateFromFile($event)" /></label><button class="mobile-v1-row danger-text" :disabled="!selectedTemplateUsage?.deletable || busy" @click="mobileTemplateMenu = false; openTemplateDeleteConfirmation()"><Trash2 :size="20" /><span><strong>删除模板</strong><small>{{ selectedTemplateUsage?.deletable ? '永久删除模板及其设定和角色' : `已有 ${selectedTemplateUsage?.associatedWorldCount || 0} 个世界使用，不能删除` }}</small></span></button></template><p v-else class="mobile-v1-notice">这是其他作者的模板。可以查看资料并使用它创建世界。</p></BaseDialog>
   <BaseDialog v-if="isMobile" v-model="mobileTemplateCharacterOpen" title="角色资料" mobile-presentation="page"><div v-if="mobileTemplateCharacter"><div class="mobile-v1-profile"><span class="mobile-v1-avatar" :style="mobileTemplateCharacter.image ? { backgroundImage: `url(${mobileTemplateCharacter.image})` } : {}">{{ mobileTemplateCharacter.image ? '' : mobileTemplateCharacter.name.slice(0, 1) }}</span><h1>{{ mobileTemplateCharacter.name }}</h1><p>{{ selectedTemplatePreview?.name }}</p></div><p class="mobile-v1-prose">{{ mobileTemplateCharacter.background || '模板预览提供角色名称与头像。使用模板创建世界后，即可与角色开始对话。' }}</p></div></BaseDialog>
   <BaseDialog v-if="isMobile" v-model="mobileModulePicker" title="选择模组" mobile-presentation="page"><button v-for="item in workspace.modules.value" :key="item.id" class="mobile-v1-row" @click="conversationForm.moduleId = String(item.id); mobileModulePicker = false"><span><strong>{{ item.name }}</strong><small>{{ [item.era, item.playerCount, item.estimatedDuration].filter(Boolean).join(' · ') }}</small></span><span class="mobile-v1-row-end">{{ conversationForm.moduleId === String(item.id) ? '✓' : '›' }}</span></button><p v-if="!workspace.modules.value.length" class="mobile-v1-notice">当前没有可用模组。</p></BaseDialog>
   <BaseDialog v-if="isMobile" :model-value="dialogs.character && characterPickerOpen" @update:model-value="!$event && collapseCharacterPicker()" title="添加角色" mobile-presentation="page"><template v-if="characterChoicePreview"><div class="mobile-v1-profile"><span class="mobile-v1-avatar" :style="characterChoicePreview.image ? { backgroundImage: `url(${characterChoicePreview.image})` } : {}">{{ characterChoicePreview.image ? '' : characterChoicePreview.name.slice(0,1) }}</span><h1>{{ characterChoicePreview.name }}</h1><p>即将加入 {{ workspace.selectedWorld.value?.name }}</p></div><section v-if="workspace.canEditSelectedWorld.value"><div class="mobile-v1-section"><h3>角色背景</h3></div><p class="mobile-v1-prose">{{ characterPreviewLoading ? '正在载入…' : characterChoicePreview.background || '尚未填写角色背景。' }}</p></section><label class="field"><span>希望角色记住的事</span><textarea v-model="characterPrompt" rows="5" placeholder="你的称呼、偏好或共同经历…" /></label></template><template #footer><button class="button primary" :disabled="!characterChoice || busy || characterPreviewLoading" @click="run(() => workspace.addCharacter(Number(characterChoice), characterPrompt), 'character')">添加到当前世界</button></template></BaseDialog>
   <BaseDialog v-if="isMobile" v-model="mobileFavorListOpen" title="好感阶段提示词" mobile-presentation="page"><button v-for="row in favorabilityRows" :key="row.id" class="mobile-v1-row" @click="openFavorStage(row)"><span><strong>好感达到 {{ row.threshold ?? '未填写' }}</strong><small class="mobile-lore-excerpt">{{ row.prompt || '待填写阶段提示词' }}</small></span><ChevronRight :size="16" /></button><p v-if="!favorabilityRows.length" class="mobile-v1-notice">还没有设置好感阶段。</p><template #footer><button class="button primary" @click="openFavorStage()"><Plus :size="16" />添加阶段</button></template></BaseDialog>
-  <BaseDialog v-if="isMobile" v-model="mobileFavorEditOpen" title="好感阶段提示词" mobile-presentation="page"><label class="field"><span>触发阈值</span><input v-model.number="mobileFavorDraft.threshold" type="number" min="0" max="100" /></label><label class="field"><span>阶段提示词</span><textarea v-model="mobileFavorDraft.prompt" rows="8" /></label><template #footer><button v-if="mobileFavorDraft.id" class="button ghost danger-text" @click="removeFavorabilityRow(mobileFavorDraft.id); mobileFavorEditOpen = false">删除阶段</button><button class="button primary" :disabled="mobileFavorDraft.threshold == null || mobileFavorDraft.threshold < 0 || mobileFavorDraft.threshold > 100 || !mobileFavorDraft.prompt.trim()" @click="saveFavorStage">保存这一阶段</button></template></BaseDialog>
+  <BaseDialog v-if="isMobile" v-model="mobileFavorEditOpen" title="好感阶段提示词" mobile-presentation="page"><label class="field"><span>触发阈值</span><input v-model.number="mobileFavorDraft.threshold" type="number" inputmode="numeric" min="0" max="100" step="1" /><small>填写 0–100 之间的整数。</small></label><label class="field"><span>阶段提示词</span><textarea v-model="mobileFavorDraft.prompt" rows="8" /></label><template #footer><button v-if="mobileFavorDraft.id" class="button ghost danger-text" @click="removeFavorabilityRow(mobileFavorDraft.id); mobileFavorEditOpen = false">删除阶段</button><button class="button primary" :disabled="!validMobileFavorStage" @click="saveFavorStage">保存这一阶段</button></template></BaseDialog>
   <BaseDialog v-if="isMobile" v-model="mobileLoreOpen" title="添加世界设定" mobile-presentation="page"><label class="field"><span>主题</span><input v-model.trim="detailForm.about" placeholder="例如：城邦规则" /></label><label class="field"><span>内容</span><textarea v-model.trim="detailForm.details" rows="9" maxlength="2000" /></label><p class="mobile-v1-prose">最多 2000 字；仅模板作者可维护。</p><template #footer><button class="button primary" :disabled="!detailForm.about || !detailForm.details || busy" @click="addWorldDetail">保存设定</button></template></BaseDialog>
   <BaseDialog v-if="isMobile" v-model="mobileLoreDetailOpen" :title="mobileLoreDetail?.about || '世界设定'" mobile-presentation="page"><p class="mobile-v1-prose">{{ mobileLoreDetail?.details }}</p><template #footer><button class="button ghost danger-text" :disabled="busy" @click="run(() => removeDetail(mobileLoreDetail?.id)).then(success => { if (success) mobileLoreDetailOpen = false })">删除设定</button></template></BaseDialog>
-  <BaseDialog v-if="isMobile" v-model="mobileDeleteWorldOpen" title="删除当前世界" mobile-presentation="page"><div class="destructive-confirmation"><strong>删除「{{ workspace.selectedWorld.value?.name }}」？</strong><p>请先移出世界内的全部角色。删除后世界会从你的列表中移除。</p></div><template #footer><button class="button secondary" @click="mobileDeleteWorldOpen = false">保留世界</button><button class="button danger" :disabled="busy" @click="run(workspace.removeWorld, 'settings').then(success => { if (success) { mobileDeleteWorldOpen = false; view = 'library' } })">确认删除</button></template></BaseDialog>
+  <BaseDialog v-model="mobileDeleteWorldOpen" title="删除当前世界" size="sm" layer="foreground" mobile-presentation="page">
+    <div class="destructive-confirmation">
+      <strong>删除「{{ workspace.selectedWorld.value?.name }}」？</strong>
+      <p v-if="workspace.loading.workspace" role="status">正在加载世界，请稍后再操作。</p>
+      <p v-else-if="workspace.characters.value.length" role="status">当前世界还有 {{ workspace.characters.value.length }} 个角色，请先移出全部角色后再删除。</p>
+      <p>剩余群聊、跑团及其人物卡、记录和存档将一并永久删除，此操作不可撤销。</p>
+    </div>
+    <template #footer>
+      <button class="button secondary" :disabled="busy" @click="mobileDeleteWorldOpen = false">保留世界</button>
+      <button class="button danger" :disabled="!canDeleteWorld" @click="confirmWorldDeletion">确认删除</button>
+    </template>
+  </BaseDialog>
   <NoticeToast />
 </template>
 
@@ -1288,4 +1504,5 @@ async function changePassword() {
 @media (max-width: 767px) {
   .archive-operation-status { bottom: calc(84px + env(safe-area-inset-bottom)); width: max-content; }
 }
+.template-editor-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
 </style>

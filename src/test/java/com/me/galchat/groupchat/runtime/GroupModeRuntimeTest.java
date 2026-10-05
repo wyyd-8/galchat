@@ -19,6 +19,8 @@ import com.me.galchat.groupchat.runtime.chat.ChatGroupRuntime;
 import com.me.galchat.groupchat.runtime.trpg.TrpgGroupAgentPolicy;
 import com.me.galchat.groupchat.runtime.trpg.TrpgGroupContextPolicy;
 import com.me.galchat.groupchat.runtime.trpg.TrpgGroupRuntime;
+import com.me.galchat.groupchat.tool.GroupToolContextFactory;
+import com.me.galchat.service.IUserCharacterInfoService;
 import com.me.galchat.service.impl.group.GroupContextAssembler;
 import com.me.galchat.service.ICharacterCardService;
 import com.me.galchat.service.impl.character.CharacterCardContextFormatter;
@@ -27,10 +29,13 @@ import com.me.galchat.tool.UserCharacterInfoTools;
 import com.me.galchat.tool.VectorTools;
 import com.me.galchat.tool.KpDiceTools;
 import com.me.galchat.tool.TrpgRunMemoryTools;
-import com.me.galchat.vector.GroupTopicVectorService;
+import com.me.galchat.vector.MutiSearchService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.ai.support.ToolCallbacks;
+import java.util.Arrays;
 import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -57,8 +62,8 @@ class GroupModeRuntimeTest {
     void contextPoliciesOwnTheirModeSpecificPreparation() {
         GroupContextAssembler assembler = mock(GroupContextAssembler.class);
         GroupTopicService topicService = mock(GroupTopicService.class);
-        GroupTopicVectorService vectorService = mock(GroupTopicVectorService.class);
-        GroupConversation chat = new GroupConversation().setId(1L).setMode(GroupChatConstant.MODE_CHAT);
+        MutiSearchService searchService = mock(MutiSearchService.class);
+        GroupConversation chat = new GroupConversation().setId(1L).setWorldId(99L).setMode(GroupChatConstant.MODE_CHAT);
         GroupConversation trpg = new GroupConversation().setId(2L).setMode(GroupChatConstant.MODE_TRPG);
         GroupChatMessage userMessage = new GroupChatMessage().setSequenceNo(20L).setContent("继续调查仓库");
         GroupActionSpec action = new GroupActionSpec(
@@ -68,15 +73,15 @@ class GroupModeRuntimeTest {
         when(topicService.windowStartSequence(chat)).thenReturn(10L);
         when(assembler.assembleContextFrom(chat, actor, 10L))
                 .thenReturn(List.of(new UserMessage("上一话题"), new UserMessage("继续调查仓库")));
-        when(vectorService.search(1L, 10L, "上一话题\n继续调查仓库"))
-                .thenReturn("更早话题的相关记忆");
+        when(searchService.searchBeforeGroupChat(99L, 1L, 10L, "上一话题\n继续调查仓库"))
+                .thenReturn("世界设定和更早话题的相关记忆");
         TrpgExplorationContextAssembler
                 explorationAssembler = mock(
                 TrpgExplorationContextAssembler.class);
         when(explorationAssembler.assemble(trpg, actor))
                 .thenReturn(List.of(new UserMessage("跑团上下文")));
 
-        ChatGroupContextPolicy chatPolicy = new ChatGroupContextPolicy(topicService, vectorService, assembler);
+        ChatGroupContextPolicy chatPolicy = new ChatGroupContextPolicy(topicService, searchService, assembler);
         TrpgGroupContextPolicy trpgPolicy = new TrpgGroupContextPolicy(
                 mock(TrpgModuleContextAssembler.class),
                 mock(TrpgAgentDecisionContextAssembler.class),
@@ -88,8 +93,12 @@ class GroupModeRuntimeTest {
         trpgPolicy.onTurnStarted(trpg, userMessage);
 
         assertThat(chatPolicy.load(chat, action).messages()).extracting(message -> message.getText())
-                .containsExactly("<retrieved-group-memory>\n更早话题的相关记忆\n</retrieved-group-memory>",
+                .containsExactly("<retrieved-group-memory>\n世界设定和更早话题的相关记忆\n</retrieved-group-memory>",
                         "上一话题", "继续调查仓库");
+        when(searchService.searchBeforeGroupChat(99L, 1L, 10L, "上一话题\n继续调查仓库"))
+                .thenReturn("");
+        assertThat(chatPolicy.load(chat, action).messages()).extracting(message -> message.getText())
+                .containsExactly("上一话题", "继续调查仓库");
         assertThat(trpgPolicy.load(trpg, action).messages()).extracting(message -> message.getText())
                 .containsExactly("跑团上下文");
         verify(topicService).onTurnStarted(chat, userMessage);
@@ -101,9 +110,10 @@ class GroupModeRuntimeTest {
         GroupContextAssembler assembler = mock(GroupContextAssembler.class);
         VectorTools vectorTools = mock(VectorTools.class);
         UserCharacterFavorTools favorTools = mock(UserCharacterFavorTools.class);
-        UserCharacterInfoTools infoTools = mock(UserCharacterInfoTools.class);
+        IUserCharacterInfoService characterInfoService = mock(IUserCharacterInfoService.class);
+        UserCharacterInfoTools infoTools = new UserCharacterInfoTools(characterInfoService);
         TrpgRunMemoryTools runMemoryTools = mock(TrpgRunMemoryTools.class);
-        GroupConversation conversation = new GroupConversation().setId(1L);
+        GroupConversation conversation = new GroupConversation().setId(1L).setUserWorldId(7L);
         GroupContextMaterial context = new GroupContextMaterial(List.of(new UserMessage("共享上下文")));
         GroupActorRef alice = new GroupActorRef(GroupChatConstant.ACTOR_CHARACTER, 11L);
         when(assembler.baseSystemPrompt(conversation, alice)).thenReturn("角色基础提示词");
@@ -112,7 +122,7 @@ class GroupModeRuntimeTest {
         when(cardService.listDiceCharacters(conversation.getId())).thenReturn(List.of());
 
         GroupModelInvocation chat = new ChatGroupAgentPolicy(
-                client, assembler, vectorTools, favorTools,
+                client, assembler, vectorTools, favorTools, infoTools,
                 runMemoryTools).prepare(
                 conversation,
                 new GroupActionSpec(GroupChatConstant.ACTION_CHAT_REPLY,
@@ -146,10 +156,20 @@ class GroupModeRuntimeTest {
                 context);
 
         assertThat(chat.prompt().getInstructions().getFirst().getText()).contains("多人群聊");
+        String chatSystem = chat.prompt().getInstructions().getFirst().getText();
+        assertThat(chatSystem.indexOf("【记忆工具选择】"))
+                .isLessThan(chatSystem.indexOf("角色基础提示词"));
+        assertThat(chat.prompt().getInstructions().get(1)).isSameAs(context.messages().getFirst());
         assertThat(trpg.prompt().getInstructions().getFirst().getText()).contains("TRPG", "战斗");
-        assertThat(chat.tools()).containsExactly(
-                vectorTools, favorTools, runMemoryTools);
-        assertThat(chat.tools()).doesNotContain(infoTools);
+        assertThat(chat.tools()).containsExactly(vectorTools, favorTools, infoTools, runMemoryTools);
+        var infoCallback = Arrays.stream(ToolCallbacks.from(chat.tools().toArray()))
+                .filter(callback -> callback.getToolDefinition().name().equals("appendUserInfoPrompt"))
+                .findFirst().orElseThrow();
+        var toolAction = new GroupActionSpec(GroupChatConstant.ACTION_CHAT_REPLY,
+                GroupChatConstant.ACTOR_CHARACTER, 11L, "default", "群聊", 1, 1);
+        infoCallback.call("{\"content\":\"用户喜欢红茶\"}", new ToolContext(
+                new GroupToolContextFactory().create(conversation, toolAction, 20L, null)));
+        verify(characterInfoService).appendUserInfoPrompt(7L, 11L, "用户喜欢红茶");
         assertThat(trpg.tools()).isEmpty();
     }
 }

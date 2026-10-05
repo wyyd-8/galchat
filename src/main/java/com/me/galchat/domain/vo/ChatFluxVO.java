@@ -11,6 +11,11 @@ public class ChatFluxVO {
     private String type;
     private String content;
     private Long sequence;
+    private GenerationErrorDetailVO errorDetail;
+
+    public ChatFluxVO(String type, String content, Long sequence) {
+        this(type, content, sequence, null);
+    }
 
     public ChatFluxVO(String type, String content) {
         this(type, content, null);

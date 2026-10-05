@@ -118,6 +118,19 @@ public class GroupChatController {
                 groupChatService.chat(conversationId, request));
     }
 
+    @PostMapping(value = "/conversations/{conversationId}/turns/{turnId}/retry",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<GroupChatEvent> retryChatTurn(@PathVariable Long conversationId,
+                                             @PathVariable Long turnId,
+                                             @RequestBody GroupTurnContinueDTO request) {
+        conversationService.requireAuthorized(conversationId);
+        return generationStreamRegistry.start(conversationId, request.getClientRequestId(),
+                requestContext("retry-group-turn",
+                        "/group-chat/conversations/" + conversationId + "/turns/" + turnId + "/retry",
+                        request.getClientRequestId(), null, null),
+                groupChatService.retry(conversationId, turnId));
+    }
+
     @GetMapping(
             value = "/conversations/{conversationId}/generations/{clientRequestId}",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -307,9 +320,11 @@ public class GroupChatController {
     }
 
     @PostMapping("/conversations/{conversationId}/withdraw")
-    public Result withdrawLatestTurn(@PathVariable Long conversationId) {
-        withdrawalService.withdrawLatestTurn(conversationId);
-        return Result.success();
+    public Result withdrawLatestTurn(@PathVariable Long conversationId,
+                                     @RequestParam Long expectedTurnId) {
+        var withdrawn = withdrawalService.withdrawLatestTurn(conversationId, expectedTurnId);
+        generationStreamRegistry.evict(conversationId);
+        return Result.success(withdrawn);
     }
 
     @GetMapping("/conversations/{conversationId}/reply-plan")

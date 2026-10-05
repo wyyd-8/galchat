@@ -16,6 +16,7 @@ import com.me.galchat.domain.po.GroupReplyPlan;
 import com.me.galchat.domain.po.GroupReplyPlanItem;
 import com.me.galchat.domain.po.GroupTurnCheckpoint;
 import com.me.galchat.domain.po.TrpgCombat;
+import com.me.galchat.domain.po.TrpgAutoSave;
 import com.me.galchat.domain.po.TrpgRuntimeChildScene;
 import com.me.galchat.domain.po.TrpgInvestigatorSuspension;
 import com.me.galchat.domain.po.TrpgWeaponStash;
@@ -52,8 +53,11 @@ public class TrpgSaveSnapshotDTO {
     private List<TrpgCombat> combats;
     private List<RestorableTurnSnapshot> restorableTurns;
     private GroupTurnCheckpoint checkpoint;
+    private DiceSnapshot lastDice;
     private RedisStateSnapshot redisState;
     private com.me.galchat.domain.po.TrpgCompletion completion;
+    /** Manual saves only: null for legacy saves, empty when no automatic checkpoints existed. */
+    private List<TrpgAutoSave> autoSaves;
 
     @Data
     @Accessors(chain = true)
@@ -97,6 +101,15 @@ public class TrpgSaveSnapshotDTO {
         private List<GroupChatAgentDecision> agentDecisions;
         private List<DiceRollSummary> diceSummaries;
         private List<DiceRollResult> diceResults;
+    }
+
+    @Data
+    @Accessors(chain = true)
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class DiceSnapshot {
+        private DiceRollSummary summary;
+        private List<DiceRollResult> results;
+        private List<GroupChatMessage> messages;
     }
 
     @Data

@@ -2,6 +2,7 @@ package com.me.galchat.tool;
 
 import com.me.galchat.constant.ChatToolContextConstant;
 import com.me.galchat.constant.GroupChatConstant;
+import com.me.galchat.domain.dto.KpInvestigatorSuspensionDTOs;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.service.impl.trpg.TrpgInvestigatorSuspensionService;
@@ -27,7 +28,7 @@ public class KpInvestigatorSuspensionTools {
             不适合示例：昏迷者仍由队友背着并影响当前处境；受控角色仍是当前冲突焦点；分离者马上有可主持的遭遇或选择；只是已经行动过或想跳过一轮。
             不要仅因昏迷、受伤、受控或本轮无法行动而调用。调用后必须在本次公开叙述中交代停镜位置，再转向其他调查员；不得虚构停镜期间的个人行动。
             """)
-    public String suspendInvestigators(
+    public KpInvestigatorSuspensionDTOs.SuspendResult suspendInvestigators(
             @ToolParam(description = "暂时停止主持其剧情线的准确调查员名称列表")
             List<String> investigatorNames,
             @ToolParam(description = "这些调查员如何离开当前剧情线，以及镜头停下时的最后处境")

@@ -101,16 +101,15 @@ public class KpModuleTools {
     @Tool(
             name = "updateQuickNotes",
             description = "按人物卡准确名称更新KP私有快速笔记，可用于调查员或NPC状态。")
-    public String updateQuickNotes(
+    public com.me.galchat.domain.dto.KpToolStateUndo.NotesResult updateQuickNotes(
             @ToolParam(description = "调查员或NPC的人物卡准确名称，不能传ID")
             String characterName,
             @ToolParam(description = "覆盖保存的KP私有快速笔记；空文本表示清除")
             String quickNotes,
             ToolContext context) {
         KpContext kp = requireKpContext(context);
-        characterCardService.updateQuickNotes(
+        return characterCardService.updateQuickNotes(
                 kp.runId(), characterName, quickNotes);
-        return "快速笔记已更新。";
     }
 
     @Tool(

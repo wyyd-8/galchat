@@ -7,6 +7,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -63,20 +64,34 @@ public class LocalDocumentReranker implements DocumentReranker {
                     .body(RerankResponse.class);
 
             if (response == null || response.results() == null || response.results().isEmpty()) {
-                return safeDocuments.stream().limit(topN).toList();
+                return vectorFallback(safeDocuments, topN);
+            }
+
+            int expectedCount = Math.min(topN, safeDocuments.size());
+            if (response.results().size() != expectedCount
+                    || response.results().stream().anyMatch(result -> result == null
+                        || result.index() < 0 || result.index() >= safeDocuments.size()
+                        || !Double.isFinite(result.score()))
+                    || response.results().stream().map(RerankResult::index).distinct().count() != expectedCount) {
+                return vectorFallback(safeDocuments, topN);
             }
 
             return response.results().stream()
                     .map(RerankResult::index)
-                    .filter(index -> index >= 0 && index < safeDocuments.size())
-                    .distinct()
-                    .limit(topN)
                     .map(safeDocuments::get)
                     .toList();
         } catch (Exception e) {
-            log.warn("本地reranker调用失败，返回向量召回原始顺序", e);
-            return safeDocuments.stream().limit(topN).toList();
+            log.warn("本地reranker调用失败，按向量检索分数降序回退", e);
+            return vectorFallback(safeDocuments, topN);
         }
+    }
+
+    private List<Document> vectorFallback(List<Document> documents, int topN) {
+        return documents.stream()
+                .filter(document -> document.getScore() != null && Double.isFinite(document.getScore()))
+                .sorted(Comparator.comparingDouble((Document document) -> document.getScore()).reversed())
+                .limit(topN)
+                .toList();
     }
 
     public record RerankRequest(String query, List<String> documents, int top_n) {

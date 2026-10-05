@@ -23,12 +23,20 @@ class ChatClientMessageAggregator {
     Flux<ChatClientResponse> aggregateChatClientResponse(
             Flux<ChatClientResponse> flux,
             Consumer<ChatClientResponse> onComplete) {
-        AggregationState state = new AggregationState();
-        return flux
-                .doOnSubscribe(subscription -> state.reset())
-                .map(state::normalizeAndAppend)
-                .doOnComplete(() -> emitAggregatedResponse(state, onComplete))
-                .doOnError(throwable -> log.error("Chat response aggregation error", throwable));
+        return aggregateChatClientResponse(flux, onComplete, true);
+    }
+
+    Flux<ChatClientResponse> aggregateChatClientResponse(
+            Flux<ChatClientResponse> flux, Consumer<ChatClientResponse> onComplete, boolean normalizeStream) {
+        return Flux.defer(() -> {
+            AggregationState state = new AggregationState();
+            return flux.map(response -> {
+                        ChatClientResponse normalized = state.normalizeAndAppend(response);
+                        return normalizeStream ? normalized : response;
+                    })
+                    .doOnComplete(() -> emitAggregatedResponse(state, onComplete))
+                    .doOnError(throwable -> log.error("Chat response aggregation error", throwable));
+        });
     }
 
     private void emitAggregatedResponse(
@@ -41,7 +49,7 @@ class ChatClientMessageAggregator {
         state.reset();
     }
 
-    private static class AggregationState {
+    static class AggregationState {
 
         private final AtomicReference<StringBuilder> content =
                 new AtomicReference<>(new StringBuilder());

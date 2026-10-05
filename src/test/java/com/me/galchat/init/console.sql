@@ -96,8 +96,6 @@ CREATE TABLE user_world_prefix (
     acitve_push_status BOOLEAN DEFAULT FALSE,
     daily_companion_mode BOOLEAN DEFAULT FALSE,
     favor_system_status VARCHAR(50) DEFAULT 'EASY',
-    eot_detection_status BOOLEAN NOT NULL DEFAULT FALSE,
-    think_status BOOLEAN NOT NULL DEFAULT FALSE,
     my_world boolean DEFAULT FALSE,
     add_special_prompt BOOLEAN DEFAULT FALSE
 );
@@ -118,6 +116,10 @@ CREATE TABLE user_chat_history (
 
 CREATE INDEX idx_user_chat_history_conversation_id
     ON user_chat_history (user_world_id, character_id, id);
+
+CREATE INDEX idx_user_chat_history_care_cursor
+    ON user_chat_history (user_world_id, id)
+    WHERE type = 'assistant' AND user_message_id IS NULL;
 
 CREATE TABLE user_chat_thinking_history (
     id BIGSERIAL PRIMARY KEY,
@@ -146,7 +148,7 @@ CREATE INDEX idx_user_chat_tool_call_tool_call_id
     ON user_chat_tool_call (tool_call_id);
 
 CREATE UNIQUE INDEX uk_tool_call_id
-    ON user_chat_tool_call (tool_call_id);
+    ON user_chat_tool_call (user_message_id, tool_call_id);
 
 CREATE TABLE coc_module (
     id BIGSERIAL PRIMARY KEY,
@@ -581,10 +583,14 @@ CREATE TABLE user_event_log (
     id BIGSERIAL PRIMARY KEY,
     user_world_id BIGINT NOT NULL,
     character_id BIGINT,
+    source_user_message_id BIGINT,
     time TIMESTAMP,
     event_description TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE UNIQUE INDEX idx_user_event_log_source_message
+    ON user_event_log (source_user_message_id) WHERE source_user_message_id IS NOT NULL;
 
 CREATE INDEX idx_user_event_log_world_time
     ON user_event_log (user_world_id, time, id);

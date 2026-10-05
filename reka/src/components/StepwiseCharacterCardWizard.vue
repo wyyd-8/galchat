@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, reactive, ref, watch } from 'vue'
 import {
   ArrowLeft, BookUser, Check, ChevronDown, Dices, FileCheck2, LoaderCircle, Minus, Plus, RotateCw, Search,
   TriangleAlert,
@@ -30,6 +30,7 @@ import {
 const draft = defineModel<CharacterCardCreationDraft | null>('draft', { required: true })
 const props = defineProps<{
   runId: number
+  active?: boolean
   participantId?: number
   defaultName?: string
   defaultEra?: string
@@ -48,6 +49,17 @@ const rules = ref<CharacterCardCreationRules | null>(null)
 const busy = ref(false)
 watch(busy, value => emit('busyChange', value), { flush: 'sync' })
 onBeforeUnmount(() => emit('busyChange', false))
+let contextRevision = 0
+let disposed = false
+watch([() => props.runId, () => props.participantId, () => props.active], () => {
+  contextRevision++
+  busy.value = false
+}, { flush: 'sync' })
+onScopeDispose(() => { disposed = true })
+function captureContext() {
+  const revision = contextRevision
+  return () => !disposed && props.active !== false && revision === contextRevision
+}
 const failure = ref('')
 const diceOpen = ref(false)
 const diceRequest = ref<DicePlaybackRequest | null>(null)
@@ -194,31 +206,39 @@ function syncFromDraft(value: CharacterCardCreationDraft | null) {
 }
 
 async function execute(action: () => Promise<void>) {
-  if (busy.value) return
+  const current = captureContext()
+  if (busy.value || !current()) return
   busy.value = true
   failure.value = ''
   try {
     await action()
   } catch (error) {
-    failure.value = errorMessage(error)
+    if (current()) failure.value = errorMessage(error)
   } finally {
-    busy.value = false
+    if (current()) busy.value = false
   }
 }
 
 async function createDraft() {
-  draft.value = await api.createStepCharacterCardDraft({
+  const current = captureContext()
+  if (!current()) return
+  const next = await api.createStepCharacterCardDraft({
     runId: props.runId,
     ...(props.participantId === undefined ? {} : { participantId: props.participantId }),
     ...identity,
   })
+  if (!current()) return
+  draft.value = next
 }
 
 async function rollAttributes() {
+  const current = captureContext()
+  if (!current()) return
   if (!draft.value) return
   const next = await api.rollCharacterCardDraftAttributes(draft.value.draftId, {
     requestId: requestId(), expectedVersion: draft.value.version,
   })
+  if (!current()) return
   draft.value = next
   if (next.state.stepwise?.attributes) {
     diceRequest.value = buildAttributeDicePlayback(
@@ -240,22 +260,32 @@ function adjustAgePenalty(code: string, delta: number) {
 }
 
 async function submitAgeAdjustment() {
+  const current = captureContext()
+  if (!current()) return
   if (!draft.value || assignedAgePenalty.value !== requiredAgePenalty.value) return
-  draft.value = await api.saveCharacterCardDraftAgeAdjustment(draft.value.draftId, {
+  const next = await api.saveCharacterCardDraftAgeAdjustment(draft.value.draftId, {
     strPenalty: agePenalties.STR, conPenalty: agePenalties.CON,
     sizPenalty: agePenalties.SIZ, dexPenalty: agePenalties.DEX,
     expectedVersion: draft.value.version,
   })
+  if (!current()) return
+  draft.value = next
 }
 
 async function confirmOccupation() {
+  const current = captureContext()
+  if (!current()) return
   if (!draft.value || !occupationText.value.trim()) return
-  draft.value = await api.saveCharacterCardDraftOccupation(draft.value.draftId, {
+  const next = await api.saveCharacterCardDraftOccupation(draft.value.draftId, {
     occupation: occupationText.value.trim(), confirmed: true, expectedVersion: draft.value.version,
   })
+  if (!current()) return
+  draft.value = next
 }
 
 async function confirmSkills() {
+  const current = captureContext()
+  if (!current()) return
   if (!draft.value || !canConfirmSkills.value) return
   const allocations = Object.entries(skillInputs)
     .filter(([, input]) => input.points > 0)
@@ -264,16 +294,21 @@ async function confirmSkills() {
       ...(input.specialization.trim() ? { specialization: input.specialization.trim() } : {}),
       allocatedPoints: input.points,
     }))
-  draft.value = await api.saveCharacterCardDraftSkills(draft.value.draftId, {
+  const next = await api.saveCharacterCardDraftSkills(draft.value.draftId, {
     allocations, confirmed: true, expectedVersion: draft.value.version,
   })
+  if (!current()) return
+  draft.value = next
 }
 
 async function rollBackground(category: string) {
+  const current = captureContext()
+  if (!current()) return
   if (!draft.value) return
   const next = await api.rollCharacterCardDraftBackground(draft.value.draftId, category, {
     requestId: requestId(), expectedVersion: draft.value.version,
   })
+  if (!current()) return
   draft.value = next
   const prompt = next.state.stepwise?.background?.prompts?.[category]
   if (prompt) {
@@ -284,19 +319,25 @@ async function rollBackground(category: string) {
 }
 
 async function confirmBackground() {
+  const current = captureContext()
+  if (!current()) return
   if (!draft.value) return
   const background = prepareStepwiseBackgroundSubmission(
     BACKGROUND_META.map((item) => item.code),
     backgroundEntries,
     keyConnectionCategory.value,
   )
-  draft.value = await api.saveCharacterCardDraftBackground(draft.value.draftId, {
+  const next = await api.saveCharacterCardDraftBackground(draft.value.draftId, {
     ...background,
     confirmed: true, expectedVersion: draft.value.version,
   })
+  if (!current()) return
+  draft.value = next
 }
 
 async function confirmEquipment() {
+  const current = captureContext()
+  if (!current()) return
   if (!draft.value) return
   const completedDraft = await api.saveCharacterCardDraftEquipment(draft.value.draftId, {
     era: equipment.era, equipmentText: equipment.equipmentText, assetsText: equipment.assetsText,
@@ -304,26 +345,33 @@ async function confirmEquipment() {
     weapons: stepwiseWeaponSelectionPayload(selectedWeaponCodes.value),
     confirmed: true, expectedVersion: draft.value.version,
   })
+  if (!current()) return
   draft.value = completedDraft
   await completeDraft(completedDraft)
 }
 
 async function completeDraft(completedDraft = draft.value) {
+  const current = captureContext()
+  if (!current()) return
   if (!completedDraft) return
   const card = await api.completeCharacterCardDraft(completedDraft.draftId, {
     requestId: requestId(), expectedVersion: completedDraft.version,
   })
+  if (!current()) return
   draft.value = null
   emit('complete', card)
 }
 
 async function abandonDraft() {
+  const current = captureContext()
+  if (!current()) return
   if (!draft.value) return
   if (!confirmAbandon.value) {
     confirmAbandon.value = true
     return
   }
   await api.abandonCharacterCardDraft(draft.value.draftId, draft.value.version)
+  if (!current()) return
   draft.value = null
   confirmAbandon.value = false
   emit('abandoned')
@@ -342,7 +390,10 @@ watch(() => equipment.era, () => {
   selectedWeaponCodes.value = selectedWeaponCodes.value.filter((code) => availableCodes.has(code))
 })
 onMounted(() => execute(async () => {
-  rules.value = await api.characterCardCreationRules()
+  const current = captureContext()
+  const loadedRules = await api.characterCardCreationRules()
+  if (!current()) return
+  rules.value = loadedRules
   syncFromDraft(draft.value)
   if (draft.value?.status === 'PREVIEW_READY') await completeDraft(draft.value)
 }))

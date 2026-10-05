@@ -68,6 +68,35 @@ class SingleChatGenerationRegistryTest {
         assertThat(replay).extracting(ChatFluxVO::getType).containsExactly("generation.failed");
         assertThat(replay.getLast().getContent()).doesNotContain("secret-provider-key");
     }
+
+    @Test
+    void anActiveReconnectGetsTheFailureOutcomeWithoutTheLiveDiagnosticPayload() {
+        var registry = new SingleChatGenerationRegistry();
+        var source = Sinks.many().unicast().<ChatFluxVO>onBackpressureBuffer();
+        var live = registry.start(1, 2L, 3L, "request", "hello", source.asFlux()).collectList().toFuture();
+        var replay = registry.resume(1, 2L, 3L, "request", 1).collectList().toFuture();
+        source.tryEmitError(new IllegalStateException("provider failure"));
+        assertThat(live.join().getLast().getErrorDetail().getStack()).contains("provider failure");
+        assertThat(replay.join().getLast().getErrorDetail()).isNull();
+        assertThat(replay.join().getLast().getContent()).doesNotContain("provider failure");
+        assertThat(replay.join().getLast().getSequence()).isEqualTo(2L);
+    }
+
+    @Test
+    void diagnosticsBoundHistoryAndLargeValuesWithoutChangingTheStreamContent() {
+        var registry = new SingleChatGenerationRegistry();
+        String content = "x".repeat(10000);
+        var events = registry.start(1, 2L, 3L, "request", content,
+                Flux.concat(Flux.range(1, 30).map(i -> new ChatFluxVO("response", content)),
+                        Flux.error(new IllegalStateException("request failed")))).collectList().block();
+        assertThat(events.getFirst().getContent()).isEqualTo(content);
+        assertThat(events.get(1).getContent()).isEqualTo(content);
+        var detail = events.getLast().getErrorDetail();
+        assertThat(detail.getResponse()).containsEntry("eventCount", 31);
+        assertThat((java.util.List<?>) detail.getResponse().get("events")).hasSize(20);
+        assertThat(detail.getRequest().get("body").toString()).contains("[truncated]");
+        assertThat(detail.getResponse().get("events").toString()).contains("[truncated]");
+    }
     @Test
     void differentRequestsCannotGenerateConcurrentlyForTheSameCharacter() {
         var registry = new SingleChatGenerationRegistry();

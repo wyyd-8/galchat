@@ -35,8 +35,7 @@ public class ChatController {
         log.info("Received message: {}", chatMessageDTO == null ? null : chatMessageDTO.getMessage());
         // chat() validates ownership on the request thread, including for duplicate starts.
         Flux<ChatFluxVO> source = chatService.chat(chatMessageDTO);
-        return generations.start(CurrentHolder.getCurrentId(), chatMessageDTO.getUserWorldId(),
-                chatMessageDTO.getCharacterId(), chatMessageDTO.getClientRequestId(), chatMessageDTO.getMessage(), source);
+        return generations.start(CurrentHolder.getCurrentId(), chatMessageDTO, source);
     }
     @GetMapping(value = "/chat/{userWorldId}/{characterId}/generations/{requestId}",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)

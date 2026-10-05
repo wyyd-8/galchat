@@ -48,7 +48,7 @@ public final class KpFirearmRequestDTOs {
     public record Target(
             @ToolParam(description = "射击目标的准确人物卡名称")
             String targetCharacterName,
-            @ToolParam(description = "声明向该目标发射的子弹数；弹药不足时后端只分配剩余弹药，之后的目标不再检定")
+            @ToolParam(description = "声明向该目标发射的子弹数；SINGLE单发模式必须为1；弹药不足时后端只分配剩余弹药，之后的目标不再检定")
             int bulletCount,
             @ToolParam(description = "仅包含射程、瞄准、光线等尚未结构化的场景因素；不要包含掩护、高速移动、小型目标、射击姿势受限或射击模式自动产生的惩罚骰；省略时为NORMAL", required = false)
             CocPercentileModifier baseModifier,

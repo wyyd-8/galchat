@@ -27,7 +27,7 @@ public class KpWaitingInvestigatorTools {
                     请根据当前剧情、时间经过、位置关系和队伍行动，选择自然且合适的汇合时机调用本工具。
                     工具使指定调查员从下一轮开始重新参与行动；不要仅因为工具可用就立即调用。
                     """)
-    public String resumeWaitingInvestigators(
+    public com.me.galchat.domain.dto.KpWaitingInvestigatorDTOs.Result resumeWaitingInvestigators(
             @ToolParam(description = "结束等待并从下一轮恢复行动的准确调查员名称列表")
             List<String> investigatorNames,
             ToolContext context) {

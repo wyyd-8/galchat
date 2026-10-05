@@ -7,6 +7,8 @@ import {
   CollapsibleContent, CollapsibleRoot, CollapsibleTrigger, TooltipContent, TooltipPortal, TooltipRoot, TooltipTrigger,
 } from 'reka-ui'
 import { useMobileViewport } from '@/composables/useMobileViewport'
+import { hasOpenDialog } from '@/composables/useDialogPresence'
+import { useActorOverview } from '@/composables/useActorOverview'
 import type { InvestigatorCardSummary, TrpgCombatParticipantOverview } from '../api/types'
 import { buildCombatHoverCard, combatInvestigatorCardId, type TrpgCombatHoverCard } from './trpgCombatOverview'
 import { buildExplorationHoverCard, explorationInvestigatorCardId, type TrpgExplorationHoverCard, type TrpgExplorationMetric } from './trpgExplorationOverview'
@@ -26,6 +28,7 @@ const props = withDefaults(defineProps<{
   playerControlled: false,
 })
 const { isMobile } = useMobileViewport()
+const { overviewOpen, allowOverview, updateOverview } = useActorOverview(hasOpenDialog)
 const emit = defineEmits<{ openCard: [cardId: number]; switchModel: [actor: TrpgExecutionActor] }>()
 
 const statusIcons: Partial<Record<string, Component>> = {
@@ -123,7 +126,11 @@ function explorationMetrics(
 </script>
 
 <template>
-  <component :is="isMobile ? CollapsibleRoot : TooltipRoot" v-if="hasOverview()" :class="{ 'mobile-actor-disclosure': isMobile }">
+  <!-- Rebind when the anchor switches between a plain row and a card button. -->
+  <component :is="isMobile ? CollapsibleRoot : TooltipRoot" v-if="hasOverview()"
+    :key="isMobile ? 'mobile' : investigatorCardId() ?? 'overview'"
+    v-bind="isMobile ? {} : { open: overviewOpen, 'onUpdate:open': updateOverview, disabled: hasOpenDialog, ignoreNonKeyboardFocus: true }"
+    :class="{ 'mobile-actor-disclosure': isMobile }">
     <component :is="isMobile ? CollapsibleTrigger : TooltipTrigger" as-child>
       <component
         :is="!isMobile && investigatorCardId() == null ? 'div' : 'button'"
@@ -132,6 +139,8 @@ function explorationMetrics(
         :type="!isMobile && investigatorCardId() == null ? undefined : 'button'"
         :aria-label="isMobile ? `查看${actor.name}的当前状态` : rowAriaLabel()"
         tabindex="0"
+        @pointermove.capture="allowOverview"
+        @focus.capture="allowOverview"
         @click="!isMobile && openCard()"
       >
         <span v-if="isMobile" class="mobile-scene-avatar" aria-hidden="true">{{ actor.name.slice(0, 1) }}</span>
@@ -147,7 +156,7 @@ function explorationMetrics(
       </component>
     </component>
     <component :is="isMobile ? 'div' : TooltipPortal">
-      <component :is="isMobile ? CollapsibleContent : TooltipContent" class="trpg-combat-overview-tooltip" :class="{ 'mobile-actor-overview': isMobile }" side="left" :side-offset="10">
+      <component :is="isMobile ? CollapsibleContent : TooltipContent" class="trpg-combat-overview-tooltip" :class="{ 'mobile-actor-overview': isMobile }" side="left" :side-offset="10" :hide-when-detached="!isMobile">
         <header>
           <span><strong>{{ overviewName() }}</strong><small>{{ overviewRole() }}</small></span>
           <em>{{ actor.statusLabel }}</em>

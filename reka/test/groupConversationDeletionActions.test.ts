@@ -6,7 +6,15 @@ import { renderToString } from '@vue/server-renderer'
 import { createServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-async function renderStage(context: TestContext, status: 'active' | 'closed') {
+async function renderStage(context: TestContext, status: 'active' | 'closed', failedTurn = false) {
+  const previousRequestFrame = globalThis.requestAnimationFrame
+  const previousCancelFrame = globalThis.cancelAnimationFrame
+  globalThis.requestAnimationFrame = () => 0
+  globalThis.cancelAnimationFrame = () => undefined
+  context.after(() => {
+    globalThis.requestAnimationFrame = previousRequestFrame
+    globalThis.cancelAnimationFrame = previousCancelFrame
+  })
   const vite = await createServer({
     appType: 'custom',
     configFile: false,
@@ -36,10 +44,10 @@ async function renderStage(context: TestContext, status: 'active' | 'closed') {
       replyPlan: { source: 'USER', displayName: '群聊', items: [] },
       replyPlans: [],
       availableCharacters: [],
-      currentTurn: null,
-      replyTurnState: null,
+      currentTurn: failedTurn ? { turnId: 42, planSource: 'USER', status: 'failed', waitingForUser: false, sceneOptions: {}, steps: [] } : null,
+      replyTurnState: failedTurn ? { turnId: 42, phase: 'failed', error: '401: API key expired.' } : null,
       sending: false,
-      loading: true,
+      loading: !failedTurn,
       hasOlderMessages: false,
     }),
   }))
@@ -58,4 +66,13 @@ test('closed conversations retain one conversation-actions entry', async (contex
   assert.doesNotMatch(html, />结束群聊</)
   assert.match(html, />会话操作</)
   assert.doesNotMatch(html, />永久删除</)
+})
+
+
+test('ordinary group retry appears below the error in the reply panel', async context => {
+  const html = await renderStage(context, 'active', true)
+  const overview = html.match(/<section class="[^"]*chat-reply-overview[^"]*"[\s\S]*?<\/section>/)?.[0]
+  assert.ok(overview)
+  assert.match(overview, /401: API key expired\.[\s\S]*>重试本轮回复</)
+  assert.equal(html.match(/>重试本轮回复</g)?.length, 1)
 })

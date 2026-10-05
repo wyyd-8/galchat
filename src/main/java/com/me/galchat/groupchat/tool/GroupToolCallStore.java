@@ -75,6 +75,10 @@ public class GroupToolCallStore implements DiceFollowUpLocator {
         }
         saveResponses(insertedByCallId, result.conversationHistory());
         insertedByCallId.values().stream()
+                .filter(call -> "askForClarification".equals(call.getToolName())
+                        || "askKp".equals(call.getToolName()))
+                .forEach(checkpointService::recordInteractionCommitted);
+        insertedByCallId.values().stream()
                 .filter(call -> call.getDiceRollSummaryId() != null)
                 .filter(call -> call.getToolResult() != null)
                 .map(GroupChatToolCall::getId)

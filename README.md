@@ -243,7 +243,7 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
   -f src/test/java/com/me/galchat/init/console.sql
 ```
 
-`console.sql` 一次性建立当前全部 47 张业务表（含 `trpg_completion`）、业务索引和 CoC 技能定义种子数据，并安装 `vector` 扩展，无需额外维护脚本。该脚本面向空数据库，不是已有数据库的增量升级脚本。以下四张向量表及其索引由后端启动时通过 `VectorConfiguration` 的 Spring AI 自动初始化，使用 UUID 主键、1024 维向量及 HNSW 余弦索引：
+**数据库业务表结构、索引和 CoC 技能定义种子数据以 [`console.sql`](src/test/java/com/me/galchat/init/console.sql) 为准。** 该脚本一次性建立当前全部 47 张业务表（含 `trpg_completion`），并安装 `vector` 扩展；初始化空库无需额外迁移脚本。已有数据库升级前应先备份，再对照 `console.sql` 按差异调整，不要直接重跑完整建表脚本。以下四张向量表及其索引由后端启动时通过 `VectorConfiguration` 的 Spring AI 自动初始化，使用 UUID 主键、1024 维向量及 HNSW 余弦索引：
 
 - `world_detail_vector_store`
 - `chat_history_vector_store`
@@ -261,14 +261,7 @@ psql -h localhost -U <username> -d <database> -v ON_ERROR_STOP=1 \
 
 《太阳与九英镑》提供[个人模组导入 JSON](data/modules/sun-and-nine-pounds.json) 和[系统默认模组 SQL](data/modules/sun-and-nine-pounds.sql)，两种方式任选其一。该模组按可回访的地点网络组织，保留场景原文并补充 AI 主持说明；封面与 10 份展示材料已填写上传地址。
 
-模组与用户世界数据按需导入，不随建表自动创建。《古树林中》的当前导入 SQL 已包含七个时间场景及最终场景主持说明。历史武器修正和跑团重置属于旧数据维护，不参与空库初始化。已有数据库升级需备份后对照当前结构处理，不要重跑 `console.sql`。单聊事件来源关联需要在部署新版后端前执行 [`20260928-user-event-source.sql`](data/migrations/20260928-user-event-source.sql)；历史事件保留为空来源，不做推测性回填。
-
-单聊工具调用去重范围改为 `(user_message_id, tool_call_id)`。已有数据库需在部署对应后端前执行以下迁移；脚本在事务内重建索引，不修改历史记录，可重复执行。新建数据库使用上面的 `console.sql` 即可。
-
-```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-  -f data/migrations/20260928-single-chat-tool-call-scope.sql
-```
+模组与用户世界数据按需导入，不随建表自动创建。《古树林中》的当前导入 SQL 已包含七个时间场景及最终场景主持说明。历史武器修正和跑团重置属于旧数据维护，不参与空库初始化。
 
 ### 2. 准备 Redis、Ollama 和后端配置
 

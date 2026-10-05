@@ -37,6 +37,33 @@ import static org.mockito.Mockito.when;
 
 class GroupConversationServiceTest {
 
+    @Test
+    void rechecksWorldAfterAcquiringMutationLock() {
+        var worlds = mock(IUserWorldPrefixService.class);
+        var locks = mock(GroupConversationLockService.class);
+        var conversations = mock(GroupConversationMapper.class);
+        var characters = mock(IUserCharacterInfoService.class);
+        var service = new GroupConversationService(
+                mock(com.me.galchat.mapper.GroupActorRuntimeConfigMapper.class),
+                mock(com.me.galchat.mapper.TrpgCompletionMapper.class), conversations,
+                mock(GroupChatMemberMapper.class), mock(GroupChatMessageMapper.class),
+                mock(GroupReplyPlanMapper.class), mock(GroupReplyPlanItemMapper.class), worlds,
+                characters, locks, mock(CocModuleMapper.class), mock(CocModuleLockService.class),
+                mock(CocModuleCharacterInstantiationService.class));
+        when(worlds.checkUserWorldAuth(3L, true)).thenReturn(new UserWorldPrefix().setId(3L).setWorldId(10L));
+        when(characters.listByUserWorldId(3L)).thenReturn(List.of(new UserCharacterInfo().setCharacterId(7L)));
+        when(locks.tryWorldLock(3L)).thenAnswer(call -> {
+            when(worlds.checkUserWorldAuth(3L, true)).thenThrow(new UserRequestException("用户世界不存在"));
+            return new GroupConversationLockService.OwnedLock(mock(RLock.class), 1L);
+        });
+        var dto = new GroupConversationCreateDTO();
+        dto.setUserWorldId(3L);
+        dto.setCharacterIds(List.of(7L));
+        assertThatThrownBy(() -> service.create(dto)).isInstanceOf(UserRequestException.class)
+                .hasMessage("用户世界不存在");
+        verify(conversations, never()).insert(any(GroupConversation.class));
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"chat", "trpg"})
     void creationLimitsBothModesToTenDistinctCharacters(String mode) {

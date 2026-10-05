@@ -183,6 +183,21 @@ export function useDirectChat(context: DirectChatContext) {
     scrollConversationToLatest(viewport)
   }
 
+  async function loadModelApis(targets: State[]) {
+    const ownEpoch = epoch
+    const requests = targets.map(state => ({ state, revision: ++state.modelListRevision }))
+    const models = await api.modelApis()
+    if (disposed || ownEpoch !== epoch) return
+    for (const { state, revision } of requests) {
+      if (!state.invalidated && revision === state.modelListRevision) state.modelApis = models
+    }
+  }
+  async function refreshModelApis() {
+    // Include cached conversations, since reopening one can reuse its history.
+    const currentStates = new Set([...states.values(), active.value])
+    await loadModelApis([...currentStates].filter(state => !state.invalidated))
+  }
+
   async function loadHistory(state: State, preserveOlder = false) {
     const revision = ++state.historyRevision; const ownEpoch = epoch
     const messagesAtStart = new Set(state.messages)
@@ -191,12 +206,8 @@ export function useDirectChat(context: DirectChatContext) {
       state.failure.retry = null; state.failure.detail.retryable = false
     }
     const valid = () => !disposed && ownEpoch === epoch && revision === state.historyRevision
-    const modelRevision = ++state.modelListRevision
-    const validModels = () => !disposed && ownEpoch === epoch && modelRevision === state.modelListRevision
-    void api.modelApis().then(models => {
-      if (validModels()) state.modelApis = models
-    }).catch(error => {
-      if (validModels()) notifyFor(state, '模型列表加载失败', errorMessage(error))
+    void loadModelApis([state]).catch(error => {
+      if (valid()) notifyFor(state, '模型列表加载失败', errorMessage(error))
     })
     try {
       const history = await api.history(state.world!.id, state.characterId)
@@ -604,5 +615,5 @@ export function useDirectChat(context: DirectChatContext) {
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', carePolling.visibilityChanged)
     if (typeof window !== 'undefined') window.removeEventListener?.('focus', carePolling.refresh)
   })
-  return { selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, generationFailure, generationFailureOpen, canRetryGenerationFailure, retryGenerationFailure, selectCharacter, selectModel, loadEarlier, close, clearDrafts, invalidateWorld, send, withdraw }
+  return { refreshModelApis, selectedCharacterId, selectedCharacter, messages, input, scroller, modelApis, loading, canWithdraw, hasOlderMessages, generationFailure, generationFailureOpen, canRetryGenerationFailure, retryGenerationFailure, selectCharacter, selectModel, loadEarlier, close, clearDrafts, invalidateWorld, send, withdraw }
 }

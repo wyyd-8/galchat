@@ -417,3 +417,23 @@ test('logout prevents the second write of a pending character addition', async t
   assert.deepEqual(prompts, [])
   assert.deepEqual(workspace.characters.value, [])
 })
+
+test('model refresh updates active and cached direct chats and ignores their older reads', async t => {
+    const {api,workspace}=await fixture(t)
+    const {chat,app}=await mountDirectChat(false,{world:workspace.selectedWorld,characters:workspace.characters,reloadCharacters:workspace.reloadCharacters,saveCharacterModel:workspace.saveCharacterModel})
+    t.after(()=>app.unmount())
+    t.mock.method(api,'history',async()=>[])
+    workspace.characters.value.push({userWorldId:3,characterId:8,characterName:'B角色'})
+    const pending=[]
+    t.mock.method(api,'modelApis',()=>new Promise(resolve=>pending.push(resolve)))
+    await chat.selectCharacter(7)
+    await chat.selectCharacter(8)
+    t.mock.method(api,'modelApis',async()=>[{id:99,name:'new model'}])
+    await chat.refreshModelApis()
+    assert.equal(chat.modelApis.value[0].id,99)
+    for (const finish of pending) finish([])
+    await settle()
+    assert.equal(chat.modelApis.value[0].id,99)
+    await chat.selectCharacter(7)
+    assert.equal(chat.modelApis.value[0].id,99)
+})

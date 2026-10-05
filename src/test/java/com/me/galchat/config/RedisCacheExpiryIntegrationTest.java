@@ -118,7 +118,7 @@ class RedisCacheExpiryIntegrationTest {
         var service = new UserCharacterInfoServiceImpl(templates, mock(IUserWorldPrefixService.class), redis,
                 mock(UserCharacterFavorLogMapper.class), mock(UserChatHistoryMapper.class), mock(UserChatThinkingHistoryMapper.class),
                 mock(UserChatToolCallMapper.class), mock(UserEventLogMapper.class), mock(GroupChatMemberMapper.class),
-                mock(SingleChatLockService.class), mock(SingleChatGenerationRegistry.class), mock(VectorStoreCleanupMapper.class));
+                mock(SingleChatLockService.class), mock(SingleChatGenerationRegistry.class), mock(VectorStoreCleanupMapper.class), mock(com.me.galchat.service.impl.group.GroupConversationLockService.class));
         ReflectionTestUtils.setField(service, "baseMapper", mapper);
         ReflectionTestUtils.setField(service, "entityClass", UserCharacterInfo.class);
         assertThat(service.buildCharacterPrompt(3L, 7L)).contains("旧资料");
@@ -138,7 +138,12 @@ class RedisCacheExpiryIntegrationTest {
         var mapper = mock(UserWorldPrefixMapper.class);
         var world = new UserWorldPrefix().setId(3L).setUserId(1L);
         when(mapper.selectOne(any())).thenReturn(world);
-        var service = new UserWorldPrefixServiceImpl(mock(IWorldTemplateService.class), redis, mock(UserCharacterInfoMapper.class));
+        var service = new UserWorldPrefixServiceImpl(mock(IWorldTemplateService.class), redis, mock(UserCharacterInfoMapper.class),
+                mock(com.me.galchat.mapper.GroupConversationMapper.class), mock(com.me.galchat.mapper.UserWorldSaveMapper.class),
+                mock(com.me.galchat.service.impl.group.GroupConversationLockService.class),
+                mock(com.me.galchat.service.impl.group.GroupConversationDeletionStore.class),
+                mock(com.me.galchat.service.ITrpgRedisStateService.class),
+                mock(com.me.galchat.service.impl.group.GroupGenerationStreamRegistry.class));
         ReflectionTestUtils.setField(service, "baseMapper", mapper);
         ReflectionTestUtils.setField(service, "entityClass", UserWorldPrefix.class);
         assertThat(service.checkUserWorldAuth(1L, 3L, false)).isSameAs(world);

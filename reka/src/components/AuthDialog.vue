@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import BaseDialog from './ui/BaseDialog.vue'
 import { useMobileViewport } from '@/composables/useMobileViewport'
 import { api } from '@/api/client'
@@ -14,6 +14,7 @@ const localBusy = ref(false)
 const busy = computed(() => localBusy.value || props.submitting === true)
 const codeBusy = ref(false)
 const form = reactive({ email: '', password: '', confirmPassword: '', code: '' })
+watch(open, () => { Object.assign(form, { password: '', confirmPassword: '', code: '' }) }, { flush: 'sync' })
 const title = computed(() => mode.value === 'reset' ? '找回密码' : isMobile.value ? (mode.value === 'login' ? 'GalChat' : '创建账号') : (mode.value === 'login' ? '回到你的世界' : '建立旅人档案'))
 const description = computed(() => mode.value === 'reset' ? '输入账户邮箱，通过邮箱验证码设置新密码。验证码 5 分钟内有效。' : isMobile.value ? undefined : '世界、角色、单聊与群聊记录会保存在当前账号下。')
 

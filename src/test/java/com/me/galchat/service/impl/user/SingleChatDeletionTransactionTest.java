@@ -78,7 +78,7 @@ class SingleChatDeletionTransactionTest {
                 mock(IUserWorldPrefixService.class), redis, mock(UserCharacterFavorLogMapper.class), histories,
                 mock(UserChatThinkingHistoryMapper.class), mock(UserChatToolCallMapper.class),
                 mock(UserEventLogMapper.class), mock(GroupChatMemberMapper.class), locks,
-                mock(SingleChatGenerationRegistry.class), vectors);
+                mock(SingleChatGenerationRegistry.class), vectors, mock(com.me.galchat.service.impl.group.GroupConversationLockService.class));
         ReflectionTestUtils.setField(service, "baseMapper", characters);
         ReflectionTestUtils.setField(service, "entityClass", UserCharacterInfo.class);
         return service;

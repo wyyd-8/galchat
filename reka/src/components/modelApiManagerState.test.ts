@@ -136,3 +136,18 @@ test('copies reactive request overrides into a plain JSON object', () => {
   assert.notEqual(copied.thinking, overrides.thinking)
   assert.doesNotThrow(() => structuredClone(copied))
 })
+
+test('a pending initial list includes untouched models and preserves concurrent creations and deletions', async () => {
+  let finish!: (rows: typeof untestedModel[]) => void
+  const created = { ...untestedModel, id: 8, name: 'new' }
+  const untouched = { ...untestedModel, id: 9, name: 'untouched' }
+  const manager = createModelApiManagerState({
+    list: () => new Promise(resolve => { finish = resolve }),
+    create: async () => created, update: async () => created, test: async () => created, delete: async () => {},
+  })
+  const pending = manager.load()
+  await manager.create({name:'new',baseUrl:'test',modelName:'test',apiKey:'secret',requestOverrides:{}})
+  await manager.delete(7)
+  finish([untestedModel, untouched]); await pending
+  assert.deepEqual(manager.models.value.map(model => model.id).sort(), [8,9])
+})

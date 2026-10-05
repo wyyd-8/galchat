@@ -126,6 +126,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         List<GroupConversationLockService.OwnedLock> groupLocks = List.of();
         try {
             worldLock = requireGroupWorldLock(userWorldId);
+            userWorldPrefixService.checkUserWorldAuth(userId, userWorldId, true);
             groupLocks = lockGroupConversations(userWorldId, List.of());
             groupTurnRecoveryService.assertNoNonTerminalTurns(userWorldId);
             UserWorldSave saved = transactionTemplate.execute(status -> doSaveWorld(userId, userWorld, createDTO));
@@ -150,6 +151,7 @@ public class UserWorldSaveServiceImpl implements IUserWorldSaveService {
         List<GroupConversationLockService.OwnedLock> groupLocks = List.of();
         try {
             worldLock = requireGroupWorldLock(userWorldId);
+            userWorldPrefixService.checkUserWorldAuth(userId, userWorldId, true);
             groupLocks = lockGroupConversations(userWorldId, snapshotConversationIds(snapshot));
             groupTurnRecoveryService.assertNoNonTerminalTurns(userWorldId);
             List<Long> deletedUserMessageIds = transactionTemplate.execute(status -> doLoadWorld(userWorldId, snapshot));

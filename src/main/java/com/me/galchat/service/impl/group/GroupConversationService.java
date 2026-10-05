@@ -75,7 +75,7 @@ public class GroupConversationService {
                 && dto.getModuleId() != null) {
             throw new UserRequestException("只有TRPG群聊可以绑定模组");
         }
-        UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(dto.getUserWorldId(), true);
+        userWorldPrefixService.checkUserWorldAuth(dto.getUserWorldId(), true);
         GroupConversationLockService.OwnedLock worldLock = lockService.tryWorldLock(dto.getUserWorldId());
         if (worldLock == null) {
             throw new UserRequestException("当前世界正在存档或读档，请稍后再创建群聊");
@@ -84,6 +84,7 @@ public class GroupConversationService {
         CocModuleLockService.OwnedLock moduleLock = null;
         boolean unlockModuleAfterTransaction = false;
         try {
+            UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(dto.getUserWorldId(), true);
             if (GroupChatConstant.MODE_TRPG.equals(mode)) {
                 moduleLock = moduleLockService.tryReadLock(dto.getModuleId());
                 if (moduleLock == null) {

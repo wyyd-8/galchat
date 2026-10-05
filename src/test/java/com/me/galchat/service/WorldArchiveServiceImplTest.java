@@ -292,6 +292,29 @@ class WorldArchiveServiceImplTest {
         assertThat(result.getMatchRate()).isEqualTo(0.5);
     }
 
+    @Test
+    void replacementCannotMakePublishedTemplatePrivateOrDeleteItsContent() {
+        var mapper = mock(WorldTemplateMapper.class);
+        var templates = new com.me.galchat.service.impl.world.WorldTemplateServiceImpl();
+        org.springframework.test.util.ReflectionTestUtils.setField(templates, "baseMapper", mapper);
+        when(mapper.selectById(20L)).thenReturn(new WorldTemplate()
+                .setId(20L).setAuthorId(1L).setName("公开世界").setVisible(true));
+        var details = mock(IWorldDetailService.class);
+        var characters = mock(ICharacterTemplateService.class);
+        var vectors = mock(VectorStoreCleanupMapper.class);
+        when(characters.list(any(Wrapper.class))).thenReturn(List.of());
+        var archives = service(mock(IUserWorldPrefixService.class), templates,
+                details, characters, mapper, vectors);
+        var upload = archive("替换世界", List.of());
+        upload.getWorld().setVisible(false);
+
+        assertThatThrownBy(() -> archives.replaceWorldTemplate(1L, 20L, upload, true))
+                .isInstanceOf(UserRequestException.class).hasMessageContaining("公开");
+        verify(vectors, never()).deleteWorldDetailsByWorldId(any());
+        verify(details, never()).remove(any(Wrapper.class));
+        verify(characters, never()).createCharacterTemplate(any(), any(), any());
+    }
+
     private static WorldArchiveServiceImpl service(IUserWorldPrefixService userWorldPrefixService,
                                                    IWorldTemplateService worldTemplateService,
                                                    IWorldDetailService worldDetailService,

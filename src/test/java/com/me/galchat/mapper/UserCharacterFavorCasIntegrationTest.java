@@ -114,7 +114,7 @@ class UserCharacterFavorCasIntegrationTest {
             when(redis.opsForHash()).thenReturn(mock(HashOperations.class));
             var favors = mock(UserCharacterFavorLogMapper.class);
             var service = new UserCharacterInfoServiceImpl(
-                    null, null, redis, favors, null, null, null, null, null, null, null, null);
+                    null, null, redis, favors, null, null, null, null, null, null, null, null, mock(com.me.galchat.service.impl.group.GroupConversationLockService.class));
             ReflectionTestUtils.setField(service, "baseMapper", mapper);
             ReflectionTestUtils.setField(service, "entityClass", UserCharacterInfo.class);
 

@@ -1191,7 +1191,7 @@ for (const phase of ['world', 'details', 'reenter'] as const) {
     let first = true
     t.mock.method(api, 'userWorld', async (id: number) => {
       if (id === 3 && phase !== 'details' && first) { first = false; started(); await blocked }
-      return { id, worldId: id + 100 }
+      return { id, worldId: id + 100, myWorld: true }
     })
     t.mock.method(api, 'characters', async (id: number) => [{ userWorldId: id, characterId: id * 100, characterName: String(id) }])
     t.mock.method(api, 'conversations', async (id: number) => [{ id: id + 10, userWorldId: id, worldId: id + 100,

@@ -113,7 +113,7 @@ class SingleChatFavorRollbackTest {
         var characterService = new UserCharacterInfoServiceImpl(mock(ICharacterTemplateService.class),
                 mock(IUserWorldPrefixService.class), redis, favors, histories, mock(UserChatThinkingHistoryMapper.class),
                 mock(UserChatToolCallMapper.class), events, mock(GroupChatMemberMapper.class), locks,
-                mock(SingleChatGenerationRegistry.class), mock(VectorStoreCleanupMapper.class));
+                mock(SingleChatGenerationRegistry.class), mock(VectorStoreCleanupMapper.class), mock(com.me.galchat.service.impl.group.GroupConversationLockService.class));
         ReflectionTestUtils.setField(characterService, "baseMapper", characters);
         ReflectionTestUtils.setField(characterService, "entityClass", UserCharacterInfo.class);
 

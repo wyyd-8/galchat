@@ -13,7 +13,7 @@ import { applyCurrentTurnEvent } from '@/components/trpgExecutionState'
 import { hydrateDiceMessage } from '@/dice/domain/dicePlayback'
 import { clearChatReadingPositions } from '@/components/chatReadingPosition'
 import { useScopedChatDraft } from '@/components/chatInputState'
-import { errorMessage, notify } from './useNotice'
+import { errorMessage, notify, refreshAfterSave } from './useNotice'
 import { createCharacterData } from './characterData'
 import { followGeneration, isGenerationAbort, GenerationStartRejected } from '@/streaming/generationConnection'
 
@@ -22,6 +22,13 @@ const freshPlan = (): ReplyPlan => ({ source: 'USER', displayName: '群聊', ite
 
 export function useWorkspace() {
   const session = reactive(currentSession())
+  const readRevisions = { userInfo: 0, templates: 0, modules: 0, worlds: 0, models: 0 }
+  let sessionRevision = 0
+  function captureSession() {
+    const revision = sessionRevision
+    const { id, token } = session
+    return () => revision === sessionRevision && id === session.id && token === session.token
+  }
   const withdrawingConversations = reactive(new Set<number>())
   const savingPlanConversations = reactive(new Set<number>())
   const savingActorRuntimes = reactive(new Set<string>())
@@ -32,6 +39,8 @@ export function useWorkspace() {
   const worlds = ref<UserWorld[]>([])
   const templates = ref<WorldTemplate[]>([])
   const selectedWorldId = ref<number | null>(null)
+  const loadedWorldId = ref<number | null>(null)
+  const worldReady = computed(() => selectedWorldId.value != null && loadedWorldId.value === selectedWorldId.value)
   const characters = ref<Character[]>([])
   const characterTemplates = ref<CharacterTemplate[]>([])
   const modules = ref<CocModule[]>([])
@@ -124,11 +133,13 @@ export function useWorkspace() {
     if (sessionStorage.getItem(key) === clientRequestId) sessionStorage.removeItem(key)
   }
   function resetWorkspace() {
+    loadedWorldId.value = null
     conversationReady.value = false
     characterData.clearSession()
     worldRevision++
     conversationRevision++; disconnectGeneration()
     selectedWorldId.value = null; selectedConversationId.value = null; worlds.value = []; characters.value = []
+    details.value = []; worldSave.value = null
     conversations.value = []; messages.value = []; replyPlans.value = []; replyPlan.value = freshPlan(); participantIds.value = []; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; modules.value = []
     latestDiceRoll.value = null; incomingDiceRolls.value = []; hasOlderGroupMessages.value = false; diceRollCache.clear()
     chatDrafts.clear()
@@ -264,30 +275,86 @@ export function useWorkspace() {
     }
     return aggregate
   }
-  function logout() { clearSession(); Object.assign(session, currentSession()); userInfo.value = null; resetWorkspace() }
+  function logout() {
+    sessionRevision++
+    clearSession(); Object.assign(session, currentSession()); userInfo.value = null; templates.value = []
+    loading.boot = false; loading.worlds = false
+    resetWorkspace()
+  }
 
   async function boot() {
     if (!isLoggedIn.value) return
+    const current = captureSession()
     loading.boot = true
-    try { await Promise.all([loadWorlds(), loadTemplates(), loadModules(), loadUserInfo()]) } catch (error) { notify('无法载入工作区', errorMessage(error), 'danger') }
-    finally { loading.boot = false }
+    try { await Promise.all([loadWorlds(), loadTemplates(), loadModules(), loadUserInfo()]) } catch (error) { if (current()) notify('无法载入工作区', errorMessage(error), 'danger') }
+    finally { if (current()) loading.boot = false }
   }
   async function authenticate(payload: { mode: 'login' | 'register'; email: string; password: string; code?: string }) {
     const result = payload.mode === 'login' ? await api.login(payload.email, payload.password) : await api.register(payload.email, payload.password, payload.code || '')
-    saveSession(result); Object.assign(session, currentSession()); await boot(); notify('欢迎回来', result.username, 'success')
+    sessionRevision++
+    saveSession(result); Object.assign(session, currentSession())
+    const current = captureSession()
+    await boot()
+    if (!current()) return false
+    notify('欢迎回来', session.username, 'success')
+    return true
   }
-  async function loadUserInfo() { userInfo.value = await api.userInfo() }
-  async function saveUserInfo(payload: Partial<UserInfo>) { await api.updateUserInfo(payload); await loadUserInfo(); notify('账号资料已保存', '', 'success') }
+  async function loadUserInfo() {
+    const sessionCurrent = captureSession()
+    const revision = ++readRevisions.userInfo
+    const current = () => sessionCurrent() && revision === readRevisions.userInfo
+    const info = await api.userInfo()
+    if (!current()) return false
+    userInfo.value = info
+    if (info) {
+      session.username = info.username
+      localStorage.setItem('galchat.username', info.username)
+    }
+    return true
+  }
+  async function saveUserInfo(payload: Partial<UserInfo>) {
+    const current = captureSession()
+    await api.updateUserInfo(payload)
+    if (!current() || !await loadUserInfo() || !current()) return false
+    notify('账号资料已保存', '', 'success')
+    return true
+  }
   async function changePassword(payload: { email: string; newPassword: string; verificationCode: string }) { await api.updatePassword(payload); notify('密码已更新', '', 'success') }
 
-  async function loadTemplates() { templates.value = await api.worldTemplates() }
-  async function loadModules() { modules.value = await api.cocModules() }
+  async function loadModelApis() {
+    const current = captureSession()
+    const revision = ++readRevisions.models
+    const rows = await api.modelApis()
+    if (current() && revision === readRevisions.models) modelApis.value = rows
+  }
+  async function loadTemplates() {
+    const sessionCurrent = captureSession()
+    const revision = ++readRevisions.templates
+    const current = () => sessionCurrent() && revision === readRevisions.templates
+    const rows = await api.worldTemplates()
+    if (current()) templates.value = rows
+  }
+  async function loadModules() {
+    const sessionCurrent = captureSession()
+    const revision = ++readRevisions.modules
+    const current = () => sessionCurrent() && revision === readRevisions.modules
+    const rows = await api.cocModules()
+    if (current()) modules.value = rows
+  }
   async function loadWorlds() {
     if (!session.id) return
+    const sessionCurrent = captureSession()
+    const revision = ++readRevisions.worlds
+    const current = () => sessionCurrent() && revision === readRevisions.worlds
     loading.worlds = true
-    try { worlds.value = await api.userWorlds(session.id) } finally { loading.worlds = false }
+    try {
+      const rows = await api.userWorlds(session.id)
+      if (current()) worlds.value = rows
+    } finally { if (current()) loading.worlds = false }
   }
   async function selectWorld(id: number) {
+    loadedWorldId.value = null
+    worldSave.value = null; conversations.value = []; details.value = []
     conversationReady.value = false
     characterData.reset()
     const revision = ++worldRevision
@@ -303,10 +370,11 @@ export function useWorkspace() {
       worlds.value = worlds.value.map((item) => item.id === id ? { ...item, ...world } : item)
       conversations.value = conversationResult; worldSave.value = saveResult
       if (world?.worldId) {
-        const [, detailResult] = await Promise.all([characterData.refreshTemplates(characterScope, world.worldId), api.worldDetails(world.worldId)])
+        const [, detailResult] = await Promise.all([characterData.refreshTemplates(characterScope, world.worldId), world.myWorld ? api.worldDetails(world.worldId) : Promise.resolve([])])
         if (!isCurrentLoad()) return false
         details.value = detailResult
       }
+      loadedWorldId.value = id
       const active = conversations.value.find((item) => item.status === 'active') || conversations.value[0]
       if (active) {
         const loadingConversation = selectConversation(active.id)
@@ -331,7 +399,11 @@ export function useWorkspace() {
       current: () => scope.current() && conversationRevision === revision
         && selectedConversationId.value === conversationId }
   }
-  async function createWorld(payload: Partial<UserWorld> & { worldId: number }) { await api.createWorld(payload); await loadWorlds(); notify('世界已创建', '', 'success') }
+  async function createWorld(payload: Partial<UserWorld> & { worldId: number }) {
+    const current = captureSession()
+    await api.createWorld(payload)
+    if (current()) await refreshAfterSave('世界已创建', loadWorlds, current)
+  }
   async function updateWorld(payload: Partial<UserWorld>) {
     const scope = captureWorldMutation()
     if (!scope) return false
@@ -350,18 +422,23 @@ export function useWorkspace() {
     if (!scope.sameSession()) return false
     // The deletion is real even when its page is no longer selected.
     worlds.value = worlds.value.filter(item => item.id !== scope.worldId)
-    const [remainingWorlds, remainingModules] = await Promise.all([
-      api.userWorlds(session.id!), api.cocModules(),
-    ])
+    await Promise.all([loadWorlds(), loadModules()])
     if (!scope.sameSession()) return false
     const current = scope.current()
-    if (current) resetWorkspace()
-    worlds.value = remainingWorlds
-    modules.value = remainingModules
+    if (current) {
+      const remainingWorlds = worlds.value, remainingModules = modules.value
+      resetWorkspace()
+      worlds.value = remainingWorlds
+      modules.value = remainingModules
+    }
     if (current) notify('当前世界已删除', '', 'success')
     return current
   }
-  async function createTemplate(payload: WorldTemplate) { await api.createWorldTemplate(payload); await loadTemplates(); notify('世界模板已创建', '', 'success') }
+  async function createTemplate(payload: WorldTemplate) {
+    const current = captureSession()
+    await api.createWorldTemplate(payload)
+    if (current()) await refreshAfterSave('世界模板已创建', loadTemplates, current)
+  }
   async function loadEditableWorldTemplate() {
     const scope = characterData.capture()
     if (!scope || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
@@ -374,9 +451,8 @@ export function useWorkspace() {
     if (!scope || !canEditSelectedWorld.value) throw new Error('只有世界模板的作者可以修改模板')
     await api.updateWorldTemplate(scope.worldId, payload)
     if (!scope.current()) return false
-    const updatedTemplates = await api.worldTemplates()
+    await loadTemplates()
     if (!scope.current()) return false
-    templates.value = updatedTemplates
     if (!await selectWorld(scope.worldId)) return false
     notify('世界模板已保存', '', 'success')
     return true
@@ -386,10 +462,11 @@ export function useWorkspace() {
     if (!scope?.templateWorldId) return false
     await api.addWorldDetail(scope.templateWorldId, payload)
     if (!scope.current()) return false
-    const updated = await api.worldDetails(scope.templateWorldId)
-    if (!scope.current()) return false
-    details.value = updated
-    return true
+    await refreshAfterSave('世界设定已添加', async () => {
+      const updated = await api.worldDetails(scope.templateWorldId!)
+      if (scope.current()) details.value = updated
+    }, scope.current)
+    return scope.current()
   }
   async function removeDetail(id: number) {
     const scope = captureWorldMutation()
@@ -402,6 +479,7 @@ export function useWorkspace() {
     return true
   }
   async function saveSnapshot(remark: string) {
+    if (!worldReady.value || loading.workspace) return false
     const scope = captureWorldMutation()
     if (!scope) return false
     const saved = await api.saveWorld(scope.worldId, remark)
@@ -411,6 +489,7 @@ export function useWorkspace() {
     return true
   }
   async function loadSnapshot() {
+    if (!worldReady.value || loading.workspace || worldSave.value?.userWorldId !== selectedWorldId.value) return false
     const scope = captureWorldMutation()
     if (!scope) return false
     await api.loadWorld(scope.worldId)
@@ -452,8 +531,7 @@ export function useWorkspace() {
     const scope = characterData.capture(); const templateWorldId = selectedWorld.value?.worldId
     if (!scope || !templateWorldId) return
     await api.createCharacterTemplate(templateWorldId, payload)
-    await characterData.refreshTemplates(scope, templateWorldId)
-    if (scope.current()) notify('角色模板已创建', '', 'success')
+    if (scope.current()) await refreshAfterSave('角色模板已创建', () => characterData.refreshTemplates(scope, templateWorldId), scope.current)
   }
   async function loadEditableCharacterTemplate(id: number) {
     const scope = characterData.capture()
@@ -479,16 +557,21 @@ export function useWorkspace() {
       localStorage.setItem(`galchat:trpg-participants:${created.id}`, encodeParticipantIds(characterIds))
     }
     if (!scope.current()) return
-    const updated = await api.conversations(scope.worldId)
+    conversations.value = [...conversations.value.filter(item => item.id !== created.id), created]
+    let refreshError: unknown
+    try {
+      const updated = await api.conversations(scope.worldId)
+      if (!scope.current()) return
+      conversations.value = updated.some(item => item.id === created.id) ? updated : [...updated, created]
+    } catch (error) { refreshError = error }
     if (!scope.current()) return
-    conversations.value = updated
     participantIds.value = characterIds
     const selecting = selectConversation(created.id)
     const revision = conversationRevision
     await selecting
     if (!scope.sameSession() || selectedWorldId.value !== scope.worldId
       || selectedConversationId.value !== created.id || conversationRevision !== revision) return
-    notify(payload.mode === 'trpg' ? 'CoC 跑团已建立' : '普通群聊已建立', created.title, 'success')
+    notify(payload.mode === 'trpg' ? 'CoC 跑团已建立' : '普通群聊已建立', refreshError ? `已创建，列表刷新失败，请重新打开世界刷新。${errorMessage(refreshError)}` : created.title, refreshError ? 'neutral' : 'success')
     return created
   }
   async function selectConversation(id: number) {
@@ -503,8 +586,8 @@ export function useWorkspace() {
     const worldId = selectedWorldId.value
     selectedConversationId.value = id; loading.chat = true; messages.value = []; hasOlderGroupMessages.value = false; currentTurn.value = null; actorRuntimes.value = []; modelApis.value = []; combatOverview.value = []; investigatorCards.value = []; replyTurnState.value = null; latestDiceRoll.value = null; incomingDiceRolls.value = []; diceRollCache.clear(); Object.keys(reasoning).forEach((key) => delete reasoning[Number(key)])
     try {
-      const [conversationDetail, history, plans, turn, runtimes, models, overview, cards] = await Promise.all([
-        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), api.actorRuntimes(id), api.modelApis(), loadCombatOverview(id), loadInvestigatorCards(id),
+      const [conversationDetail, history, plans, turn, runtimes, , overview, cards] = await Promise.all([
+        api.conversation(id), api.groupMessages(id), api.replyPlan(id), api.currentTurn(id), api.actorRuntimes(id), loadModelApis(), loadCombatOverview(id), loadInvestigatorCards(id),
       ])
       if (revision !== conversationRevision || selectedConversationId.value !== id || selectedWorldId.value !== worldId) return
       const hydrated = await hydrateGroupMessages(history)
@@ -515,7 +598,6 @@ export function useWorkspace() {
       setReplyPlans(plans)
       currentTurn.value = turn
       actorRuntimes.value = runtimes
-      modelApis.value = models
       combatOverview.value = overview
       investigatorCards.value = cards
       setConversationParticipants(conversationDetail)
@@ -1028,12 +1110,12 @@ export function useWorkspace() {
     operation.synced = false
     const worldId = selectedWorldId.value
     const recoveringInitialLoad = conversationLoad?.revision === revision
-    const [detail, history, plans, turn, overview, cards, runtimes, models] = await Promise.all([
+    const [detail, history, plans, turn, overview, cards, runtimes] = await Promise.all([
       api.conversation(conversation.id), api.groupMessages(conversation.id), api.replyPlan(conversation.id), api.currentTurn(conversation.id),
       conversation.mode === 'trpg' ? loadCombatOverview(conversation.id) : [],
       conversation.mode === 'trpg' ? loadInvestigatorCards(conversation.id) : [],
       recoveringInitialLoad ? api.actorRuntimes(conversation.id) : [],
-      recoveringInitialLoad ? api.modelApis() : [],
+      recoveringInitialLoad ? loadModelApis() : undefined,
     ])
     if (revision !== conversationRevision || selectedConversationId.value !== conversation.id || selectedWorldId.value !== worldId) return
     const hydrated = await hydrateGroupMessages(history)
@@ -1052,7 +1134,6 @@ export function useWorkspace() {
     if (recoveringInitialLoad) {
       setConversationParticipants(detail)
       actorRuntimes.value = runtimes
-      modelApis.value = models
     }
     conversationReady.value = true
     operation.synced = true
@@ -1389,8 +1470,8 @@ export function useWorkspace() {
   window.addEventListener(UNAUTHORIZED_EVENT, logout)
   onMounted(boot)
   return {
-    session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, characters, characterTemplates, details, worldSave,
-    conversations, selectedConversationId, selectedConversation, conversationReady, savingReplyPlan, savingActorKeys, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, actorRuntimes, modelApis, combatOverview, investigatorCards, replyTurnState, generationFailed,
+    session, loading, userInfo, worlds, templates, modules, selectedWorldId, selectedWorld, worldReady, characters, characterTemplates, details, worldSave,
+    loadModelApis, conversations, selectedConversationId, selectedConversation, conversationReady, savingReplyPlan, savingActorKeys, messages, reasoning, replyPlans, replyPlan, participantIds, messageInput, inquiryInput, composerIntent, messageScroller, currentTurn, actorRuntimes, modelApis, combatOverview, investigatorCards, replyTurnState, generationFailed,
     latestDiceRoll, incomingDiceRolls, hasOlderGroupMessages, generationFailure, generationFailureOpen, loadDiceAggregate,
     isLoggedIn, canEditSelectedWorld, planItems, availablePlanCharacters, characterById, authenticate, logout, loadUserInfo, saveUserInfo, changePassword,
     loadWorlds, loadTemplates, loadModules, selectWorld, createWorld, updateWorld, removeWorld, createTemplate, loadEditableWorldTemplate, updateTemplate, addDetail, removeDetail, saveSnapshot, loadSnapshot,

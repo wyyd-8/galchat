@@ -235,3 +235,54 @@ test('workspace mutation: deleting the selected world refreshes the remaining wo
   assert.equal(workspace.selectedWorldId.value, null)
   assert.deepEqual(workspace.worlds.value.map(world => world.id), [4])
 })
+
+test('a world using another author’s template opens without requesting private lore', async t => {
+  const {workspace, api, worlds} = await worldMutationFixture(t)
+  worlds[1].myWorld = false
+  t.mock.method(api, 'worldDetails', async () => { throw new Error('无权访问该世界详情') })
+  assert.equal(await workspace.selectWorld(4), true)
+  assert.deepEqual(workspace.details.value, [])
+  assert.equal(workspace.selectedConversationId.value, 8)
+})
+
+test('profile save updates both visible and persisted username', async t => {
+  const {workspace, api} = await worldMutationFixture(t)
+  workspace.session.username = '旧名字'
+  localStorage.setItem('galchat.username', '旧名字')
+  t.mock.method(api, 'updateUserInfo', async () => {})
+  t.mock.method(api, 'userInfo', async () => ({id:1, username:'新名字', email:'user@example.test'}))
+  await workspace.saveUserInfo({username:'新名字'})
+  assert.equal(workspace.session.username, '新名字')
+  assert.equal(localStorage.getItem('galchat.username'), '新名字')
+})
+
+for (const [method, field, oldValue, newValue] of [
+  ['loadUserInfo', 'userInfo', {id:1,username:'old',email:'old@example.test'}, {id:2,username:'new',email:'new@example.test'}],
+  ['loadWorlds', 'worlds', [{id:3,name:'old world'}], [{id:5,name:'new world'}]],
+  ['loadTemplates', 'templates', [{id:13,name:'private old template'}], [{id:15,name:'new template'}]],
+  ['loadModules', 'modules', [{id:21,name:'old module'}], [{id:22,name:'new module'}]],
+] as const) {
+  test(`${method} ignores an old response after switching accounts`, async t => {
+    const {workspace, api} = await worldMutationFixture(t)
+    let finish
+    const endpoint = {loadUserInfo:'userInfo', loadWorlds:'userWorlds', loadTemplates:'worldTemplates', loadModules:'cocModules'}[method]
+    t.mock.method(api, endpoint, () => new Promise(resolve => {finish=resolve}))
+    const pending = workspace[method]()
+    workspace.logout()
+    Object.assign(workspace.session, {id:2,token:'next-token',username:'new'})
+    workspace[field].value = structuredClone(newValue)
+    finish(oldValue)
+    await pending
+    assert.deepEqual(workspace[field].value, newValue)
+    assert.equal(workspace.session.username, 'new')
+  })
+}
+
+test('logout clears private template, lore and save data', async t => {
+  const {workspace} = await worldMutationFixture(t)
+  workspace.templates.value = [{id:13,name:'private template'}]
+  workspace.logout()
+  assert.deepEqual(workspace.templates.value, [])
+  assert.deepEqual(workspace.details.value, [])
+  assert.equal(workspace.worldSave.value, null)
+})

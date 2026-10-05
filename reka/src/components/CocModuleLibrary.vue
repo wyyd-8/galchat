@@ -10,7 +10,7 @@ import { parseModuleCharacterText, validateWeaponDamage } from './cocModuleChara
 import { automaticDerivedFields, syncAutomaticDerivedValues, type CharacterDerivedField } from './cocModuleCharacterDerived'
 import { prioritizeNonBaseSkills } from './cocModuleCharacterSkills'
 import { cloneCocModuleData } from './cocModuleData'
-import { cocModulePayloadFingerprint, createCocModuleSaveQueue, saveCocModuleIfNeeded } from './cocModuleAutosave'
+import { cocModulePayloadFingerprint, createCocModuleSaveQueue, saveCocModuleIfNeeded, validateCocModulePayload } from './cocModuleAutosave'
 import { useMobileViewport } from '@/composables/useMobileViewport'
 import { useMobileDialogHistory } from '@/composables/useMobileDialogHistory'
 import BaseDialog from '@/components/ui/BaseDialog.vue'
@@ -72,11 +72,11 @@ const sectionLabels = { overview: '基本资料', context: '主持人设定', lo
 watch([isMobile, mobileView], () => emit('detailOpenChange', isMobile.value && mobileView.value !== 'list'), { immediate: true })
 onUnmounted(() => emit('detailOpenChange', false))
 async function mobileBack() {
-  if (busy.value || isSaving.value) return
+  if (busy.value || isSaving.value || blockPendingUpload()) return
   if (mobileEntry.value !== null) { mobileEntry.value = null; await nextTick(); if (moduleScroller.value) moduleScroller.value.scrollTop = mobileListScrollTop; return }
   const destination = mobileView.value === 'section' && !creating.value ? 'directory' : 'list'
   if (hasUnsavedChanges.value && (canFullEdit.value || canRestrictedEdit.value)) {
-    if (creating.value || canRestrictedEdit.value || !await persistCurrentModule()) {
+    if (creating.value || !await saveBeforeLeaving()) {
       pendingDestination.value = destination
       leaveOpen.value = true
       return
@@ -85,13 +85,14 @@ async function mobileBack() {
   mobileView.value = destination
 }
 function discardAndLeave() {
+  if (blockPendingUpload()) return
   if (savedPayload.value && !creating.value) editing.value = cloneCocModuleData(savedPayload.value)
   else { editing.value = null; selected.value = null; creating.value = false }
   mobileView.value = pendingDestination.value
   leaveOpen.value = false
 }
 async function openMobileSection(tab: Tab) {
-  switchTab(tab)
+  if (!await switchTab(tab)) return
   mobileEntry.value = null
   mobileView.value = 'section'
   await nextTick()
@@ -108,6 +109,7 @@ const loading = ref(true)
 const busy = ref(false)
 const message = ref('')
 const creating = ref(false)
+const creationPending = ref(false)
 const unlockConfirm = ref(false)
 const rules = ref<CharacterCardCreationRules | null>(null)
 const importingText = ref('')
@@ -194,23 +196,44 @@ async function loadRules() {
   try { rules.value = await api.characterCardCreationRules() } catch { rules.value = null }
 }
 
+let listRevision = 0
+let editorRevision = 0
+const detailLoading = ref(false)
+
 async function loadModules(preferredId?: number) {
+  const request = ++listRevision
+  const editor = editorRevision
   loading.value = true
   try {
     const [mine, visible] = await Promise.all([api.myCocModules(), api.cocModules()])
+    if (request !== listRevision) return false
     ownedModules.value = mine
     defaultModules.value = visible.filter((item) => item.ownerUserId == null)
-    const id = preferredId || selected.value?.module.id || mine[0]?.id || defaultModules.value[0]?.id
-    if (id) await openModule(id, Boolean(preferredId))
-    else { selected.value = null; editing.value = null }
-  } catch (error) { showError(error) }
-  finally { loading.value = false }
+    // A list refresh must never replace an editor opened while it was pending.
+    if (editor !== editorRevision || (!preferredId && editing.value)) return true
+    const id = preferredId || mine[0]?.id || defaultModules.value[0]?.id
+    if (id) return await loadModule(id, Boolean(preferredId))
+    selected.value = null; editing.value = null
+    return true
+  } catch (error) { showError(error); return false }
+  finally { if (request === listRevision) loading.value = false }
 }
 
 async function openModule(id: number, reveal = true) {
+  if (busy.value || isSaving.value) return
   busy.value = true
   try {
+    if (!await saveBeforeLeaving()) return
+    await loadModule(id, reveal)
+  } finally { busy.value = false }
+}
+
+async function loadModule(id: number, reveal = true) {
+  const request = ++editorRevision
+  detailLoading.value = true
+  try {
     const detail = await api.manageCocModule(id)
+    if (request !== editorRevision) return false
     const payload = detailToPayload(detail)
     selected.value = detail
     editing.value = payload
@@ -224,43 +247,63 @@ async function openModule(id: number, reveal = true) {
     if (reveal) mobileView.value = 'directory'
     characterDialogOpen.value = false
     clearCharacterImport()
-  } catch (error) { showError(error) }
-  finally { busy.value = false }
+    return true
+  } catch (error) { showError(error); return false }
+  finally { if (request === editorRevision) detailLoading.value = false }
 }
 
-function newModule() {
-  mobileView.value = 'section'
-  mobileEntry.value = null
-  creating.value = true
-  selected.value = {
-    module: { id: 0, name: '未命名模组', introduction: '', visible: true, ownerUserId: -1, editLocked: false },
-    context: {}, locations: [], clues: [], materials: [], characters: [],
-  }
-  editing.value = emptyPayload()
-  savedFingerprint.value = ''
-  failedFingerprint.value = ''
-  activeTab.value = 'overview'
-  unlockConfirm.value = false
-  characterDialogOpen.value = false
-  clearCharacterImport()
-}
-
-async function saveModule() {
-  const form = editing.value
-  if (!form || !canFullEdit.value) return
-  if (!creating.value) {
-    await persistCurrentModule('模组已保存')
-    return
-  }
-  if (!form.name.trim() || !form.introduction.trim()) return showMessage('请填写模组名称和简介')
+async function newModule() {
+  if (busy.value || isSaving.value) return
   busy.value = true
   try {
-    const saved = await api.createCocModule(cleanPayload(form))
-    showMessage('模组已创建，可以继续编辑其他内容')
+    if (!await saveBeforeLeaving()) return
+    editorRevision++
+    detailLoading.value = false
+    mobileView.value = 'section'
+    mobileEntry.value = null
+    creating.value = true
+    selected.value = {
+      module: { id: 0, name: '未命名模组', introduction: '', visible: true, ownerUserId: -1, editLocked: false },
+      context: {}, locations: [], clues: [], materials: [], characters: [],
+    }
+    editing.value = emptyPayload()
+    savedFingerprint.value = ''
+    failedFingerprint.value = ''
+    activeTab.value = 'overview'
+    unlockConfirm.value = false
+    characterDialogOpen.value = false
+    clearCharacterImport()
+  } finally { busy.value = false }
+}
+
+async function saveModule(): Promise<boolean> {
+  if (creationPending.value) return false
+  if (uploadingCover.value || uploadingMaterial.value !== null) {
+    showMessage('图片仍在上传，请上传完成后再保存')
+    return false
+  }
+  const form = editing.value
+  if (!form || !canFullEdit.value) return false
+  if (!creating.value) {
+    return persistCurrentModule('模组已保存')
+  }
+  if (!form.name.trim() || !form.introduction.trim()) { showMessage('请填写模组名称和简介'); return false }
+  busy.value = true
+  creationPending.value = true
+  try {
+    const payload = cleanPayload(form)
+    const saved = await api.createCocModule(payload)
+    // Record the committed identity before attempting any follow-up reads.
+    selected.value!.module = { ...selected.value!.module, ...payload, ...saved }
+    creating.value = false
+    savedPayload.value = cloneCocModuleData(payload)
+    savedFingerprint.value = cocModulePayloadFingerprint(payload)
     emit('changed')
-    await loadModules(saved.id)
-  } catch (error) { showError(error) }
-  finally { busy.value = false }
+    const refreshed = await loadModules(saved.id)
+    showMessage(refreshed ? '模组已创建，可以继续编辑其他内容' : '模组已创建，刷新失败；可重新选择该模组刷新')
+    return true
+  } catch (error) { showError(error); return false }
+  finally { creationPending.value = false; busy.value = false }
 }
 
 async function persistCurrentModule(successMessage?: string): Promise<boolean> {
@@ -308,24 +351,99 @@ function syncModuleSummary(payload: CocModuleSavePayload) {
   if (summary) Object.assign(summary, selected.value?.module)
 }
 
-function switchTab(tab: Tab) {
-  if (tab === activeTab.value) return
-  void persistCurrentModule()
-  activeTab.value = tab
+async function prepareToLeave(): Promise<boolean> {
+  if (busy.value || isSaving.value || uploadingCover.value || uploadingMaterial.value !== null) {
+    showMessage('正在保存或上传，请完成后再离开')
+    return false
+  }
+  busy.value = true
+  try { return await saveBeforeLeaving() }
+  finally { busy.value = false }
+}
+
+defineExpose({ prepareToLeave })
+
+function blockPendingUpload() {
+  if (!uploadingCover.value && uploadingMaterial.value === null) return false
+  showMessage('图片仍在上传，请上传完成后再继续')
+  return true
+}
+
+async function saveBeforeLeaving(): Promise<boolean> {
+  if (blockPendingUpload()) return false
+  if (!hasUnsavedChanges.value) return true
+  if (creating.value) return saveModule()
+  if (canRestrictedEdit.value) {
+    if (!await persistRestrictedModule()) return false
+  } else if (!await persistCurrentModule()) return false
+  if (hasUnsavedChanges.value) {
+    showMessage('保存期间内容有新的修改，请再次保存后继续')
+    return false
+  }
+  return true
+}
+
+async function persistRestrictedModule(): Promise<boolean> {
+  const form = editing.value
+  const baseline = savedPayload.value
+  if (!form || !baseline) return false
+  const snapshot = cloneCocModuleData(form)
+  const invalid = validateCocModulePayload(snapshot)
+  if (invalid) { showMessage(`尚未保存：${invalid}`); return false }
+  pendingSaveCount.value++
+  try {
+    for (const location of snapshot.locations) {
+      const previous = baseline.locations.find(item => item.id === location.id)
+      if (!location.id || !previous || previous.content === location.content) continue
+      await api.updateCocModuleLocationContent(selectedId.value, location.id, location.content)
+      previous.content = location.content
+    }
+    for (const [index, clue] of snapshot.clues.entries()) {
+      const previous = baseline.clues.find(item => item.id === clue.id)
+      if (!clue.id) {
+        const saved = await api.addCocModuleClue(selectedId.value, clue)
+        baseline.clues.push(saved)
+        const current = form.clues[index]
+        if (current) current.id = saved.id
+      } else if (previous && previous.content !== clue.content) {
+        await api.updateCocModuleClueContent(selectedId.value, clue.id, clue.content)
+        previous.content = clue.content
+      }
+    }
+    return true
+  } catch (error) { showError(error); return false }
+  finally {
+    savedFingerprint.value = cocModulePayloadFingerprint(cleanPayload(baseline))
+    pendingSaveCount.value--
+  }
+}
+
+async function switchTab(tab: Tab) {
+  if (blockPendingUpload()) return false
+  if (tab === activeTab.value) return true
+  if (busy.value || isSaving.value) return false
+  busy.value = true
+  try {
+    if (!creating.value && !await saveBeforeLeaving()) return false
+    activeTab.value = tab
+    return true
+  } finally { busy.value = false }
 }
 
 async function deleteModule() {
+  if (blockPendingUpload()) return
   if (!selectedId.value || isDefault.value || !confirm(`确定删除“${selected.value?.module.name}”吗？此操作不能撤销。`)) return
   busy.value = true
-  try { await api.deleteCocModule(selectedId.value); showMessage('模组已删除'); emit('changed'); selected.value = null; await loadModules() }
+  try { await api.deleteCocModule(selectedId.value); showMessage('模组已删除'); emit('changed'); selected.value = null; editing.value = null; editorRevision++; await loadModules() }
   catch (error) { showError(error) }
   finally { busy.value = false }
 }
 
 async function exportModule() {
-  if (!selectedId.value) return
+  if (!selectedId.value || busy.value || isSaving.value) return
   busy.value = true
   try {
+    if (!await saveBeforeLeaving()) return
     const blob = await api.exportCocModule(selectedId.value)
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
@@ -340,22 +458,32 @@ async function importModule(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (!file) return
+  if (!file || busy.value || isSaving.value) return
   busy.value = true
   try {
+    if (!await saveBeforeLeaving()) return
     const archive = JSON.parse(await file.text()) as CocModuleArchive
     const imported = await api.importCocModule(archive)
-    showMessage(`已导入“${imported.name}”`)
     emit('changed')
-    await loadModules(imported.id)
+    const refreshed = await loadModules(imported.id)
+    showMessage(refreshed ? `已导入“${imported.name}”` : `已导入“${imported.name}”，列表刷新失败，请重新打开模组库刷新`)
   } catch (error) { showError(error) }
   finally { busy.value = false }
 }
 
 async function unlockModule() {
-  if (!selectedId.value || !isLocked.value) return
+  if (!selectedId.value || !isLocked.value || busy.value || isSaving.value || blockPendingUpload()) return
   busy.value = true
-  try { await api.unlockCocModule(selectedId.value); showMessage('模组已解锁，相关跑团存档已按规则处理'); emit('changed'); await loadModules(selectedId.value) }
+  try {
+    await api.unlockCocModule(selectedId.value)
+    // Unlock changes permissions only. Keep the draft and its saved baseline intact.
+    selected.value!.module.editLocked = false
+    const summary = ownedModules.value.find(item => item.id === selectedId.value)
+    if (summary) summary.editLocked = false
+    emit('changed')
+    const refreshed = await loadModules()
+    showMessage(refreshed ? '模组已解锁，相关跑团存档已按规则处理' : '模组已解锁，列表刷新失败；修改仍保留在当前页面')
+  }
   catch (error) { showError(error) }
   finally { busy.value = false; unlockConfirm.value = false }
 }
@@ -379,12 +507,22 @@ async function saveLockedClue(index: number) {
 }
 
 async function addLockedClue() {
-  if (!editing.value || !selectedId.value) return
-  const clue = editing.value.clues.at(-1)
+  const form = editing.value
+  const baseline = savedPayload.value
+  const moduleId = selectedId.value
+  if (!form || !baseline || !moduleId || busy.value || isSaving.value) return
+  const clue = form.clues.at(-1)
   if (!clue || clue.id || !clue.title.trim() || !clue.content.trim()) return showMessage('请先填写新线索的标题和正文')
   busy.value = true
-  try { await api.addCocModuleClue(selectedId.value, clue); showMessage('新线索已添加'); await openModule(selectedId.value, false); activeTab.value = 'clues'; mobileEntry.value = null }
-  catch (error) { showError(error) }
+  try {
+    const saved = await api.addCocModuleClue(moduleId, cloneCocModuleData(clue))
+    if (editing.value !== form || selectedId.value !== moduleId) return
+    // Preserve all drafts, including content typed while this request was pending.
+    clue.id = saved.id
+    baseline.clues.push(cloneCocModuleData(saved))
+    savedFingerprint.value = cocModulePayloadFingerprint(cleanPayload(baseline))
+    showMessage('新线索已添加')
+  } catch (error) { showError(error) }
   finally { busy.value = false }
 }
 
@@ -634,7 +772,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
 <template>
   <main class="module-library-page" :class="`mobile-module-${mobileView}`">
     <div v-if="message" class="module-toast" role="status">{{ message }}</div>
-    <div class="module-workspace">
+    <fieldset class="module-workspace" :disabled="creationPending || busy || detailLoading || uploadingCover || uploadingMaterial !== null" :inert="creationPending || busy || detailLoading || uploadingCover || uploadingMaterial !== null" :aria-busy="creationPending || busy || detailLoading || uploadingCover || uploadingMaterial !== null">
       <section v-if="isMobile && mobileView === 'list'" class="v1-module-library">
         <header class="v1-module-library-header"><span class="v1-module-brand">✦</span><div><strong>模组库</strong><small>CoC 跑团内容</small></div><button class="icon-button" aria-label="创建模组" :disabled="busy" @click="newModule"><Plus :size="21" /></button></header>
         <div class="v1-module-library-content">
@@ -756,7 +894,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
               <template v-for="(clue, index) in moduleForm.clues" :key="clue.id || `new-${index}`"><article v-if="!isMobile || mobileEntry === null || mobileEntry === index" class="module-entry-card" :class="{ 'mobile-entry-selected': mobileEntry === index }">
                 <header v-if="!isMobile || mobileEntry === null"><button v-if="isMobile" class="mobile-module-entry-title" @click="openMobileEntry(index)">{{ clue.title || `线索 ${index + 1}` }}<ChevronRight :size="17" /></button><strong v-else>{{ clue.id ? `线索 ${index + 1}` : '新线索' }}</strong><button v-if="canFullEdit && !isMobile" class="icon-button" title="删除线索" @click="removeAt(moduleForm.clues, index)"><Trash2 :size="15" /></button></header>
                 <template v-if="!isMobile || mobileEntry === index">
-                <div class="module-form-grid"><label class="field full"><span>标题 *</span><input v-model="clue.title" :disabled="!canFullEdit && Boolean(clue.id)" /></label><label class="field full"><span>线索正文 *</span><textarea v-model="clue.content" rows="7" :disabled="isDefault" /></label><label class="switch-row full"><span><strong>重要线索</strong></span><input v-model="clue.important" type="checkbox" :disabled="!canFullEdit && Boolean(clue.id)" /></label></div>
+                <div class="module-form-grid"><label class="field full"><span>标题 *</span><input v-model="clue.title" :disabled="!canFullEdit && (Boolean(clue.id) || busy)" /></label><label class="field full"><span>线索正文 *</span><textarea v-model="clue.content" rows="7" :disabled="isDefault" /></label><label class="switch-row full"><span><strong>重要线索</strong></span><input v-model="clue.important" type="checkbox" :disabled="!canFullEdit && (Boolean(clue.id) || busy)" /></label></div>
                 <button v-if="canRestrictedEdit" class="button secondary entry-save" :disabled="busy" @click="clue.id ? saveLockedClue(index) : addLockedClue()"><Save :size="15" />{{ clue.id ? '保存线索正文' : '添加线索' }}</button>
                 </template>
               </article></template>
@@ -890,7 +1028,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
           <footer v-if="!isMobile && canFullEdit && !creating" class="module-danger-zone"><span><strong>删除模组</strong><small>仅未锁定的自建模组可以删除。</small></span><button class="button ghost danger-text" :disabled="busy" @click="deleteModule"><Trash2 :size="15" />删除</button></footer>
         </template>
       </section>
-    </div>
+    </fieldset>
     <BaseDialog v-model="leaveOpen" title="仍有未保存的修改" description="修改仍保留在当前页面。可以返回继续编辑，或明确放弃这次修改。" layer="foreground"><template #footer><button class="button secondary" @click="leaveOpen = false">继续编辑</button><button class="button danger" @click="discardAndLeave">放弃修改并返回</button></template></BaseDialog>
     <BaseDialog v-model="moduleActionsOpen" title="模组选项" mobile-presentation="sheet">
       <nav class="v1-module-action-list"><button v-if="selectedId" :disabled="busy" @click="exportModule(); moduleActionsOpen = false"><Download :size="18" />导出模组</button><button v-if="isLocked" :disabled="busy" @click="unlockConfirm = true; moduleActionsOpen = false"><UnlockKeyhole :size="18" />解锁模组</button><button v-if="canFullEdit && !creating" class="danger-text" :disabled="busy" @click="moduleActionsOpen = false; deleteModule()"><Trash2 :size="18" />删除模组</button></nav>
@@ -906,7 +1044,7 @@ function showMessage(value: string) { message.value = value; window.setTimeout((
 .module-save-status.saving, .module-save-status.dirty { color: #95642b; }
 .module-save-status.error { color: var(--wine); }
 .module-save-status.saved { color: var(--pine); }
-.module-workspace { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.module-workspace { border: 0; padding: 0; margin: 0; min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 .module-switcher { min-height: 94px; padding: 12px clamp(28px, 4vw, 58px); border-bottom: 1px solid #d8d4ca; display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; align-items: center; gap: 18px; background: #eeebe3; }
 .module-switcher-heading h1, .module-switcher-heading small { display: block; }

@@ -4,6 +4,7 @@ import com.me.galchat.utils.RedisCacheExpiry;
 
 import com.me.galchat.service.impl.chat.SingleChatLockService;
 import com.me.galchat.service.impl.chat.SingleChatGenerationRegistry;
+import com.me.galchat.service.impl.group.GroupConversationLockService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -73,9 +74,29 @@ public class UserCharacterInfoServiceImpl extends ServiceImpl<UserCharacterInfoM
     private final SingleChatLockService singleChatLockService;
     private final SingleChatGenerationRegistry singleChatGenerations;
     private final VectorStoreCleanupMapper vectorStoreCleanupMapper;
+    private final GroupConversationLockService worldLockService;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void addCharacter(Long userWorldId, Long characterId) {
+        var lock = worldLockService.tryWorldLock(userWorldId);
+        if (lock == null) throw new UserRequestException("当前世界正在变更，请稍后再添加角色");
+        boolean transactional = TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive();
+        if (transactional) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) { worldLockService.unlock(lock); }
+            });
+        }
+        try {
+            doAddCharacter(userWorldId, characterId);
+        } finally {
+            if (!transactional) worldLockService.unlock(lock);
+        }
+    }
+
+    private void doAddCharacter(Long userWorldId, Long characterId) {
         UserWorldPrefix userWorld = userWorldPrefixService.checkUserWorldAuth(userWorldId, true);
         UserCharacterInfo oldCharacter = getByUserWorldIdAndCharacterId(userWorldId, characterId);
         if (oldCharacter != null) {

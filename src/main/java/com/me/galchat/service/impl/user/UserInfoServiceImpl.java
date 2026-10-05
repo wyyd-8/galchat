@@ -1,6 +1,7 @@
 package com.me.galchat.service.impl.user;
 
 import com.me.galchat.domain.dto.UserAuthDTO;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.me.galchat.constant.UserConstant;
 import com.me.galchat.domain.dto.UserPasswordDTO;
 import com.me.galchat.domain.dto.UserProfileDTO;
@@ -181,12 +182,16 @@ public class UserInfoServiceImpl extends ServiceImpl<UserInfoMapper, UserInfo> i
             }
         }
 
+        if (!StringUtils.hasText(userProfileDTO.getUsername()) && diceSkin == null
+                && !userProfileDTO.isBirthdayProvided()) return;
+
         UserInfo updateUserInfo = new UserInfo()
                 .setId(Long.valueOf(userId))
                 .setUsername(StringUtils.hasText(userProfileDTO.getUsername()) ? userProfileDTO.getUsername() : null)
-                .setBirthday(userProfileDTO.getBirthday())
                 .setDiceSkin(diceSkin);
-        updateById(updateUserInfo);
+        update(updateUserInfo, new LambdaUpdateWrapper<UserInfo>()
+                .eq(UserInfo::getId, userId)
+                .set(userProfileDTO.isBirthdayProvided(), UserInfo::getBirthday, userProfileDTO.getBirthday()));
     }
 
     @Override

@@ -69,7 +69,7 @@ class UserCharacterFavorUpdateTest {
                 mock(UserChatThinkingHistoryMapper.class), mock(UserChatToolCallMapper.class),
                 mock(UserEventLogMapper.class), mock(GroupChatMemberMapper.class),
                 mock(SingleChatLockService.class), mock(SingleChatGenerationRegistry.class),
-                mock(VectorStoreCleanupMapper.class));
+                mock(VectorStoreCleanupMapper.class), mock(com.me.galchat.service.impl.group.GroupConversationLockService.class));
         ReflectionTestUtils.setField(target, "baseMapper", characters);
         ReflectionTestUtils.setField(target, "entityClass", UserCharacterInfo.class);
         var transactions = new AbstractPlatformTransactionManager() {

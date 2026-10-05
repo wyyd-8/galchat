@@ -6,20 +6,31 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.me.galchat.constant.RedisConstant;
 import com.me.galchat.domain.po.UserWorldPrefix;
+import com.me.galchat.domain.po.GroupConversation;
+import com.me.galchat.domain.po.UserWorldSave;
 import com.me.galchat.domain.po.WorldTemplate;
 import com.me.galchat.exception.UserAuthException;
 import com.me.galchat.exception.UserRequestException;
 import com.me.galchat.mapper.UserCharacterInfoMapper;
 import com.me.galchat.mapper.UserWorldPrefixMapper;
+import com.me.galchat.mapper.GroupConversationMapper;
+import com.me.galchat.mapper.UserWorldSaveMapper;
+import com.me.galchat.service.ITrpgRedisStateService;
+import com.me.galchat.service.impl.group.GroupConversationDeletionStore;
+import com.me.galchat.service.impl.group.GroupConversationLockService;
+import com.me.galchat.service.impl.group.GroupGenerationStreamRegistry;
 import com.me.galchat.service.IUserWorldPrefixService;
 import com.me.galchat.service.IWorldTemplateService;
 import com.me.galchat.utils.CurrentHolder;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Service;
 import java.util.ArrayList;
@@ -39,12 +50,19 @@ import java.util.stream.Collectors;
  * @since 2026-05-03
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMapper, UserWorldPrefix> implements IUserWorldPrefixService {
 
     private final IWorldTemplateService worldTemplateService;
     private final StringRedisTemplate redisTemplate;
     private final UserCharacterInfoMapper userCharacterInfoMapper;
+    private final GroupConversationMapper conversationMapper;
+    private final UserWorldSaveMapper worldSaveMapper;
+    private final GroupConversationLockService lockService;
+    private final GroupConversationDeletionStore deletionStore;
+    private final ITrpgRedisStateService redisStateService;
+    private final GroupGenerationStreamRegistry generationRegistry;
 
     @Override
     public List<UserWorldPrefix> listBaseInfoByUserId(Long userId) {
@@ -118,18 +136,71 @@ public class UserWorldPrefixServiceImpl extends ServiceImpl<UserWorldPrefixMappe
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteUserWorld(Long userId, Long id) {
-        UserWorldPrefix userWorld = baseMapper.selectByIdAndUserId(id, userId);
-        if (userWorld == null) {
-            throw new UserRequestException("用户世界不存在");
+        GroupConversationLockService.OwnedLock worldLock = lockService.tryWorldLock(id);
+        if (worldLock == null) {
+            throw new UserRequestException("当前世界正在变更，请稍后再删除");
         }
+        List<GroupConversationLockService.OwnedLock> conversationLocks = new ArrayList<>();
+        Runnable unlock = () -> {
+            for (int i = conversationLocks.size() - 1; i >= 0; i--) {
+                lockService.unlock(conversationLocks.get(i));
+            }
+            lockService.unlock(worldLock);
+        };
+        boolean transactional = TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive();
+        if (transactional) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) { unlock.run(); }
+            });
+        }
+        try {
+            UserWorldPrefix userWorld = baseMapper.selectByIdAndUserId(id, userId);
+            if (userWorld == null) throw new UserRequestException("用户世界不存在");
+            checkNoCharacters(id);
+            List<GroupConversation> conversations = conversationMapper.selectList(
+                    new LambdaQueryWrapper<GroupConversation>()
+                            .eq(GroupConversation::getUserWorldId, id)
+                            .orderByAsc(GroupConversation::getId));
+            // Acquire every conversation before deleting anything. Generations hold
+            // these locks independently of the world mutation lock.
+            for (GroupConversation conversation : conversations) {
+                var lock = lockService.tryLock(conversation.getId());
+                if (lock == null) throw new UserRequestException("世界内有群聊或跑团正在生成回复，请稍后再删除");
+                conversationLocks.add(lock);
+            }
+            for (GroupConversation conversation : conversations) deletionStore.delete(conversation);
+            worldSaveMapper.delete(new LambdaQueryWrapper<UserWorldSave>().eq(UserWorldSave::getUserWorldId, id));
+            if (baseMapper.deleteByIdAndUserId(id, userId) == 0) {
+                throw new UserRequestException("当前世界存在角色，不能删除");
+            }
+            Runnable clearState = () -> clearDeletedWorldState(id, conversations);
+            if (transactional) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() { clearState.run(); }
+                });
+            } else clearState.run();
+        } finally {
+            if (!transactional) unlock.run();
+        }
+    }
 
-        Long userWorldId = userWorld.getId();
-        checkNoCharacters(userWorldId);
-        int deleted = baseMapper.deleteByIdAndUserId(userWorldId, userId);
-        if (deleted == 0) {
-            throw new UserRequestException("当前世界存在角色，不能删除");
+    private void clearDeletedWorldState(Long worldId, List<GroupConversation> conversations) {
+        for (GroupConversation conversation : conversations) {
+            try {
+                redisStateService.clear(conversation.getId());
+            } catch (RuntimeException error) {
+                log.warn("删除世界后清理跑团状态失败, conversationId:{}", conversation.getId(), error);
+            }
+            generationRegistry.evict(conversation.getId());
         }
-        evictUserWorldRedisData(userWorldId);
+        try {
+            evictUserWorldRedisData(worldId);
+        } catch (RuntimeException error) {
+            log.warn("删除世界后清理世界缓存失败, worldId:{}", worldId, error);
+        }
     }
 
     @Override

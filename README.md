@@ -106,7 +106,9 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 
 **17 · 模组库，准备属于自己的调查故事**
 
-从侧栏或手机底部导航进入“模组库”，可以查看现有模组，也可以创建或导入 JSON 模组，维护基本信息、地点、线索、展示材料及模组人物。自己的模组支持导出，方便备份和分享；系统模组只读，已被跑团引用的个人模组会限制部分编辑。准备好内容后，就能在新建跑团时选择它。
+从侧栏或手机底部导航进入“模组库”，可以查看现有模组，也可以创建或导入 JSON、ZIP 模组，维护基本信息、地点、线索、展示材料及模组人物。自己的模组支持导出 ZIP，方便备份和分享；系统模组只读，已被跑团引用的个人模组会限制部分编辑。准备好内容后，就能在新建跑团时选择它。
+
+单机版的世界与模组导出统一使用 ZIP，本地上传图片随包保存；非本地图片在导出包中的对应图片字段置空，原有数据中的图片地址不变。JSON 导入仍保留原有图片链接，不自动下载图片。正文中嵌入的图片链接不做改写。
 
 ![浏览模组与调查材料](output/video/article-media/15-module-library.gif)
 
@@ -234,7 +236,7 @@ GalChat 是一个面向角色聊天、多人互动和 CoC 跑团的全栈项目�
 
 ### Docker 单机部署
 
-当前分支提供一套单机 Docker 部署文件，包含前端 nginx、后端 Spring Boot、Python BERT、Python reranker、PostgreSQL/pgvector、Redis 和 Ollama。部署时只向宿主机暴露 `80` 端口，容器之间共享网络命名空间，因此现有 `application.yaml` 中的 `localhost` 配置可以保持不变。
+当前分支提供一套单机 Docker 部署文件，包含前端 nginx、后端 Spring Boot、Python reranker、PostgreSQL/pgvector、Redis 和 Ollama。部署时只向宿主机暴露 `80` 端口，容器之间共享网络命名空间，因此现有 `application.yaml` 中的 `localhost` 配置可以保持不变。
 
 启动前，在仓库根目录的 `.env` 或宿主机环境变量中设置 `DEEPSEEK_API_KEY`、`GALCHAT_JWT_SIGNING_KEY` 和 `GALCHAT_MODEL_API_MASTER_KEY`。两把密钥分别使用 `openssl rand -base64 32` 生成并持久保存；Compose 会把这些值传入后端容器。升级已有部署时也需要补充 JWT 密钥和 DeepSeek API Key，首次启用新的 JWT 密钥后需要重新登录。
 
@@ -267,7 +269,6 @@ docker compose down -v
 - PostgreSQL 首次创建数据卷时会执行 `src/test/java/com/me/galchat/init/console.sql`，并启用 `vector` 扩展。
 - 数据库用户名、库名和无密码访问方式按当前 `application.yaml` 固化在 `Dockerfile.postgres` 中。用户自定义模型功能所需的 `GALCHAT_MODEL_API_MASTER_KEY` 可通过宿主机环境变量或 `.env` 传入，生成和保存方式见上文。
 - Ollama 容器启动后会尝试拉取 `bge-m3`。如果服务器无法访问模型源，可进入容器后手动准备该模型。
-- Python BERT 镜像会复制本地 `python/bert_model`。该目录当前在 `.gitignore` 中，如果换机器部署，需要先把模型目录放回同一路径。
 - 上传图片会保存到后端本地 `uploads/` 目录，接口返回 `/uploads/<文件名>`；Docker 部署时该目录挂载为 `uploads-data` 数据卷。
 
 以下命令除前端步骤外，均在仓库根目录执行。

@@ -13,6 +13,7 @@ reka/node_modules
 reka/dist
 
 python/venv
+python/bert_model
 python/.idea
 python/__pycache__
 **/__pycache__

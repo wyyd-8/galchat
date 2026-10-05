@@ -74,6 +74,53 @@ class ArchiveZipCodecTest {
         }
     }
 
+    @Test void moduleExportClearsNonLocalImagesButKeepsLocalImagesAndOriginalData() throws Exception {
+        Files.write(dir.resolve("abc.png"), png);
+        var codec = new ArchiveZipCodec(mapper, dir);
+        var archive = mapper.readTree("""
+                {"module":{"coverUrl":"https://example.com/cover.png",
+                  "introduction":"![正文图片](https://example.com/story.png)",
+                  "materials":[{"imageUrl":"/uploads/abc.png"},{"imageUrl":"https://example.com/material.png"}],
+                  "characters":[{"character":{"avatarUrl":"//example.com/avatar.png"}}]}}
+                """);
+        var original = archive.deepCopy();
+        byte[] exported = codec.exportZip("module", archive);
+        try (var zip = new ZipInputStream(new ByteArrayInputStream(exported))) {
+            assertEquals("manifest.json", zip.getNextEntry().getName());
+            var packed = mapper.readTree(zip.readAllBytes()).path("archive");
+            assertEquals("", packed.at("/module/coverUrl").asString());
+            assertEquals("", packed.at("/module/materials/1/imageUrl").asString());
+            assertEquals("", packed.at("/module/characters/0/character/avatarUrl").asString());
+            assertEquals("images/abc.png", packed.at("/module/materials/0/imageUrl").asString());
+            assertEquals("![正文图片](https://example.com/story.png)", packed.at("/module/introduction").asString());
+            assertEquals("images/abc.png", zip.getNextEntry().getName());
+            assertArrayEquals(png, zip.readAllBytes());
+            assertNull(zip.getNextEntry());
+        }
+        try (var imported = codec.importZip("module", new ByteArrayInputStream(exported))) {
+            assertEquals("", imported.archive().at("/module/coverUrl").asString());
+            String local = imported.archive().at("/module/materials/0/imageUrl").asString();
+            assertArrayEquals(png, Files.readAllBytes(dir.resolve(local.substring(9))));
+        }
+        assertEquals(original, archive);
+    }
+
+    @Test void worldExportClearsNonLocalImagesWithoutChangingOriginalData() throws Exception {
+        var codec = new ArchiveZipCodec(mapper, dir);
+        var archive = mapper.readTree("""
+                {"world":{"image":"https://example.com/world.png"},
+                 "characters":[{"image":"https://example.com/avatar.png"}]}
+                """);
+        var original = archive.deepCopy();
+        byte[] exported = codec.exportZip("world", archive);
+        try (var imported = codec.importZip("world", new ByteArrayInputStream(exported))) {
+            assertEquals("", imported.archive().at("/world/image").asString());
+            assertEquals("", imported.archive().at("/characters/0/image").asString());
+        }
+        assertEquals(original, archive);
+        try (var files = Files.list(dir)) { assertEquals(0, files.count()); }
+    }
+
     @Test void exportRejectsMissingImagesAndSymlinks() throws Exception {
         var codec = new ArchiveZipCodec(mapper, dir);
         var archive = mapper.readTree("{\"world\":{\"image\":\"/uploads/abc.png\"}}");

@@ -46,14 +46,6 @@ services:
       - ollama-data:/root/.ollama
     restart: unless-stopped
 
-  bert:
-    build:
-      context: .
-      dockerfile: Dockerfile.python
-    command: ["uvicorn", "bert:app", "--host", "0.0.0.0", "--port", "8081"]
-    network_mode: service:web
-    restart: unless-stopped
-
   reranker:
     build:
       context: .
@@ -79,8 +71,6 @@ services:
       redis:
         condition: service_healthy
       ollama:
-        condition: service_started
-      bert:
         condition: service_started
       reranker:
         condition: service_started

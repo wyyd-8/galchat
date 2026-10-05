@@ -48,7 +48,7 @@ images/
 - 世界：world.image、characters[].image。
 - 模组：module.coverUrl、module.materials[].imageUrl；角色卡自由 JSON 内递归识别 image、imageUrl、coverUrl、avatarUrl 字符串字段。
 - 同一源图片地址在包内只保存一次。导入生成新的 UUID 文件名，并将全部引用重写为 `/uploads/<UUID>.<扩展名>`。
-- 空图片字段不生成资源。不扫描正文 Markdown/HTML 中嵌入的链接，不下载外链；明确图片字段中的非本地地址会导致导出失败。
+- 空图片字段不生成资源。明确图片字段中的非本地地址在导出的 ZIP 内置为空字符串，不下载外链、不修改原数据；本地上传图片仍校验并打包。不扫描或改写正文 Markdown/HTML 中嵌入的链接。
 - 旧 JSON 接口仍保留原有路径语义，不自动迁移图片。
 
 ## 校验、限制与事务

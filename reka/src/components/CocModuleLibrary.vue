@@ -450,7 +450,7 @@ async function exportModule() {
     if (!await saveBeforeLeaving()) return
     const name = selected.value?.module.name || 'galchat-coc-module'
     downloadArchive(await api.exportCocModuleZip(id), name)
-    showMessage('ZIP 已生成并发起下载，包含模组内容和图片')
+    showMessage('ZIP 已生成并发起下载，包含模组内容和本地图片，非本地图片已置空')
   } catch (error) { showError(error) }
   finally { busy.value = false; archiveOperation.value = '' }
 }

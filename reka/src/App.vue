@@ -1068,7 +1068,7 @@ async function exportWorld() {
   const name = workspace.selectedWorld.value?.name || 'galchat-world'
   await runArchive('正在打包世界和图片…', async () => {
     downloadArchive(await api.exportWorldZip(id), name)
-    notify('ZIP 已生成', '已发起下载，包含世界设定、角色和图片', 'success')
+    notify('ZIP 已生成', '已发起下载，包含世界设定、角色和本地图片，非本地图片已置空', 'success')
   })
 }
 async function openAccount() { await run(async () => { if (!await workspace.loadUserInfo()) return false; const info = workspace.userInfo.value; Object.assign(accountForm, { username: info?.username || '', email: info?.email || '', birthday: info?.birthday || '', diceSkin: resolveDiceSkin(info?.diceSkin) }); dialogs.account = true }) }
@@ -1379,7 +1379,7 @@ async function changePassword() {
       </TabsContent>
 
       <TabsContent value="data" class="tabs-content">
-        <div v-if="isMobile"><p class="mobile-v1-notice">当前世界：{{ workspace.selectedWorld.value?.name }}</p><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="openEditTemplate"><span><strong>编辑世界模板</strong><small>名称、封面与背景</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" :disabled="!workspace.canEditSelectedWorld.value || busy" @click="exportWorld"><span><strong>导出世界模板</strong><small>{{ workspace.canEditSelectedWorld.value ? '下载 ZIP，包含设定、角色和图片' : '只有模板作者可以导出' }}</small></span><Download :size="18" /></button><label class="mobile-v1-row file-button"><span><strong>导入世界模板</strong><small>选择 ZIP（含图片）或旧 JSON</small></span><Plus :size="18" /><input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="pickWorldArchive" /></label><div class="mobile-v1-section"><h3>危险操作</h3></div><button class="mobile-v1-row danger-text" @click="mobileDeleteWorldOpen = true"><span><strong>删除当前世界</strong><small>先移出全部角色；剩余群聊、跑团和存档将一起删除</small></span><ChevronRight :size="16" /></button></div>
+        <div v-if="isMobile"><p class="mobile-v1-notice">当前世界：{{ workspace.selectedWorld.value?.name }}</p><button v-if="workspace.canEditSelectedWorld.value" class="mobile-v1-row" @click="openEditTemplate"><span><strong>编辑世界模板</strong><small>名称、封面与背景</small></span><ChevronRight :size="16" /></button><button class="mobile-v1-row" :disabled="!workspace.canEditSelectedWorld.value || busy" @click="exportWorld"><span><strong>导出世界模板</strong><small>{{ workspace.canEditSelectedWorld.value ? '下载 ZIP，包含设定、角色和本地图片，非本地图片置空' : '只有模板作者可以导出' }}</small></span><Download :size="18" /></button><label class="mobile-v1-row file-button"><span><strong>导入世界模板</strong><small>选择 ZIP（含图片）或旧 JSON</small></span><Plus :size="18" /><input type="file" :accept="ARCHIVE_ACCEPT" :disabled="busy" @change="pickWorldArchive" /></label><div class="mobile-v1-section"><h3>危险操作</h3></div><button class="mobile-v1-row danger-text" @click="mobileDeleteWorldOpen = true"><span><strong>删除当前世界</strong><small>先移出全部角色；剩余群聊、跑团和存档将一起删除</small></span><ChevronRight :size="16" /></button></div>
         <div v-else class="settings-data">
           <section class="data-world-summary">
             <span class="data-summary-icon"><Database :size="20" /></span>

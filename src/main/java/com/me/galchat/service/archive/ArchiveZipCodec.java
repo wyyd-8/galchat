@@ -39,6 +39,8 @@ public class ArchiveZipCodec {
         Map<String, String> references = new HashMap<>();
         long[] total = {0};
         rewriteArchive(type, copy, value -> references.computeIfAbsent(value, url -> {
+            // Only local uploads travel with the archive; leave source data untouched.
+            if (!url.startsWith(ImageConstant.LOCAL_UPLOAD_URL_PREFIX)) return "";
             String local = ImageSecurityUtils.normalizeLocalImageUrl(url);
             String name = local.substring(ImageConstant.LOCAL_UPLOAD_URL_PREFIX.length());
             Path source = directory.resolve(name);
